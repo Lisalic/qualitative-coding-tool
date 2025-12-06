@@ -1,79 +1,93 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from typing import List
-from app.database import get_db
-from app.models import models
-from app.schemas import schemas
+import os
+import sqlite3
+import sys
+from pathlib import Path
+from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import JSONResponse
+
+from app.config import settings
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../scripts'))
+from import_db import import_from_zst_file  # type: ignore
 
 router = APIRouter()
 
-# Document endpoints
-@router.post("/documents/", response_model=schemas.Document)
-def create_document(document: schemas.DocumentCreate, db: Session = Depends(get_db)):
-    db_document = models.Document(**document.dict())
-    db.add(db_document)
-    db.commit()
-    db.refresh(db_document)
-    return db_document
+UPLOADS_DIR = Path(__file__).resolve().parent.parent / 'uploads'
+DB_PATH = Path(settings.reddit_db_path)
+os.makedirs(UPLOADS_DIR, exist_ok=True)
 
-@router.get("/documents/", response_model=List[schemas.Document])
-def get_documents(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    documents = db.query(models.Document).offset(skip).limit(limit).all()
-    return documents
 
-@router.get("/documents/{document_id}", response_model=schemas.Document)
-def get_document(document_id: int, db: Session = Depends(get_db)):
-    document = db.query(models.Document).filter(models.Document.id == document_id).first()
-    if document is None:
-        raise HTTPException(status_code=404, detail="Document not found")
-    return document
+@router.post("/upload-zst/")
+async def upload_zst_file(file: UploadFile = File(...)):
+    """Upload a .zst file and import it into a single database (no sessions)."""
+    if not file.filename.endswith('.zst'):
+        raise HTTPException(status_code=400, detail="File must be a .zst file")
 
-@router.put("/documents/{document_id}", response_model=schemas.Document)
-def update_document(document_id: int, document: schemas.DocumentCreate, db: Session = Depends(get_db)):
-    db_document = db.query(models.Document).filter(models.Document.id == document_id).first()
-    if db_document is None:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    for key, value in document.dict().items():
-        setattr(db_document, key, value)
-    
-    db.commit()
-    db.refresh(db_document)
-    return db_document
+    file_path = UPLOADS_DIR / file.filename
+    try:
+        content = await file.read()
+        with open(file_path, 'wb') as fh:
+            fh.write(content)
+        print(f"[UPLOAD] Saved file to {file_path}")
 
-@router.delete("/documents/{document_id}")
-def delete_document(document_id: int, db: Session = Depends(get_db)):
-    db_document = db.query(models.Document).filter(models.Document.id == document_id).first()
-    if db_document is None:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    db.delete(db_document)
-    db.commit()
-    return {"message": "Document deleted"}
+        stats = import_from_zst_file(str(file_path), str(DB_PATH))
+        print(f"[IMPORT] Completed import: {stats}")
 
-# Code endpoints
-@router.post("/codes/", response_model=schemas.Code)
-def create_code(code: schemas.CodeCreate, db: Session = Depends(get_db)):
-    db_code = models.Code(**code.dict())
-    db.add(db_code)
-    db.commit()
-    db.refresh(db_code)
-    return db_code
+        return JSONResponse({
+            "status": "success",
+            "message": "File imported successfully",
+            "database": "reddit_data.db",
+            "file_path": str(file_path),
+            "stats": stats,
+        })
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Error importing file: {exc}")
 
-@router.get("/codes/", response_model=List[schemas.Code])
-def get_codes(document_id: int = None, db: Session = Depends(get_db)):
-    query = db.query(models.Code)
-    if document_id:
-        query = query.filter(models.Code.document_id == document_id)
-    codes = query.all()
-    return codes
 
-@router.delete("/codes/{code_id}")
-def delete_code(code_id: int, db: Session = Depends(get_db)):
-    db_code = db.query(models.Code).filter(models.Code.id == code_id).first()
-    if db_code is None:
-        raise HTTPException(status_code=404, detail="Code not found")
-    
-    db.delete(db_code)
-    db.commit()
-    return {"message": "Code deleted"}
+@router.get("/database-entries/")
+async def get_database_entries(limit: int = 5):
+    """Return up to `limit` submissions and comments from the database."""
+    if not DB_PATH.exists():
+        return JSONResponse({
+            "submissions": [],
+            "comments": [],
+            "total_submissions": 0,
+            "total_comments": 0,
+            "message": "Database not found. Please upload a file first.",
+        })
+
+    conn = None
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT COUNT(*) as count FROM submissions')
+        sub_count = cursor.fetchone()['count']
+        cursor.execute('SELECT COUNT(*) as count FROM comments')
+        com_count = cursor.fetchone()['count']
+
+        cursor.execute('SELECT * FROM submissions LIMIT ?', (limit,))
+        submissions = [dict(row) for row in cursor.fetchall()]
+        cursor.execute('SELECT * FROM comments LIMIT ?', (limit,))
+        comments = [dict(row) for row in cursor.fetchall()]
+    except sqlite3.OperationalError as exc:
+        if conn:
+            conn.close()
+        return JSONResponse({
+            "submissions": [],
+            "comments": [],
+            "total_submissions": 0,
+            "total_comments": 0,
+            "message": f"Database schema missing or invalid: {exc}"
+        }, status_code=500)
+    finally:
+        if conn:
+            conn.close()
+
+    return JSONResponse({
+        "submissions": submissions,
+        "comments": comments,
+        "total_submissions": sub_count,
+        "total_comments": com_count,
+    })
