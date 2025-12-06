@@ -17,17 +17,31 @@ ENV/
 # Node
 node_modules/
 dist/
+dist-ssr
 *.local
+
+# Node logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
 
 # OS
 .DS_Store
 Thumbs.db
 
 # Logs
-*.log
