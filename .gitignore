@@ -12,6 +12,7 @@ ENV/
 # Database
 *.db
 *.sqlite
+*.zst
 
 # Node
 node_modules/
