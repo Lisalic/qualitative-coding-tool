@@ -1,0 +1,31 @@
+.error-display {
+  background-color: #ff6666;
+  color: #000000;
+  padding: 1rem;
+  border-radius: 4px;
+  margin-bottom: 1.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.error-display .error-message {
+  margin: 0;
+  flex: 1;
+  font-weight: 500;
+}
+
+.dismiss-btn {
+  background: none;
+  border: none;
+  color: #000000;
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 0;
+  margin-left: 1rem;
+  font-weight: bold;
+}
+
+.dismiss-btn:hover {
+  opacity: 0.8;
+}

@@ -1,0 +1,131 @@
+.data-table-container {
+  background-color: #000000;
+  border: 1px solid #ffffff;
+  padding: 2rem;
+  border-radius: 4px;
+}
+
+.table-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.table-header h2 {
+  color: #ffffff;
+  font-size: 1.3rem;
+  margin: 0;
+}
+
+.refresh-btn, .view-btn {
+  background-color: #000000;
+  color: #ffffff;
+  border: 1px solid #ffffff;
+  padding: 0.65rem 1.25rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.refresh-btn:hover:not(:disabled), .view-btn:hover {
+  background-color: #ffffff;
+  color: #000000;
+}
+
+.refresh-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.view-btn {
+  width: 100%;
+  padding: 0.875rem;
+  font-size: 1rem;
+}
+
+.stats {
+  color: #aaa;
+  font-size: 0.95rem;
+  margin-bottom: 1.5rem;
+}
+
+.info-message {
+  color: #cccccc;
+  font-style: italic;
+  padding: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  background-color: rgba(255, 255, 255, 0.05);
+  margin-bottom: 1.5rem;
+}
+
+.table-section {
+  margin-bottom: 2rem;
+}
+
+.table-section h3 {
+  color: #ffffff;
+  font-size: 1.1rem;
+  margin-bottom: 1rem;
+  margin-top: 0;
+}
+
+.table-wrapper {
+  overflow-x: auto;
+  border: 1px solid #ffffff;
+  border-radius: 4px;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  background-color: #000000;
+  color: #ffffff;
+}
+
+.data-table th {
+  background-color: #000000;
+  color: #ffffff;
+  padding: 0.75rem;
+  text-align: left;
+  border-bottom: 2px solid #ffffff;
+  font-weight: 500;
+}
+
+.data-table td {
+  padding: 0.75rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+}
+
+.data-table tbody tr:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.data-table td.truncate {
+  max-width: 300px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.no-data {
+  color: #cccccc;
+  padding: 1rem;
+  text-align: center;
+  font-style: italic;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+.error-message {
+  color: #ff6666;
+  padding: 1rem;
+  border: 1px solid #ff6666;
+  border-radius: 4px;
+  background-color: rgba(255, 102, 102, 0.1);
+  margin-bottom: 1rem;
+}
