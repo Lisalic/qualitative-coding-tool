@@ -1,29 +1,30 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import FileUpload from '../components/FileUpload'
-import DataTable from '../components/DataTable'
 import ErrorDisplay from '../components/ErrorDisplay'
 import '../styles/Home.css'
 
 export default function Home() {
   const [error, setError] = useState('')
   const [uploadData, setUploadData] = useState(null)
-  const [refreshTrigger, setRefreshTrigger] = useState(0)
+  const navigate = useNavigate()
 
   const handleUploadSuccess = (data) => {
-    console.log('[Home] Upload successful:', data)
     setUploadData(data)
     setError('')
-    setRefreshTrigger(prev => prev + 1)
   }
 
   const handleUploadError = (errorMsg) => {
-    console.error('[Home] Upload error:', errorMsg)
     setError(errorMsg)
     setUploadData(null)
   }
 
   const handleDismissError = () => {
     setError('')
+  }
+
+  const handleViewData = () => {
+    navigate('/data')
   }
 
   return (
@@ -36,14 +37,14 @@ export default function Home() {
           onDismiss={handleDismissError}
         />
 
-        {!uploadData ? (
-          <FileUpload 
-            onUploadSuccess={handleUploadSuccess}
-            onError={handleUploadError}
-          />
-        ) : (
-          <DataTable key={refreshTrigger} />
-        )}
+        <FileUpload 
+          onUploadSuccess={handleUploadSuccess}
+          onError={handleUploadError}
+        />
+
+        <button onClick={handleViewData} className="view-data-btn">
+          View Data
+        </button>
       </div>
     </div>
   )

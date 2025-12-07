@@ -1,15 +1,16 @@
 .error-display {
   background-color: #ff6666;
-  color: #000000;
-  padding: 1rem;
+  color: #ffffff;
+  padding: 0rem 1rem;
   border-radius: 4px;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 
 .error-display .error-message {
+  color: #ffffff;
   margin: 0;
   flex: 1;
   font-weight: 500;
@@ -18,7 +19,7 @@
 .dismiss-btn {
   background: none;
   border: none;
-  color: #000000;
+  color: #ffffff;
   font-size: 1.5rem;
   cursor: pointer;
   padding: 0;

@@ -7,7 +7,6 @@ from pathlib import Path
 
 def create_database(db_path):
     db_path = Path(db_path)
-    print(f"Ensuring reddit_data schema at: {db_path}")
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
@@ -61,7 +60,6 @@ def create_database(db_path):
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_comments_subreddit ON comments(subreddit)')
     
     conn.commit()
-    print(f"Database schema ready")
     return conn
 
 def decompress_zst_file(file_path, chunk_size=16384): 
@@ -81,8 +79,6 @@ def import_submissions(conn, file_path, batch_size=100000):
     submissions = []
     count = 0
     errors = 0
-
-    print(f"Importing submissions from {file_path}...")
 
     try:
         for line in decompress_zst_file(file_path):
@@ -129,7 +125,6 @@ def import_submissions(conn, file_path, batch_size=100000):
                 ))
 
                 count += 1
-                print(f"  Read submission record #{count}")
 
                 if len(submissions) >= batch_size:
                     cursor.executemany('''
@@ -137,18 +132,13 @@ def import_submissions(conn, file_path, batch_size=100000):
                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     ''', submissions)
                     conn.commit()
-                    print(f"  Imported {count} submissions...")
                     submissions = []
 
             except json.JSONDecodeError as e:
                 errors += 1
-                if errors < 10:
-                    print(f"  JSON error (line {count + errors}): {str(e)[:100]}")
                 continue
             except Exception as e:
                 errors += 1
-                if errors < 10:
-                    print(f"  Import error (line {count + errors}): {str(e)[:100]}")
                 continue
 
         if submissions:
@@ -158,18 +148,14 @@ def import_submissions(conn, file_path, batch_size=100000):
             ''', submissions)
             conn.commit()
 
-        print(f"Imported {count} submissions ({errors} errors)\n")
-
     except Exception as e:
-        print(f"Fatal error reading file: {e}\n")
+        pass
 
 def import_comments(conn, file_path, batch_size=100000):
     cursor = conn.cursor()
     comments = []
     count = 0
     errors = 0
-    
-    print(f"Importing comments from {file_path}...")
     
     try:
         for line in decompress_zst_file(file_path):
@@ -195,25 +181,19 @@ def import_comments(conn, file_path, batch_size=100000):
                 ))
                 
                 count += 1
-                print(f"  Read comment record #{count}")
                 
                 if len(comments) >= batch_size:
                     cursor.executemany('''
                     INSERT OR REPLACE INTO comments VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
                     ''', comments)
                     conn.commit()
-                    print(f"  Imported {count} comments...")
                     comments = []
                     
             except json.JSONDecodeError as e:
                 errors += 1
-                if errors < 10:
-                    print(f"  JSON error (line {count + errors}): {str(e)[:100]}")
                 continue
             except Exception as e:
                 errors += 1
-                if errors < 10:
-                    print(f"  Import error (line {count + errors}): {str(e)[:100]}")
                 continue
         
         if comments:
@@ -222,10 +202,8 @@ def import_comments(conn, file_path, batch_size=100000):
             ''', comments)
             conn.commit()
         
-        print(f"Imported {count} comments ({errors} errors)\n")
-        
     except Exception as e:
-        print(f"Fatal error reading file: {e}\n")
+        pass
 
 def get_file_size_mb(file_path):
     size_bytes = os.path.getsize(file_path)
@@ -258,7 +236,6 @@ def import_from_zst_file(file_path, db_path=None):
     elif '_comments' in file_path or 'comment' in file_path.lower():
         import_comments(conn, file_path)
     else:
-        print(f"File type unclear, attempting to import as submissions...")
         import_submissions(conn, file_path)
     
     cursor = conn.cursor()
@@ -274,7 +251,6 @@ def main():
     project_root = Path(__file__).resolve().parents[2]
     db_path = project_root / 'reddit_data.db'
 
-    print(f"Opening reddit_data at: {db_path}")
     conn = create_database(db_path)
     
     submission_files = []
@@ -288,16 +264,10 @@ def main():
             elif file.endswith('_comments.zst'):
                 comment_files.append(file_path)
     
-    print(f"Found {len(submission_files)} submission file(s)")
     for file_path in submission_files:
-        size_mb = get_file_size_mb(file_path)
-        print(f"File size: {size_mb:.2f} MB")
         import_submissions(conn, file_path)
     
-    print(f"Found {len(comment_files)} comment file(s)")
     for file_path in comment_files:
-        size_mb = get_file_size_mb(file_path)
-        print(f"File size: {size_mb:.2f} MB")
         import_comments(conn, file_path)
     
     cursor = conn.cursor()
@@ -305,11 +275,6 @@ def main():
     sub_count = cursor.fetchone()[0]
     cursor.execute('SELECT COUNT(*) FROM comments')
     com_count = cursor.fetchone()[0]
-    
-    print("IMPORT COMPLETE!")
-    print(f"Total submissions: {sub_count:,}")
-    print(f"Total comments: {com_count:,}")
-    print(f"Database saved to: {db_path}")
     
     conn.close()
 
