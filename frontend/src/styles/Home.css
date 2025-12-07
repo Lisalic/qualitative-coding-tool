@@ -26,3 +26,119 @@
   font-size: 28px;
   font-weight: 600;
 }
+
+.button-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.main-button {
+  background-color: #000000;
+  color: #ffffff;
+  border: 2px solid #ffffff;
+  padding: 40px 20px;
+  font-size: 24px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: all 0.2s;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.main-button:hover {
+  background-color: #ffffff;
+  color: #000000;
+  transform: translateY(-2px);
+}
+
+.main-button:active {
+  transform: translateY(0);
+}
+
+.back-button {
+  background-color: #ffffff;
+  color: #000000;
+  border: none;
+  padding: 10px 20px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.back-button:hover {
+  background-color: #e0e0e0;
+}
+
+.filter-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.filter-form .form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.filter-form .form-group label {
+  color: #ffffff;
+  font-weight: 400;
+  font-size: 1rem;
+}
+
+.filter-input {
+  color: #ffffff;
+  padding: 0.75rem;
+  border: 1px solid #ffffff;
+  border-radius: 4px;
+  background-color: #1a1a1a;
+  font-size: 1rem;
+}
+
+.filter-input::placeholder {
+  color: #666;
+}
+
+.filter-input:disabled {
+  background-color: #0a0a0a;
+  opacity: 0.6;
+}
+
+.filter-submit-btn {
+  background-color: #000000;
+  color: #ffffff;
+  border: 1px solid #ffffff;
+  padding: 0.875rem 1rem;
+  font-size: 1rem;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.filter-submit-btn:hover:not(:disabled) {
+  background-color: #ffffff;
+  color: #000000;
+}
+
+.filter-submit-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.filter-message {
+  color: #ff0000;
+  margin-top: 1rem;
+  font-size: 0.95rem;
+  padding: 0.75rem;
+  border: 1px solid #ff0000;
+  border-radius: 4px;
+  background-color: rgba(255, 0, 0, 0.05);
+}

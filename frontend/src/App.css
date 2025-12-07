@@ -4,17 +4,6 @@
   background-color: #000000;
 }
 
-.container {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 2rem;
-}
-
-.page {
-  padding: 2rem;
-  background-color: #000000;
-}
-
 h1 {
   font-size: 2.5rem;
   margin-bottom: 1rem;
@@ -31,74 +20,4 @@ h3 {
   font-size: 1.5rem;
   margin-bottom: 0.75rem;
   color: #ffffff;
-}
-
-.card {
-  background-color: #000000;
-  border-radius: 4px;
-  padding: 1.5rem;
-  margin-bottom: 1rem;
-  border: 1px solid #ffffff;
-}
-
-.btn {
-  background-color: #000000;
-  color: #ffffff;
-  border: 1px solid #ffffff;
-  padding: 0.75rem 1.5rem;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 1rem;
-  transition: all 0.2s;
-}
-
-.btn:hover {
-  background-color: #ffffff;
-  color: #000000;
-}
-
-.btn-secondary {
-  background-color: #000000;
-  border: 1px solid #888888;
-  color: #888888;
-}
-
-.btn-secondary:hover {
-  background-color: #888888;
-  color: #000000;
-}
-
-.btn-danger {
-  background-color: #000000;
-  border: 1px solid #ff0000;
-  color: #ff0000;
-}
-
-.btn-danger:hover {
-  background-color: #ff0000;
-  color: #000000;
-}
-
-input[type="text"],
-textarea {
-  width: 100%;
-  padding: 0.75rem;
-  border: 1px solid #ffffff;
-  border-radius: 4px;
-  background-color: #000000;
-  color: #ffffff;
-  font-family: inherit;
-  font-size: 1rem;
-  margin-bottom: 1rem;
-}
-
-textarea {
-  min-height: 200px;
-  resize: vertical;
-}
-
-input[type="text"]:focus,
-textarea:focus {
-  outline: none;
-  border-color: #ffffff;
 }
