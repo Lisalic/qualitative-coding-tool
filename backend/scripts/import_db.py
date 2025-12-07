@@ -20,20 +20,10 @@ def create_database(db_path):
     author TEXT,
     created_utc INTEGER,
     score INTEGER,
-    num_comments INTEGER,
-    is_self BOOLEAN,
-    retrieved_on INTEGER,
-    stickied BOOLEAN,
-    over_18 BOOLEAN,
-    spoiler BOOLEAN,
-    locked BOOLEAN,
-    distinguished TEXT,
-    permalink TEXT,
-    has_image BOOLEAN,
-    image_url TEXT
-);
+    num_comments INTEGER
+    )
     ''')
-#TABLE comments
+    #TABLE comments
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS comments (
         id TEXT PRIMARY KEY,
@@ -43,12 +33,7 @@ def create_database(db_path):
         created_utc INTEGER,
         score INTEGER,
         link_id TEXT,
-        parent_id TEXT,
-        retrieved_on INTEGER,
-        stickied BOOLEAN,
-        distinguished TEXT,
-        controversiality INTEGER,
-        FOREIGN KEY (link_id) REFERENCES submissions(id)
+        parent_id TEXT
     )
     ''')
     
@@ -74,7 +59,7 @@ def decompress_zst_file(file_path, chunk_size=16384):
             if line:
                 yield line
 
-def import_submissions(conn, file_path, batch_size=100000):
+def import_submissions(conn, file_path, batch_size=100000, subreddit_filter=None):
     cursor = conn.cursor()
     submissions = []
     count = 0
@@ -84,17 +69,15 @@ def import_submissions(conn, file_path, batch_size=100000):
         for line in decompress_zst_file(file_path):
             try:
                 data = json.loads(line)
+                subreddit = data.get('subreddit')
+                
+                # Skip if subreddit filter is set and this subreddit is not in the list
+                if subreddit_filter and subreddit and subreddit.lower() not in subreddit_filter:
+                    continue
+                
                 submission_id = data.get("id")
-
-                post_hint = data.get("post_hint")
-                domain = str(data.get("domain") or "")
                 external_url = data.get("url")
 
-                has_image = False
-                image_url = None
-                if post_hint == "image" or domain.startswith(("i.redd.it", "i.imgur.com")):
-                    has_image = True
-                    image_url = external_url or None
 
                 selftext = data.get("selftext")
                 if not selftext:
@@ -105,23 +88,13 @@ def import_submissions(conn, file_path, batch_size=100000):
 
                 submissions.append((
                     submission_id,
-                    data.get('subreddit'),
+                    subreddit,
                     data.get('title'),
                     selftext,          
                     data.get('author'),
                     data.get('created_utc'),
                     data.get('score'),
                     data.get('num_comments'),
-                    data.get('is_self'),
-                    data.get('retrieved_on'),
-                    data.get('stickied'),
-                    data.get('over_18'),
-                    data.get('spoiler'),
-                    data.get('locked'),
-                    data.get('distinguished'),
-                    data.get('permalink'),
-                    has_image,
-                    image_url
                 ))
 
                 count += 1
@@ -129,7 +102,7 @@ def import_submissions(conn, file_path, batch_size=100000):
                 if len(submissions) >= batch_size:
                     cursor.executemany('''
                     INSERT OR REPLACE INTO submissions 
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    VALUES (?,?,?,?,?,?,?,?)
                     ''', submissions)
                     conn.commit()
                     submissions = []
@@ -144,14 +117,14 @@ def import_submissions(conn, file_path, batch_size=100000):
         if submissions:
             cursor.executemany('''
             INSERT OR REPLACE INTO submissions 
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?)
             ''', submissions)
             conn.commit()
 
     except Exception as e:
         pass
 
-def import_comments(conn, file_path, batch_size=100000):
+def import_comments(conn, file_path, batch_size=100000, subreddit_filter=None):
     cursor = conn.cursor()
     comments = []
     count = 0
@@ -161,30 +134,31 @@ def import_comments(conn, file_path, batch_size=100000):
         for line in decompress_zst_file(file_path):
             try:
                 data = json.loads(line)
+                subreddit = data.get('subreddit')
+                
+                # Skip if subreddit filter is set and this subreddit is not in the list
+                if subreddit_filter and subreddit and subreddit.lower() not in subreddit_filter:
+                    continue
                 
                 link_id = data.get('link_id', '').replace('t3_', '')
                 parent_id = data.get('parent_id', '')
                 
                 comments.append((
                     data['id'],
-                    data.get('subreddit'),
+                    subreddit,
                     data.get('body'),
                     data.get('author'),
                     data.get('created_utc'),
                     data.get('score'),
                     link_id,
                     parent_id,
-                    data.get('retrieved_on'),
-                    data.get('stickied'),
-                    data.get('distinguished'),
-                    data.get('controversiality')
                 ))
                 
                 count += 1
                 
                 if len(comments) >= batch_size:
                     cursor.executemany('''
-                    INSERT OR REPLACE INTO comments VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                    INSERT OR REPLACE INTO comments VALUES (?,?,?,?,?,?,?,?)
                     ''', comments)
                     conn.commit()
                     comments = []
@@ -198,7 +172,7 @@ def import_comments(conn, file_path, batch_size=100000):
         
         if comments:
             cursor.executemany('''
-            INSERT OR REPLACE INTO comments VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            INSERT OR REPLACE INTO comments VALUES (?,?,?,?,?,?,?,?)
             ''', comments)
             conn.commit()
         
@@ -209,10 +183,15 @@ def get_file_size_mb(file_path):
     size_bytes = os.path.getsize(file_path)
     return size_bytes / (1024 * 1024)
 
-def import_from_zst_file(file_path, db_path=None):
+def import_from_zst_file(file_path, db_path=None, subreddit_filter=None):
     """
     Import data from a single zst file and create/update database.
     Returns a dictionary with import statistics.
+    
+    Args:
+        file_path: Path to the .zst file
+        db_path: Path to the database (optional)
+        subreddit_filter: List of subreddit names to import (optional, None imports all)
     """
     file_path = str(file_path)
 
@@ -228,15 +207,21 @@ def import_from_zst_file(file_path, db_path=None):
         'comments_imported': 0,
         'errors': 0,
         'db_path': str(db_path),
-        'file_path': file_path
+        'file_path': file_path,
+        'subreddit_filter': subreddit_filter
     }
     
+    # Convert filter to lowercase for case-insensitive matching
+    filter_list = None
+    if subreddit_filter:
+        filter_list = [s.lower() for s in subreddit_filter]
+    
     if '_submissions' in file_path or 'submission' in file_path.lower():
-        import_submissions(conn, file_path)
+        import_submissions(conn, file_path, subreddit_filter=filter_list)
     elif '_comments' in file_path or 'comment' in file_path.lower():
-        import_comments(conn, file_path)
+        import_comments(conn, file_path, subreddit_filter=filter_list)
     else:
-        import_submissions(conn, file_path)
+        import_submissions(conn, file_path, subreddit_filter=filter_list)
     
     cursor = conn.cursor()
     cursor.execute('SELECT COUNT(*) FROM submissions')
@@ -272,9 +257,7 @@ def main():
     
     cursor = conn.cursor()
     cursor.execute('SELECT COUNT(*) FROM submissions')
-    sub_count = cursor.fetchone()[0]
     cursor.execute('SELECT COUNT(*) FROM comments')
-    com_count = cursor.fetchone()[0]
     
     conn.close()
 

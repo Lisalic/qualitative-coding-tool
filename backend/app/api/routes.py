@@ -1,8 +1,9 @@
 import os
 import sqlite3
 import sys
+import json
 from pathlib import Path
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, UploadFile, Form
 from fastapi.responses import JSONResponse
 
 from app.config import settings
@@ -18,9 +19,17 @@ os.makedirs(UPLOADS_DIR, exist_ok=True)
 
 
 @router.post("/upload-zst/")
-async def upload_zst_file(file: UploadFile = File(...)):
+async def upload_zst_file(file: UploadFile = File(...), subreddits: str = Form(None)):
     if not file.filename.endswith('.zst'):
         raise HTTPException(status_code=400, detail="File must be a .zst file")
+
+    # Parse subreddits if provided
+    subreddit_list = None
+    if subreddits:
+        try:
+            subreddit_list = json.loads(subreddits)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="Invalid subreddits format")
 
     file_path = UPLOADS_DIR / file.filename
     try:
@@ -28,7 +37,7 @@ async def upload_zst_file(file: UploadFile = File(...)):
         with open(file_path, 'wb') as fh:
             fh.write(content)
 
-        stats = import_from_zst_file(str(file_path), str(DB_PATH))
+        stats = import_from_zst_file(str(file_path), str(DB_PATH), subreddit_list)
 
         return JSONResponse({
             "status": "success",
