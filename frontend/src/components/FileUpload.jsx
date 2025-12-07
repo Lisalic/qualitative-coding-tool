@@ -5,6 +5,8 @@ export default function FileUpload({ onUploadSuccess, onError }) {
   const [file, setFile] = useState(null)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
+  const [subredditInput, setSubredditInput] = useState('')
+  const [subredditTags, setSubredditTags] = useState([])
 
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0]
@@ -15,6 +17,29 @@ export default function FileUpload({ onUploadSuccess, onError }) {
       onError('Please select a .zst file')
       setFile(null)
     }
+  }
+
+  const handleAddSubreddit = (e) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault()
+      const value = subredditInput.trim().replace(/,\s*$/, '')
+      if (value && !subredditTags.includes(value.toLowerCase())) {
+        setSubredditTags([...subredditTags, value.toLowerCase()])
+        setSubredditInput('')
+      }
+    }
+  }
+
+  const handleAddSubredditClick = () => {
+    const value = subredditInput.trim()
+    if (value && !subredditTags.includes(value.toLowerCase())) {
+      setSubredditTags([...subredditTags, value.toLowerCase()])
+      setSubredditInput('')
+    }
+  }
+
+  const handleRemoveSubreddit = (index) => {
+    setSubredditTags(subredditTags.filter((_, i) => i !== index))
   }
 
   const handleSubmit = async (e) => {
@@ -32,6 +57,10 @@ export default function FileUpload({ onUploadSuccess, onError }) {
     try {
       const formData = new FormData()
       formData.append('file', file)
+      
+      if (subredditTags.length > 0) {
+        formData.append('subreddits', JSON.stringify(subredditTags))
+      }
 
       const response = await fetch('/api/upload-zst/', {
         method: 'POST',
@@ -57,6 +86,8 @@ export default function FileUpload({ onUploadSuccess, onError }) {
       const data = JSON.parse(text)
       setMessage('✓ reddit_data.db updated')
       setFile(null)
+      setSubredditTags([])
+      setSubredditInput('')
       setLoading(false)
       
       onUploadSuccess(data)
@@ -80,6 +111,46 @@ export default function FileUpload({ onUploadSuccess, onError }) {
             disabled={loading}
           />
           {file && <p className="file-name">Selected: {file.name}</p>}
+        </div>
+
+        <div className="form-group">
+          <label htmlFor="subreddits">Filter by Subreddits</label>
+          <div className="subreddit-input-wrapper">
+            <div className="subreddit-input-group">
+              <input
+                id="subreddits"
+                type="text"
+                placeholder="Enter subreddit name..."
+                value={subredditInput}
+                onChange={(e) => setSubredditInput(e.target.value)}
+                onKeyDown={handleAddSubreddit}
+                disabled={loading}
+              />
+              <button
+                type="button"
+                className="add-btn"
+                onClick={handleAddSubredditClick}
+                disabled={loading || !subredditInput.trim()}
+              >
+                Add
+              </button>
+            </div>
+            <div className="subreddit-tags">
+              {subredditTags.map((subreddit, index) => (
+                <div key={index} className="tag">
+                  <span>{subreddit}</span>
+                  <button
+                    type="button"
+                    className="tag-remove"
+                    onClick={() => handleRemoveSubreddit(index)}
+                    disabled={loading}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
 
         <button type="submit" disabled={loading}>
