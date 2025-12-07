@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from app.config import settings
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../scripts'))
-from import_db import import_from_zst_file  # type: ignore
+from import_db import import_from_zst_file
 
 router = APIRouter()
 
@@ -19,7 +19,6 @@ os.makedirs(UPLOADS_DIR, exist_ok=True)
 
 @router.post("/upload-zst/")
 async def upload_zst_file(file: UploadFile = File(...)):
-    """Upload a .zst file and import it into a single database (no sessions)."""
     if not file.filename.endswith('.zst'):
         raise HTTPException(status_code=400, detail="File must be a .zst file")
 
@@ -28,10 +27,8 @@ async def upload_zst_file(file: UploadFile = File(...)):
         content = await file.read()
         with open(file_path, 'wb') as fh:
             fh.write(content)
-        print(f"[UPLOAD] Saved file to {file_path}")
 
         stats = import_from_zst_file(str(file_path), str(DB_PATH))
-        print(f"[IMPORT] Completed import: {stats}")
 
         return JSONResponse({
             "status": "success",
@@ -46,7 +43,6 @@ async def upload_zst_file(file: UploadFile = File(...)):
 
 @router.get("/database-entries/")
 async def get_database_entries(limit: int = 5):
-    """Return up to `limit` submissions and comments from the database."""
     if not DB_PATH.exists():
         return JSONResponse({
             "submissions": [],

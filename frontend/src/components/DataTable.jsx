@@ -10,40 +10,30 @@ export default function DataTable() {
     try {
       setError('')
       setLoading(true)
-      console.log('[DataTable] Fetching entries...')
       
       const response = await fetch('/api/database-entries/?limit=10')
       
       if (!response.ok) {
         const text = await response.text()
-        console.error('[DataTable] Error response:', text)
         throw new Error(`Failed to fetch database entries: ${response.status}`)
       }
 
       const text = await response.text()
-      console.log('[DataTable] Response text:', text)
       
       if (!text) {
         throw new Error('Empty response from server')
       }
       
       const data = JSON.parse(text)
-      console.log('[DataTable] Parsed data:', data)
       setDbEntries(data)
     } catch (err) {
-      console.error('[DataTable] Error:', err)
       setError(`Error: ${err.message}`)
     } finally {
       setLoading(false)
     }
   }
 
-  const handleRefresh = () => {
-    fetchEntries()
-  }
-
   useEffect(() => {
-    console.log('[DataTable] Component mounted, fetching entries')
     fetchEntries()
   }, [])
 
@@ -51,9 +41,6 @@ export default function DataTable() {
     <div className="data-table-container">
       <div className="table-header">
         <h2>Database Contents</h2>
-        <button onClick={handleRefresh} disabled={loading} className="refresh-btn">
-          {loading ? 'Loading...' : 'Refresh'}
-        </button>
       </div>
 
       {error && <p className="error-message">{error}</p>}
