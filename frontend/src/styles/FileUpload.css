@@ -165,27 +165,6 @@
   margin-top: 0.5rem;
 }
 
-.file-upload button {
-  background-color: #000000;
-  color: #ffffff;
-  border: 1px solid #ffffff;
-  padding: 0.875rem 1rem;
-  font-size: 1rem;
-  cursor: pointer;
-  border-radius: 4px;
-  transition: all 0.2s;
-}
-
-.file-upload button:hover:not(:disabled) {
-  background-color: #ffffff;
-  color: #000000;
-}
-
-.file-upload button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
 .success-message {
   color: #00ff00;
   margin-top: 1rem;

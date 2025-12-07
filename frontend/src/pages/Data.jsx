@@ -1,18 +1,21 @@
 import { useNavigate } from 'react-router-dom'
+import Navbar from '../components/Navbar'
 import DataTable from '../components/DataTable'
 import '../styles/Data.css'
 
 export default function Data() {
   const navigate = useNavigate()
 
+  const handleBack = () => {
+    navigate('/')
+  }
+
   return (
-    <div className="data-container">
-      <div className="data-header">
-        <button onClick={() => navigate('/')} className="back-btn">
-          ← Back
-        </button>
+    <>
+      <Navbar showBack={true} onBack={handleBack} />
+      <div className="data-container">
+        <DataTable />
       </div>
-      <DataTable />
-    </div>
+    </>
   )
 }

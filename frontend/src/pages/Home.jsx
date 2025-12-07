@@ -1,51 +1,41 @@
-import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import FileUpload from '../components/FileUpload'
-import ErrorDisplay from '../components/ErrorDisplay'
+import Navbar from '../components/Navbar'
 import '../styles/Home.css'
 
 export default function Home() {
-  const [error, setError] = useState('')
-  const [uploadData, setUploadData] = useState(null)
   const navigate = useNavigate()
 
-  const handleUploadSuccess = (data) => {
-    setUploadData(data)
-    setError('')
+  const handleImportClick = () => {
+    navigate('/import')
   }
 
-  const handleUploadError = (errorMsg) => {
-    setError(errorMsg)
-    setUploadData(null)
-  }
-
-  const handleDismissError = () => {
-    setError('')
-  }
-
-  const handleViewData = () => {
+  const handleViewClick = () => {
     navigate('/data')
   }
 
+  const handleFilterClick = () => {
+    navigate('/filter')
+  }
+
   return (
-    <div className="home-container">
-      <div className="form-wrapper">
-        <h1>Import Reddit Data</h1>
-        
-        <ErrorDisplay 
-          message={error} 
-          onDismiss={handleDismissError}
-        />
-
-        <FileUpload 
-          onUploadSuccess={handleUploadSuccess}
-          onError={handleUploadError}
-        />
-
-        <button onClick={handleViewData} className="view-data-btn">
-          View Data
-        </button>
+    <>
+      <Navbar showBack={false} />
+      <div className="home-container">
+        <div className="form-wrapper">
+          <h1>Reddit Data Tool</h1>
+          <div className="button-grid">
+            <button onClick={handleImportClick} className="main-button">
+              Import Data
+            </button>
+            <button onClick={handleViewClick} className="main-button">
+              View Data
+            </button>
+            <button onClick={handleFilterClick} className="main-button">
+              Filter Data
+            </button>
+          </div>
+        </div>
       </div>
-    </div>
+    </>
   )
 }
