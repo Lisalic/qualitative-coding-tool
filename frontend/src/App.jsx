@@ -3,6 +3,11 @@ import Home from './pages/Home'
 import Import from './pages/Import'
 import Filter from './pages/Filter'
 import Data from './pages/Data'
+import FilteredData from './pages/FilteredData'
+import GenerateCodebook from './pages/GenerateCodebook'
+import ViewCodebook from './pages/ViewCodebook'
+import ApplyCodebook from './pages/ApplyCodebook'
+import ViewCoding from './pages/ViewCoding'
 import './App.css'
 
 function App() {
@@ -12,8 +17,13 @@ function App() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/import" element={<Import />} />
-          <Route path="/filter" element={<Filter />} />
           <Route path="/data" element={<Data />} />
+          <Route path="/filter" element={<Filter />} />
+          <Route path="/filtered-data" element={<FilteredData />} />
+          <Route path="/codebook-generate" element={<GenerateCodebook />} />
+          <Route path="/codebook-view" element={<ViewCodebook />} />
+          <Route path="/codebook-apply" element={<ApplyCodebook />} />
+          <Route path="/coding-view" element={<ViewCoding />} />
         </Routes>
       </div>
     </Router>

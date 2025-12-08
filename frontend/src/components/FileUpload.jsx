@@ -66,9 +66,11 @@ export default function FileUpload({ onUploadSuccess, onError }) {
         method: 'POST',
         body: formData,
       })
+      console.log('Response received:', response.status, response.statusText)
 
       if (!response.ok) {
         const text = await response.text()
+        console.log('Error response text:', text)
         let errorMsg = 'Upload failed'
         try {
           const errorData = JSON.parse(text)
@@ -80,11 +82,19 @@ export default function FileUpload({ onUploadSuccess, onError }) {
       }
 
       const text = await response.text()
+      console.log('Response text:', text)
       if (!text) {
         throw new Error('Empty response from server')
       }
       const data = JSON.parse(text)
-      setMessage('✓ reddit_data.db updated')
+      console.log('Parsed response data:', data)
+      
+      if (data.status === 'processing') {
+        setMessage('📤 File uploaded. Import processing in background...')
+      } else {
+        setMessage('✓ reddit_data.db updated')
+      }
+      
       setFile(null)
       setSubredditTags([])
       setSubredditInput('')

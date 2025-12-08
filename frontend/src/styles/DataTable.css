@@ -18,6 +18,11 @@
   margin: 0;
 }
 
+.database-switcher {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .refresh-btn, .view-btn {
   background-color: #000000;
   color: #ffffff;
@@ -29,7 +34,12 @@
   transition: all 0.2s;
 }
 
-.refresh-btn:hover:not(:disabled), .view-btn:hover {
+.refresh-btn:hover:not(:disabled), .view-btn:hover:not(:disabled) {
+  background-color: #ffffff;
+  color: #000000;
+}
+
+.view-btn.active {
   background-color: #ffffff;
   color: #000000;
 }

@@ -11,7 +11,7 @@ export default function DataTable() {
       setError('')
       setLoading(true)
       
-      const response = await fetch('/api/database-entries/?limit=10')
+      const response = await fetch(`/api/database-entries/?limit=10&database=original`)
       
       if (!response.ok) {
         const text = await response.text()
