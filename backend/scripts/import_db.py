@@ -64,14 +64,21 @@ def import_submissions(conn, file_path, batch_size=100000, subreddit_filter=None
     submissions = []
     count = 0
     errors = 0
+    processed_lines = 0
 
+    print(f"Starting submission import from {file_path}")
+    
     try:
         for line in decompress_zst_file(file_path):
+            processed_lines += 1
+            
+            if processed_lines % 10000 == 0:
+                print(f"Processed {processed_lines} lines, imported {count} submissions")
+                
             try:
                 data = json.loads(line)
                 subreddit = data.get('subreddit')
                 
-                # Skip if subreddit filter is set and this subreddit is not in the list
                 if subreddit_filter and subreddit and subreddit.lower() not in subreddit_filter:
                     continue
                 
@@ -105,6 +112,7 @@ def import_submissions(conn, file_path, batch_size=100000, subreddit_filter=None
                     VALUES (?,?,?,?,?,?,?,?)
                     ''', submissions)
                     conn.commit()
+                    print(f"Committed batch of {len(submissions)} submissions")
                     submissions = []
 
             except json.JSONDecodeError as e:
@@ -120,9 +128,12 @@ def import_submissions(conn, file_path, batch_size=100000, subreddit_filter=None
             VALUES (?,?,?,?,?,?,?,?)
             ''', submissions)
             conn.commit()
+            print(f"Committed final batch of {len(submissions)} submissions")
+
+        print(f"Submission import complete: {count} imported, {errors} errors, {processed_lines} lines processed")
 
     except Exception as e:
-        pass
+        print(f"Error in import_submissions: {e}")
 
 def import_comments(conn, file_path, batch_size=100000, subreddit_filter=None):
     cursor = conn.cursor()
@@ -136,7 +147,6 @@ def import_comments(conn, file_path, batch_size=100000, subreddit_filter=None):
                 data = json.loads(line)
                 subreddit = data.get('subreddit')
                 
-                # Skip if subreddit filter is set and this subreddit is not in the list
                 if subreddit_filter and subreddit and subreddit.lower() not in subreddit_filter:
                     continue
                 
@@ -177,7 +187,7 @@ def import_comments(conn, file_path, batch_size=100000, subreddit_filter=None):
             conn.commit()
         
     except Exception as e:
-        pass
+        print(f"Error in import_comments: {e}")
 
 def get_file_size_mb(file_path):
     size_bytes = os.path.getsize(file_path)
@@ -216,6 +226,7 @@ def import_from_zst_file(file_path, db_path=None, subreddit_filter=None):
     if subreddit_filter:
         filter_list = [s.lower() for s in subreddit_filter]
     
+    # Always import, with or without filter
     if '_submissions' in file_path or 'submission' in file_path.lower():
         import_submissions(conn, file_path, subreddit_filter=filter_list)
     elif '_comments' in file_path or 'comment' in file_path.lower():
@@ -229,6 +240,7 @@ def import_from_zst_file(file_path, db_path=None, subreddit_filter=None):
     cursor.execute('SELECT COUNT(*) FROM comments')
     stats['comments_imported'] = cursor.fetchone()[0]
     
+    print(f"Final stats: {stats}")
     conn.close()
     return stats
 
