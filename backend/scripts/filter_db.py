@@ -43,9 +43,40 @@ def prompt_gemma(model, prompt: str):
         print(error_msg)
         return error_msg
 
-def main(api_key: str, prompt: str | None = None):
+def main(api_key: str, prompt: str | None = None, database: str = "original"):
+    # Determine database path
+    from pathlib import Path
+    from app.config import settings
+    db_path = Path(settings.reddit_db_path)
+    if database == "filtered":
+        db_path = db_path.parent / "filtereddata.db"
+
+    # Sample data from database
+    sample_data = ""
+    if db_path.exists():
+        try:
+            conn = sqlite3.connect(str(db_path))
+            cursor = conn.cursor()
+            cursor.execute("SELECT title, selftext FROM submissions LIMIT 5")
+            submissions = cursor.fetchall()
+            cursor.execute("SELECT body FROM comments LIMIT 10")
+            comments = cursor.fetchall()
+            conn.close()
+
+            sample_data = "Sample submissions:\n"
+            for title, text in submissions:
+                sample_data += f"Title: {title}\nText: {text[:200]}...\n\n"
+            sample_data += "Sample comments:\n"
+            for body, in comments:
+                sample_data += f"{body[:200]}...\n\n"
+        except Exception as e:
+            sample_data = f"Error sampling data: {e}\n"
+
+    # Create full prompt
+    full_prompt = f"{sample_data}\n{prompt or 'Generate a comprehensive codebook for analyzing this Reddit data'}"
+
     model = setup_gemma(api_key)
-    return prompt_gemma(model, prompt)
+    return prompt_gemma(model, full_prompt)
 
 
 if __name__ == "__main__":

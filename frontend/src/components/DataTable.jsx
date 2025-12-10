@@ -1,17 +1,18 @@
 import { useEffect, useState } from 'react'
 import '../styles/DataTable.css'
 
-export default function DataTable() {
+export default function DataTable({ database = "original", title = "Database Contents" }) {
   const [dbEntries, setDbEntries] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [currentDatabase, setCurrentDatabase] = useState(database)
 
   const fetchEntries = async () => {
     try {
       setError('')
       setLoading(true)
       
-      const response = await fetch(`/api/database-entries/?limit=10&database=original`)
+      const response = await fetch(`/api/database-entries/?limit=10&database=${currentDatabase}`)
       
       if (!response.ok) {
         const text = await response.text()
@@ -35,12 +36,12 @@ export default function DataTable() {
 
   useEffect(() => {
     fetchEntries()
-  }, [])
+  }, [currentDatabase])
 
   return (
     <div className="data-table-container">
       <div className="table-header">
-        <h2>Database Contents</h2>
+        <h1>{title}</h1>
       </div>
 
       {error && <p className="error-message">{error}</p>}

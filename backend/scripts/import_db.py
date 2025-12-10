@@ -48,16 +48,32 @@ def create_database(db_path):
     return conn
 
 def decompress_zst_file(file_path, chunk_size=16384): 
-    dctx = zstd.ZstdDecompressor(max_window_size=2**31)
+    try:
+        # Try to open as uncompressed text first
+        with open(file_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    yield line
+        return
+    except UnicodeDecodeError:
+        pass  # Not text, try zstd
     
-    with open(file_path, 'rb') as ifh:
-        reader = dctx.stream_reader(ifh, read_size=chunk_size)
-        text_buffer = io.TextIOWrapper(reader, encoding='utf-8', errors='ignore')
+    # Try zstd decompression
+    try:
+        dctx = zstd.ZstdDecompressor(max_window_size=2**31)
         
-        for line in text_buffer:
-            line = line.strip()
-            if line:
-                yield line
+        with open(file_path, 'rb') as ifh:
+            reader = dctx.stream_reader(ifh, read_size=chunk_size)
+            text_buffer = io.TextIOWrapper(reader, encoding='utf-8', errors='ignore')
+            
+            for line in text_buffer:
+                line = line.strip()
+                if line:
+                    yield line
+    except Exception as e:
+        print(f"Error decompressing {file_path}: {e}")
+        return
 
 def import_submissions(conn, file_path, batch_size=100000, subreddit_filter=None):
     cursor = conn.cursor()
@@ -227,12 +243,16 @@ def import_from_zst_file(file_path, db_path=None, subreddit_filter=None):
         filter_list = [s.lower() for s in subreddit_filter]
     
     # Always import, with or without filter
-    if '_submissions' in file_path or 'submission' in file_path.lower():
-        import_submissions(conn, file_path, subreddit_filter=filter_list)
-    elif '_comments' in file_path or 'comment' in file_path.lower():
-        import_comments(conn, file_path, subreddit_filter=filter_list)
-    else:
-        import_submissions(conn, file_path, subreddit_filter=filter_list)
+    try:
+        if '_submissions' in file_path or 'submission' in file_path.lower():
+            import_submissions(conn, file_path, subreddit_filter=filter_list)
+        elif '_comments' in file_path or 'comment' in file_path.lower():
+            import_comments(conn, file_path, subreddit_filter=filter_list)
+        else:
+            import_submissions(conn, file_path, subreddit_filter=filter_list)
+    except Exception as e:
+        print(f"Error importing {file_path}: {e}")
+        stats['errors'] += 1
     
     cursor = conn.cursor()
     cursor.execute('SELECT COUNT(*) FROM submissions')
@@ -246,7 +266,7 @@ def import_from_zst_file(file_path, db_path=None, subreddit_filter=None):
 
 def main():
     project_root = Path(__file__).resolve().parents[2]
-    db_path = project_root / 'reddit_data.db'
+    db_path = project_root / 'data' / 'reddit_data.db'
 
     conn = create_database(db_path)
     

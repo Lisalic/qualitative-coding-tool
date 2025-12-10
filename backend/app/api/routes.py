@@ -2,6 +2,7 @@ import os
 import sqlite3
 import sys
 import json
+import tempfile
 from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, UploadFile, Form
 from fastapi.responses import JSONResponse
@@ -11,12 +12,11 @@ from app.config import settings
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../scripts'))
 from import_db import import_from_zst_file
 from filter_db import main as filter_database_with_ai
+from codebook_generator import main as generate_codebook_main
 
 router = APIRouter()
 
-UPLOADS_DIR = Path(__file__).resolve().parent.parent / 'uploads'
 DB_PATH = Path(settings.reddit_db_path)
-os.makedirs(UPLOADS_DIR, exist_ok=True)
 
 
 @router.post("/upload-zst/")
@@ -30,7 +30,6 @@ async def upload_zst_file(
         print("File rejected: not a .zst file")
         raise HTTPException(status_code=400, detail="File must be a .zst file")
 
-    # Parse subreddits if provided
     subreddit_list = None
     if subreddits:
         try:
@@ -40,27 +39,23 @@ async def upload_zst_file(
             print("Invalid subreddit JSON")
             raise HTTPException(status_code=400, detail="Invalid subreddits format")
 
-    file_path = UPLOADS_DIR / file.filename
-    print(f"Saving file to: {file_path}")
-    
     try:
         content = await file.read()
-        with open(file_path, 'wb') as fh:
-            fh.write(content)
-        print(f"File saved successfully, size: {len(content)} bytes")
+        with tempfile.NamedTemporaryFile(suffix='.zst', delete=False) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+        print(f"File temporarily saved to: {tmp_path}, size: {len(content)} bytes")
 
-        # Perform import synchronously
-        print("Starting synchronous import...")
-        # Always import to the main DB, never to filtered DB
-        stats = import_from_zst_file(str(file_path), str(DB_PATH), subreddit_list)
+        stats = import_from_zst_file(tmp_path, str(DB_PATH), subreddit_list)
         print(f"Import completed successfully: {stats}")
 
-        # Return response with import statistics
+        os.unlink(tmp_path)
+
         response_data = {
             "status": "completed",
             "message": "Import completed successfully",
-            "database": "reddit_data.db",
-            "file_path": str(file_path),
+            "database": str(DB_PATH.relative_to(DB_PATH.parent.parent)),
+            "file_name": file.filename,
             "stats": stats
         }
         print(f"Sending response: {response_data}")
@@ -73,8 +68,19 @@ async def upload_zst_file(
         raise HTTPException(status_code=500, detail=f"Error uploading/importing file: {exc}")
 
 
+@router.get("/codebook")
+async def get_codebook():
+    codebook_path = Path(__file__).parent.parent.parent.parent / "data" / "codebook.txt"
+    if codebook_path.exists():
+        with open(codebook_path, 'r') as f:
+            codebook_content = f.read()
+        return JSONResponse({"codebook": codebook_content})
+    else:
+        return JSONResponse({"status": "processing", "message": "Codebook generation in progress. Please try again later."})
+
+
 @router.get("/database-entries/")
-async def get_database_entries(limit: int = 5, database: str = "original"):
+async def get_database_entries(limit: int = 10, database: str = "original"):
     db_path = DB_PATH
     if database == "filtered":
         db_path = DB_PATH.parent / "filtereddata.db"
@@ -148,13 +154,28 @@ async def get_database_entries(limit: int = 5, database: str = "original"):
 
 
 @router.post("/filter-data/")
-async def filter_database(api_key: str = Form(...), prompt: str = Form("")):
-    if not api_key.strip():
-        raise HTTPException(status_code=400, detail="API key is required")
-
+async def generate_codebook(database: str = Form("original"), api_key: str = Form(...)):
+    db_path = Path(settings.reddit_db_path)
+    if database == "filtered":
+        db_path = db_path.parent / "filtereddata.db"
+    
+    if not db_path.exists():
+        db_name = "Reddit Data" if database == "original" else "Filtered Data"
+        return JSONResponse({"error": f"{db_name} database not found. Please import and filter data first."}, status_code=404)
+    
     try:
-        result = filter_database_with_ai(api_key=api_key, prompt=prompt or None)
-        return JSONResponse(result)
-
+        generate_codebook_main(str(db_path), api_key)
+        # Read the generated codebook.txt
+        import os
+        print(f"Current working directory: {os.getcwd()}")
+        codebook_path = Path(__file__).parent.parent.parent.parent / "data" / "codebook.txt"
+        print(f"Looking for codebook at: {codebook_path}")
+        if codebook_path.exists():
+            with open(codebook_path, 'r') as f:
+                codebook_content = f.read()
+            return JSONResponse({"codebook": codebook_content})
+        else:
+            print(f"Codebook file not found at: {codebook_path}")
+            return JSONResponse({"error": "Codebook file not found"})
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        return JSONResponse({"error": str(exc)}, status_code=500)
