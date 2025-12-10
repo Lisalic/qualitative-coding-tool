@@ -65,12 +65,43 @@ export default function Filter() {
     }
   }
 
+  const handleViewFilteredData = () => {
+    navigate('/filtered-data')
+  }
+
   return (
     <>
       <Navbar showBack={true} onBack={handleBack} />
       <div className="home-container">
         <div className="form-wrapper">
           <h1>Filter Data</h1>
+          
+          <div style={{ marginBottom: '30px', textAlign: 'center' }}>
+            <button 
+              onClick={handleViewFilteredData}
+              style={{
+                backgroundColor: '#000000',
+                color: '#ffffff',
+                border: '1px solid #ffffff',
+                padding: '12px 24px',
+                fontSize: '16px',
+                cursor: 'pointer',
+                borderRadius: '4px',
+                transition: 'all 0.2s'
+              }}
+              onMouseOver={(e) => {
+                e.target.style.backgroundColor = '#ffffff'
+                e.target.style.color = '#000000'
+              }}
+              onMouseOut={(e) => {
+                e.target.style.backgroundColor = '#000000'
+                e.target.style.color = '#ffffff'
+              }}
+            >
+              View Filtered Data
+            </button>
+          </div>
+
           <form onSubmit={handleSubmit} className="filter-form">
             <div className="form-group">
               <label htmlFor="api-key">Google Gemini API Key</label>

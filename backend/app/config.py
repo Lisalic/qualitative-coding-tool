@@ -1,8 +1,8 @@
 from pathlib import Path
 from pydantic_settings import BaseSettings
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-REDDIT_DB_PATH = BASE_DIR.parent / "data" / "reddit_data.db"
+BASE_DIR = Path(__file__).resolve().parent.parent.parent  # Project root
+REDDIT_DB_PATH = BASE_DIR / "data" / "reddit_data.db"
 
 
 class Settings(BaseSettings):

@@ -4,7 +4,7 @@ from openai import OpenAI
 from pathlib import Path
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
-FREE_MODEL = "google/gemini-2.0-flash-exp:free"
+FREE_MODEL = "amazon/nova-2-lite-v1:free"
 MAX_RETRIES = 3
 INITIAL_RETRY_DELAY = 2  
 
@@ -47,14 +47,27 @@ def get_client(system_prompt: str, user_prompt: str, api_key: str) -> str:
             print(f"Retrying in {wait_time}s...")
             time.sleep(wait_time)
 
-#not in use currently
 def load_existing_codebook() -> str:
-    filename = '1_codebook.txt'
+    current_path = Path(__file__).resolve()
+    project_root = current_path.parent
+    while project_root != project_root.parent:  # Not at filesystem root
+        if (project_root / "data" / "codebook.txt").exists():
+            break
+        project_root = project_root.parent
+    else:
+        project_root = Path(__file__).parent.parent.parent
+    
+    codebook_path = project_root / "data" / "codebook.txt"
+    if not codebook_path.exists():
+        raise FileNotFoundError(f"Codebook not found at {codebook_path}. Please generate a codebook first using the codebook generator.")
     try:
-        with open(filename, 'r', encoding='utf-8') as f:
-            return f.read()
+        with open(codebook_path, 'r', encoding='utf-8') as f:
+            content = f.read().strip()
+            if not content:
+                raise ValueError(f"Codebook file exists but is empty. Please generate a valid codebook first.")
+            return content
     except FileNotFoundError:
-        return ""
+        raise FileNotFoundError(f"Codebook not found at {codebook_path}. Please generate a codebook first using the codebook generator.")
 
 def load_posts_content(db_path: str) -> str:
     try:
@@ -77,8 +90,9 @@ def load_posts_content(db_path: str) -> str:
 
 #not in use currently
 def load_methodology_content() -> str:
+    methodology_path = Path(__file__).parent.parent.parent / "data" / "methodology.txt"
     try:
-        with open('0_methodology.txt', 'r') as f:
+        with open(methodology_path, 'r') as f:
             return f.read()
     except FileNotFoundError:
         return ""
@@ -130,7 +144,7 @@ def generate_codebook(posts_content: str, api_key: str, previous_codebook: str =
 
 
 #not in use currently
-def classify_posts(codebook: str, posts_content: str,METHODOLOGY: str) -> str:
+def classify_posts(codebook: str, posts_content: str, methodology: str, api_key: str) -> str:
     
     system_prompt = f"""
     You are a highly meticulous qualitative data coder. Your task is to process the raw POSTS CONTENT by applying the codes defined in the CODEBOOK. 
@@ -167,10 +181,10 @@ def classify_posts(codebook: str, posts_content: str,METHODOLOGY: str) -> str:
     POSTS CONTENT:
     {posts_content}
     METHODOLOGY:
-    {METHODOLOGY}
+    {methodology}
     """
     
-    return get_client(system_prompt, user_prompt)
+    return get_client(system_prompt, user_prompt, api_key)
 #not in use currently
 def generate_summary(codebook: str, classification_report: str) -> str:
 
@@ -257,18 +271,40 @@ ANALYTICAL SUMMARY:
 
 
 
-def main(db_path, api_key):    
+def main(db_path, api_key, methodology=""):    
     try:
+        print("Loading existing codebook...")
+        codebook = load_existing_codebook()
+        print(f"Loaded codebook ({len(codebook)} characters)")
+        
+        print("Loading posts content...")
         POSTS_CONTENT = load_posts_content(db_path)
         if not POSTS_CONTENT:
             raise ValueError(f"Could not load posts from database. Please ensure the database contains valid data.")
-
-        print("Generating codebook...")
-        codebook = generate_codebook(POSTS_CONTENT, api_key)
-        codebook_path = Path(db_path).parent / "codebook.txt"
-        codebook_path.parent.mkdir(parents=True, exist_ok=True)
-        write_to_file(str(codebook_path), codebook)
-        print(f"Codebook generated and saved to {codebook_path}")
+        if POSTS_CONTENT.startswith("Error loading posts:"):
+            raise ValueError(f"Database error: {POSTS_CONTENT}")
+        print(f"Loaded posts content ({len(POSTS_CONTENT)} characters)")
+        
+        METHODOLOGY = methodology.strip()
+        
+        print("Applying codebook to posts...")
+        classification_report = classify_posts(codebook, POSTS_CONTENT, METHODOLOGY, api_key)
+        
+        print("Saving classification report...")
+        current_path = Path(__file__).resolve()
+        project_root = current_path.parent
+        while project_root != project_root.parent:  
+            if (project_root / "data").exists():
+                break
+            project_root = project_root.parent
+        else:
+            project_root = Path(__file__).parent.parent.parent
+        
+        data_dir = project_root / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        report_path = data_dir / "classification_report.txt"
+        write_to_file(str(report_path), classification_report)
+        print(f"Classification report saved to {report_path}")
         
     except Exception as e:
         print(f"ERROR: {e}")

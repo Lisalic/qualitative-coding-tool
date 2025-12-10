@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import Navbar from '../components/Navbar'
 import '../styles/Home.css'
 
 export default function GenerateCodebook() {
+  const navigate = useNavigate()
   const [database, setDatabase] = useState('original')
   const [apiKey, setApiKey] = useState('')
   const [loading, setLoading] = useState(false)
@@ -58,12 +60,42 @@ export default function GenerateCodebook() {
     }
   }
 
+  const handleViewCodebook = () => {
+    navigate('/codebook-view')
+  }
+
   return (
     <>
       <Navbar />
       <div className="home-container">
         <div className="form-wrapper">
           <h1>Generate Codebook</h1>
+          
+          <div style={{ marginBottom: '30px', textAlign: 'center' }}>
+            <button 
+              onClick={handleViewCodebook}
+              style={{
+                backgroundColor: '#000000',
+                color: '#ffffff',
+                border: '1px solid #ffffff',
+                padding: '12px 24px',
+                fontSize: '16px',
+                cursor: 'pointer',
+                borderRadius: '4px',
+                transition: 'all 0.2s'
+              }}
+              onMouseOver={(e) => {
+                e.target.style.backgroundColor = '#ffffff'
+                e.target.style.color = '#000000'
+              }}
+              onMouseOut={(e) => {
+                e.target.style.backgroundColor = '#000000'
+                e.target.style.color = '#ffffff'
+              }}
+            >
+              View Codebook
+            </button>
+          </div>
 
           <form onSubmit={handleSubmit} className="filter-form">
             <div className="form-group">

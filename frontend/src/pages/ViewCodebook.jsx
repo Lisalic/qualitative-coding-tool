@@ -1,12 +1,18 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import Navbar from '../components/Navbar'
 import '../styles/Data.css'
 
 export default function ViewCodebook() {
+  const navigate = useNavigate()
   const [codebooks, setCodebooks] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+
+  const handleBack = () => {
+    navigate('/')
+  }
 
   const fetchCodebooks = async () => {
     try {
@@ -36,7 +42,7 @@ export default function ViewCodebook() {
 
   return (
     <>
-      <Navbar />
+      <Navbar onBack={handleBack} />
       <div className="data-container">
         <div style={{
           border: '1px solid #ffffff',

@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../scripts'))
 from import_db import import_from_zst_file
 from filter_db import main as filter_database_with_ai
 from codebook_generator import main as generate_codebook_main
+from codebook_apply import main as apply_codebook_main
 
 router = APIRouter()
 
@@ -77,6 +78,17 @@ async def get_codebook():
         return JSONResponse({"codebook": codebook_content})
     else:
         return JSONResponse({"status": "processing", "message": "Codebook generation in progress. Please try again later."})
+
+
+@router.get("/classification-report")
+async def get_classification_report():
+    report_path = Path(__file__).parent.parent.parent.parent / "data" / "classification_report.txt"
+    if report_path.exists():
+        with open(report_path, 'r') as f:
+            report_content = f.read()
+        return JSONResponse({"classification_report": report_content})
+    else:
+        return JSONResponse({"error": "Classification report not found. Please apply a codebook first."}, status_code=404)
 
 
 @router.get("/database-entries/")
@@ -177,5 +189,33 @@ async def generate_codebook(database: str = Form("original"), api_key: str = For
         else:
             print(f"Codebook file not found at: {codebook_path}")
             return JSONResponse({"error": "Codebook file not found"})
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@router.post("/apply-codebook/")
+async def apply_codebook(
+    database: str = Form("original"), 
+    api_key: str = Form(...), 
+    methodology: str = Form("")
+):
+    db_path = Path(settings.reddit_db_path)
+    if database == "filtered":
+        db_path = db_path.parent / "filtereddata.db"
+    
+    if not db_path.exists():
+        db_name = "Reddit Data" if database == "original" else "Filtered Data"
+        return JSONResponse({"error": f"{db_name} database not found. Please import and filter data first."}, status_code=404)
+    
+    try:
+        apply_codebook_main(str(db_path), api_key, methodology)
+        # Read the generated classification report
+        report_path = Path(__file__).parent.parent.parent.parent / "data" / "classification_report.txt"
+        if report_path.exists():
+            with open(report_path, 'r') as f:
+                report_content = f.read()
+            return JSONResponse({"classification_report": report_content})
+        else:
+            return JSONResponse({"error": "Classification report not found"})
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500)

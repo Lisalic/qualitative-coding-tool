@@ -1,10 +1,13 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import Navbar from '../components/Navbar'
 import '../styles/Home.css'
 
 export default function ApplyCodebook() {
+  const navigate = useNavigate()
   const [apiKey, setApiKey] = useState('')
-  const [codebook, setCodebook] = useState('')
+  const [methodology, setMethodology] = useState('')
+  const [database, setDatabase] = useState('original')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
@@ -16,11 +19,6 @@ export default function ApplyCodebook() {
       return
     }
 
-    if (!codebook.trim()) {
-      setError('Codebook is required')
-      return
-    }
-
     try {
       setLoading(true)
       setError(null)
@@ -28,9 +26,10 @@ export default function ApplyCodebook() {
 
       const formData = new FormData()
       formData.append('api_key', apiKey)
-      formData.append('prompt', codebook)
+      formData.append('database', database)
+      formData.append('methodology', methodology)
 
-      const response = await fetch('http://localhost:8001/api/filter-data/', {
+      const response = await fetch('/api/apply-codebook/', {
         method: 'POST',
         body: formData,
       })
@@ -48,35 +47,78 @@ export default function ApplyCodebook() {
     }
   }
 
+  const handleViewCoding = () => {
+    navigate('/coding-view')
+  }
+
   return (
     <>
       <Navbar />
       <div className="home-container">
         <div className="form-wrapper">
           <h1>Apply Codebook</h1>
+          
+          <div style={{ marginBottom: '30px', textAlign: 'center' }}>
+            <button 
+              onClick={handleViewCoding}
+              style={{
+                backgroundColor: '#000000',
+                color: '#ffffff',
+                border: '1px solid #ffffff',
+                padding: '12px 24px',
+                fontSize: '16px',
+                cursor: 'pointer',
+                borderRadius: '4px',
+                transition: 'all 0.2s'
+              }}
+              onMouseOver={(e) => {
+                e.target.style.backgroundColor = '#ffffff'
+                e.target.style.color = '#000000'
+              }}
+              onMouseOut={(e) => {
+                e.target.style.backgroundColor = '#000000'
+                e.target.style.color = '#ffffff'
+              }}
+            >
+              View Coding Results
+            </button>
+          </div>
 
         <form onSubmit={handleSubmit} className="filter-form">
           <div className="form-group">
-            <label htmlFor="apiKey">Google Gemini API Key</label>
+            <label htmlFor="apiKey">OpenRouter API Key</label>
             <input
               type="password"
               id="apiKey"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder="Enter your Google Gemini API key..."
+              placeholder="Enter your OpenRouter API key..."
               className="filter-input"
             />
           </div>
 
           <div className="form-group">
-            <label htmlFor="codebook">Codebook</label>
-            <textarea
-              id="codebook"
-              value={codebook}
-              onChange={(e) => setCodebook(e.target.value)}
-              placeholder="Paste your codebook or coding instructions..."
+            <label htmlFor="database">Data Source</label>
+            <select
+              id="database"
+              value={database}
+              onChange={(e) => setDatabase(e.target.value)}
               className="filter-input"
-              rows="8"
+            >
+              <option value="original">Original Data</option>
+              <option value="filtered">Filtered Data</option>
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="methodology">Methodology (Optional)</label>
+            <textarea
+              id="methodology"
+              value={methodology}
+              onChange={(e) => setMethodology(e.target.value)}
+              placeholder="Enter your coding methodology or leave blank..."
+              className="filter-input"
+              rows="4"
             />
           </div>
 
@@ -85,15 +127,15 @@ export default function ApplyCodebook() {
           </button>
         </form>
 
-        {(error || (result && result.message)) && (
+        {(error || (result && result.error)) && (
           <p className="filter-message">
-            {error || result.message}
+            {error || result.error}
           </p>
         )}
-        {result && !result.message && (
+        {result && result.classification_report && (
           <div className="result">
-            <h2>Coding Results</h2>
-            <pre>{JSON.stringify(result, null, 2)}</pre>
+            <h2>Classification Report</h2>
+            <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace' }}>{result.classification_report}</pre>
           </div>
         )}
         </div>
