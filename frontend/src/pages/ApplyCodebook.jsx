@@ -30,7 +30,7 @@ export default function ApplyCodebook() {
       formData.append('api_key', apiKey)
       formData.append('prompt', codebook)
 
-      const response = await fetch('http://localhost:8000/api/filter-data/', {
+      const response = await fetch('http://localhost:8001/api/filter-data/', {
         method: 'POST',
         body: formData,
       })

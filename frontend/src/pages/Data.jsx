@@ -14,7 +14,7 @@ export default function Data() {
     <>
       <Navbar showBack={true} onBack={handleBack} />
       <div className="data-container">
-        <DataTable />
+        <DataTable title="View Data" />
       </div>
     </>
   )

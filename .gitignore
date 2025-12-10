@@ -9,10 +9,11 @@ env/
 ENV/
 .env
 
-# Database
+# Data
 *.db
 *.sqlite
 *.zst
+*.txt
 
 # Node
 node_modules/

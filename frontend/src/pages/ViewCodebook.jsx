@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import ReactMarkdown from 'react-markdown'
 import Navbar from '../components/Navbar'
 import '../styles/Data.css'
 
@@ -12,14 +13,16 @@ export default function ViewCodebook() {
       setLoading(true)
       setError(null)
 
-      const response = await fetch(
-        `http://localhost:8000/api/database-entries/?limit=50&database=codebook`
-      )
+      const response = await fetch('/api/codebook')
       if (!response.ok) {
-        throw new Error('Failed to fetch codebooks')
+        throw new Error('Failed to fetch codebook')
       }
       const data = await response.json()
-      setCodebooks(data.submissions || [])
+      if (data.codebook) {
+        setCodebooks([{ content: data.codebook }])
+      } else {
+        setCodebooks([])
+      }
     } catch (err) {
       setError(err.message)
     } finally {
@@ -35,42 +38,46 @@ export default function ViewCodebook() {
     <>
       <Navbar />
       <div className="data-container">
-        <h1>View Codebook</h1>
-        <p>Review and manage your coding schemes</p>
+        <div style={{
+          border: '1px solid #ffffff',
+          borderRadius: '8px',
+          padding: '20px',
+          backgroundColor: '#000000'
+        }}>
+          <h1 style={{ textAlign: 'center', color: '#ffffff' }}>View Codebook</h1>
 
-        {loading && <p>Loading codebooks...</p>}
-        {error && <div style={{color: '#ff6666', padding: '10px', border: '1px solid #ff6666', borderRadius: '4px', marginBottom: '20px'}}>{error}</div>}
-        
-        {codebooks.length > 0 && (
-          <div>
-            <h2>Available Codebooks</h2>
-            <div style={{display: 'grid', gap: '20px'}}>
-              {codebooks.map((codebook, index) => (
-                <div key={index} style={{
-                  backgroundColor: '#000000',
-                  border: '1px solid #ffffff',
-                  borderRadius: '4px',
-                  padding: '20px',
-                  color: '#ffffff'
-                }}>
-                  <h3>{codebook.name || `Codebook ${index + 1}`}</h3>
-                  <p>{codebook.description || 'No description available'}</p>
-                  {codebook.categories && (
-                    <ul style={{color: '#cccccc'}}>
-                      {JSON.parse(codebook.categories || '[]').map((category, idx) => (
-                        <li key={idx}>{category.name}: {category.codes.join(', ')}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              ))}
+          {loading && <p>Loading codebooks...</p>}
+          {error && <div style={{color: '#ff6666', padding: '10px', border: '1px solid #ff6666', borderRadius: '4px', marginBottom: '20px'}}>{error}</div>}
+          
+          {codebooks.length > 0 && (
+            <div>
+              <div style={{
+                backgroundColor: '#000000',
+                border: '1px solid #ffffff',
+                borderRadius: '4px',
+                padding: '20px',
+                color: '#ffffff'
+              }}>
+                <ReactMarkdown
+                  components={{
+                    h3: ({ children }) => <h3 style={{ color: '#ffffff', marginTop: '20px' }}>{children}</h3>,
+                    h4: ({ children }) => <h4 style={{ color: '#ffffff', marginTop: '15px' }}>{children}</h4>,
+                    ul: ({ children }) => <ul style={{ color: '#ffffff' }}>{children}</ul>,
+                    li: ({ children }) => <li style={{ color: '#ffffff' }}>{children}</li>,
+                    strong: ({ children }) => <strong style={{ color: '#ffffff' }}>{children}</strong>,
+                    p: ({ children }) => <p style={{ color: '#ffffff' }}>{children}</p>,
+                  }}
+                >
+                  {codebooks[0].content}
+                </ReactMarkdown>
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {codebooks.length === 0 && !loading && !error && (
-          <p>No codebooks found. Generate a codebook first.</p>
-        )}
+          {codebooks.length === 0 && !loading && !error && (
+            <p>No codebook found. Generate a codebook first.</p>
+          )}
+        </div>
       </div>
     </>
   )
