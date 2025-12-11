@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import Navbar from '../components/Navbar'
+import ActionForm from '../components/ActionForm'
 import { useState } from 'react'
 import '../styles/Home.css'
 
@@ -14,30 +15,30 @@ export default function Filter() {
     navigate('/')
   }
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
+  const handleViewFilteredData = () => {
+    navigate('/filtered-data')
+  }
 
-    if (!filterPrompt.trim()) {
-      setMessage('Please enter a filter prompt')
-      return
+  const handleSubmit = async (formData) => {
+    if (!formData.filterPrompt.trim()) {
+      throw new Error('Please enter a filter prompt')
     }
 
-    if (!apiKey.trim()) {
-      setMessage('Please enter a Google Gemini API key')
-      return
+    if (!formData.apiKey.trim()) {
+      throw new Error('Please enter a Google Gemini API key')
     }
 
     setLoading(true)
     setMessage('')
 
     try {
-      const formData = new FormData()
-      formData.append('api_key', apiKey)
-      formData.append('prompt', filterPrompt)
+      const requestData = new FormData()
+      requestData.append('api_key', formData.apiKey)
+      requestData.append('prompt', formData.filterPrompt)
 
       const response = await fetch('/api/filter-data/', {
         method: 'POST',
-        body: formData,
+        body: requestData,
       })
 
       if (!response.ok) {
@@ -65,75 +66,44 @@ export default function Filter() {
     }
   }
 
-  const handleViewFilteredData = () => {
-    navigate('/filtered-data')
-  }
+  const fields = [
+    {
+      id: 'apiKey',
+      label: 'Google Gemini API Key',
+      type: 'password',
+      value: apiKey,
+      placeholder: 'Enter your Google Gemini API key...'
+    },
+    {
+      id: 'filterPrompt',
+      label: 'Filter Prompt',
+      type: 'textarea',
+      value: filterPrompt,
+      placeholder: 'Enter your filter prompt...',
+      rows: 5
+    }
+  ]
 
   return (
     <>
       <Navbar showBack={true} onBack={handleBack} />
-      <div className="home-container">
-        <div className="form-wrapper">
-          <h1>Filter Data</h1>
-          
-          <div style={{ marginBottom: '30px', textAlign: 'center' }}>
-            <button 
-              onClick={handleViewFilteredData}
-              style={{
-                backgroundColor: '#000000',
-                color: '#ffffff',
-                border: '1px solid #ffffff',
-                padding: '12px 24px',
-                fontSize: '16px',
-                cursor: 'pointer',
-                borderRadius: '4px',
-                transition: 'all 0.2s'
-              }}
-              onMouseOver={(e) => {
-                e.target.style.backgroundColor = '#ffffff'
-                e.target.style.color = '#000000'
-              }}
-              onMouseOut={(e) => {
-                e.target.style.backgroundColor = '#000000'
-                e.target.style.color = '#ffffff'
-              }}
-            >
-              View Filtered Data
-            </button>
-          </div>
-
-          <form onSubmit={handleSubmit} className="filter-form">
-            <div className="form-group">
-              <label htmlFor="api-key">Google Gemini API Key</label>
-              <input
-                id="api-key"
-                type="password"
-                placeholder="Enter your Google Gemini API key..."
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                disabled={loading}
-                className="filter-input"
-              />
-            </div>
-            <div className="form-group">
-              <label htmlFor="filter-prompt">Filter Prompt</label>
-              <textarea
-                id="filter-prompt"
-                placeholder="Enter your filter prompt..."
-                value={filterPrompt}
-                onChange={(e) => setFilterPrompt(e.target.value)}
-                disabled={loading}
-                className="filter-input"
-                rows="5"
-              />
-            </div>
-            <button type="submit" disabled={loading} className="filter-submit-btn">
-              {loading ? 'Processing...' : 'Filter'}
-            </button>
-            {message && <p className="filter-message">{message}</p>}
-          </form>
-        </div>
-      </div>
+      <ActionForm
+        title="Filter Data"
+        viewButton={{
+          text: 'View Filtered Data',
+          onClick: handleViewFilteredData
+        }}
+        fields={fields}
+        submitButton={{
+          text: 'Filter',
+          loadingText: 'Processing...',
+          disabled: loading
+        }}
+        onSubmit={handleSubmit}
+        error={message && message.startsWith('Error:') ? message : null}
+        result={message && message.startsWith('✓') ? message : null}
+        resultTitle="Filter Result"
+      />
     </>
   )
 }

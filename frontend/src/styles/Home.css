@@ -60,23 +60,7 @@
   transform: translateY(0);
 }
 
-.back-button {
-  background-color: #ffffff;
-  color: #000000;
-  border: none;
-  padding: 10px 20px;
-  font-size: 16px;
-  font-weight: 600;
-  cursor: pointer;
-  border-radius: 4px;
-  transition: all 0.2s;
-}
-
-.back-button:hover {
-  background-color: #e0e0e0;
-}
-
-.filter-form {
+.action-form {
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -86,19 +70,19 @@
   background-color: #000000;
 }
 
-.filter-form .form-group {
+.action-form .form-group {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
 }
 
-.filter-form .form-group label {
+.action-form .form-group label {
   color: #ffffff;
   font-weight: 400;
   font-size: 1rem;
 }
 
-.filter-input {
+.form-input {
   color: #ffffff;
   padding: 0.75rem;
   border: 1px solid #ffffff;
@@ -107,21 +91,21 @@
   font-size: 1rem;
 }
 
-.filter-input::placeholder {
+.form-input::placeholder {
   color: #666;
 }
 
-.filter-input:disabled {
+.form-input:disabled {
   background-color: #0a0a0a;
   opacity: 0.6;
 }
 
-textarea.filter-input {
+textarea.form-input {
   resize: vertical;
   min-height: 100px;
 }
 
-.filter-submit-btn {
+.form-submit-btn {
   background-color: #000000;
   color: #ffffff;
   border: 1px solid #ffffff;
@@ -132,17 +116,17 @@ textarea.filter-input {
   transition: all 0.2s;
 }
 
-.filter-submit-btn:hover:not(:disabled) {
+.form-submit-btn:hover:not(:disabled) {
   background-color: #ffffff;
   color: #000000;
 }
 
-.filter-submit-btn:disabled {
+.form-submit-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
 
-.filter-message {
+.form-message {
   color: #ff0000;
   margin-top: 1rem;
   font-size: 0.95rem;
@@ -170,4 +154,20 @@ textarea.filter-input {
   margin-top: 12px;
   font-size: 12px;
   color: #ffffff;
+}
+
+.view-button {
+  background-color: #000000;
+  color: #ffffff;
+  border: 1px solid #ffffff;
+  padding: 12px 24px;
+  font-size: 16px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.view-button:hover {
+  background-color: #ffffff;
+  color: #000000;
 }

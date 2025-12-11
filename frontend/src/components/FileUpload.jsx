@@ -109,7 +109,7 @@ export default function FileUpload({ onUploadSuccess, onError }) {
 
   return (
     <div className="file-upload">
-      <h2>Upload Reddit Data</h2>
+      <h2>Upload Data</h2>
       <form onSubmit={handleSubmit}>
         <div className="form-group">
           <label htmlFor="zst-file">Upload .zst File</label>
