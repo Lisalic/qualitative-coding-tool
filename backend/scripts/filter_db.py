@@ -1,90 +1,211 @@
-import json
-import sys
+import os
+import time
 import sqlite3
-from pathlib import Path
-import google.generativeai as genai
+import ast
+from openai import OpenAI
 
-## FILTER NOT IMPLEMENTED
-
-
-def setup_gemma(api_key: str):
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemma-3-27b-it")
-    return model
+OPENROUTER_URL = "https://openrouter.ai/api/v1"
+FREE_MODEL = "google/gemini-2.0-flash-exp:free"
+MAX_RETRIES = 3
+INITIAL_RETRY_DELAY = 2  
 
 
-def prompt_gemma(model, prompt: str):
+def write_to_file(filename: str, content: str):
     try:
-        response = model.generate_content(
-            prompt,
-            generation_config=genai.GenerationConfig(
-                temperature=0.7,
-                max_output_tokens=512,
-            ),
-        )
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(content)
+    except IOError as e:
+        print(f"ERROR: Could not write to file {filename}. Reason: {e}")
 
-        text = ""
-        if hasattr(response, "text") and response.text:
-            text = response.text
-        elif getattr(response, "candidates", None):
-            for candidate in response.candidates:
-                content = getattr(candidate, "content", None)
-                if content and getattr(content, "parts", None):
-                    for part in content.parts:
-                        if hasattr(part, "text") and part.text:
-                            text += part.text
 
-        print(f"Gemma Response: {text}")
-
-        return text
-
-    except Exception as exc: 
-        error_msg = f"Error prompting Gemma: {str(exc)}"
-        print(error_msg)
-        return error_msg
-
-def main(api_key: str, prompt: str | None = None, database: str = "original"):
-    # Determine database path
-    from pathlib import Path
-    from app.config import settings
-    db_path = Path(settings.reddit_db_path)
-    if database == "filtered":
-        db_path = db_path.parent / "filtereddata.db"
-
-    # Sample data from database
-    sample_data = ""
-    if db_path.exists():
+def get_client(system_prompt: str, user_prompt: str, api_key: str) -> str:
+    if not api_key:
+        raise ValueError("OpenRouter API key is required")
+    for attempt in range(1, MAX_RETRIES + 1):
         try:
-            conn = sqlite3.connect(str(db_path))
-            cursor = conn.cursor()
-            cursor.execute("SELECT title, selftext FROM submissions LIMIT 5")
-            submissions = cursor.fetchall()
-            cursor.execute("SELECT body FROM comments LIMIT 10")
-            comments = cursor.fetchall()
-            conn.close()
-
-            sample_data = "Sample submissions:\n"
-            for title, text in submissions:
-                sample_data += f"Title: {title}\nText: {text[:200]}...\n\n"
-            sample_data += "Sample comments:\n"
-            for body, in comments:
-                sample_data += f"{body[:200]}...\n\n"
+            client = OpenAI(
+                api_key=api_key,
+                base_url=OPENROUTER_URL,
+            )
+            response = client.chat.completions.create(
+                model=FREE_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.05,
+                timeout=300, 
+                extra_body={"transforms": ["middle-out"]}
+            )
+            return response.choices[0].message.content
+        except KeyboardInterrupt:
+            print("\nkeyboard interrupt")
+            raise
         except Exception as e:
-            sample_data = f"Error sampling data: {e}\n"
+            if attempt == MAX_RETRIES:
+                raise
+            wait_time = INITIAL_RETRY_DELAY * (2 ** (attempt - 1))
+            print(f"\nAPI call failed (attempt {attempt}/{MAX_RETRIES}): {type(e).__name__}")
+            print(f"Retrying in {wait_time}s...")
+            time.sleep(wait_time)
 
-    # Create full prompt
-    full_prompt = f"{sample_data}\n{prompt or 'Generate a comprehensive codebook for analyzing this Reddit data'}"
 
-    model = setup_gemma(api_key)
-    return prompt_gemma(model, full_prompt)
+def load_posts_content(db_path: str) -> str:
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, title, selftext FROM submissions")
+        posts = cursor.fetchall()
+        conn.close()
+
+        content = ""
+        for post_id, title, selftext in posts:
+            content += f"ID: {post_id}\nTitle: {title}\nText: {selftext}\n\n"
+        return content
+    except Exception as e:
+        return f"Error loading posts: {e}"
 
 
-if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python filter_db.py <api_key> [prompt]")
-        sys.exit(1)
+def filter_posts_with_ai(filter_prompt: str, posts_content: str, api_key: str) -> str:
+    """
+    Use AI to filter posts based on a given prompt and return results in JSON format.
 
-    api_key_arg = sys.argv[1]
-    prompt_arg = sys.argv[2] if len(sys.argv) > 2 else None
+    Args:
+        filter_prompt (str): The filtering criteria/prompt
+        posts_content (str): The posts content to filter through
+        api_key (str): OpenRouter API key
 
-    result = main(api_key_arg, prompt_arg)
+    Returns:
+        str: JSON string with filtered posts as an array of objects: [{id, title, selftext}, ...]
+    """
+    system_prompt = f"""You are an expert content analyst. Your task is to filter posts based on the given criteria.
+
+FILTERING CRITERIA: {filter_prompt}
+
+INSTRUCTIONS:
+1. Analyze each post in the provided content
+2. Determine which posts match the filtering criteria
+3. Return ONLY a valid JSON array where each object contains "id", "title", and "selftext" fields
+4. LIMIT your response to MAXIMUM 10 posts that best match the criteria
+5. Only include posts that clearly match the filtering criteria
+6. If no posts match, return an empty JSON array []
+7. ALWAYS ensure the JSON array is complete and properly closed with ]
+
+EXAMPLE OUTPUT FORMAT:
+[
+  {{"id": "post_id_1", "title": "Post Title 1", "selftext": "Post content 1"}},
+  {{"id": "post_id_2", "title": "Post Title 2", "selftext": "Post content 2"}}
+]
+
+CRITICAL: Return ONLY the raw JSON array with NO markdown code blocks, NO backticks, NO "```json" wrappers, and NO additional text or explanation."""
+
+    user_prompt = f"Here are the posts to filter:\n\n{posts_content}"
+
+    try:
+        response = get_client(system_prompt, user_prompt, api_key)
+
+        response = response.strip()
+        print(response)
+        if not response.startswith('['):
+            return '[]'
+        if not response.endswith(']'):
+            last_comma = response.rfind(',')
+            if last_comma > 0:
+                response = response[:last_comma] + ']'
+            else:
+                response = response.rstrip() + ']'
+
+        try:
+            import json
+            json.loads(response)
+            return response
+        except json.JSONDecodeError:
+            return '[]'
+
+    except Exception as e:
+        return f'[{{"error": "Failed to filter posts: {str(e)}"}}]'
+
+
+def save_filtered_posts_to_db(posts_list) -> bool:
+    """
+    Save filtered posts to database.
+
+    Args:
+        posts_list: A string which contains a list of post dictionaries, each containing 'id', 'title', and 'selftext' keys
+
+    Returns:
+        bool: True if successful, False if failed
+    """
+    try:
+        posts = ast.literal_eval(posts_list)
+        
+        if not isinstance(posts, list):
+            print(f"Error: Expected list after parsing, got {type(posts)}")
+            return False
+
+        print(f"Processing {len(posts)} posts")
+
+        data_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data")
+        os.makedirs(data_dir, exist_ok=True)
+        
+        filtered_db_path = os.path.join(data_dir, "filtered_data.db")
+
+        conn = sqlite3.connect(filtered_db_path)
+        cursor = conn.cursor()
+
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS submissions (
+        id TEXT PRIMARY KEY,
+        title TEXT,
+        selftext TEXT
+        )
+        ''')
+
+        for post in posts:
+            if isinstance(post, dict) and 'id' in post and 'title' in post and 'selftext' in post:
+                cursor.execute('''
+                INSERT OR REPLACE INTO submissions (id, title, selftext)
+                VALUES (?, ?, ?)
+                ''', (
+                    post['id'],
+                    post['title'],
+                    post['selftext']
+                ))
+            else:
+                print(f"Warning: Skipping invalid post: {post}")
+
+        conn.commit()
+        conn.close()
+
+        print(f"Successfully saved {len(posts)} filtered posts to {filtered_db_path}")
+        return True
+
+    except (ValueError, SyntaxError) as e:
+        print(f"Error parsing string to list: {e}")
+        return False
+    except Exception as e:
+        print(f"Error saving filtered posts to database: {e}")
+        return False
+
+
+def main(api_key: str, prompt: str):
+    db_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "reddit_data.db")
+    if not os.path.exists(db_path):
+        print("Error: reddit_data.db not found. Please import data first.")
+        return
+
+    posts_content = load_posts_content(db_path)
+    if not posts_content or posts_content.startswith("Error"):
+        print(posts_content)
+        return
+
+    filtered_list = filter_posts_with_ai(prompt, posts_content, api_key)
+    if filtered_list.startswith('[{{"error":'):
+        print(f"Filtering failed: {filtered_list}")
+        return
+
+    save_success = save_filtered_posts_to_db(filtered_list)
+    if save_success:
+        print("Filtering completed successfully!")
+    else:
+        print("Failed to save filtered data.")

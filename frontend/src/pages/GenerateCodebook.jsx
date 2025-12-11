@@ -29,7 +29,7 @@ export default function GenerateCodebook() {
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 60000)
 
-      const response = await fetch('/api/filter-data/', {
+      const response = await fetch('/api/generate-codebook/', {
         method: 'POST',
         body: requestData,
         signal: controller.signal,

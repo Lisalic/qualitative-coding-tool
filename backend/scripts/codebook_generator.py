@@ -47,7 +47,7 @@ def get_client(system_prompt: str, user_prompt: str, api_key: str) -> str:
             print(f"Retrying in {wait_time}s...")
             time.sleep(wait_time)
 
-#not in use currently
+
 def load_existing_codebook() -> str:
     filename = '1_codebook.txt'
     try:
@@ -75,7 +75,7 @@ def load_posts_content(db_path: str) -> str:
     except Exception as e:
         return f"Error loading posts: {e}"
 
-#not in use currently
+
 def load_methodology_content() -> str:
     try:
         with open('0_methodology.txt', 'r') as f:
@@ -129,7 +129,6 @@ def generate_codebook(posts_content: str, api_key: str, previous_codebook: str =
     return get_client(system_prompt, user_prompt, api_key)
 
 
-#not in use currently
 def classify_posts(codebook: str, posts_content: str,METHODOLOGY: str) -> str:
     
     system_prompt = f"""
@@ -171,7 +170,6 @@ def classify_posts(codebook: str, posts_content: str,METHODOLOGY: str) -> str:
     """
     
     return get_client(system_prompt, user_prompt)
-#not in use currently
 def generate_summary(codebook: str, classification_report: str) -> str:
 
     system_prompt = f"""
@@ -215,7 +213,6 @@ def generate_summary(codebook: str, classification_report: str) -> str:
     """
     
     return get_client(system_prompt, user_prompt)
-#not in use currently
 def analyze_codebook_feedback(codebook: str, posts_content: str, classification_report: str = "", analytical_summary: str = "") -> str:
 
     system_prompt = f"""

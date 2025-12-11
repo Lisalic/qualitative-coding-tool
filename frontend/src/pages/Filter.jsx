@@ -25,7 +25,7 @@ export default function Filter() {
     }
 
     if (!formData.apiKey.trim()) {
-      throw new Error('Please enter a Google Gemini API key')
+      throw new Error('Please enter a OpenRouter API key')
     }
 
     setLoading(true)
@@ -69,10 +69,10 @@ export default function Filter() {
   const fields = [
     {
       id: 'apiKey',
-      label: 'Google Gemini API Key',
+      label: 'OpenRouter API Key',
       type: 'password',
       value: apiKey,
-      placeholder: 'Enter your Google Gemini API key...'
+      placeholder: 'Enter your OpenRouter API key...'
     },
     {
       id: 'filterPrompt',

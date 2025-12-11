@@ -10,7 +10,6 @@ def create_database(db_path):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
-    # TABLE submissions
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS submissions (
     id TEXT PRIMARY KEY,
@@ -23,7 +22,6 @@ def create_database(db_path):
     num_comments INTEGER
     )
     ''')
-    #TABLE comments
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS comments (
         id TEXT PRIMARY KEY,
@@ -49,7 +47,6 @@ def create_database(db_path):
 
 def decompress_zst_file(file_path, chunk_size=16384): 
     try:
-        # Try to open as uncompressed text first
         with open(file_path, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
@@ -57,9 +54,8 @@ def decompress_zst_file(file_path, chunk_size=16384):
                     yield line
         return
     except UnicodeDecodeError:
-        pass  # Not text, try zstd
+        pass  
     
-    # Try zstd decompression
     try:
         dctx = zstd.ZstdDecompressor(max_window_size=2**31)
         
@@ -237,12 +233,10 @@ def import_from_zst_file(file_path, db_path=None, subreddit_filter=None):
         'subreddit_filter': subreddit_filter
     }
     
-    # Convert filter to lowercase for case-insensitive matching
     filter_list = None
     if subreddit_filter:
         filter_list = [s.lower() for s in subreddit_filter]
     
-    # Always import, with or without filter
     try:
         if '_submissions' in file_path or 'submission' in file_path.lower():
             import_submissions(conn, file_path, subreddit_filter=filter_list)
