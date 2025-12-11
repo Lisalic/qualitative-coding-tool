@@ -37,7 +37,7 @@ export default function Import() {
       <Navbar showBack={true} onBack={handleBack} />
       <div className="home-container">
         <div className="form-wrapper">
-          <h1>Import Reddit Data</h1>
+          <h1>Import Data</h1>
           
           <div style={{ marginBottom: '30px', textAlign: 'center' }}>
             <button 
