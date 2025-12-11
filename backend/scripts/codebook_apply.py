@@ -4,7 +4,7 @@ from openai import OpenAI
 from pathlib import Path
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
-FREE_MODEL = "amazon/nova-2-lite-v1:free"
+FREE_MODEL = "google/gemini-2.0-flash-exp:free"
 MAX_RETRIES = 3
 INITIAL_RETRY_DELAY = 2  
 
@@ -50,7 +50,7 @@ def get_client(system_prompt: str, user_prompt: str, api_key: str) -> str:
 def load_existing_codebook() -> str:
     current_path = Path(__file__).resolve()
     project_root = current_path.parent
-    while project_root != project_root.parent:  # Not at filesystem root
+    while project_root != project_root.parent:
         if (project_root / "data" / "codebook.txt").exists():
             break
         project_root = project_root.parent

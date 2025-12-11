@@ -95,7 +95,7 @@ async def get_classification_report():
 async def get_database_entries(limit: int = 10, database: str = "original"):
     db_path = DB_PATH
     if database == "filtered":
-        db_path = DB_PATH.parent / "filtereddata.db"
+        db_path = DB_PATH.parent / "filtered_data.db"
     elif database == "codebook":
         db_path = DB_PATH.parent / "codebook.db"
     elif database == "coding":
@@ -117,21 +117,26 @@ async def get_database_entries(limit: int = 10, database: str = "original"):
         cursor = conn.cursor()
 
         if database == "codebook":
-            # For codebook database, assume different schema
             cursor.execute('SELECT COUNT(*) as count FROM codebooks')
             sub_count = cursor.fetchone()['count']
             cursor.execute('SELECT * FROM codebooks LIMIT ?', (limit,))
             submissions = [dict(row) for row in cursor.fetchall()]
-            comments = []  # No comments in codebook
+            comments = []
             com_count = 0
         elif database == "coding":
-            # For coding database, assume different schema
             cursor.execute('SELECT COUNT(*) as count FROM codings')
             sub_count = cursor.fetchone()['count']
             cursor.execute('SELECT * FROM codings LIMIT ?', (limit,))
             submissions = [dict(row) for row in cursor.fetchall()]
-            comments = []  # No comments in coding
+            comments = []
             com_count = 0
+        elif database == "filtered":
+            cursor.execute('SELECT COUNT(*) as count FROM submissions')
+            sub_count = cursor.fetchone()['count']
+            com_count = 0
+            cursor.execute('SELECT * FROM submissions LIMIT ?', (limit,))
+            submissions = [dict(row) for row in cursor.fetchall()]
+            comments = []
         else:
             cursor.execute('SELECT COUNT(*) as count FROM submissions')
             sub_count = cursor.fetchone()['count']
@@ -166,10 +171,24 @@ async def get_database_entries(limit: int = 10, database: str = "original"):
 
 
 @router.post("/filter-data/")
+async def filter_data(api_key: str = Form(...), prompt: str = Form(...)):
+    db_path = Path(settings.reddit_db_path)
+    
+    if not db_path.exists():
+        return JSONResponse({"error": "Reddit data database not found. Please import data first."}, status_code=404)
+    
+    try:
+        filter_database_with_ai(api_key, prompt)
+        return JSONResponse({"message": "Data filtered successfully"})
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@router.post("/generate-codebook/")
 async def generate_codebook(database: str = Form("original"), api_key: str = Form(...)):
     db_path = Path(settings.reddit_db_path)
     if database == "filtered":
-        db_path = db_path.parent / "filtereddata.db"
+        db_path = db_path.parent / "filtered_data.db"
     
     if not db_path.exists():
         db_name = "Reddit Data" if database == "original" else "Filtered Data"
@@ -177,7 +196,6 @@ async def generate_codebook(database: str = Form("original"), api_key: str = For
     
     try:
         generate_codebook_main(str(db_path), api_key)
-        # Read the generated codebook.txt
         import os
         print(f"Current working directory: {os.getcwd()}")
         codebook_path = Path(__file__).parent.parent.parent.parent / "data" / "codebook.txt"
@@ -201,7 +219,7 @@ async def apply_codebook(
 ):
     db_path = Path(settings.reddit_db_path)
     if database == "filtered":
-        db_path = db_path.parent / "filtereddata.db"
+        db_path = db_path.parent / "filtered_data.db"
     
     if not db_path.exists():
         db_name = "Reddit Data" if database == "original" else "Filtered Data"
@@ -209,7 +227,6 @@ async def apply_codebook(
     
     try:
         apply_codebook_main(str(db_path), api_key, methodology)
-        # Read the generated classification report
         report_path = Path(__file__).parent.parent.parent.parent / "data" / "classification_report.txt"
         if report_path.exists():
             with open(report_path, 'r') as f:

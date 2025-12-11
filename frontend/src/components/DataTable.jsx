@@ -62,20 +62,38 @@ export default function DataTable({ database = "original", title = "Database Con
                   <thead>
                     <tr>
                       <th>ID</th>
-                      <th>Subreddit</th>
-                      <th>Title</th>
-                      <th>Author</th>
-                      <th>Score</th>
+                      {currentDatabase === "filtered" ? (
+                        <>
+                          <th>Title</th>
+                          <th>Selftext</th>
+                        </>
+                      ) : (
+                        <>
+                          <th>Subreddit</th>
+                          <th>Title</th>
+                          <th>Author</th>
+                          <th>Score</th>
+                        </>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
                     {dbEntries.submissions.map((sub) => (
                       <tr key={sub.id}>
                         <td>{sub.id}</td>
-                        <td>{sub.subreddit}</td>
-                        <td className="truncate">{sub.title}</td>
-                        <td>{sub.author}</td>
-                        <td>{sub.score}</td>
+                        {currentDatabase === "filtered" ? (
+                          <>
+                            <td className="truncate">{sub.title}</td>
+                            <td className="truncate">{sub.selftext}</td>
+                          </>
+                        ) : (
+                          <>
+                            <td>{sub.subreddit}</td>
+                            <td className="truncate">{sub.title}</td>
+                            <td>{sub.author}</td>
+                            <td>{sub.score}</td>
+                          </>
+                        )}
                       </tr>
                     ))}
                   </tbody>
