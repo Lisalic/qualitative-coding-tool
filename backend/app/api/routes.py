@@ -23,7 +23,8 @@ DB_PATH = Path(settings.reddit_db_path)
 @router.post("/upload-zst/")
 async def upload_zst_file(
     file: UploadFile = File(...), 
-    subreddits: str = Form(None)
+    subreddits: str = Form(None),
+    data_type: str = Form(...)
 ):
     print(f"Received upload request for file: {file.filename}")
     
@@ -40,6 +41,24 @@ async def upload_zst_file(
             print("Invalid subreddit JSON")
             raise HTTPException(status_code=400, detail="Invalid subreddits format")
 
+    # Process data type
+    if data_type not in ["submissions", "comments"]:
+        raise HTTPException(status_code=400, detail="data_type must be 'submissions' or 'comments'")
+    import_data_type = data_type
+    print(f"Data type: {import_data_type}")
+
+    # Generate unique database name
+    database_dir = Path(settings.database_dir)
+    database_dir.mkdir(parents=True, exist_ok=True)
+    base_name = file.filename.replace('.zst', '')
+    counter = 1
+    db_name = f"{base_name}{counter}.db"
+    db_path = database_dir / db_name
+    while db_path.exists():
+        counter += 1
+        db_name = f"{base_name}{counter}.db"
+        db_path = database_dir / db_name
+
     try:
         content = await file.read()
         with tempfile.NamedTemporaryFile(suffix='.zst', delete=False) as tmp:
@@ -47,15 +66,17 @@ async def upload_zst_file(
             tmp_path = tmp.name
         print(f"File temporarily saved to: {tmp_path}, size: {len(content)} bytes")
 
-        stats = import_from_zst_file(tmp_path, str(DB_PATH), subreddit_list)
+        stats = import_from_zst_file(tmp_path, str(db_path), subreddit_list, import_data_type)
         print(f"Import completed successfully: {stats}")
 
         os.unlink(tmp_path)
 
+        count = stats['comments_imported'] if import_data_type == 'comments' else stats['submissions_imported']
+        
         response_data = {
             "status": "completed",
-            "message": "Import completed successfully",
-            "database": str(DB_PATH.relative_to(DB_PATH.parent.parent)),
+            "message": f"Created {db_name} with {count} {import_data_type}",
+            "database": db_name,
             "file_name": file.filename,
             "stats": stats
         }
@@ -66,7 +87,136 @@ async def upload_zst_file(
         print(f"Error during upload/import: {exc}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Error uploading/importing file: {exc}")
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@router.get("/list-databases/")
+async def list_databases():
+    database_dir = Path(settings.database_dir)
+    if not database_dir.exists():
+        return JSONResponse({"databases": []})
+    
+    databases = [f.name for f in database_dir.iterdir() if f.is_file() and f.name.endswith('.db')]
+    return JSONResponse({"databases": databases})
+
+
+@router.post("/merge-databases/")
+async def merge_databases(databases: str = Form(...)):
+    try:
+        db_list = json.loads(databases)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid databases format")
+
+    database_dir = Path(settings.database_dir)
+    master_path = DB_PATH
+
+    # Delete existing master DB if it exists
+    if master_path.exists():
+        master_path.unlink()
+        print(f"Deleted existing master database: {master_path}")
+
+    # Create new master DB
+    master_conn = sqlite3.connect(str(master_path))
+    master_conn.execute('''
+        CREATE TABLE submissions (
+        id TEXT PRIMARY KEY,
+        subreddit TEXT,
+        title TEXT,
+        selftext TEXT,
+        author TEXT,
+        created_utc INTEGER,
+        score INTEGER,
+        num_comments INTEGER
+        )
+    ''')
+    master_conn.execute('''
+        CREATE TABLE comments (
+            id TEXT PRIMARY KEY,
+            subreddit TEXT,
+            body TEXT,
+            author TEXT,
+            created_utc INTEGER,
+            score INTEGER,
+            link_id TEXT,
+            parent_id TEXT
+        )
+    ''')
+    master_conn.commit()
+
+    for db_name in db_list:
+        db_path = database_dir / db_name
+        if not db_path.exists():
+            continue
+        
+        try:
+            conn = sqlite3.connect(str(db_path))
+            cursor = conn.cursor()
+            
+            # Copy submissions
+            cursor.execute('SELECT * FROM submissions')
+            submissions = cursor.fetchall()
+            master_conn.executemany('INSERT OR IGNORE INTO submissions VALUES (?, ?, ?, ?, ?, ?, ?, ?)', submissions)
+            
+            # Copy comments
+            cursor.execute('SELECT * FROM comments')
+            comments = cursor.fetchall()
+            master_conn.executemany('INSERT OR IGNORE INTO comments VALUES (?, ?, ?, ?, ?, ?, ?, ?)', comments)
+            
+            conn.close()
+        except Exception as e:
+            print(f"Error merging {db_name}: {e}")
+            continue
+    
+    master_conn.commit()
+    master_conn.close()
+    
+    return JSONResponse({"message": "Master database created successfully"})
+
+
+@router.delete("/delete-database/{db_name}")
+async def delete_database(db_name: str):
+    database_dir = Path(settings.database_dir)
+    db_path = database_dir / db_name
+    
+    if not db_path.exists():
+        raise HTTPException(status_code=404, detail="Database not found")
+    
+    if not db_name.endswith('.db'):
+        raise HTTPException(status_code=400, detail="Invalid database name")
+    
+    try:
+        db_path.unlink()
+        return JSONResponse({"message": f"Database '{db_name}' deleted successfully"})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete database: {str(e)}")
+
+
+@router.post("/rename-database/")
+async def rename_database(old_name: str = Form(...), new_name: str = Form(...)):
+    database_dir = Path(settings.database_dir)
+    
+    if not old_name.endswith('.db'):
+        old_name += '.db'
+    if not new_name.endswith('.db'):
+        new_name += '.db'
+    
+    old_path = database_dir / old_name
+    new_path = database_dir / new_name
+    
+    if old_path == new_path:
+        return JSONResponse({"message": "Database name unchanged"})
+    
+    if not old_path.exists():
+        raise HTTPException(status_code=404, detail="Database not found")
+    
+    if new_path.exists():
+        raise HTTPException(status_code=400, detail="Database with new name already exists")
+    
+    try:
+        old_path.rename(new_path)
+        return JSONResponse({"message": f"Database renamed from '{old_name}' to '{new_name}' successfully"})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to rename database: {str(e)}")
 
 
 @router.get("/codebook")

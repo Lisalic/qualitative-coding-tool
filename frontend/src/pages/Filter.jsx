@@ -1,88 +1,80 @@
-import { useNavigate } from 'react-router-dom'
-import Navbar from '../components/Navbar'
-import ActionForm from '../components/ActionForm'
-import { useState } from 'react'
-import '../styles/Home.css'
+import { useNavigate } from "react-router-dom";
+import Navbar from "../components/Navbar";
+import ActionForm from "../components/ActionForm";
+import { useState } from "react";
+import "../styles/Home.css";
 
 export default function Filter() {
-  const navigate = useNavigate()
-  const [filterPrompt, setFilterPrompt] = useState('')
-  const [apiKey, setApiKey] = useState('')
-  const [message, setMessage] = useState('')
-  const [loading, setLoading] = useState(false)
+  const navigate = useNavigate();
+  const [filterPrompt, setFilterPrompt] = useState("");
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const handleBack = () => {
-    navigate('/')
-  }
+    navigate("/");
+  };
 
   const handleViewFilteredData = () => {
-    navigate('/filtered-data')
-  }
+    navigate("/filtered-data");
+  };
 
   const handleSubmit = async (formData) => {
+    const savedApiKey = localStorage.getItem("apiKey");
+    if (!savedApiKey) {
+      throw new Error("Please set your API key in the navbar first.");
+    }
+
     if (!formData.filterPrompt.trim()) {
-      throw new Error('Please enter a filter prompt')
+      throw new Error("Please enter a filter prompt");
     }
 
-    if (!formData.apiKey.trim()) {
-      throw new Error('Please enter a OpenRouter API key')
-    }
-
-    setLoading(true)
-    setMessage('')
+    setLoading(true);
+    setMessage("");
 
     try {
-      const requestData = new FormData()
-      requestData.append('api_key', formData.apiKey)
-      requestData.append('prompt', formData.filterPrompt)
+      const requestData = new FormData();
+      requestData.append("api_key", savedApiKey);
+      requestData.append("prompt", formData.filterPrompt);
 
-      const response = await fetch('/api/filter-data/', {
-        method: 'POST',
+      const response = await fetch("/api/filter-data/", {
+        method: "POST",
         body: requestData,
-      })
+      });
 
       if (!response.ok) {
-        const text = await response.text()
-        let errorMsg = 'Filtering failed'
+        const text = await response.text();
+        let errorMsg = "Filtering failed";
         try {
-          const errorData = JSON.parse(text)
-          errorMsg = errorData.detail || errorMsg
+          const errorData = JSON.parse(text);
+          errorMsg = errorData.detail || errorMsg;
         } catch (e) {
-          errorMsg = text || errorMsg
+          errorMsg = text || errorMsg;
         }
-        throw new Error(errorMsg)
+        throw new Error(errorMsg);
       }
 
-      const text = await response.text()
-      const data = JSON.parse(text)
+      const text = await response.text();
+      const data = JSON.parse(text);
 
-      setMessage(`✓ ${data.message}`)
-      setFilterPrompt('')
-      setApiKey('')
+      setMessage(`✓ ${data.message}`);
+      setFilterPrompt("");
     } catch (err) {
-      setMessage(`Error: ${err.message}`)
+      setMessage(`Error: ${err.message}`);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   const fields = [
     {
-      id: 'apiKey',
-      label: 'OpenRouter API Key',
-      type: 'password',
-      value: apiKey,
-      placeholder: 'Enter your OpenRouter API key...'
-    },
-    {
-      id: 'filterPrompt',
-      label: 'Filter Prompt',
-      type: 'textarea',
+      id: "filterPrompt",
+      label: "Filter Prompt",
+      type: "textarea",
       value: filterPrompt,
-      placeholder: 'Enter your filter prompt...',
-      rows: 5
-    }
-  ]
+      placeholder: "Enter your filter prompt...",
+      rows: 5,
+    },
+  ];
 
   return (
     <>
@@ -90,20 +82,20 @@ export default function Filter() {
       <ActionForm
         title="Filter Data"
         viewButton={{
-          text: 'View Filtered Data',
-          onClick: handleViewFilteredData
+          text: "View Filtered Data",
+          onClick: handleViewFilteredData,
         }}
         fields={fields}
         submitButton={{
-          text: 'Filter',
-          loadingText: 'Processing...',
-          disabled: loading
+          text: "Filter",
+          loadingText: "Processing...",
+          disabled: loading,
         }}
         onSubmit={handleSubmit}
-        error={message && message.startsWith('Error:') ? message : null}
-        result={message && message.startsWith('✓') ? message : null}
+        error={message && message.startsWith("Error:") ? message : null}
+        result={message && message.startsWith("✓") ? message : null}
         resultTitle="Filter Result"
       />
     </>
-  )
+  );
 }

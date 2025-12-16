@@ -9,14 +9,8 @@
   margin: 0 auto;
   display: flex;
   align-items: center;
-}
-
-.navbar-centered {
-  justify-content: center;
-}
-
-.navbar-with-back {
   justify-content: space-between;
+  position: relative;
 }
 
 .navbar-back-button {
@@ -40,8 +34,57 @@
   font-weight: 400;
   color: #ffffff;
   text-decoration: none;
+  flex: 1;
+  text-align: center;
 }
 
 .navbar-spacer {
   width: 80px;
+}
+
+.navbar-api {
+  display: flex;
+  align-items: center;
+  position: absolute;
+  right: 20px;
+}
+
+.api-input-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.api-input {
+  padding: 4px 8px;
+  border: 1px solid #ffffff;
+  border-radius: 4px;
+  background-color: #000000;
+  color: #ffffff;
+  font-size: 14px;
+  width: 200px;
+}
+
+.api-save-btn, .api-cancel-btn, .api-toggle-btn {
+  background-color: #ffffff;
+  color: #000000;
+  border: none;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.api-save-btn:hover, .api-cancel-btn:hover, .api-toggle-btn:hover {
+  background-color: #e0e0e0;
+}
+
+.api-cancel-btn {
+  background-color: #666;
+  color: #ffffff;
+}
+
+.api-cancel-btn:hover {
+  background-color: #555;
 }

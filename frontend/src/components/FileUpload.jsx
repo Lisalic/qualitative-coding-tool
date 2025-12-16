@@ -1,111 +1,115 @@
-import { useState } from 'react'
-import '../styles/FileUpload.css'
+import { useState } from "react";
+import "../styles/FileUpload.css";
 
 export default function FileUpload({ onUploadSuccess, onError }) {
-  const [file, setFile] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [message, setMessage] = useState('')
-  const [subredditInput, setSubredditInput] = useState('')
-  const [subredditTags, setSubredditTags] = useState([])
+  const [file, setFile] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const [subredditInput, setSubredditInput] = useState("");
+  const [subredditTags, setSubredditTags] = useState([]);
+  const [dataType, setDataType] = useState("submissions");
 
   const handleFileChange = (e) => {
-    const selectedFile = e.target.files[0]
-    if (selectedFile && selectedFile.name.endsWith('.zst')) {
-      setFile(selectedFile)
-      onError('')
+    const selectedFile = e.target.files[0];
+    if (selectedFile && selectedFile.name.endsWith(".zst")) {
+      setFile(selectedFile);
+      onError("");
     } else {
-      onError('Please select a .zst file')
-      setFile(null)
+      onError("Please select a .zst file");
+      setFile(null);
     }
-  }
+  };
 
   const handleAddSubreddit = (e) => {
-    if (e.key === 'Enter' || e.key === ',') {
-      e.preventDefault()
-      const value = subredditInput.trim().replace(/,\s*$/, '')
+    if (e.key === "Enter" || e.key === ",") {
+      e.preventDefault();
+      const value = subredditInput.trim().replace(/,\s*$/, "");
       if (value && !subredditTags.includes(value.toLowerCase())) {
-        setSubredditTags([...subredditTags, value.toLowerCase()])
-        setSubredditInput('')
+        setSubredditTags([...subredditTags, value.toLowerCase()]);
+        setSubredditInput("");
       }
     }
-  }
+  };
 
   const handleAddSubredditClick = () => {
-    const value = subredditInput.trim()
+    const value = subredditInput.trim();
     if (value && !subredditTags.includes(value.toLowerCase())) {
-      setSubredditTags([...subredditTags, value.toLowerCase()])
-      setSubredditInput('')
+      setSubredditTags([...subredditTags, value.toLowerCase()]);
+      setSubredditInput("");
     }
-  }
+  };
 
   const handleRemoveSubreddit = (index) => {
-    setSubredditTags(subredditTags.filter((_, i) => i !== index))
-  }
+    setSubredditTags(subredditTags.filter((_, i) => i !== index));
+  };
 
   const handleSubmit = async (e) => {
-    e.preventDefault()
+    e.preventDefault();
 
     if (!file) {
-      onError('Please select a file')
-      return
+      onError("Please select a file");
+      return;
     }
 
-    setLoading(true)
-    setMessage('')
-    onError('')
+    setLoading(true);
+    setMessage("");
+    onError("");
 
     try {
-      const formData = new FormData()
-      formData.append('file', file)
-      
+      const formData = new FormData();
+      formData.append("file", file);
+
       if (subredditTags.length > 0) {
-        formData.append('subreddits', JSON.stringify(subredditTags))
+        formData.append("subreddits", JSON.stringify(subredditTags));
       }
 
-      const response = await fetch('/api/upload-zst/', {
-        method: 'POST',
+      formData.append("data_type", dataType);
+
+      const response = await fetch("/api/upload-zst/", {
+        method: "POST",
         body: formData,
-      })
-      console.log('Response received:', response.status, response.statusText)
+      });
+      console.log("Response received:", response.status, response.statusText);
 
       if (!response.ok) {
-        const text = await response.text()
-        console.log('Error response text:', text)
-        let errorMsg = 'Upload failed'
+        const text = await response.text();
+        console.log("Error response text:", text);
+        let errorMsg = "Upload failed";
         try {
-          const errorData = JSON.parse(text)
-          errorMsg = errorData.detail || errorMsg
+          const errorData = JSON.parse(text);
+          errorMsg = errorData.detail || errorMsg;
         } catch (e) {
-          errorMsg = text || errorMsg
+          errorMsg = text || errorMsg;
         }
-        throw new Error(errorMsg)
+        throw new Error(errorMsg);
       }
 
-      const text = await response.text()
-      console.log('Response text:', text)
+      const text = await response.text();
+      console.log("Response text:", text);
       if (!text) {
-        throw new Error('Empty response from server')
+        throw new Error("Empty response from server");
       }
-      const data = JSON.parse(text)
-      console.log('Parsed response data:', data)
-      
-      if (data.status === 'processing') {
-        setMessage('📤 File uploaded. Import processing in background...')
+      const data = JSON.parse(text);
+      console.log("Parsed response data:", data);
+
+      if (data.status === "processing") {
+        setMessage("📤 File uploaded. Import processing in background...");
       } else {
-        setMessage('✓ reddit_data.db updated')
+        setMessage(data.message || "✓ Upload completed");
       }
-      
-      setFile(null)
-      setSubredditTags([])
-      setSubredditInput('')
-      setLoading(false)
-      
-      onUploadSuccess(data)
+
+      setFile(null);
+      setSubredditTags([]);
+      setSubredditInput("");
+      setDataType("submissions");
+      setLoading(false);
+
+      onUploadSuccess(data);
     } catch (err) {
-      onError(`Error: ${err.message}`)
-      setLoading(false)
+      onError(`Error: ${err.message}`);
+      setLoading(false);
     }
-  }
+  };
 
   return (
     <div className="file-upload">
@@ -163,12 +167,40 @@ export default function FileUpload({ onUploadSuccess, onError }) {
           </div>
         </div>
 
+        <div className="form-group">
+          <label>Data Type</label>
+          <div className="radio-group">
+            <label className="radio-label">
+              <input
+                type="radio"
+                name="data-type"
+                value="submissions"
+                checked={dataType === "submissions"}
+                onChange={(e) => setDataType(e.target.value)}
+                disabled={loading}
+              />
+              Submissions
+            </label>
+            <label className="radio-label">
+              <input
+                type="radio"
+                name="data-type"
+                value="comments"
+                checked={dataType === "comments"}
+                onChange={(e) => setDataType(e.target.value)}
+                disabled={loading}
+              />
+              Comments
+            </label>
+          </div>
+        </div>
+
         <button type="submit" disabled={loading}>
-          {loading ? 'Processing...' : 'Upload'}
+          {loading ? "Processing..." : "Upload"}
         </button>
       </form>
 
       {message && <p className="success-message">{message}</p>}
     </div>
-  )
+  );
 }

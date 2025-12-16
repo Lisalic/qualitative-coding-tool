@@ -11,12 +11,32 @@
 
 .form-wrapper {
   width: 100%;
-  max-width: 800px;
   background-color: #000000;
   border: 2px solid #ffffff;
   border-radius: 8px;
   padding: 40px;
   box-shadow: 0 4px 6px rgba(255, 255, 255, 0.1);
+}
+
+.import-layout {
+  width: 100%;
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+  gap: 0;
+}
+
+.upload-section {
+  flex: 1;
+  width:40%;
+  padding-left: 20px;
+  padding-right: 20px;
+}
+
+.database-section {
+  flex: 1;
+  padding-left: 20px;
+  padding-right: 20px;
 }
 
 .form-wrapper h1 {

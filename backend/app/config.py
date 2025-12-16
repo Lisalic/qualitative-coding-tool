@@ -1,13 +1,15 @@
 from pathlib import Path
 from pydantic_settings import BaseSettings
 
-BASE_DIR = Path(__file__).resolve().parent.parent.parent  # Project root
-REDDIT_DB_PATH = BASE_DIR / "data" / "reddit_data.db"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent  # Project root
+REDDIT_DATABASE_PATH = PROJECT_ROOT / "data" / "reddit_data.db"
+DATABASE_DIR = PROJECT_ROOT / "data" / "databases"
 
 
 class Settings(BaseSettings):
-    database_url: str = f"sqlite:///{REDDIT_DB_PATH}"
-    reddit_db_path: str = str(REDDIT_DB_PATH)
+    database_url: str = f"sqlite:///{REDDIT_DATABASE_PATH}"
+    reddit_db_path: str = str(REDDIT_DATABASE_PATH)
+    database_dir: str = str(DATABASE_DIR)
     secret_key: str = "your-secret-key-here"
 
     class Config:

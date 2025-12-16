@@ -205,7 +205,7 @@ def get_file_size_mb(file_path):
     size_bytes = os.path.getsize(file_path)
     return size_bytes / (1024 * 1024)
 
-def import_from_zst_file(file_path, db_path=None, subreddit_filter=None):
+def import_from_zst_file(file_path, db_path=None, subreddit_filter=None, data_type=None):
     """
     Import data from a single zst file and create/update database.
     Returns a dictionary with import statistics.
@@ -214,6 +214,7 @@ def import_from_zst_file(file_path, db_path=None, subreddit_filter=None):
         file_path: Path to the .zst file
         db_path: Path to the database (optional)
         subreddit_filter: List of subreddit names to import (optional, None imports all)
+        data_type: 'submissions' or 'comments' (required)
     """
     file_path = str(file_path)
 
@@ -238,12 +239,12 @@ def import_from_zst_file(file_path, db_path=None, subreddit_filter=None):
         filter_list = [s.lower() for s in subreddit_filter]
     
     try:
-        if '_submissions' in file_path or 'submission' in file_path.lower():
-            import_submissions(conn, file_path, subreddit_filter=filter_list)
-        elif '_comments' in file_path or 'comment' in file_path.lower():
+        if data_type == 'comments':
             import_comments(conn, file_path, subreddit_filter=filter_list)
-        else:
+        elif data_type == 'submissions':
             import_submissions(conn, file_path, subreddit_filter=filter_list)
+        else:
+            raise ValueError(f"Invalid data_type: {data_type}. Must be 'submissions' or 'comments'")
     except Exception as e:
         print(f"Error importing {file_path}: {e}")
         stats['errors'] += 1

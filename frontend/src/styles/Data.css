@@ -4,6 +4,136 @@
   padding: 20px;
 }
 
+.database-selection {
+  margin-top: 0;
+  margin-left: 0;
+  padding: 20px;
+  border: 2px solid #ffffff;
+  border-radius: 8px;
+  background-color: #000000;
+  color: #ffffff;
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.database-selection h2 {
+  margin-bottom: 10px;
+  font-size: 1rem;
+}
+
+.database-list {
+  margin: 20px 0;
+}
+
+.database-item {
+  display: block;
+  margin: 10px 0;
+  padding: 12px 24px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background-color: #000000;
+  color: #ffffff;
+  font-size: 16px;
+  cursor: pointer;
+  outline: none;
+  width: 100%;
+  text-align: center;
+}
+
+.database-item label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  margin-bottom: 5px;
+}
+
+.database-item input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+}
+
+.database-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 5px;
+}
+
+.rename-btn, .delete-btn {
+  background-color: #444;
+  color: #ffffff;
+  border: none;
+  padding: 4px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.rename-btn:hover {
+  background-color: #666;
+}
+
+.delete-btn:hover {
+  background-color: #d9534f;
+}
+
+.rename-controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.rename-controls input {
+  flex: 1;
+  padding: 4px;
+  border: 1px solid #ffffff;
+  border-radius: 3px;
+  background-color: #1a1a1a;
+  color: #ffffff;
+}
+
+.rename-controls button {
+  background-color: #444;
+  color: #ffffff;
+  border: none;
+  padding: 4px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.rename-controls button:hover {
+  background-color: #666;
+}
+
+.merge-btn {
+  padding: 12px 24px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 16px;
+  margin-top: 20px;
+  outline: none;
+  width: 100%;
+  text-align: center;
+}
+
+.merge-btn:hover:not(:disabled) {
+  /* default hover */
+}
+
+.merge-btn:disabled {
+  cursor: pointer;
+}
+
+.success-message {
+  color: #28a745;
+  background-color: #d4edda;
+  border: 1px solid #c3e6cb;
+  padding: 12px;
+  border-radius: 4px;
+  margin-top: 20px;
+}
+
 .report-content {
   background-color: #f8f9fa;
   border: 1px solid #e9ecef;
