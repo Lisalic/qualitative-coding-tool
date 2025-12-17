@@ -243,13 +243,16 @@ async def get_classification_report():
 
 @router.get("/database-entries/")
 async def get_database_entries(limit: int = 10, database: str = "original"):
-    db_path = DB_PATH
-    if database == "filtered":
+    if database.endswith('.db'):
+        db_path = Path(settings.database_dir) / database
+    elif database == "filtered":
         db_path = DB_PATH.parent / "filtered_data.db"
     elif database == "codebook":
         db_path = DB_PATH.parent / "codebook.db"
     elif database == "coding":
         db_path = DB_PATH.parent / "codeddata.db"
+    else:  # "original"
+        db_path = DB_PATH
 
     if not db_path.exists():
         return JSONResponse({

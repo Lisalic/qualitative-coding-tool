@@ -1,42 +1,64 @@
-import { useEffect, useState } from 'react'
-import '../styles/DataTable.css'
+import { useEffect, useState } from "react";
+import EntryModal from "./EntryModal";
+import "../styles/DataTable.css";
 
-export default function DataTable({ database = "original", title = "Database Contents" }) {
-  const [dbEntries, setDbEntries] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [currentDatabase, setCurrentDatabase] = useState(database)
+export default function DataTable({
+  database = "original",
+  title = "Database Contents",
+}) {
+  const [dbEntries, setDbEntries] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [currentDatabase, setCurrentDatabase] = useState(database);
+  const [selectedEntry, setSelectedEntry] = useState(null);
+  const [showModal, setShowModal] = useState(false);
 
   const fetchEntries = async () => {
     try {
-      setError('')
-      setLoading(true)
-      
-      const response = await fetch(`/api/database-entries/?limit=10&database=${currentDatabase}`)
-      
+      setError("");
+      setLoading(true);
+
+      const response = await fetch(
+        `/api/database-entries/?limit=10&database=${currentDatabase}`
+      );
+
       if (!response.ok) {
-        const text = await response.text()
-        throw new Error(`Failed to fetch database entries: ${response.status}`)
+        const text = await response.text();
+        throw new Error(`Failed to fetch database entries: ${response.status}`);
       }
 
-      const text = await response.text()
-      
+      const text = await response.text();
+
       if (!text) {
-        throw new Error('Empty response from server')
+        throw new Error("Empty response from server");
       }
-      
-      const data = JSON.parse(text)
-      setDbEntries(data)
+
+      const data = JSON.parse(text);
+      setDbEntries(data);
     } catch (err) {
-      setError(`Error: ${err.message}`)
+      setError(`Error: ${err.message}`);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   useEffect(() => {
-    fetchEntries()
-  }, [currentDatabase])
+    setCurrentDatabase(database);
+  }, [database]);
+
+  useEffect(() => {
+    fetchEntries();
+  }, [currentDatabase]);
+
+  const handleRowClick = (entry, type) => {
+    setSelectedEntry({ ...entry, type });
+    setShowModal(true);
+  };
+
+  const closeModal = () => {
+    setShowModal(false);
+    setSelectedEntry(null);
+  };
 
   return (
     <div className="data-table-container">
@@ -49,10 +71,13 @@ export default function DataTable({ database = "original", title = "Database Con
       {dbEntries && (
         <>
           <p className="stats">
-            Total: {dbEntries.total_submissions} submissions, {dbEntries.total_comments} comments
+            Total: {dbEntries.total_submissions} submissions,{" "}
+            {dbEntries.total_comments} comments
           </p>
 
-          {dbEntries.message && <p className="info-message">{dbEntries.message}</p>}
+          {dbEntries.message && (
+            <p className="info-message">{dbEntries.message}</p>
+          )}
 
           {dbEntries.submissions.length > 0 && (
             <div className="table-section">
@@ -79,7 +104,11 @@ export default function DataTable({ database = "original", title = "Database Con
                   </thead>
                   <tbody>
                     {dbEntries.submissions.map((sub) => (
-                      <tr key={sub.id}>
+                      <tr
+                        key={sub.id}
+                        onClick={() => handleRowClick(sub, "submission")}
+                        className="clickable-row"
+                      >
                         <td>{sub.id}</td>
                         {currentDatabase === "filtered" ? (
                           <>
@@ -118,7 +147,11 @@ export default function DataTable({ database = "original", title = "Database Con
                   </thead>
                   <tbody>
                     {dbEntries.comments.map((comment) => (
-                      <tr key={comment.id}>
+                      <tr
+                        key={comment.id}
+                        onClick={() => handleRowClick(comment, "comment")}
+                        className="clickable-row"
+                      >
                         <td>{comment.id}</td>
                         <td>{comment.subreddit}</td>
                         <td className="truncate">{comment.body}</td>
@@ -132,12 +165,20 @@ export default function DataTable({ database = "original", title = "Database Con
             </div>
           )}
 
-          {dbEntries.submissions.length === 0 && dbEntries.comments.length === 0 && (
-            <p className="no-data">No data available. Please upload a file first.</p>
-          )}
+          {dbEntries.submissions.length === 0 &&
+            dbEntries.comments.length === 0 && (
+              <p className="no-data">
+                No data available. Please upload a file first.
+              </p>
+            )}
         </>
       )}
 
+      <EntryModal
+        entry={selectedEntry}
+        isOpen={showModal}
+        onClose={closeModal}
+      />
     </div>
-  )
+  );
 }
