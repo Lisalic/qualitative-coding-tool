@@ -108,13 +108,31 @@ export default function CodebookManager({ onViewCodebook }) {
                       <div className="database-actions">
                         <button
                           onClick={() => onViewCodebook(cb.id)}
-                          className="btn"
+                          className="edit-btn"
                         >
                           View
                         </button>
                         <button
                           onClick={() => startRename(cb.id)}
-                          className="btn btn-secondary btn-small"
+                          style={{
+                            backgroundColor: "#000000",
+                            color: "#ffffff",
+                            border: "1px solid #ffffff",
+                            padding: "0.5rem 0.75rem",
+                            fontSize: "0.9rem",
+                            cursor: "pointer",
+                            borderRadius: "4px",
+                            transition: "all 0.2s",
+                            marginRight: "10px",
+                          }}
+                          onMouseOver={(e) => {
+                            e.target.style.backgroundColor = "#ffffff";
+                            e.target.style.color = "#000000";
+                          }}
+                          onMouseOut={(e) => {
+                            e.target.style.backgroundColor = "#000000";
+                            e.target.style.color = "#ffffff";
+                          }}
                         >
                           Rename
                         </button>
@@ -128,7 +146,24 @@ export default function CodebookManager({ onViewCodebook }) {
                               handleDeleteCodebook(cb.id);
                             }
                           }}
-                          className="btn btn-danger btn-small"
+                          style={{
+                            backgroundColor: "#000000",
+                            color: "#ffffff",
+                            border: "1px solid #ffffff",
+                            padding: "0.5rem 0.75rem",
+                            fontSize: "0.9rem",
+                            cursor: "pointer",
+                            borderRadius: "4px",
+                            transition: "all 0.2s",
+                          }}
+                          onMouseOver={(e) => {
+                            e.target.style.backgroundColor = "#ffffff";
+                            e.target.style.color = "#000000";
+                          }}
+                          onMouseOut={(e) => {
+                            e.target.style.backgroundColor = "#000000";
+                            e.target.style.color = "#ffffff";
+                          }}
                         >
                           Delete
                         </button>

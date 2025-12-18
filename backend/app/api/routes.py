@@ -450,3 +450,36 @@ async def apply_codebook(
             return JSONResponse({"error": "Classification report not found"})
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@router.get("/comments/{submission_id}")
+async def get_comments_for_submission(submission_id: str, database: str = Query("original")):
+    """Fetch all comments for a specific submission"""
+    if database.endswith('.db'):
+        db_path = Path(settings.database_dir) / database
+    elif database == "filtered":
+        db_path = DB_PATH.parent / "filtered_data.db"
+    elif database == "codebook":
+        db_path = DB_PATH.parent / "codebook.db"
+    elif database == "coding":
+        db_path = DB_PATH.parent / "codeddata.db"
+    else:  # "original"
+        db_path = DB_PATH
+
+    if not db_path.exists():
+        return JSONResponse({"error": f"Database not found: {database}"}, status_code=404)
+
+    try:
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        # Fetch comments where link_id matches the submission_id
+        cursor.execute('SELECT * FROM comments WHERE link_id = ? ORDER BY created_utc ASC', (submission_id,))
+        comments = [dict(row) for row in cursor.fetchall()]
+
+        conn.close()
+        return JSONResponse({"comments": comments})
+
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)

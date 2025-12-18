@@ -88,7 +88,7 @@ export default function PromptManager({ onLoadPrompt, currentPrompt }) {
             <button
               type="button"
               onClick={savePrompt}
-              className="btn btn-primary"
+              className="save-prompt-btn"
               disabled={!newPromptContent.trim()}
             >
               Save Prompt
@@ -102,7 +102,7 @@ export default function PromptManager({ onLoadPrompt, currentPrompt }) {
             <button
               type="button"
               onClick={clearMessage}
-              className="btn btn-small"
+              className="message-close-btn"
               aria-label="Close message"
             >
               ×
@@ -133,14 +133,14 @@ export default function PromptManager({ onLoadPrompt, currentPrompt }) {
                     <button
                       type="button"
                       onClick={() => loadPrompt(prompt)}
-                      className="btn btn-secondary btn-small"
+                      className="load-prompt-btn"
                     >
                       Load
                     </button>
                     <button
                       type="button"
                       onClick={() => deletePrompt(prompt.id)}
-                      className="btn btn-danger btn-small"
+                      className="delete-prompt-btn"
                     >
                       Delete
                     </button>

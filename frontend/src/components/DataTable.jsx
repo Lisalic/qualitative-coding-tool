@@ -12,6 +12,7 @@ export default function DataTable({
   const [currentDatabase, setCurrentDatabase] = useState(database);
   const [selectedEntry, setSelectedEntry] = useState(null);
   const [showModal, setShowModal] = useState(false);
+  const [limit, setLimit] = useState(50);
 
   const fetchEntries = async () => {
     try {
@@ -19,7 +20,7 @@ export default function DataTable({
       setLoading(true);
 
       const response = await fetch(
-        `/api/database-entries/?limit=10&database=${currentDatabase}`
+        `/api/database-entries/?limit=${limit}&database=${currentDatabase}`
       );
 
       if (!response.ok) {
@@ -48,7 +49,7 @@ export default function DataTable({
 
   useEffect(() => {
     fetchEntries();
-  }, [currentDatabase]);
+  }, [currentDatabase, limit]);
 
   const handleRowClick = (entry, type) => {
     setSelectedEntry({ ...entry, type });
@@ -75,13 +76,29 @@ export default function DataTable({
             {dbEntries.total_comments} comments
           </p>
 
+          <div className="limit-selector">
+            <label htmlFor="entry-limit">Show entries: </label>
+            <select
+              id="entry-limit"
+              value={limit}
+              onChange={(e) => setLimit(Number(e.target.value))}
+              className="limit-select"
+            >
+              <option value={10}>10</option>
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+              <option value={200}>200</option>
+            </select>
+          </div>
+
           {dbEntries.message && (
             <p className="info-message">{dbEntries.message}</p>
           )}
 
           {dbEntries.submissions.length > 0 && (
             <div className="table-section">
-              <h3>Sample Submissions (10)</h3>
+              <h3>Sample Submissions ({limit})</h3>
               <div className="table-wrapper">
                 <table className="data-table">
                   <thead>
@@ -133,7 +150,7 @@ export default function DataTable({
 
           {dbEntries.comments.length > 0 && (
             <div className="table-section">
-              <h3>Sample Comments (10)</h3>
+              <h3>Sample Comments ({limit})</h3>
               <div className="table-wrapper">
                 <table className="data-table">
                   <thead>
@@ -178,6 +195,7 @@ export default function DataTable({
         entry={selectedEntry}
         isOpen={showModal}
         onClose={closeModal}
+        database={currentDatabase}
       />
     </div>
   );

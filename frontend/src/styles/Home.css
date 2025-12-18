@@ -126,8 +126,8 @@ textarea.form-input {
   background-color: #000000;
   color: #ffffff;
   border: 1px solid #ffffff;
-  padding: 0.875rem 1rem;
-  font-size: 1rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
   cursor: pointer;
   border-radius: 4px;
   transition: all 0.2s;

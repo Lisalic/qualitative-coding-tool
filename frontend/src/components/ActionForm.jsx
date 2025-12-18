@@ -81,7 +81,7 @@ export default function ActionForm({
         <button
           type="submit"
           disabled={submitButton.disabled}
-          className="btn btn-primary"
+          className="form-submit-btn"
         >
           {submitButton.disabled ? submitButton.loadingText : submitButton.text}
         </button>
