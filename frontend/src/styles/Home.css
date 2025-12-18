@@ -189,7 +189,6 @@ textarea.form-input {
   color: #000000;
 }
 
-/* Prompt Manager Styles */
 .prompt-manager {
   margin: 0;
   padding: 0;
@@ -200,7 +199,6 @@ textarea.form-input {
 
 .prompt-manager-content {
   margin-top: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
 .save-prompt-section {

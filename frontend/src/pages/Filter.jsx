@@ -133,7 +133,6 @@ export default function Filter() {
                 Apply Filter
               </h1>
               <ActionForm
-                title="Filter Prompt"
                 fields={fields}
                 submitButton={{
                   text: "Filter",

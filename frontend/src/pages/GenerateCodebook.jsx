@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import ActionForm from "../components/ActionForm";
+import CodebookManager from "../components/CodebookManager";
 import "../styles/Home.css";
 
 export default function GenerateCodebook() {
@@ -11,8 +12,12 @@ export default function GenerateCodebook() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
 
-  const handleViewCodebook = () => {
-    navigate("/codebook-view");
+  const handleViewCodebook = (codebookId) => {
+    if (codebookId) {
+      navigate(`/codebook-view?selected=${codebookId}`);
+    } else {
+      navigate("/codebook-view");
+    }
   };
 
   const handleSubmit = async (formData) => {
@@ -80,22 +85,48 @@ export default function GenerateCodebook() {
     <>
       <Navbar />
       <div className="home-container">
-        <ActionForm
-          title="Generate Codebook"
-          viewButton={{
-            text: "View Codebook",
-            onClick: handleViewCodebook,
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            border: "2px solid #ffffff",
+            borderRadius: "8px",
+            padding: "20px",
           }}
-          fields={fields}
-          submitButton={{
-            text: "Generate Codebook",
-            loadingText: "Generating...",
-            disabled: loading,
-          }}
-          onSubmit={handleSubmit}
-          error={error}
-          result={result}
-          resultTitle="Generated Codebook"
+        >
+          <h1
+            style={{
+              fontSize: "28px",
+              fontWeight: "600",
+              margin: "0 0 30px 0",
+              textAlign: "center",
+            }}
+          >
+            Generate Codebook
+          </h1>
+          <div style={{ marginBottom: "30px", textAlign: "center" }}>
+            <button onClick={handleViewCodebook} className="view-button">
+              View Codebook
+            </button>
+          </div>
+          <ActionForm
+            fields={fields}
+            submitButton={{
+              text: "Generate Codebook",
+              loadingText: "Generating...",
+              disabled: loading,
+            }}
+            onSubmit={handleSubmit}
+            error={error}
+            result={result}
+            resultTitle="Generated Codebook"
+          />
+        </div>
+        <CodebookManager
+          onViewCodebook={(codebookId) =>
+            navigate(`/codebook-view?selected=${codebookId}`)
+          }
         />
       </div>
     </>

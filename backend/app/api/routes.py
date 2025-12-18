@@ -4,7 +4,7 @@ import sys
 import json
 import tempfile
 from pathlib import Path
-from fastapi import APIRouter, File, HTTPException, UploadFile, Form
+from fastapi import APIRouter, File, HTTPException, UploadFile, Form, Query
 from fastapi.responses import JSONResponse
 
 from app.config import settings
@@ -220,14 +220,76 @@ async def rename_database(old_name: str = Form(...), new_name: str = Form(...)):
 
 
 @router.get("/codebook")
-async def get_codebook():
-    codebook_path = Path(__file__).parent.parent.parent.parent / "data" / "codebook.txt"
-    if codebook_path.exists():
-        with open(codebook_path, 'r') as f:
-            codebook_content = f.read()
-        return JSONResponse({"codebook": codebook_content})
-    else:
-        return JSONResponse({"status": "processing", "message": "Codebook generation in progress. Please try again later."})
+async def get_codebook(codebook_id: str = Query(None)):
+    codebooks_dir = Path(__file__).parent.parent.parent.parent / "data" / "codebooks"
+    if codebooks_dir.exists():
+        if codebook_id:
+            target_file = codebooks_dir / f"{codebook_id}.txt"
+            if target_file.exists():
+                with open(target_file, 'r') as f:
+                    codebook_content = f.read()
+                return JSONResponse({"codebook": codebook_content})
+            else:
+                return JSONResponse({"error": f"Codebook {codebook_id} not found"}, status_code=404)
+        else:
+            codebook_files = list(codebooks_dir.glob("*.txt"))
+            if codebook_files:
+                latest_codebook = sorted(codebook_files, key=lambda x: x.name)[0]
+                with open(latest_codebook, 'r') as f:
+                    codebook_content = f.read()
+                return JSONResponse({"codebook": codebook_content})
+    return JSONResponse({"status": "processing", "message": "No codebooks found."})
+
+
+@router.get("/list-codebooks")
+async def list_codebooks():
+    codebooks_dir = Path(__file__).parent.parent.parent.parent / "data" / "codebooks"
+    if codebooks_dir.exists():
+        codebook_files = list(codebooks_dir.glob("*.txt"))
+        codebooks = []
+        for cb in codebook_files:
+            codebook_id = cb.stem  # filename without .txt
+            codebooks.append({"id": codebook_id, "name": codebook_id})
+        codebooks.sort(key=lambda x: x["id"])
+        return JSONResponse({"codebooks": codebooks})
+    return JSONResponse({"codebooks": []})
+
+
+@router.post("/rename-codebook/")
+async def rename_codebook(old_id: str = Form(...), new_id: str = Form(...)):
+    codebooks_dir = Path(__file__).parent.parent.parent.parent / "data" / "codebooks"
+    if not codebooks_dir.exists():
+        return JSONResponse({"error": "Codebooks directory not found"}, status_code=404)
+    
+    old_file = codebooks_dir / f"{old_id}.txt"
+    new_file = codebooks_dir / f"{new_id}.txt"
+    
+    if not old_file.exists():
+        return JSONResponse({"error": f"Codebook {old_id} not found"}, status_code=404)
+    
+    if new_file.exists():
+        return JSONResponse({"error": f"Codebook {new_id} already exists"}, status_code=400)
+    
+    try:
+        old_file.rename(new_file)
+        return JSONResponse({"message": f"Codebook {old_id} renamed to {new_id}"})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.post("/save-codebook/")
+async def save_codebook(codebook_id: str = Form(...), content: str = Form(...)):
+    codebooks_dir = Path(__file__).parent.parent.parent.parent / "data" / "codebooks"
+    codebooks_dir.mkdir(parents=True, exist_ok=True)
+    
+    codebook_file = codebooks_dir / f"{codebook_id}.txt"
+    
+    try:
+        with open(codebook_file, 'w') as f:
+            f.write(content)
+        return JSONResponse({"message": f"Codebook {codebook_id} saved successfully"})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @router.get("/classification-report")
@@ -349,17 +411,16 @@ async def generate_codebook(database: str = Form("original"), api_key: str = For
     
     try:
         generate_codebook_main(str(db_path), api_key)
-        import os
-        print(f"Current working directory: {os.getcwd()}")
-        codebook_path = Path(__file__).parent.parent.parent.parent / "data" / "codebook.txt"
-        print(f"Looking for codebook at: {codebook_path}")
-        if codebook_path.exists():
-            with open(codebook_path, 'r') as f:
-                codebook_content = f.read()
-            return JSONResponse({"codebook": codebook_content})
-        else:
-            print(f"Codebook file not found at: {codebook_path}")
-            return JSONResponse({"error": "Codebook file not found"})
+        codebooks_dir = Path(__file__).parent.parent.parent.parent / "data" / "codebooks"
+        if codebooks_dir.exists():
+            codebook_files = list(codebooks_dir.glob("codebook*.txt"))
+            if codebook_files:
+                # Get the latest codebook (highest number)
+                latest_codebook = max(codebook_files, key=lambda x: int(x.stem.replace("codebook", "")))
+                with open(latest_codebook, 'r') as f:
+                    codebook_content = f.read()
+                return JSONResponse({"codebook": codebook_content})
+        return JSONResponse({"error": "Codebook file not found"})
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500)
 

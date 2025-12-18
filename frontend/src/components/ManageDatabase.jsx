@@ -49,13 +49,48 @@ export default function ManageDatabase({
                   <div className="database-actions">
                     <button
                       onClick={() => onStartRename(dbName)}
-                      className="rename-btn"
+                      style={{
+                        backgroundColor: "#000000",
+                        color: "#ffffff",
+                        border: "1px solid #ffffff",
+                        padding: "12px 24px",
+                        fontSize: "16px",
+                        cursor: "pointer",
+                        borderRadius: "4px",
+                        transition: "all 0.2s",
+                        marginRight: "10px",
+                      }}
+                      onMouseOver={(e) => {
+                        e.target.style.backgroundColor = "#ffffff";
+                        e.target.style.color = "#000000";
+                      }}
+                      onMouseOut={(e) => {
+                        e.target.style.backgroundColor = "#000000";
+                        e.target.style.color = "#ffffff";
+                      }}
                     >
                       Rename
                     </button>
                     <button
                       onClick={() => onDelete(dbName)}
-                      className="delete-btn"
+                      style={{
+                        backgroundColor: "#000000",
+                        color: "#ffffff",
+                        border: "1px solid #ffffff",
+                        padding: "12px 24px",
+                        fontSize: "16px",
+                        cursor: "pointer",
+                        borderRadius: "4px",
+                        transition: "all 0.2s",
+                      }}
+                      onMouseOver={(e) => {
+                        e.target.style.backgroundColor = "#ffffff";
+                        e.target.style.color = "#000000";
+                      }}
+                      onMouseOut={(e) => {
+                        e.target.style.backgroundColor = "#000000";
+                        e.target.style.color = "#ffffff";
+                      }}
                     >
                       Delete
                     </button>
@@ -69,7 +104,35 @@ export default function ManageDatabase({
         <button
           onClick={onCreateMaster}
           disabled={selectedDatabases.length === 0 || loading}
-          className="merge-btn"
+          style={{
+            backgroundColor:
+              selectedDatabases.length === 0 || loading ? "#333" : "#000000",
+            color: "#ffffff",
+            border: "1px solid #ffffff",
+            padding: "12px 24px",
+            fontSize: "16px",
+            cursor:
+              selectedDatabases.length === 0 || loading
+                ? "not-allowed"
+                : "pointer",
+            borderRadius: "4px",
+            transition: "all 0.2s",
+            width: "100%",
+            textAlign: "center",
+            opacity: selectedDatabases.length === 0 || loading ? 0.6 : 1,
+          }}
+          onMouseOver={(e) => {
+            if (selectedDatabases.length > 0 && !loading) {
+              e.target.style.backgroundColor = "#ffffff";
+              e.target.style.color = "#000000";
+            }
+          }}
+          onMouseOut={(e) => {
+            if (selectedDatabases.length > 0 && !loading) {
+              e.target.style.backgroundColor = "#000000";
+              e.target.style.color = "#ffffff";
+            }
+          }}
         >
           {loading ? "Creating..." : "Create Master Database"}
         </button>

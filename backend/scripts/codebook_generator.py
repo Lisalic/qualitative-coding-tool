@@ -262,8 +262,24 @@ def main(db_path, api_key):
 
         print("Generating codebook...")
         codebook = generate_codebook(POSTS_CONTENT, api_key)
-        codebook_path = Path(db_path).parent / "codebook.txt"
-        codebook_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Save to data/codebooks/ with incremental naming
+        data_dir = Path(__file__).parent.parent.parent.parent / "data"
+        codebooks_dir = data_dir / "codebooks"
+        codebooks_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Find the next codebook number
+        existing_codebooks = list(codebooks_dir.glob("codebook*.txt"))
+        numbers = []
+        for cb in existing_codebooks:
+            try:
+                num = int(cb.stem.replace("codebook", ""))
+                numbers.append(num)
+            except ValueError:
+                pass
+        next_num = max(numbers) + 1 if numbers else 1
+        
+        codebook_path = codebooks_dir / f"codebook{next_num}.txt"
         write_to_file(str(codebook_path), codebook)
         print(f"Codebook generated and saved to {codebook_path}")
         

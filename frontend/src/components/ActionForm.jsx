@@ -2,8 +2,6 @@ import { useState, useEffect } from "react";
 import "../styles/Home.css";
 
 export default function ActionForm({
-  title,
-  viewButton,
   fields,
   submitButton,
   onSubmit,
@@ -72,16 +70,6 @@ export default function ActionForm({
 
   return (
     <div className="form-wrapper">
-      <h1>{title}</h1>
-
-      {viewButton && (
-        <div style={{ marginBottom: "30px", textAlign: "center" }}>
-          <button onClick={viewButton.onClick} className="view-button">
-            {viewButton.text}
-          </button>
-        </div>
-      )}
-
       <form onSubmit={handleSubmit} className="action-form">
         {fields.map((field) => (
           <div key={field.id} className="form-group">
@@ -93,7 +81,7 @@ export default function ActionForm({
         <button
           type="submit"
           disabled={submitButton.disabled}
-          className="form-submit-btn"
+          className="btn btn-primary"
         >
           {submitButton.disabled ? submitButton.loadingText : submitButton.text}
         </button>
