@@ -79,23 +79,25 @@ export default function GenerateCodebook() {
   return (
     <>
       <Navbar />
-      <ActionForm
-        title="Generate Codebook"
-        viewButton={{
-          text: "View Codebook",
-          onClick: handleViewCodebook,
-        }}
-        fields={fields}
-        submitButton={{
-          text: "Generate Codebook",
-          loadingText: "Generating...",
-          disabled: loading,
-        }}
-        onSubmit={handleSubmit}
-        error={error}
-        result={result}
-        resultTitle="Generated Codebook"
-      />
+      <div className="home-container">
+        <ActionForm
+          title="Generate Codebook"
+          viewButton={{
+            text: "View Codebook",
+            onClick: handleViewCodebook,
+          }}
+          fields={fields}
+          submitButton={{
+            text: "Generate Codebook",
+            loadingText: "Generating...",
+            disabled: loading,
+          }}
+          onSubmit={handleSubmit}
+          error={error}
+          result={result}
+          resultTitle="Generated Codebook"
+        />
+      </div>
     </>
   );
 }

@@ -1,6 +1,5 @@
 .home-container {
   width: 100%;
-  min-height: calc(100vh - 60px);
   background-color: #000000;
   color: #ffffff;
   padding: 40px 20px;
@@ -84,8 +83,6 @@
   display: flex;
   flex-direction: column;
   gap: 20px;
-  border: 1px solid #ffffff;
-  border-radius: 4px;
   padding: 20px;
   background-color: #000000;
 }
@@ -190,4 +187,253 @@ textarea.form-input {
 .view-button:hover {
   background-color: #ffffff;
   color: #000000;
+}
+
+/* Prompt Manager Styles */
+.prompt-manager {
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background-color: transparent;
+}
+
+.prompt-manager-content {
+  margin-top: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.save-prompt-section {
+  margin-bottom: 30px;
+  padding: 15px;
+  border: 1px solid rgb(255, 255, 255);
+  border-radius: 6px;
+  background-color: rgba(255, 255, 255, 0.02);
+  text-align: center;
+}
+
+.save-prompt-section h3 {
+  margin: 0 0 15px 0;
+  color: #ffffff;
+  font-size: 16px;
+}
+
+.save-prompt-btn {
+  background-color: #000000;
+  color: #ffffff;
+  border: 1px solid #ffffff;
+  padding: 8px 16px;
+  font-size: 14px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.2s;
+  margin-left: 10px;
+}
+
+.save-prompt-btn:hover:not(:disabled) {
+  background-color: #ffffff;
+  color: #000000;
+}
+
+.save-prompt-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.saved-prompts-section h3 {
+  margin: 0 0 15px 0;
+  color: #ffffff;
+  font-size: 16px;
+}
+
+.no-prompts {
+  color: #cccccc;
+  font-style: italic;
+  text-align: center;
+  padding: 20px;
+}
+
+.prompts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.prompt-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 15px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+.prompt-info {
+  flex: 1;
+  margin-right: 15px;
+}
+
+.prompt-info h4 {
+  margin: 0 0 8px 0;
+  color: #ffffff;
+  font-size: 14px;
+}
+
+.prompt-preview {
+  margin: 0 0 8px 0;
+  color: #cccccc;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.prompt-date {
+  color: #888888;
+  font-size: 12px;
+}
+
+.prompt-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.load-prompt-btn {
+  background-color: #0000aa;
+  color: #ffffff;
+  border: 1px solid #0000aa;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.load-prompt-btn:hover {
+  background-color: #0000ff;
+  border-color: #0000ff;
+}
+
+.delete-prompt-btn {
+  background-color: #aa0000;
+  color: #ffffff;
+  border: 1px solid #aa0000;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.delete-prompt-btn:hover {
+  background-color: #ff0000;
+  border-color: #ff0000;
+}
+
+/* Prompt Messages */
+.prompt-message {
+  padding: 12px 16px;
+  border-radius: 6px;
+  margin-bottom: 20px;
+  font-weight: 500;
+  text-align: center;
+  border: 1px solid;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.prompt-message.success {
+  background-color: rgba(0, 255, 0, 0.1);
+  color: #00aa00;
+  border-color: #00aa00;
+}
+
+.prompt-message.error {
+  background-color: rgba(255, 0, 0, 0.1);
+  color: #aa0000;
+  border-color: #aa0000;
+}
+
+.message-close-btn {
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: background-color 0.2s;
+  margin-left: 12px;
+  flex-shrink: 0;
+}
+
+.message-close-btn:hover {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+.load-prompt-btn, .delete-prompt-btn {
+  background-color: #000000;
+  color: #ffffff;
+  border: 1px solid #ffffff;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.load-prompt-btn:hover, .delete-prompt-btn:hover {
+  background-color: #ffffff;
+  color: #000000;
+}
+
+/* Filter Page Side-by-Side Layout */
+.filter-layout {
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+  border: 2px solid #ffffff;
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.filter-form-section {
+  flex: 1;
+  min-width: 0;
+  border: 2px solid #ffffff;
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.prompt-manager-section {
+  flex: 1;
+  min-width: 0;
+}
+
+.prompt-manager-section .prompt-manager {
+  flex: 1;
+  margin: 0;
+  border: 2px solid #ffffff;
+  border-radius: 8px;
+  background-color: #000000;
+  padding: 20px;
+}
+
+/* Responsive design for smaller screens */
+@media (max-width: 1024px) {
+  .filter-layout {
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .filter-form-section,
+  .prompt-manager-section {
+    flex: none;
+  }
 }

@@ -74,23 +74,25 @@ export default function ApplyCodebook() {
   return (
     <>
       <Navbar />
-      <ActionForm
-        title="Apply Codebook"
-        viewButton={{
-          text: "View Coding Results",
-          onClick: handleViewCoding,
-        }}
-        fields={fields}
-        submitButton={{
-          text: "Apply Codebook",
-          loadingText: "Applying...",
-          disabled: loading,
-        }}
-        onSubmit={handleSubmit}
-        error={error || (result && result.error)}
-        result={result && result.classification_report}
-        resultTitle="Classification Report"
-      />
+      <div className="home-container">
+        <ActionForm
+          title="Apply Codebook"
+          viewButton={{
+            text: "View Coding Results",
+            onClick: handleViewCoding,
+          }}
+          fields={fields}
+          submitButton={{
+            text: "Apply Codebook",
+            loadingText: "Applying...",
+            disabled: loading,
+          }}
+          onSubmit={handleSubmit}
+          error={error || (result && result.error)}
+          result={result && result.classification_report}
+          resultTitle="Classification Report"
+        />
+      </div>
     </>
   );
 }
