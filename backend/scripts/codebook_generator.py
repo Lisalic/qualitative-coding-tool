@@ -84,14 +84,22 @@ def load_methodology_content() -> str:
         return ""
 
 
-def generate_codebook(posts_content: str, api_key: str, previous_codebook: str = "", feedback_text: str = "") -> str:
-    system_prompt = f"""
+def generate_codebook(posts_content: str, api_key: str, previous_codebook: str = "", feedback_text: str = "", custom_prompt: str = "") -> str:
+    base_system_prompt = """
     Act as a qualitative researcher analyzing the following Reddit posts. Your task is to develop or refine a **Codebook** based on an open coding process.
     
     Your analysis must maintain the focus on:
     1. **Adult Retrospection:** The lasting effects and consequences of past bullying.
     2. **Current Student Perception:** The immediate feelings, and perception of the bullying situation.
-
+    """
+    
+    # Add custom prompt if provided
+    if custom_prompt.strip():
+        system_prompt = f"{base_system_prompt}\n\nAdditional Instructions:\n{custom_prompt.strip()}\n"
+    else:
+        system_prompt = base_system_prompt
+    
+    system_prompt += """
     **STRICT OUTPUT INSTRUCTION:** Provide ONLY the codebook content below. Do not include any introductory or concluding conversational text.
 
     Format the output using the following Markdown structure for each code:
@@ -254,14 +262,14 @@ ANALYTICAL SUMMARY:
 
 
 
-def main(db_path, api_key):    
+def main(db_path, api_key, prompt=""):    
     try:
         POSTS_CONTENT = load_posts_content(db_path)
         if not POSTS_CONTENT:
             raise ValueError(f"Could not load posts from database. Please ensure the database contains valid data.")
 
         print("Generating codebook...")
-        codebook = generate_codebook(POSTS_CONTENT, api_key)
+        codebook = generate_codebook(POSTS_CONTENT, api_key, custom_prompt=prompt)
         
         # Save to data/codebooks/ with incremental naming
         data_dir = Path(__file__).parent.parent.parent.parent / "data"

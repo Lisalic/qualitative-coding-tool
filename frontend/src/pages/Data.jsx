@@ -33,28 +33,33 @@ export default function Data() {
     return `Database: ${selectedDatabase.replace(".db", "")}`;
   };
 
+  const databaseItems = ["original", ...databases];
+
+  const getDisplayName = (item) => {
+    if (item === "original") return "Master Database";
+    return item.replace(".db", "");
+  };
+
   return (
     <>
       <Navbar showBack={true} onBack={handleBack} />
       <div className="data-container">
         <div className="database-selector">
-          <button
-            className={`db-button ${
-              selectedDatabase === "original" ? "active" : ""
-            }`}
-            onClick={() => setSelectedDatabase("original")}
-          >
-            Master Database
-          </button>
-          {databases.map((db) => (
-            <button
-              key={db}
-              className={`db-button ${selectedDatabase === db ? "active" : ""}`}
-              onClick={() => setSelectedDatabase(db)}
-            >
-              {db.replace(".db", "")}
-            </button>
-          ))}
+          {databaseItems.map((item) => {
+            const itemId = item;
+            const displayName = getDisplayName(item);
+            return (
+              <button
+                key={itemId}
+                className={`db-button ${
+                  selectedDatabase === itemId ? "active" : ""
+                }`}
+                onClick={() => setSelectedDatabase(itemId)}
+              >
+                {displayName}
+              </button>
+            );
+          })}
         </div>
         <DataTable title={getTitle()} database={selectedDatabase} />
       </div>

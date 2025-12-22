@@ -292,6 +292,32 @@ async def save_codebook(codebook_id: str = Form(...), content: str = Form(...)):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@router.get("/list-coded-data")
+async def list_coded_data():
+    coded_data_dir = Path(__file__).parent.parent.parent.parent / "data" / "coded_data"
+    if coded_data_dir.exists():
+        coded_files = list(coded_data_dir.glob("*.txt"))
+        coded_data = []
+        for cf in coded_files:
+            coded_id = cf.stem  # filename without .txt
+            coded_data.append({"id": coded_id, "name": coded_id})
+        coded_data.sort(key=lambda x: x["id"], reverse=True)  # Most recent first
+        return JSONResponse({"coded_data": coded_data})
+    return JSONResponse({"coded_data": []})
+
+
+@router.get("/coded-data/{coded_id}")
+async def get_coded_data(coded_id: str):
+    coded_data_dir = Path(__file__).parent.parent.parent.parent / "data" / "coded_data"
+    coded_file = coded_data_dir / f"{coded_id}.txt"
+    if coded_file.exists():
+        with open(coded_file, 'r') as f:
+            coded_content = f.read()
+        return JSONResponse({"coded_data": coded_content})
+    else:
+        return JSONResponse({"error": f"Coded data {coded_id} not found"}, status_code=404)
+
+
 @router.get("/classification-report")
 async def get_classification_report():
     report_path = Path(__file__).parent.parent.parent.parent / "data" / "classification_report.txt"
@@ -400,7 +426,7 @@ async def filter_data(api_key: str = Form(...), prompt: str = Form(...)):
 
 
 @router.post("/generate-codebook/")
-async def generate_codebook(database: str = Form("original"), api_key: str = Form(...)):
+async def generate_codebook(database: str = Form("original"), api_key: str = Form(...), prompt: str = Form("")):
     db_path = Path(settings.reddit_db_path)
     if database == "filtered":
         db_path = db_path.parent / "filtered_data.db"
@@ -410,7 +436,7 @@ async def generate_codebook(database: str = Form("original"), api_key: str = For
         return JSONResponse({"error": f"{db_name} database not found. Please import and filter data first."}, status_code=404)
     
     try:
-        generate_codebook_main(str(db_path), api_key)
+        generate_codebook_main(str(db_path), api_key, prompt)
         codebooks_dir = Path(__file__).parent.parent.parent.parent / "data" / "codebooks"
         if codebooks_dir.exists():
             codebook_files = list(codebooks_dir.glob("codebook*.txt"))
@@ -440,9 +466,8 @@ async def apply_codebook(
         return JSONResponse({"error": f"{db_name} database not found. Please import and filter data first."}, status_code=404)
     
     try:
-        apply_codebook_main(str(db_path), api_key, methodology)
-        report_path = Path(__file__).parent.parent.parent.parent / "data" / "classification_report.txt"
-        if report_path.exists():
+        report_path = apply_codebook_main(str(db_path), api_key, methodology)
+        if report_path and Path(report_path).exists():
             with open(report_path, 'r') as f:
                 report_content = f.read()
             return JSONResponse({"classification_report": report_content})

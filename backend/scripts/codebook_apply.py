@@ -301,10 +301,20 @@ def main(db_path, api_key, methodology=""):
             project_root = Path(__file__).parent.parent.parent
         
         data_dir = project_root / "data"
-        data_dir.mkdir(parents=True, exist_ok=True)
-        report_path = data_dir / "classification_report.txt"
+        coded_data_dir = data_dir / "coded_data"
+        coded_data_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Generate filename with timestamp and database name
+        from datetime import datetime
+        db_name = Path(db_path).stem  # e.g., 'reddit_data' or 'filtered_data'
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{db_name}_coded_{timestamp}.txt"
+        report_path = coded_data_dir / filename
+        
         write_to_file(str(report_path), classification_report)
         print(f"Classification report saved to {report_path}")
+        
+        return str(report_path)  # Return the path
         
     except Exception as e:
         print(f"ERROR: {e}")

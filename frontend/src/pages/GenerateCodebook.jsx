@@ -1,16 +1,40 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import ActionForm from "../components/ActionForm";
 import CodebookManager from "../components/CodebookManager";
 import "../styles/Home.css";
+import "../styles/Data.css";
 
 export default function GenerateCodebook() {
   const navigate = useNavigate();
   const [database, setDatabase] = useState("original");
+  const [databases, setDatabases] = useState([]);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+
+  useEffect(() => {
+    fetchDatabases();
+  }, []);
+
+  const fetchDatabases = async () => {
+    try {
+      const response = await fetch("/api/list-databases/");
+      if (!response.ok) throw new Error("Failed to fetch databases");
+      const data = await response.json();
+      setDatabases(data.databases);
+    } catch (err) {
+      console.error("Error fetching databases:", err);
+    }
+  };
+
+  const databaseItems = ["original", ...databases];
+
+  const getDisplayName = (item) => {
+    if (item === "original") return "Master Database";
+    return item.replace(".db", "");
+  };
 
   const handleViewCodebook = (codebookId) => {
     if (codebookId) {
@@ -33,8 +57,11 @@ export default function GenerateCodebook() {
       setResult(null);
 
       const requestData = new FormData();
-      requestData.append("database", formData.database);
+      requestData.append("database", database);
       requestData.append("api_key", savedApiKey);
+      if (formData.prompt) {
+        requestData.append("prompt", formData.prompt);
+      }
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 60000);
@@ -70,14 +97,12 @@ export default function GenerateCodebook() {
 
   const fields = [
     {
-      id: "database",
-      label: "Database",
-      type: "select",
-      value: database,
-      options: [
-        { value: "original", label: "Reddit Data" },
-        { value: "filtered", label: "Filtered Data" },
-      ],
+      id: "prompt",
+      label: "Prompt (Optional)",
+      type: "textarea",
+      placeholder:
+        "Enter a custom prompt to guide the codebook generation. Leave empty for default behavior.",
+      rows: 4,
     },
   ];
 
@@ -109,6 +134,24 @@ export default function GenerateCodebook() {
             <button onClick={handleViewCodebook} className="view-button">
               View Codebook
             </button>
+          </div>
+          <div className="database-selector">
+            <h3 style={{ marginBottom: "15px", color: "#ffffff" }}>
+              Select Database
+            </h3>
+            {databaseItems.map((item) => {
+              const itemId = item;
+              const displayName = getDisplayName(item);
+              return (
+                <button
+                  key={itemId}
+                  className={`db-button ${database === itemId ? "active" : ""}`}
+                  onClick={() => setDatabase(itemId)}
+                >
+                  {displayName}
+                </button>
+              );
+            })}
           </div>
           <ActionForm
             fields={fields}
