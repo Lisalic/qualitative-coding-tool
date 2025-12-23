@@ -172,7 +172,6 @@
   margin-bottom: 1rem;
 }
 
-/* Clickable rows */
 .clickable-row {
   cursor: pointer;
   transition: background-color 0.2s;
@@ -182,7 +181,6 @@
   background-color: rgba(255, 255, 255, 0.1) !important;
 }
 
-/* Modal styles */
 .modal-overlay {
   position: fixed;
   top: 0;
@@ -268,7 +266,6 @@
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-/* Comments section styles */
 .comments-section {
   margin-top: 2rem;
   padding-top: 1.5rem;

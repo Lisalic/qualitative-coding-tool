@@ -9,14 +9,19 @@ export default function ApplyCodebook() {
   const navigate = useNavigate();
   const [methodology, setMethodology] = useState("");
   const [database, setDatabase] = useState("original");
+  const [databaseType, setDatabaseType] = useState("unfiltered");
   const [codebook, setCodebook] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [codebooks, setCodebooks] = useState([]);
+  const [databases, setDatabases] = useState([]);
+  const [filteredDatabases, setFilteredDatabases] = useState([]);
 
   useEffect(() => {
     fetchCodebooks();
+    fetchDatabases();
+    fetchFilteredDatabases();
   }, []);
 
   const fetchCodebooks = async () => {
@@ -30,6 +35,28 @@ export default function ApplyCodebook() {
       }
     } catch (err) {
       console.error("Error fetching codebooks:", err);
+    }
+  };
+
+  const fetchDatabases = async () => {
+    try {
+      const response = await fetch("/api/list-databases/");
+      if (!response.ok) throw new Error("Failed to fetch databases");
+      const data = await response.json();
+      setDatabases(data.databases);
+    } catch (err) {
+      console.error("Error fetching databases:", err);
+    }
+  };
+
+  const fetchFilteredDatabases = async () => {
+    try {
+      const response = await fetch("/api/list-filtered-databases/");
+      if (!response.ok) throw new Error("Failed to fetch filtered databases");
+      const data = await response.json();
+      setFilteredDatabases(data.databases);
+    } catch (err) {
+      console.error("Error fetching filtered databases:", err);
     }
   };
 
@@ -72,16 +99,48 @@ export default function ApplyCodebook() {
     }
   };
 
+  const getAvailableDatabases = () => {
+    if (databaseType === "filtered") {
+      return filteredDatabases;
+    } else {
+      return ["original", ...databases];
+    }
+  };
+
+  const getDisplayName = (item) => {
+    if (item === "original") return "Master Database";
+    return item.replace(".db", "");
+  };
+
+  const handleDatabaseTypeChange = (type) => {
+    setDatabaseType(type);
+    const available = getAvailableDatabases();
+    if (available.length > 0) {
+      setDatabase(available[0]);
+    }
+  };
+
   const fields = [
     {
+      id: "databaseType",
+      label: "Database Type",
+      type: "radio",
+      value: databaseType,
+      options: [
+        { value: "unfiltered", label: "Unfiltered Databases" },
+        { value: "filtered", label: "Filtered Databases" },
+      ],
+      onChange: handleDatabaseTypeChange,
+    },
+    {
       id: "database",
-      label: "Data Source",
+      label: "Specific Database",
       type: "select",
       value: database,
-      options: [
-        { value: "original", label: "Original Data" },
-        { value: "filtered", label: "Filtered Data" },
-      ],
+      options: getAvailableDatabases().map((item) => ({
+        value: item,
+        label: getDisplayName(item),
+      })),
     },
     {
       id: "codebook",
@@ -107,31 +166,15 @@ export default function ApplyCodebook() {
     <>
       <Navbar />
       <div className="home-container">
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            border: "2px solid #ffffff",
-            borderRadius: "8px",
-            padding: "20px",
-          }}
-        >
-          <h1
-            style={{
-              fontSize: "28px",
-              fontWeight: "600",
-              margin: "0 0 30px 0",
-              textAlign: "center",
-            }}
-          >
-            Apply Codebook
-          </h1>
-          <div style={{ marginBottom: "30px", textAlign: "center" }}>
+        <div className="form-wrapper">
+          <h1>Apply Codebook</h1>
+
+          <div className="action-buttons">
             <button onClick={handleViewCoding} className="view-button">
               View Coding Results
             </button>
           </div>
+
           <ActionForm
             fields={fields}
             submitButton={{
@@ -145,6 +188,7 @@ export default function ApplyCodebook() {
             resultTitle="Classification Report"
           />
         </div>
+
         <CodebookManager
           onViewCodebook={(codebookId) =>
             navigate(`/codebook-view?selected=${codebookId}`)

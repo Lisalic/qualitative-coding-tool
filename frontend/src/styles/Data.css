@@ -161,7 +161,6 @@
 }
 
 .merge-btn:hover:not(:disabled) {
-  /* default hover */
 }
 
 .merge-btn:disabled {

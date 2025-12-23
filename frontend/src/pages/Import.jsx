@@ -60,7 +60,7 @@ export default function Import() {
       const data = await response.json();
       console.log("Master database created:", data);
       setSuccessMessage("Master database created successfully!");
-      setSelectedDatabases([]); // Clear selection
+      setSelectedDatabases([]);
     } catch (err) {
       console.error("Create master error:", err);
       setError(`Error creating master database: ${err.message}`);
@@ -82,7 +82,7 @@ export default function Import() {
 
       const data = await response.json();
       console.log("Database deleted:", data);
-      fetchDatabases(); // Refresh the list
+      fetchDatabases();
     } catch (err) {
       console.error("Delete error:", err);
       setError(`Error deleting database: ${err.message}`);
@@ -111,7 +111,7 @@ export default function Import() {
       console.log("Database renamed:", data);
       setRenamingDb(null);
       setNewName("");
-      fetchDatabases(); // Refresh the list
+      fetchDatabases();
     } catch (err) {
       console.error("Rename error:", err);
       setError(`Error renaming database: ${err.message}`);
@@ -135,7 +135,7 @@ export default function Import() {
   const handleUploadSuccess = (data) => {
     setUploadData(data);
     setError("");
-    fetchDatabases(); // Refresh the database list
+    fetchDatabases();
   };
 
   const handleUploadError = (errorMsg) => {

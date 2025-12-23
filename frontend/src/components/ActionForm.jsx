@@ -32,6 +32,13 @@ export default function ActionForm({
     }));
   };
 
+  const handleFieldChange = (field, value) => {
+    if (field.onChange) {
+      field.onChange(value);
+    }
+    handleInputChange(field.id, value);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     await onSubmit(formData);
@@ -42,7 +49,7 @@ export default function ActionForm({
     const commonProps = {
       id: field.id,
       value,
-      onChange: (e) => handleInputChange(field.id, e.target.value),
+      onChange: (e) => handleFieldChange(field, e.target.value),
       placeholder: field.placeholder,
       className: "form-input",
       disabled: submitButton.disabled,
@@ -58,6 +65,24 @@ export default function ActionForm({
               </option>
             ))}
           </select>
+        );
+      case "radio":
+        return (
+          <div className="radio-group">
+            {field.options.map((option) => (
+              <label key={option.value} className="radio-option">
+                <input
+                  type="radio"
+                  name={field.id}
+                  value={option.value}
+                  checked={value === option.value}
+                  onChange={(e) => handleFieldChange(field, e.target.value)}
+                  disabled={submitButton.disabled}
+                />
+                {option.label}
+              </label>
+            ))}
+          </div>
         );
       case "textarea":
         return <textarea {...commonProps} rows={field.rows || 4} />;

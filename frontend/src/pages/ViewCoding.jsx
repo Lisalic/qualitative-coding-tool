@@ -33,7 +33,7 @@ export default function ViewCoding() {
         ) {
           setSelectedCodedData(selectedFromUrl);
         } else {
-          setSelectedCodedData(data.coded_data[0].id); // Select first (most recent)
+          setSelectedCodedData(data.coded_data[0].id);
         }
       }
     } catch (err) {
@@ -75,7 +75,6 @@ export default function ViewCoding() {
 
   const handleCodedDataChange = (codedDataId) => {
     setSelectedCodedData(codedDataId);
-    // Update URL
     const url = new URL(window.location);
     url.searchParams.set("selected", codedDataId);
     window.history.pushState({}, "", url);

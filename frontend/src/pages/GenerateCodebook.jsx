@@ -9,13 +9,16 @@ import "../styles/Data.css";
 export default function GenerateCodebook() {
   const navigate = useNavigate();
   const [database, setDatabase] = useState("original");
+  const [databaseType, setDatabaseType] = useState("unfiltered");
   const [databases, setDatabases] = useState([]);
+  const [filteredDatabases, setFilteredDatabases] = useState([]);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     fetchDatabases();
+    fetchFilteredDatabases();
   }, []);
 
   const fetchDatabases = async () => {
@@ -29,11 +32,38 @@ export default function GenerateCodebook() {
     }
   };
 
-  const databaseItems = ["original", ...databases];
+  const fetchFilteredDatabases = async () => {
+    try {
+      const response = await fetch("/api/list-filtered-databases/");
+      if (!response.ok) throw new Error("Failed to fetch filtered databases");
+      const data = await response.json();
+      setFilteredDatabases(data.databases);
+    } catch (err) {
+      console.error("Error fetching filtered databases:", err);
+    }
+  };
+
+  const databaseItems = ["original", ...databases, ...filteredDatabases];
+
+  const getAvailableDatabases = () => {
+    if (databaseType === "filtered") {
+      return filteredDatabases;
+    } else {
+      return ["original", ...databases];
+    }
+  };
 
   const getDisplayName = (item) => {
     if (item === "original") return "Master Database";
     return item.replace(".db", "");
+  };
+
+  const handleDatabaseTypeChange = (type) => {
+    setDatabaseType(type);
+    const available = getAvailableDatabases();
+    if (available.length > 0) {
+      setDatabase(available[0]);
+    }
   };
 
   const handleViewCodebook = (codebookId) => {
@@ -97,6 +127,27 @@ export default function GenerateCodebook() {
 
   const fields = [
     {
+      id: "databaseType",
+      label: "Database Type",
+      type: "radio",
+      value: databaseType,
+      options: [
+        { value: "unfiltered", label: "Unfiltered Databases" },
+        { value: "filtered", label: "Filtered Databases" },
+      ],
+      onChange: handleDatabaseTypeChange,
+    },
+    {
+      id: "database",
+      label: "Specific Database",
+      type: "select",
+      value: database,
+      options: getAvailableDatabases().map((item) => ({
+        value: item,
+        label: getDisplayName(item),
+      })),
+    },
+    {
       id: "prompt",
       label: "Prompt (Optional)",
       type: "textarea",
@@ -110,49 +161,15 @@ export default function GenerateCodebook() {
     <>
       <Navbar />
       <div className="home-container">
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            border: "2px solid #ffffff",
-            borderRadius: "8px",
-            padding: "20px",
-          }}
-        >
-          <h1
-            style={{
-              fontSize: "28px",
-              fontWeight: "600",
-              margin: "0 0 30px 0",
-              textAlign: "center",
-            }}
-          >
-            Generate Codebook
-          </h1>
-          <div style={{ marginBottom: "30px", textAlign: "center" }}>
+        <div className="form-wrapper">
+          <h1>Generate Codebook</h1>
+
+          <div className="action-buttons">
             <button onClick={handleViewCodebook} className="view-button">
               View Codebook
             </button>
           </div>
-          <div className="database-selector">
-            <h3 style={{ marginBottom: "15px", color: "#ffffff" }}>
-              Select Database
-            </h3>
-            {databaseItems.map((item) => {
-              const itemId = item;
-              const displayName = getDisplayName(item);
-              return (
-                <button
-                  key={itemId}
-                  className={`db-button ${database === itemId ? "active" : ""}`}
-                  onClick={() => setDatabase(itemId)}
-                >
-                  {displayName}
-                </button>
-              );
-            })}
-          </div>
+
           <ActionForm
             fields={fields}
             submitButton={{
@@ -166,6 +183,7 @@ export default function GenerateCodebook() {
             resultTitle="Generated Codebook"
           />
         </div>
+
         <CodebookManager
           onViewCodebook={(codebookId) =>
             navigate(`/codebook-view?selected=${codebookId}`)

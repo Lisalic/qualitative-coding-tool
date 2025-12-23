@@ -36,7 +36,7 @@ export default function ViewCodebook() {
         ) {
           setSelectedCodebook(selectedFromUrl);
         } else {
-          setSelectedCodebook(data.codebooks[data.codebooks.length - 1].id); // Select latest
+          setSelectedCodebook(data.codebooks[data.codebooks.length - 1].id);
         }
       }
     } catch (err) {

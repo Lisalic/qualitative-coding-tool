@@ -100,6 +100,16 @@ async def list_databases():
     return JSONResponse({"databases": databases})
 
 
+@router.get("/list-filtered-databases/")
+async def list_filtered_databases():
+    filtered_database_dir = Path(settings.filtered_database_dir)
+    if not filtered_database_dir.exists():
+        return JSONResponse({"databases": []})
+    
+    databases = [f.name for f in filtered_database_dir.iterdir() if f.is_file() and f.name.endswith('.db')]
+    return JSONResponse({"databases": databases})
+
+
 @router.post("/merge-databases/")
 async def merge_databases(databases: str = Form(...)):
     try:
@@ -332,9 +342,16 @@ async def get_classification_report():
 @router.get("/database-entries/")
 async def get_database_entries(limit: int = 10, database: str = "original"):
     if database.endswith('.db'):
-        db_path = Path(settings.database_dir) / database
+        # Check if it's in the filtered directory first
+        filtered_db_path = Path(settings.filtered_database_dir) / database
+        if filtered_db_path.exists():
+            db_path = filtered_db_path
+        else:
+            db_path = Path(settings.database_dir) / database
+    elif database == "filtered_data":
+        db_path = Path(settings.filtered_database_dir) / "filtered_data.db"
     elif database == "filtered":
-        db_path = DB_PATH.parent / "filtered_data.db"
+        db_path = Path(settings.filtered_database_dir) / "filtered_data.db"
     elif database == "codebook":
         db_path = DB_PATH.parent / "codebook.db"
     elif database == "coding":
@@ -371,7 +388,8 @@ async def get_database_entries(limit: int = 10, database: str = "original"):
             submissions = [dict(row) for row in cursor.fetchall()]
             comments = []
             com_count = 0
-        elif database == "filtered":
+        elif database == "filtered" or (database.endswith('.db') and str(db_path).startswith(str(settings.filtered_database_dir))):
+            # Filtered databases only have submissions table
             cursor.execute('SELECT COUNT(*) as count FROM submissions')
             sub_count = cursor.fetchone()['count']
             com_count = 0
@@ -427,13 +445,27 @@ async def filter_data(api_key: str = Form(...), prompt: str = Form(...)):
 
 @router.post("/generate-codebook/")
 async def generate_codebook(database: str = Form("original"), api_key: str = Form(...), prompt: str = Form("")):
-    db_path = Path(settings.reddit_db_path)
-    if database == "filtered":
-        db_path = db_path.parent / "filtered_data.db"
+    # Resolve database path using same logic as database-entries endpoint
+    if database.endswith('.db'):
+        # Check if it's in the filtered directory first
+        filtered_db_path = Path(settings.filtered_database_dir) / database
+        if filtered_db_path.exists():
+            db_path = filtered_db_path
+        else:
+            db_path = Path(settings.database_dir) / database
+    elif database == "filtered_data":
+        db_path = Path(settings.filtered_database_dir) / "filtered_data.db"
+    elif database == "filtered":
+        db_path = Path(settings.filtered_database_dir) / "filtered_data.db"
+    elif database == "codebook":
+        db_path = DB_PATH.parent / "codebook.db"
+    elif database == "coding":
+        db_path = DB_PATH.parent / "codeddata.db"
+    else:  # "original"
+        db_path = DB_PATH
     
     if not db_path.exists():
-        db_name = "Reddit Data" if database == "original" else "Filtered Data"
-        return JSONResponse({"error": f"{db_name} database not found. Please import and filter data first."}, status_code=404)
+        return JSONResponse({"error": f"Database not found. Please import data first."}, status_code=404)
     
     try:
         generate_codebook_main(str(db_path), api_key, prompt)
@@ -455,18 +487,34 @@ async def generate_codebook(database: str = Form("original"), api_key: str = For
 async def apply_codebook(
     database: str = Form("original"), 
     api_key: str = Form(...), 
-    methodology: str = Form("")
+    methodology: str = Form(""),
+    codebook: str = Form(...)
 ):
-    db_path = Path(settings.reddit_db_path)
-    if database == "filtered":
-        db_path = db_path.parent / "filtered_data.db"
+    # Resolve database path using same logic as database-entries endpoint
+    if database.endswith('.db'):
+        # Check if it's in the filtered directory first
+        filtered_db_path = Path(settings.filtered_database_dir) / database
+        if filtered_db_path.exists():
+            db_path = filtered_db_path
+        else:
+            db_path = Path(settings.database_dir) / database
+    elif database == "filtered_data":
+        db_path = Path(settings.filtered_database_dir) / "filtered_data.db"
+    elif database == "filtered":
+        db_path = Path(settings.filtered_database_dir) / "filtered_data.db"
+    elif database == "codebook":
+        db_path = DB_PATH.parent / "codebook.db"
+    elif database == "coding":
+        db_path = DB_PATH.parent / "codeddata.db"
+    else:  # "original"
+        db_path = DB_PATH
     
     if not db_path.exists():
-        db_name = "Reddit Data" if database == "original" else "Filtered Data"
-        return JSONResponse({"error": f"{db_name} database not found. Please import and filter data first."}, status_code=404)
+        db_name = "Database"
+        return JSONResponse({"error": f"{db_name} not found. Please import data first."}, status_code=404)
     
     try:
-        report_path = apply_codebook_main(str(db_path), api_key, methodology)
+        report_path = apply_codebook_main(str(db_path), api_key, methodology, codebook)
         if report_path and Path(report_path).exists():
             with open(report_path, 'r') as f:
                 report_content = f.read()

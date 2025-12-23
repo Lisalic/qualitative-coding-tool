@@ -5,6 +5,7 @@ import "../styles/DataTable.css";
 export default function DataTable({
   database = "original",
   title = "Database Contents",
+  isFilteredView = false,
 }) {
   const [dbEntries, setDbEntries] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -104,7 +105,7 @@ export default function DataTable({
                   <thead>
                     <tr>
                       <th>ID</th>
-                      {currentDatabase === "filtered" ? (
+                      {isFilteredView || currentDatabase === "filtered" ? (
                         <>
                           <th>Title</th>
                           <th>Selftext</th>
@@ -127,7 +128,7 @@ export default function DataTable({
                         className="clickable-row"
                       >
                         <td>{sub.id}</td>
-                        {currentDatabase === "filtered" ? (
+                        {isFilteredView || currentDatabase === "filtered" ? (
                           <>
                             <td className="truncate">{sub.title}</td>
                             <td className="truncate">{sub.selftext}</td>

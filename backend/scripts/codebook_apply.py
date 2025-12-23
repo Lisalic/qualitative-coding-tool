@@ -47,19 +47,26 @@ def get_client(system_prompt: str, user_prompt: str, api_key: str) -> str:
             print(f"Retrying in {wait_time}s...")
             time.sleep(wait_time)
 
-def load_existing_codebook() -> str:
+def load_existing_codebook(codebook_id=None) -> str:
     current_path = Path(__file__).resolve()
     project_root = current_path.parent
     while project_root != project_root.parent:
-        if (project_root / "data" / "codebook.txt").exists():
+        if (project_root / "data").exists():
             break
         project_root = project_root.parent
     else:
         project_root = Path(__file__).parent.parent.parent
     
-    codebook_path = project_root / "data" / "codebook.txt"
+    if codebook_id:
+        codebook_path = project_root / "data" / "codebooks" / f"{codebook_id}.txt"
+    else:
+        codebook_path = project_root / "data" / "codebook.txt"
+    
     if not codebook_path.exists():
-        raise FileNotFoundError(f"Codebook not found at {codebook_path}. Please generate a codebook first using the codebook generator.")
+        if codebook_id:
+            raise FileNotFoundError(f"Codebook '{codebook_id}' not found. Please select a valid codebook.")
+        else:
+            raise FileNotFoundError(f"Codebook not found at {codebook_path}. Please generate a codebook first using the codebook generator.")
     try:
         with open(codebook_path, 'r', encoding='utf-8') as f:
             content = f.read().strip()
@@ -67,7 +74,10 @@ def load_existing_codebook() -> str:
                 raise ValueError(f"Codebook file exists but is empty. Please generate a valid codebook first.")
             return content
     except FileNotFoundError:
-        raise FileNotFoundError(f"Codebook not found at {codebook_path}. Please generate a codebook first using the codebook generator.")
+        if codebook_id:
+            raise FileNotFoundError(f"Codebook '{codebook_id}' not found. Please select a valid codebook.")
+        else:
+            raise FileNotFoundError(f"Codebook not found at {codebook_path}. Please generate a codebook first using the codebook generator.")
 
 def load_posts_content(db_path: str) -> str:
     try:
@@ -271,10 +281,10 @@ ANALYTICAL SUMMARY:
 
 
 
-def main(db_path, api_key, methodology=""):    
+def main(db_path, api_key, methodology="", codebook_id=None):    
     try:
         print("Loading existing codebook...")
-        codebook = load_existing_codebook()
+        codebook = load_existing_codebook(codebook_id)
         print(f"Loaded codebook ({len(codebook)} characters)")
         
         print("Loading posts content...")
