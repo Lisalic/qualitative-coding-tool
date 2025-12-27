@@ -4,6 +4,9 @@ import "../styles/Home.css";
 export default function PromptManager({ onLoadPrompt, currentPrompt }) {
   const [savedPrompts, setSavedPrompts] = useState([]);
   const [newPromptContent, setNewPromptContent] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editName, setEditName] = useState("");
+  const [editContent, setEditContent] = useState("");
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("");
   useEffect(() => {
@@ -49,6 +52,42 @@ export default function PromptManager({ onLoadPrompt, currentPrompt }) {
 
     setNewPromptContent("");
     showMessage("Prompt saved successfully!");
+  };
+
+  const startEdit = (prompt) => {
+    setEditingId(prompt.id);
+    setEditName(prompt.name || "");
+    setEditContent(prompt.prompt || "");
+    clearMessage();
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditName("");
+    setEditContent("");
+  };
+
+  const saveEdit = (id) => {
+    if (!editContent.trim()) {
+      showMessage("Please enter prompt content", "error");
+      return;
+    }
+    const updated = savedPrompts.map((p) => {
+      if (p.id === id) {
+        return {
+          ...p,
+          name: editName || p.name,
+          prompt: editContent.trim(),
+        };
+      }
+      return p;
+    });
+    setSavedPrompts(updated);
+    localStorage.setItem("savedFilterPrompts", JSON.stringify(updated));
+    setEditingId(null);
+    setEditName("");
+    setEditContent("");
+    showMessage("Prompt updated successfully!");
   };
 
   const loadPrompt = (prompt) => {
@@ -118,33 +157,82 @@ export default function PromptManager({ onLoadPrompt, currentPrompt }) {
             <div className="prompts-list">
               {savedPrompts.map((prompt) => (
                 <div key={prompt.id} className="prompt-item">
-                  <div className="prompt-info">
-                    <h4>{prompt.name}</h4>
-                    <p className="prompt-preview">
-                      {prompt.prompt.length > 100
-                        ? `${prompt.prompt.substring(0, 100)}...`
-                        : prompt.prompt}
-                    </p>
-                    <small className="prompt-date">
-                      Saved: {new Date(prompt.createdAt).toLocaleDateString()}
-                    </small>
-                  </div>
-                  <div className="prompt-actions">
-                    <button
-                      type="button"
-                      onClick={() => loadPrompt(prompt)}
-                      className="load-prompt-btn"
-                    >
-                      Load
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => deletePrompt(prompt.id)}
-                      className="delete-prompt-btn"
-                    >
-                      Delete
-                    </button>
-                  </div>
+                  {editingId === prompt.id ? (
+                    <div className="prompt-edit">
+                      <div className="form-group">
+                        <label>Edit name</label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label>Edit prompt</label>
+                        <textarea
+                          className="form-input"
+                          rows={4}
+                          value={editContent}
+                          onChange={(e) => setEditContent(e.target.value)}
+                        />
+                      </div>
+                      <div className="prompt-actions">
+                        <button
+                          type="button"
+                          onClick={() => saveEdit(prompt.id)}
+                          className="save-prompt-btn"
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          onClick={cancelEdit}
+                          className="delete-prompt-btn"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="prompt-info">
+                        <h4>{prompt.name}</h4>
+                        <p className="prompt-preview">
+                          {prompt.prompt.length > 100
+                            ? `${prompt.prompt.substring(0, 100)}...`
+                            : prompt.prompt}
+                        </p>
+                        <small className="prompt-date">
+                          Saved:{" "}
+                          {new Date(prompt.createdAt).toLocaleDateString()}
+                        </small>
+                      </div>
+                      <div className="prompt-actions">
+                        <button
+                          type="button"
+                          onClick={() => loadPrompt(prompt)}
+                          className="load-prompt-btn"
+                        >
+                          Load
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => startEdit(prompt)}
+                          className="load-prompt-btn"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deletePrompt(prompt.id)}
+                          className="delete-prompt-btn"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               ))}
             </div>

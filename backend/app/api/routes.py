@@ -532,15 +532,44 @@ async def get_database_entries(limit: int = 10, database: str = Query(..., descr
 
 
 @router.post("/filter-data/")
-async def filter_data(api_key: str = Form(...), prompt: str = Form(...)):
-    db_path = Path(settings.reddit_db_path)
-    
+async def filter_data(api_key: str = Form(...), prompt: str = Form(...), database: str = Form(None), name: str = Form(...)):
+    # Resolve database path similar to other endpoints; if not provided, use settings.reddit_db_path
+    if database and database.endswith('.db'):
+        filtered_db_path = Path(settings.filtered_database_dir) / database
+        if filtered_db_path.exists():
+            db_path = filtered_db_path
+        else:
+            db_path = Path(settings.database_dir) / database
+    elif database in ("filtered_data", "filtered"):
+        db_path = Path(settings.filtered_database_dir) / "filtered_data.db"
+    else:
+        db_path = Path(settings.reddit_db_path)
+
     if not db_path.exists():
-        return JSONResponse({"error": "Reddit data database not found. Please import data first."}, status_code=404)
-    
+        return JSONResponse({"error": f"Database not found: {db_path}. Please upload data first."}, status_code=404)
+
+    # Validate output name for filtered DB (required)
+    filtered_dir = Path(settings.filtered_database_dir)
+    filtered_dir.mkdir(parents=True, exist_ok=True)
+
+    if not name or not name.strip():
+        return JSONResponse({"error": "A name for the filtered database is required"}, status_code=400)
+
+    # Basic sanitization: no path separators, no parent traversal
+    if any(sep in name for sep in ("/", "\\")) or ".." in name:
+        return JSONResponse({"error": "Invalid name provided"}, status_code=400)
+    if not name.endswith('.db'):
+        name = f"{name}.db"
+    candidate = filtered_dir / name
+    if candidate.exists():
+        return JSONResponse({"error": f"Filtered database '{name}' already exists"}, status_code=400)
+
+    output_db_path = str(candidate)
+
     try:
-        filter_database_with_ai(api_key, prompt)
-        return JSONResponse({"message": "Data filtered successfully"})
+        # Pass the resolved db path and the desired output path to the filter script
+        filter_database_with_ai(api_key, prompt, str(db_path), output_db_path)
+        return JSONResponse({"message": "Data filtered successfully", "output": Path(output_db_path).name})
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500)
 

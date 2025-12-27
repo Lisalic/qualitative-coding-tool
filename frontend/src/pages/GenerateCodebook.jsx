@@ -26,10 +26,13 @@ export default function GenerateCodebook() {
       const response = await fetch("/api/list-databases/");
       if (!response.ok) throw new Error("Failed to fetch databases");
       const data = await response.json();
-      setDatabases(data.databases);
+      const dbNames = (data.databases || []).map((d) =>
+        typeof d === "string" ? d : d.name
+      );
+      setDatabases(dbNames);
       // Set default database if none selected
-      if (!database && data.databases.length > 0) {
-        setDatabase(data.databases[0]);
+      if (!database && dbNames.length > 0) {
+        setDatabase(dbNames[0]);
       }
     } catch (err) {
       console.error("Error fetching databases:", err);
@@ -41,7 +44,10 @@ export default function GenerateCodebook() {
       const response = await fetch("/api/list-filtered-databases/");
       if (!response.ok) throw new Error("Failed to fetch filtered databases");
       const data = await response.json();
-      setFilteredDatabases(data.databases);
+      const fdNames = (data.databases || []).map((d) =>
+        typeof d === "string" ? d : d.name
+      );
+      setFilteredDatabases(fdNames);
     } catch (err) {
       console.error("Error fetching filtered databases:", err);
     }

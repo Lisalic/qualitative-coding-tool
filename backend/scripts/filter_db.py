@@ -126,7 +126,7 @@ CRITICAL: Return ONLY the raw JSON array with NO markdown code blocks, NO backti
         return f'[{{"error": "Failed to filter posts: {str(e)}"}}]'
 
 
-def save_filtered_posts_to_db(posts_list) -> bool:
+def save_filtered_posts_to_db(posts_list, output_db_path=None) -> bool:
     """
     Save filtered posts to database.
 
@@ -145,10 +145,14 @@ def save_filtered_posts_to_db(posts_list) -> bool:
 
         print(f"Processing {len(posts)} posts")
 
-        data_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data")
-        os.makedirs(data_dir, exist_ok=True)
-        
-        filtered_db_path = os.path.join(data_dir, "filtered_data.db")
+        # Determine output path (use provided path or default filtered_data.db)
+        if output_db_path:
+            filtered_db_path = output_db_path
+            os.makedirs(os.path.dirname(filtered_db_path), exist_ok=True)
+        else:
+            data_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data")
+            os.makedirs(data_dir, exist_ok=True)
+            filtered_db_path = os.path.join(data_dir, "filtered_data.db")
 
         conn = sqlite3.connect(filtered_db_path)
         cursor = conn.cursor()
@@ -188,10 +192,13 @@ def save_filtered_posts_to_db(posts_list) -> bool:
         return False
 
 
-def main(api_key: str, prompt: str):
-    db_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "reddit_data.db")
+def main(api_key: str, prompt: str, db_path: str = None, output_db_path: str = None):
+    # Allow overriding the database path; default to reddit_data.db for backwards compatibility
+    if not db_path:
+        db_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "reddit_data.db")
+
     if not os.path.exists(db_path):
-        print("Error: reddit_data.db not found. Please import data first.")
+        print(f"Error: {db_path} not found. Please import data first.")
         return
 
     posts_content = load_posts_content(db_path)
@@ -204,7 +211,8 @@ def main(api_key: str, prompt: str):
         print(f"Filtering failed: {filtered_list}")
         return
 
-    save_success = save_filtered_posts_to_db(filtered_list)
+    # Save into the provided output path if given
+    save_success = save_filtered_posts_to_db(filtered_list, output_db_path)
     if save_success:
         print("Filtering completed successfully!")
     else:

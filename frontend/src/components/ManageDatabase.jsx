@@ -23,7 +23,7 @@ export default function ManageDatabase({
         <h2>Manage Databases</h2>
         <div className="database-list">
           {databases.map((db) => {
-            const dbName = db.name || db; // Handle both old and new format
+            const dbName = db.name || db;
             const metadata = db.metadata;
             return (
               <div key={dbName} className="database-item">

@@ -2,7 +2,7 @@ import { useNavigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import ActionForm from "../components/ActionForm";
 import PromptManager from "../components/PromptManager";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import "../styles/Home.css";
 
 export default function Filter() {
@@ -10,6 +10,9 @@ export default function Filter() {
   const [filterPrompt, setFilterPrompt] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [database, setDatabase] = useState("");
+  const [databases, setDatabases] = useState([]);
+  const [name, setName] = useState("");
 
   const handleViewFilteredData = () => {
     navigate("/filtered-data");
@@ -19,9 +22,42 @@ export default function Filter() {
     setFilterPrompt(prompt);
   };
 
+  useEffect(() => {
+    fetchDatabases();
+  }, []);
+
+  useEffect(() => {
+    if (databases.length > 0 && !database) {
+      setDatabase(databases[0]);
+    }
+  }, [databases]);
+
+  const fetchDatabases = async () => {
+    try {
+      const response = await fetch("/api/list-databases/");
+      if (!response.ok) throw new Error("Failed to fetch databases");
+      const data = await response.json();
+      const dbNames = (data.databases || []).map((d) =>
+        typeof d === "string" ? d : d.name
+      );
+      setDatabases(dbNames);
+      if (!database && dbNames.length > 0) setDatabase(dbNames[0]);
+    } catch (err) {
+      console.error("Error fetching databases:", err);
+    }
+  };
+
+  // (filtered databases removed - only unfiltered databases are used in this page)
+
   const handleFieldChange = (fieldId, value) => {
     if (fieldId === "filterPrompt") {
       setFilterPrompt(value);
+    }
+    if (fieldId === "database") {
+      setDatabase(value);
+    }
+    if (fieldId === "name") {
+      setName(value);
     }
   };
 
@@ -35,6 +71,11 @@ export default function Filter() {
       throw new Error("Please enter a filter prompt");
     }
 
+    // Require a name for the filtered DB
+    if (!formData.name || !formData.name.trim()) {
+      throw new Error("Please provide a name for the filtered database");
+    }
+
     setLoading(true);
     setMessage("");
 
@@ -42,6 +83,14 @@ export default function Filter() {
       const requestData = new FormData();
       requestData.append("api_key", savedApiKey);
       requestData.append("prompt", formData.filterPrompt);
+      // include desired output name if provided
+      if (formData.name) {
+        requestData.append("name", formData.name);
+      }
+      // include selected database if provided
+      if (formData.database) {
+        requestData.append("database", formData.database);
+      }
 
       const response = await fetch("/api/filter-data/", {
         method: "POST",
@@ -80,6 +129,27 @@ export default function Filter() {
       value: filterPrompt,
       placeholder: "Enter your filter prompt...",
       rows: 5,
+    },
+  ];
+
+  const nameField = {
+    id: "name",
+    label: "Filtered Database Name",
+    type: "text",
+    value: name,
+    placeholder: "my-filtered-db",
+  };
+
+  const databaseFields = [
+    {
+      id: "database",
+      label: "Database",
+      type: "select",
+      value: database,
+      options: databases.map((d) => ({
+        value: d,
+        label: d.replace(".db", ""),
+      })),
     },
   ];
 
@@ -129,7 +199,7 @@ export default function Filter() {
                 Apply Filter
               </h1>
               <ActionForm
-                fields={fields}
+                fields={[...databaseFields, nameField, ...fields]}
                 submitButton={{
                   text: "Filter",
                   loadingText: "Processing...",
