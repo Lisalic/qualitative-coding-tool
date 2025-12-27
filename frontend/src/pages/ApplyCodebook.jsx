@@ -8,7 +8,7 @@ import "../styles/Home.css";
 export default function ApplyCodebook() {
   const navigate = useNavigate();
   const [methodology, setMethodology] = useState("");
-  const [database, setDatabase] = useState("original");
+  const [database, setDatabase] = useState("");
   const [databaseType, setDatabaseType] = useState("unfiltered");
   const [codebook, setCodebook] = useState("");
   const [loading, setLoading] = useState(false);
@@ -44,6 +44,10 @@ export default function ApplyCodebook() {
       if (!response.ok) throw new Error("Failed to fetch databases");
       const data = await response.json();
       setDatabases(data.databases);
+      // Set default database if none selected
+      if (!database && data.databases.length > 0) {
+        setDatabase(data.databases[0]);
+      }
     } catch (err) {
       console.error("Error fetching databases:", err);
     }
@@ -103,12 +107,11 @@ export default function ApplyCodebook() {
     if (databaseType === "filtered") {
       return filteredDatabases;
     } else {
-      return ["original", ...databases];
+      return databases;
     }
   };
 
   const getDisplayName = (item) => {
-    if (item === "original") return "Master Database";
     return item.replace(".db", "");
   };
 
@@ -166,34 +169,39 @@ export default function ApplyCodebook() {
     <>
       <Navbar />
       <div className="home-container">
-        <div className="form-wrapper">
-          <h1>Apply Codebook</h1>
+        <div className="page-layout">
+          <div className="form-section">
+            <div className="form-wrapper">
+              <h1>Apply Codebook</h1>
 
-          <div className="action-buttons">
-            <button onClick={handleViewCoding} className="view-button">
-              View Coding Results
-            </button>
+              <div className="action-buttons">
+                <button onClick={handleViewCoding} className="view-button">
+                  View Coding Results
+                </button>
+              </div>
+
+              <ActionForm
+                fields={fields}
+                submitButton={{
+                  text: "Apply Codebook",
+                  loadingText: "Applying...",
+                  disabled: loading,
+                }}
+                onSubmit={handleSubmit}
+                error={error || (result && result.error)}
+                result={result && result.classification_report}
+                resultTitle="Classification Report"
+              />
+            </div>
           </div>
-
-          <ActionForm
-            fields={fields}
-            submitButton={{
-              text: "Apply Codebook",
-              loadingText: "Applying...",
-              disabled: loading,
-            }}
-            onSubmit={handleSubmit}
-            error={error || (result && result.error)}
-            result={result && result.classification_report}
-            resultTitle="Classification Report"
-          />
+          <div className="manager-section">
+            <CodebookManager
+              onViewCodebook={(codebookId) =>
+                navigate(`/codebook-view?selected=${codebookId}`)
+              }
+            />
+          </div>
         </div>
-
-        <CodebookManager
-          onViewCodebook={(codebookId) =>
-            navigate(`/codebook-view?selected=${codebookId}`)
-          }
-        />
       </div>
     </>
   );

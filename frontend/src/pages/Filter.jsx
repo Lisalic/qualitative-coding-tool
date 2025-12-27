@@ -11,10 +11,6 @@ export default function Filter() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const handleBack = () => {
-    navigate("/");
-  };
-
   const handleViewFilteredData = () => {
     navigate("/filtered-data");
   };
@@ -89,7 +85,7 @@ export default function Filter() {
 
   return (
     <>
-      <Navbar showBack={true} onBack={handleBack} />
+      <Navbar showBack={true} />
       <div className="home-container">
         <div className="filter-layout">
           <div style={{ textAlign: "center", marginBottom: "30px" }}>

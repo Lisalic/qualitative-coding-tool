@@ -1,53 +1,62 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import DataTable from "../components/DataTable";
 import "../styles/Data.css";
 
 export default function Data() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [databases, setDatabases] = useState([]);
-  const [selectedDatabase, setSelectedDatabase] = useState("original");
+  const [selectedDatabase, setSelectedDatabase] = useState("");
 
   useEffect(() => {
     fetchDatabases();
   }, []);
+
+  useEffect(() => {
+    if (location.state?.selectedDatabase) {
+      setSelectedDatabase(location.state.selectedDatabase);
+    }
+  }, [location.state]);
+
+  useEffect(() => {
+    // Set default database if none selected and we have databases loaded
+    if (!selectedDatabase && databases.length > 0) {
+      setSelectedDatabase(databases[0]);
+    }
+  }, [databases, selectedDatabase]);
 
   const fetchDatabases = async () => {
     try {
       const response = await fetch("/api/list-databases/");
       if (!response.ok) throw new Error("Failed to fetch databases");
       const data = await response.json();
-      setDatabases(data.databases);
+      // Handle both old format (array of strings) and new format (array of objects)
+      const dbNames = data.databases.map((db) =>
+        typeof db === "string" ? db : db.name
+      );
+      setDatabases(dbNames);
     } catch (err) {
       console.error("Error fetching databases:", err);
     }
   };
 
-  const handleBack = () => {
-    navigate("/");
-  };
-
   const getTitle = () => {
-    if (selectedDatabase === "original") return "Master Database Contents";
+    if (!selectedDatabase) return "Select a Database";
     return `Database: ${selectedDatabase.replace(".db", "")}`;
   };
 
-  const databaseItems = ["original", ...databases];
-
-  const getDisplayName = (item) => {
-    if (item === "original") return "Master Database";
-    return item.replace(".db", "");
-  };
+  const databaseItems = databases;
 
   return (
     <>
-      <Navbar showBack={true} onBack={handleBack} />
+      <Navbar showBack={true} />
       <div className="data-container">
         <div className="database-selector">
           {databaseItems.map((item) => {
             const itemId = item;
-            const displayName = getDisplayName(item);
+            const displayName = item.replace(".db", "");
             return (
               <button
                 key={itemId}

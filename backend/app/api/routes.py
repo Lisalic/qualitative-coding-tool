@@ -24,7 +24,8 @@ DB_PATH = Path(settings.reddit_db_path)
 async def upload_zst_file(
     file: UploadFile = File(...), 
     subreddits: str = Form(None),
-    data_type: str = Form(...)
+    data_type: str = Form(...),
+    name: str = Form(None)
 ):
     print(f"Received upload request for file: {file.filename}")
     
@@ -50,7 +51,7 @@ async def upload_zst_file(
     # Generate unique database name
     database_dir = Path(settings.database_dir)
     database_dir.mkdir(parents=True, exist_ok=True)
-    base_name = file.filename.replace('.zst', '')
+    base_name = name.strip() if name else file.filename.replace('.zst', '')
     counter = 1
     db_name = f"{base_name}{counter}.db"
     db_path = database_dir / db_name
@@ -96,8 +97,50 @@ async def list_databases():
     if not database_dir.exists():
         return JSONResponse({"databases": []})
     
-    databases = [f.name for f in database_dir.iterdir() if f.is_file() and f.name.endswith('.db')]
+    databases = []
+    for f in database_dir.iterdir():
+        if f.is_file() and f.name.endswith('.db'):
+            metadata = get_database_metadata(f)
+            databases.append({
+                "name": f.name,
+                "metadata": metadata
+            })
+    
     return JSONResponse({"databases": databases})
+
+
+def get_database_metadata(db_path):
+    """Get metadata for a database file."""
+    try:
+        conn = sqlite3.connect(str(db_path))
+        cursor = conn.cursor()
+        
+        # Get submission count
+        cursor.execute("SELECT COUNT(*) FROM submissions")
+        submission_count = cursor.fetchone()[0]
+        
+        # Get comment count
+        cursor.execute("SELECT COUNT(*) FROM comments")
+        comment_count = cursor.fetchone()[0]
+        
+        conn.close()
+        
+        # Get file creation date
+        import os
+        creation_time = os.path.getctime(str(db_path))
+        
+        return {
+            "total_submissions": submission_count,
+            "total_comments": comment_count,
+            "date_created": creation_time if creation_time > 0 else None
+        }
+    except Exception as e:
+        print(f"Error getting metadata for {db_path}: {e}")
+        return {
+            "total_submissions": 0,
+            "total_comments": 0,
+            "date_created": None
+        }
 
 
 @router.get("/list-filtered-databases/")
@@ -111,23 +154,38 @@ async def list_filtered_databases():
 
 
 @router.post("/merge-databases/")
-async def merge_databases(databases: str = Form(...)):
+async def merge_databases(databases: str = Form(...), name: str = Form(...)):
     try:
         db_list = json.loads(databases)
+        print(f"Merging databases: {db_list} into {name}")
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid databases format")
 
+    if not name or not name.strip():
+        raise HTTPException(status_code=400, detail="Database name is required")
+
     database_dir = Path(settings.database_dir)
-    master_path = DB_PATH
+    print(f"Database directory: {database_dir}")
+    
+    # Ensure name has .db extension
+    if not name.endswith('.db'):
+        name = f"{name}.db"
+    
+    merged_path = database_dir / name
+    print(f"Merged database path: {merged_path}")
+    
+    # Check if database with this name already exists
+    if merged_path.exists():
+        raise HTTPException(status_code=400, detail=f"Database '{name}' already exists")
 
-    # Delete existing master DB if it exists
-    if master_path.exists():
-        master_path.unlink()
-        print(f"Deleted existing master database: {master_path}")
-
-    # Create new master DB
-    master_conn = sqlite3.connect(str(master_path))
-    master_conn.execute('''
+    # Create new merged DB
+    try:
+        merged_conn = sqlite3.connect(str(merged_path))
+        print("Created merged database connection")
+    except Exception as e:
+        print(f"Error creating merged database: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create database: {str(e)}")
+    merged_conn.execute('''
         CREATE TABLE submissions (
         id TEXT PRIMARY KEY,
         subreddit TEXT,
@@ -139,7 +197,7 @@ async def merge_databases(databases: str = Form(...)):
         num_comments INTEGER
         )
     ''')
-    master_conn.execute('''
+    merged_conn.execute('''
         CREATE TABLE comments (
             id TEXT PRIMARY KEY,
             subreddit TEXT,
@@ -151,36 +209,76 @@ async def merge_databases(databases: str = Form(...)):
             parent_id TEXT
         )
     ''')
-    master_conn.commit()
+    merged_conn.commit()
 
     for db_name in db_list:
         db_path = database_dir / db_name
+        print(f"Processing database: {db_name}, path: {db_path}, exists: {db_path.exists()}")
         if not db_path.exists():
+            print(f"Database {db_name} does not exist, skipping")
             continue
         
         try:
             conn = sqlite3.connect(str(db_path))
             cursor = conn.cursor()
+            print(f"Connected to {db_name}")
             
-            # Copy submissions
-            cursor.execute('SELECT * FROM submissions')
-            submissions = cursor.fetchall()
-            master_conn.executemany('INSERT OR IGNORE INTO submissions VALUES (?, ?, ?, ?, ?, ?, ?, ?)', submissions)
+            # Check if submissions table exists and copy data
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='submissions'")
+            if cursor.fetchone():
+                cursor.execute('SELECT COUNT(*) FROM submissions')
+                sub_count = cursor.fetchone()[0]
+                print(f"Found {sub_count} submissions in {db_name}")
+                cursor.execute('SELECT * FROM submissions')
+                submissions = cursor.fetchall()
+                print(f"Retrieved {len(submissions)} submissions from {db_name}")
+                try:
+                    merged_conn.executemany('INSERT OR IGNORE INTO submissions VALUES (?, ?, ?, ?, ?, ?, ?, ?)', submissions)
+                    print(f"Inserted submissions from {db_name}")
+                except Exception as e:
+                    print(f"Error inserting submissions from {db_name}: {e}")
+            else:
+                print(f"No submissions table in {db_name}")
             
-            # Copy comments
-            cursor.execute('SELECT * FROM comments')
-            comments = cursor.fetchall()
-            master_conn.executemany('INSERT OR IGNORE INTO comments VALUES (?, ?, ?, ?, ?, ?, ?, ?)', comments)
+            # Check if comments table exists and copy data
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='comments'")
+            if cursor.fetchone():
+                cursor.execute('SELECT COUNT(*) FROM comments')
+                comment_count = cursor.fetchone()[0]
+                print(f"Found {comment_count} comments in {db_name}")
+                cursor.execute('SELECT * FROM comments')
+                comments = cursor.fetchall()
+                print(f"Retrieved {len(comments)} comments from {db_name}")
+                try:
+                    merged_conn.executemany('INSERT OR IGNORE INTO comments VALUES (?, ?, ?, ?, ?, ?, ?, ?)', comments)
+                    print(f"Inserted comments from {db_name}")
+                except Exception as e:
+                    print(f"Error inserting comments from {db_name}: {e}")
+            else:
+                print(f"No comments table in {db_name}")
             
             conn.close()
+            print(f"Successfully processed {db_name}")
         except Exception as e:
             print(f"Error merging {db_name}: {e}")
+            import traceback
+            traceback.print_exc()
             continue
     
-    master_conn.commit()
-    master_conn.close()
+    try:
+        merged_conn.commit()
+        print("Committed merged database")
+    except Exception as e:
+        print(f"Error committing merged database: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to commit merged database: {str(e)}")
     
-    return JSONResponse({"message": "Master database created successfully"})
+    try:
+        merged_conn.close()
+        print("Closed merged database connection")
+    except Exception as e:
+        print(f"Error closing merged database: {e}")
+    
+    return JSONResponse({"message": f"Databases merged into '{name}' successfully"})
 
 
 @router.delete("/delete-database/{db_name}")
@@ -340,7 +438,10 @@ async def get_classification_report():
 
 
 @router.get("/database-entries/")
-async def get_database_entries(limit: int = 10, database: str = "original"):
+async def get_database_entries(limit: int = 10, database: str = Query(..., description="Database name")):
+    if not database:
+        raise HTTPException(status_code=400, detail="Database name is required")
+        
     if database.endswith('.db'):
         # Check if it's in the filtered directory first
         filtered_db_path = Path(settings.filtered_database_dir) / database
@@ -356,8 +457,8 @@ async def get_database_entries(limit: int = 10, database: str = "original"):
         db_path = DB_PATH.parent / "codebook.db"
     elif database == "coding":
         db_path = DB_PATH.parent / "codeddata.db"
-    else:  # "original"
-        db_path = DB_PATH
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown database type: {database}")
 
     if not db_path.exists():
         return JSONResponse({
@@ -425,7 +526,8 @@ async def get_database_entries(limit: int = 10, database: str = "original"):
         "comments": comments,
         "total_submissions": sub_count,
         "total_comments": com_count,
-        "database": database
+        "database": database,
+        "date_created": os.path.getctime(str(db_path)) if db_path.exists() and os.path.getctime(str(db_path)) > 0 else None
     })
 
 

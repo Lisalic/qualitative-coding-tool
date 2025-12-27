@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import Navbar from "../components/Navbar";
 import "../styles/Data.css";
+import "../styles/DataTable.css";
 
 export default function ViewCoding() {
   const navigate = useNavigate();
@@ -11,10 +12,6 @@ export default function ViewCoding() {
   const [codedDataContent, setCodedDataContent] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-
-  const handleBack = () => {
-    navigate("/");
-  };
 
   const fetchAvailableCodedData = async () => {
     try {
@@ -82,7 +79,7 @@ export default function ViewCoding() {
 
   return (
     <>
-      <Navbar showBack={true} onBack={handleBack} />
+      <Navbar showBack={true} />
       <div className="data-container">
         <div className="codebook-selector">
           {availableCodedData.map((cd) => (
@@ -110,19 +107,7 @@ export default function ViewCoding() {
           </h1>
 
           {loading && <p style={{ color: "#ffffff" }}>Loading coded data...</p>}
-          {error && (
-            <div
-              style={{
-                color: "#ff6666",
-                padding: "10px",
-                border: "1px solid #ff6666",
-                borderRadius: "4px",
-                marginBottom: "20px",
-              }}
-            >
-              {error}
-            </div>
-          )}
+          {error && <p className="error-message">{error}</p>}
 
           {codedDataContent && (
             <div>

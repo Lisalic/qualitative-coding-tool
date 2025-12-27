@@ -27,10 +27,6 @@ export default function FilteredData() {
     }
   };
 
-  const handleBack = () => {
-    navigate("/");
-  };
-
   const getTitle = () => {
     if (!selectedDatabase) return "Filtered Data Contents";
     return `Filtered Database: ${selectedDatabase.replace(".db", "")}`;
@@ -44,7 +40,7 @@ export default function FilteredData() {
 
   return (
     <>
-      <Navbar showBack={true} onBack={handleBack} />
+      <Navbar showBack={true} />
       <div className="data-container">
         {databases.length > 0 ? (
           <>

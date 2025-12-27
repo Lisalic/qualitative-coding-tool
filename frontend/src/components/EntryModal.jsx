@@ -1,12 +1,7 @@
 import { useState, useEffect } from "react";
 import "../styles/DataTable.css";
 
-export default function EntryModal({
-  entry,
-  isOpen,
-  onClose,
-  database = "original",
-}) {
+export default function EntryModal({ entry, isOpen, onClose, database = "" }) {
   const [comments, setComments] = useState([]);
   const [loadingComments, setLoadingComments] = useState(false);
 
@@ -46,9 +41,7 @@ export default function EntryModal({
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>
-            {entry.type === "submission" ? "Submission" : "Comment"} Details
-          </h2>
+          <h2>{entry.type === "submission" ? "Post" : "Comment"} Details</h2>
           <button className="modal-close" onClick={onClose}>
             ×
           </button>

@@ -1,6 +1,5 @@
 .file-upload {
   background-color: #000000;
-  border: 2px solid #ffffff;
   padding: 20px;
   border-radius: 8px;
   margin-bottom: 2rem;
@@ -70,27 +69,43 @@
 }
 
 .radio-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
+  margin-top: 0.5rem;
 }
 
 .radio-label {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
+  display: inline-block;
+  background-color: #000000;
   color: #ffffff;
+  border: 1px solid #ffffff;
+  padding: 0.2rem 0.4rem;
+  font-size: 0.7rem;
   cursor: pointer;
-  font-size: 1rem;
+  border-radius: 4px;
+  transition: all 0.2s;
+  text-align: center;
+  font-weight: 500;
+  white-space: nowrap;
+  margin-right: 0.5rem;
 }
 
-.radio-label input[type="radio"] {
-  margin: 0;
-  cursor: pointer;
+.radio-label:hover {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+  transform: translateY(-2px);
 }
 
-.radio-label input[type="radio"]:disabled {
+input[type="radio"]:checked + .radio-label {
+  background-color: #ffffff;
+  color: #000000;
+}
+
+input[type="radio"]:disabled + .radio-label {
+  opacity: 0.5;
   cursor: not-allowed;
+}
+
+.radio-label:active {
+  transform: translateY(0);
 }
 
 .form-hint {
@@ -191,6 +206,16 @@
   margin-top: 0.5rem;
 }
 
+.error-message {
+  color: #ff4444;
+  margin-top: 1rem;
+  font-size: 0.95rem;
+  padding: 0.75rem;
+  border: 1px solid #ff4444;
+  border-radius: 4px;
+  background-color: rgba(255, 68, 68, 0.05);
+}
+
 .success-message {
   color: #00ff00;
   margin-top: 1rem;
@@ -199,4 +224,11 @@
   border: 1px solid #00ff00;
   border-radius: 4px;
   background-color: rgba(0, 255, 0, 0.05);
+}
+
+.upload-form-wrapper {
+  border: 1px solid #ffffff;
+  border-radius: 8px;
+  padding: 20px;
+  background-color: #000000;
 }

@@ -8,7 +8,7 @@ import "../styles/Data.css";
 
 export default function GenerateCodebook() {
   const navigate = useNavigate();
-  const [database, setDatabase] = useState("original");
+  const [database, setDatabase] = useState("");
   const [databaseType, setDatabaseType] = useState("unfiltered");
   const [databases, setDatabases] = useState([]);
   const [filteredDatabases, setFilteredDatabases] = useState([]);
@@ -27,6 +27,10 @@ export default function GenerateCodebook() {
       if (!response.ok) throw new Error("Failed to fetch databases");
       const data = await response.json();
       setDatabases(data.databases);
+      // Set default database if none selected
+      if (!database && data.databases.length > 0) {
+        setDatabase(data.databases[0]);
+      }
     } catch (err) {
       console.error("Error fetching databases:", err);
     }
@@ -43,18 +47,17 @@ export default function GenerateCodebook() {
     }
   };
 
-  const databaseItems = ["original", ...databases, ...filteredDatabases];
+  const databaseItems = [...databases, ...filteredDatabases];
 
   const getAvailableDatabases = () => {
     if (databaseType === "filtered") {
       return filteredDatabases;
     } else {
-      return ["original", ...databases];
+      return databases;
     }
   };
 
   const getDisplayName = (item) => {
-    if (item === "original") return "Master Database";
     return item.replace(".db", "");
   };
 
@@ -161,34 +164,39 @@ export default function GenerateCodebook() {
     <>
       <Navbar />
       <div className="home-container">
-        <div className="form-wrapper">
-          <h1>Generate Codebook</h1>
+        <div className="page-layout">
+          <div className="form-section">
+            <div className="form-wrapper">
+              <h1>Generate Codebook</h1>
 
-          <div className="action-buttons">
-            <button onClick={handleViewCodebook} className="view-button">
-              View Codebook
-            </button>
+              <div className="action-buttons">
+                <button onClick={handleViewCodebook} className="view-button">
+                  View Codebook
+                </button>
+              </div>
+
+              <ActionForm
+                fields={fields}
+                submitButton={{
+                  text: "Generate Codebook",
+                  loadingText: "Generating...",
+                  disabled: loading,
+                }}
+                onSubmit={handleSubmit}
+                error={error}
+                result={result}
+                resultTitle="Generated Codebook"
+              />
+            </div>
           </div>
-
-          <ActionForm
-            fields={fields}
-            submitButton={{
-              text: "Generate Codebook",
-              loadingText: "Generating...",
-              disabled: loading,
-            }}
-            onSubmit={handleSubmit}
-            error={error}
-            result={result}
-            resultTitle="Generated Codebook"
-          />
+          <div className="manager-section">
+            <CodebookManager
+              onViewCodebook={(codebookId) =>
+                navigate(`/codebook-view?selected=${codebookId}`)
+              }
+            />
+          </div>
         </div>
-
-        <CodebookManager
-          onViewCodebook={(codebookId) =>
-            navigate(`/codebook-view?selected=${codebookId}`)
-          }
-        />
       </div>
     </>
   );

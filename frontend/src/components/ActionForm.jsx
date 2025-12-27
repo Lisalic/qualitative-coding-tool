@@ -41,7 +41,9 @@ export default function ActionForm({
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    await onSubmit(formData);
+    if (onSubmit) {
+      await onSubmit(formData);
+    }
   };
 
   const renderField = (field) => {
@@ -52,7 +54,7 @@ export default function ActionForm({
       onChange: (e) => handleFieldChange(field, e.target.value),
       placeholder: field.placeholder,
       className: "form-input",
-      disabled: submitButton.disabled,
+      disabled: submitButton?.disabled,
     };
 
     switch (field.type) {
@@ -70,17 +72,21 @@ export default function ActionForm({
         return (
           <div className="radio-group">
             {field.options.map((option) => (
-              <label key={option.value} className="radio-option">
+              <div key={option.value}>
                 <input
                   type="radio"
+                  id={`${field.id}-${option.value}`}
                   name={field.id}
                   value={option.value}
                   checked={value === option.value}
                   onChange={(e) => handleFieldChange(field, e.target.value)}
-                  disabled={submitButton.disabled}
+                  disabled={submitButton?.disabled}
+                  style={{ display: 'none' }}
                 />
-                {option.label}
-              </label>
+                <label htmlFor={`${field.id}-${option.value}`} className="radio-option">
+                  {option.label}
+                </label>
+              </div>
             ))}
           </div>
         );
@@ -88,6 +94,18 @@ export default function ActionForm({
         return <textarea {...commonProps} rows={field.rows || 4} />;
       case "password":
         return <input {...commonProps} type="password" />;
+      case "button":
+        return (
+          <button
+            type="button"
+            onClick={field.onClick}
+            className="view-button"
+          >
+            {field.label}
+          </button>
+        );
+      case "title":
+        return <h1>{field.label}</h1>;
       default:
         return <input {...commonProps} type={field.type || "text"} />;
     }
@@ -96,20 +114,30 @@ export default function ActionForm({
   return (
     <div className="form-wrapper">
       <form onSubmit={handleSubmit} className="action-form">
-        {fields.map((field) => (
-          <div key={field.id} className="form-group">
-            <label htmlFor={field.id}>{field.label}</label>
-            {renderField(field)}
-          </div>
-        ))}
+        {fields.map((field) => {
+          if (field.type === "title") {
+            return <div key={field.id}>{renderField(field)}</div>;
+          }
+          if (field.type === "button") {
+            return <div key={field.id} className="action-buttons">{renderField(field)}</div>;
+          }
+          return (
+            <div key={field.id} className="form-group">
+              <label htmlFor={field.id}>{field.label}</label>
+              {renderField(field)}
+            </div>
+          );
+        })}
 
-        <button
-          type="submit"
-          disabled={submitButton.disabled}
-          className="form-submit-btn"
-        >
-          {submitButton.disabled ? submitButton.loadingText : submitButton.text}
-        </button>
+        {submitButton && (
+          <button
+            type="submit"
+            disabled={submitButton.disabled}
+            className="form-submit-btn"
+          >
+            {submitButton.disabled ? submitButton.loadingText : submitButton.text}
+          </button>
+        )}
       </form>
 
       {error && <p className="form-message">{error}</p>}

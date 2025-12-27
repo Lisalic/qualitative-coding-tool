@@ -3,7 +3,7 @@ import EntryModal from "./EntryModal";
 import "../styles/DataTable.css";
 
 export default function DataTable({
-  database = "original",
+  database = "",
   title = "Database Contents",
   isFilteredView = false,
 }) {
@@ -16,6 +16,12 @@ export default function DataTable({
   const [limit, setLimit] = useState(50);
 
   const fetchEntries = async () => {
+    if (!currentDatabase || currentDatabase.trim() === "") {
+      setDbEntries(null);
+      setLoading(false);
+      return;
+    }
+
     try {
       setError("");
       setLoading(true);
@@ -70,12 +76,34 @@ export default function DataTable({
 
       {error && <p className="error-message">{error}</p>}
 
+      {!dbEntries && !loading && !error && (
+        <p className="info-message">Select a database to view its contents.</p>
+      )}
+
+      {loading && (
+        <p className="loading-message">Loading database contents...</p>
+      )}
+
       {dbEntries && (
         <>
           <p className="stats">
-            Total: {dbEntries.total_submissions} submissions,{" "}
-            {dbEntries.total_comments} comments
+            Total: {dbEntries.total_submissions} Posts,{" "}
+            {dbEntries.total_comments} Comments
           </p>
+          {dbEntries.date_created && dbEntries.date_created > 0 && (
+            <p className="stats">
+              Date Created:{" "}
+              {(() => {
+                try {
+                  return new Date(
+                    dbEntries.date_created * 1000
+                  ).toLocaleString();
+                } catch (e) {
+                  return "Unknown";
+                }
+              })()}
+            </p>
+          )}
 
           <div className="limit-selector">
             <label htmlFor="entry-limit">Show entries: </label>
@@ -99,7 +127,7 @@ export default function DataTable({
 
           {dbEntries.submissions.length > 0 && (
             <div className="table-section">
-              <h3>Sample Submissions ({limit})</h3>
+              <h3>Sample Posts ({limit})</h3>
               <div className="table-wrapper">
                 <table className="data-table">
                   <thead>

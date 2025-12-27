@@ -27,13 +27,13 @@
 }
 
 .db-button {
-  padding: 10px 20px;
-  border: 1px solid #ffffff;
-  border-radius: 4px;
   background-color: #000000;
   color: #ffffff;
+  border: 1px solid #ffffff;
+  padding: 10px 20px;
   font-size: 16px;
   cursor: pointer;
+  border-radius: 4px;
   transition: all 0.2s;
 }
 
@@ -81,6 +81,29 @@
   outline: none;
   width: 100%;
   text-align: center;
+}
+
+.database-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.database-metadata {
+  font-size: 14px;
+  color: #cccccc;
+  margin-left: 24px; /* Align with checkbox */
+}
+
+.metadata-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.metadata-row span {
+  white-space: nowrap;
 }
 
 .database-item label {

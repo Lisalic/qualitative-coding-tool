@@ -24,7 +24,7 @@ function Navbar({ showBack, onBack }) {
   const shouldShowBack =
     showBack !== undefined ? showBack : location.pathname !== "/";
 
-  const handleBack = onBack || (() => navigate(-1));
+  const handleBack = onBack || (() => navigate("/home"));
 
   return (
     <nav className="navbar">

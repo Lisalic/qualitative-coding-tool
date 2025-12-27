@@ -1,9 +1,9 @@
 import FileUpload from "./FileUpload";
 
-export default function UploadData({ onUploadSuccess, onError }) {
+export default function UploadData({ onUploadSuccess, onView }) {
   return (
     <div className="upload-section">
-      <FileUpload onUploadSuccess={onUploadSuccess} onError={onError} />
+      <FileUpload onUploadSuccess={onUploadSuccess} onView={onView} />
     </div>
   );
 }

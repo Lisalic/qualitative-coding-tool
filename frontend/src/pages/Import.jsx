@@ -17,6 +17,7 @@ export default function Import() {
   const [successMessage, setSuccessMessage] = useState("");
   const [renamingDb, setRenamingDb] = useState(null);
   const [newName, setNewName] = useState("");
+  const [mergeName, setMergeName] = useState("");
 
   useEffect(() => {
     fetchDatabases();
@@ -41,29 +42,50 @@ export default function Import() {
     );
   };
 
-  const handleCreateMaster = async () => {
-    if (selectedDatabases.length === 0) return;
+  const handleMergeDatabases = async () => {
+    if (selectedDatabases.length < 2) {
+      setError("Please select at least 2 databases to merge");
+      return;
+    }
+
+    if (!mergeName.trim()) {
+      setError("Please enter a name for the merged database");
+      return;
+    }
 
     setLoading(true);
     setSuccessMessage("");
+    setError(""); // Clear any previous errors
     try {
       const formData = new FormData();
       formData.append("databases", JSON.stringify(selectedDatabases));
+      formData.append("name", mergeName.trim());
 
       const response = await fetch("/api/merge-databases/", {
         method: "POST",
         body: formData,
       });
 
-      if (!response.ok) throw new Error("Failed to create master database");
+      if (!response.ok) {
+        let errorMsg = "Failed to merge databases";
+        try {
+          const errorData = await response.json();
+          errorMsg = errorData.detail || errorMsg;
+        } catch (e) {
+          // If we can't parse JSON, use the generic message
+        }
+        throw new Error(errorMsg);
+      }
 
       const data = await response.json();
-      console.log("Master database created:", data);
-      setSuccessMessage("Master database created successfully!");
+      console.log("Databases merged:", data);
+      setSuccessMessage("Databases merged successfully!");
       setSelectedDatabases([]);
+      setMergeName("");
+      fetchDatabases();
     } catch (err) {
-      console.error("Create master error:", err);
-      setError(`Error creating master database: ${err.message}`);
+      console.error("Merge error:", err);
+      setError(err.message); // Set the error message for display in ManageDatabase
     } finally {
       setLoading(false);
     }
@@ -128,88 +150,59 @@ export default function Import() {
     setNewName("");
   };
 
-  const handleBack = () => {
-    navigate("/");
-  };
-
   const handleUploadSuccess = (data) => {
     setUploadData(data);
     setError("");
     fetchDatabases();
   };
 
-  const handleUploadError = (errorMsg) => {
-    setError(errorMsg);
-    setUploadData(null);
-  };
-
   const handleDismissError = () => {
     setError("");
   };
 
-  const handleViewData = () => {
-    navigate("/data");
+  const handleViewData = (dbName) => {
+    navigate("/data", { state: { selectedDatabase: dbName } });
   };
 
   return (
     <>
-      <Navbar showBack={true} onBack={handleBack} />
+      <Navbar showBack={true} />
       <div className="home-container">
-        <div className="form-wrapper">
-          <h1>Import Data</h1>
+        {error &&
+          !error.includes("select at least") &&
+          !error.includes("enter a name") &&
+          !error.includes("Database") &&
+          !error.includes("merge") && (
+            <ErrorDisplay message={error} onDismiss={handleDismissError} />
+          )}
 
-          <div style={{ marginBottom: "30px", textAlign: "center" }}>
-            <button
-              onClick={handleViewData}
-              style={{
-                backgroundColor: "#000000",
-                color: "#ffffff",
-                border: "1px solid #ffffff",
-                padding: "12px 24px",
-                fontSize: "16px",
-                cursor: "pointer",
-                borderRadius: "4px",
-                transition: "all 0.2s",
-              }}
-              onMouseOver={(e) => {
-                e.target.style.backgroundColor = "#ffffff";
-                e.target.style.color = "#000000";
-              }}
-              onMouseOut={(e) => {
-                e.target.style.backgroundColor = "#000000";
-                e.target.style.color = "#ffffff";
-              }}
-            >
-              View Imported Data
-            </button>
-          </div>
+        <div className="import-layout">
+          <UploadData
+            onUploadSuccess={handleUploadSuccess}
+            onView={handleViewData}
+          />
 
-          <ErrorDisplay message={error} onDismiss={handleDismissError} />
-
-          <div className="import-layout">
-            <UploadData
-              onUploadSuccess={handleUploadSuccess}
-              onError={handleUploadError}
+          {databases.length > 0 && (
+            <ManageDatabase
+              databases={databases}
+              selectedDatabases={selectedDatabases}
+              onSelect={handleDatabaseSelect}
+              onMergeDatabases={handleMergeDatabases}
+              mergeName={mergeName}
+              onMergeNameChange={setMergeName}
+              loading={loading}
+              successMessage={successMessage}
+              errorMessage={error}
+              renamingDb={renamingDb}
+              newName={newName}
+              onNewNameChange={setNewName}
+              onRename={handleRenameDatabase}
+              onStartRename={startRename}
+              onCancelRename={cancelRename}
+              onDelete={handleDeleteDatabase}
+              onView={handleViewData}
             />
-
-            {databases.length > 0 && (
-              <ManageDatabase
-                databases={databases}
-                selectedDatabases={selectedDatabases}
-                onSelect={handleDatabaseSelect}
-                onCreateMaster={handleCreateMaster}
-                loading={loading}
-                successMessage={successMessage}
-                renamingDb={renamingDb}
-                newName={newName}
-                onNewNameChange={setNewName}
-                onRename={handleRenameDatabase}
-                onStartRename={startRename}
-                onCancelRename={cancelRename}
-                onDelete={handleDeleteDatabase}
-              />
-            )}
-          </div>
+          )}
         </div>
       </div>
     </>

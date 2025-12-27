@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import Navbar from "../components/Navbar";
 import "../styles/Data.css";
+import "../styles/DataTable.css";
 
 export default function ViewCodebook() {
   const navigate = useNavigate();
@@ -14,10 +15,6 @@ export default function ViewCodebook() {
   const [isEditing, setIsEditing] = useState(false);
   const [editedContent, setEditedContent] = useState("");
   const [newCodebookName, setNewCodebookName] = useState("");
-
-  const handleBack = () => {
-    navigate("/");
-  };
 
   const fetchAvailableCodebooks = async () => {
     try {
@@ -130,7 +127,7 @@ export default function ViewCodebook() {
 
   return (
     <>
-      <Navbar onBack={handleBack} />
+      <Navbar />
       <div className="data-container">
         <div className="codebook-selector">
           {availableCodebooks.map((cb) => (
@@ -217,19 +214,7 @@ export default function ViewCodebook() {
           </div>
 
           {loading && <p>Loading codebook...</p>}
-          {error && (
-            <div
-              style={{
-                color: "#ff6666",
-                padding: "10px",
-                border: "1px solid #ff6666",
-                borderRadius: "4px",
-                marginBottom: "20px",
-              }}
-            >
-              {error}
-            </div>
-          )}
+          {error && <p className="error-message">{error}</p>}
 
           {codebookContent && (
             <div>
