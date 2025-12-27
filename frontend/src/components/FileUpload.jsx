@@ -122,7 +122,14 @@ export default function FileUpload({ onUploadSuccess, onView }) {
 
   return (
     <div className="file-upload">
-      <h1 style={{ textAlign: "center", fontSize: "28px", fontWeight: "600" }}>
+      <h1
+        style={{
+          textAlign: "center",
+          fontSize: "28px",
+          fontWeight: "600",
+          margin: "0 0 10px 0",
+        }}
+      >
         Import Data
       </h1>
       <div className="action-buttons">
@@ -130,7 +137,7 @@ export default function FileUpload({ onUploadSuccess, onView }) {
           View Imported Data
         </button>
       </div>
-      <div className="upload-form-wrapper">
+      <div className="form-wrapper">
         <h2>Upload Data</h2>
         <form onSubmit={handleSubmit}>
           <div className="form-group">
@@ -233,7 +240,7 @@ export default function FileUpload({ onUploadSuccess, onView }) {
             />
           </div>
 
-          <button type="submit" disabled={loading}>
+          <button type="submit" disabled={loading} className="form-submit-btn">
             {loading ? "Processing..." : "Upload"}
           </button>
         </form>

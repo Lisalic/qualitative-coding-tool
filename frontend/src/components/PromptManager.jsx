@@ -111,7 +111,7 @@ export default function PromptManager({ onLoadPrompt, currentPrompt }) {
           margin: "0 0 30px 0",
         }}
       >
-        Saved Prompts
+        Manage Prompts
       </h1>
       <div className="prompt-manager-content">
         <div className="save-prompt-section">
@@ -150,7 +150,7 @@ export default function PromptManager({ onLoadPrompt, currentPrompt }) {
         )}
 
         <div>
-          <h3>Saved Prompts</h3>
+          <h3 style={{ textAlign: "center" }}>Saved Prompts</h3>
           {savedPrompts.length === 0 ? (
             <p className="no-prompts">No saved prompts yet.</p>
           ) : (

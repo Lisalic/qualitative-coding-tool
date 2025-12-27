@@ -226,7 +226,7 @@ input[type="radio"]:disabled + .radio-label {
   background-color: rgba(0, 255, 0, 0.05);
 }
 
-.upload-form-wrapper {
+.form-wrapper {
   border: 1px solid #ffffff;
   border-radius: 8px;
   padding: 20px;

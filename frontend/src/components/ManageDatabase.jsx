@@ -20,7 +20,16 @@ export default function ManageDatabase({
   return (
     <div className="database-section">
       <div className="database-selection">
-        <h2>Manage Databases</h2>
+        <h1
+          style={{
+            textAlign: "center",
+            fontSize: "28px",
+            fontWeight: "600",
+            margin: "0 0 30px 0",
+          }}
+        >
+          Manage Databases
+        </h1>
         <div className="database-list">
           {databases.map((db) => {
             const dbName = db.name || db;

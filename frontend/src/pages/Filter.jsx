@@ -157,47 +157,27 @@ export default function Filter() {
     <>
       <Navbar showBack={true} />
       <div className="home-container">
-        <div className="filter-layout">
-          <div style={{ textAlign: "center", marginBottom: "30px" }}>
-            <h1 style={{ fontSize: "28px", fontWeight: "600" }}>Filter Data</h1>
-            <button
-              type="button"
-              onClick={handleViewFilteredData}
-              style={{
-                backgroundColor: "#000000",
-                color: "#ffffff",
-                border: "1px solid #ffffff",
-                padding: "12px 24px",
-                fontSize: "16px",
-                cursor: "pointer",
-                borderRadius: "4px",
-                marginTop: "10px",
-                transition: "all 0.2s",
-              }}
-              onMouseOver={(e) => {
-                e.target.style.backgroundColor = "#ffffff";
-                e.target.style.color = "#000000";
-              }}
-              onMouseOut={(e) => {
-                e.target.style.backgroundColor = "#000000";
-                e.target.style.color = "#ffffff";
-              }}
-            >
-              View Filtered Data
-            </button>
-          </div>
-          <div style={{ display: "flex", gap: "30px" }}>
-            <div className="filter-form-section">
+        <div className="tool-page-layout">
+          <div className="left-section">
+            <div className="file-upload">
               <h1
                 style={{
                   textAlign: "center",
                   fontSize: "28px",
                   fontWeight: "600",
-                  margin: "0 0 30px 0",
+                  margin: "0 0 10px 0",
                 }}
               >
                 Apply Filter
               </h1>
+              <div className="action-buttons">
+                <button
+                  onClick={handleViewFilteredData}
+                  className="view-button"
+                >
+                  View Filtered Data
+                </button>
+              </div>
               <ActionForm
                 fields={[...databaseFields, nameField, ...fields]}
                 submitButton={{
@@ -211,12 +191,12 @@ export default function Filter() {
                 resultTitle="Filter Result"
               />
             </div>
-            <div className="prompt-manager-section">
-              <PromptManager
-                onLoadPrompt={handleLoadPrompt}
-                currentPrompt={filterPrompt}
-              />
-            </div>
+          </div>
+          <div className="prompt-manager-section">
+            <PromptManager
+              onLoadPrompt={handleLoadPrompt}
+              currentPrompt={filterPrompt}
+            />
           </div>
         </div>
       </div>

@@ -176,7 +176,7 @@ export default function Import() {
             <ErrorDisplay message={error} onDismiss={handleDismissError} />
           )}
 
-        <div className="import-layout">
+        <div className="tool-page-layout">
           <UploadData
             onUploadSuccess={handleUploadSuccess}
             onView={handleViewData}

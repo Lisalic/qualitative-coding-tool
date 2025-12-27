@@ -13,16 +13,16 @@
   background-color: #000000;
   border: 2px solid #ffffff;
   border-radius: 8px;
-  padding: 40px;
+  padding: 0;
   box-shadow: 0 4px 6px rgba(255, 255, 255, 0.1);
 }
 
-.import-layout {
+.tool-page-layout {
   width: 100%;
   overflow: hidden;
   display: flex;
   justify-content: center;
-  gap: 0;
+  gap: 40px;
 }
 
 .page-layout {
@@ -41,16 +41,16 @@
 
 .database-section {
   flex: 1;
-  padding-left: 20px;
-  padding-right: 20px;
+  padding-left: 0;
+  padding-right: 0;
 }
 
-.upload-section {
-  flex: 4;
+.left-section {
+  flex: 2;
   border: 2px solid #ffffff;
   border-radius: 8px;
-  padding-left: 20px;
-  padding-right: 20px;
+  padding-left: 0;
+  padding-right: 0;
 }
 
 .form-wrapper h1 {
@@ -100,6 +100,35 @@
   gap: 20px;
   padding: 20px;
   background-color: #000000;
+}
+
+.tool-page-layout .left-section .action-form {
+  padding: 0;
+}
+
+/* Match import page typography within the Filter page left column */
+.tool-page-layout .left-section {
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: #ffffff;
+}
+
+.tool-page-layout .left-section h2,
+.tool-page-layout .left-section h3,
+.tool-page-layout .left-section h4 {
+  font-weight: 600;
+  margin: 0 0 10px 0;
+}
+
+.tool-page-layout .left-section .action-form .form-group label {
+  font-weight: 400;
+  font-size: 1rem;
+}
+
+.tool-page-layout .left-section .form-input {
+  font-size: 1rem;
+  line-height: 1.5;
 }
 
 .action-form .form-group {
@@ -185,8 +214,8 @@ input[type="radio"]:disabled + .radio-option {
   background-color: #000000;
   color: #ffffff;
   border: 1px solid #ffffff;
-  padding: 0.5rem 0.75rem;
-  font-size: 0.9rem;
+  padding: 12px 24px;
+  font-size: 16px;
   cursor: pointer;
   border-radius: 4px;
   transition: all 0.2s;
@@ -332,6 +361,20 @@ input[type="radio"]:disabled + .radio-option {
   background-color: rgba(255, 255, 255, 0.02);
 }
 
+/* When editing a prompt, make the edit container fill available width */
+.prompt-edit {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Ensure inputs/textareas sized to parent */
+.prompt-edit .form-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
 .prompt-info {
   flex: 1;
   margin-right: 15px;
@@ -459,20 +502,28 @@ input[type="radio"]:disabled + .radio-option {
   width: 100%;
   max-width: 1400px;
   margin: 0 auto;
-  border: 2px solid #ffffff;
   border-radius: 8px;
-  padding: 20px;
+  padding: 0;
+  display: flex;
+  gap: 30px;
 }
 
-.filter-form-section {
-  flex: 1;
+.filter-section {
+  /* Take a smaller width (approx ~66%) */
+  flex: 2;
   min-width: 0;
   border: 2px solid #ffffff;
   border-radius: 8px;
-  padding: 20px;
+  padding: 0;
+}
+
+/* Remove form-wrapper padding only inside Filter page form section */
+.filter-section .form-wrapper {
+  padding: 0;
 }
 
 .prompt-manager-section {
+  /* Take ~25% of available width */
   flex: 1;
   min-width: 0;
 }
@@ -492,7 +543,7 @@ input[type="radio"]:disabled + .radio-option {
     gap: 20px;
   }
 
-  .filter-form-section,
+  .filter-section,
   .prompt-manager-section {
     flex: none;
   }
