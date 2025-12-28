@@ -357,7 +357,18 @@ async def list_codebooks():
         codebooks = []
         for cb in codebook_files:
             codebook_id = cb.stem  # filename without .txt
-            codebooks.append({"id": codebook_id, "name": codebook_id})
+            # collect metadata: character count and modification time
+            try:
+                with open(cb, 'r') as f:
+                    content = f.read()
+                stat = cb.stat()
+                metadata = {
+                    "characters": len(content),
+                    "date_created": int(stat.st_mtime)
+                }
+            except Exception:
+                metadata = {}
+            codebooks.append({"id": codebook_id, "name": codebook_id, "metadata": metadata})
         codebooks.sort(key=lambda x: x["id"])
         return JSONResponse({"codebooks": codebooks})
     return JSONResponse({"codebooks": []})
@@ -575,7 +586,7 @@ async def filter_data(api_key: str = Form(...), prompt: str = Form(...), databas
 
 
 @router.post("/generate-codebook/")
-async def generate_codebook(database: str = Form("original"), api_key: str = Form(...), prompt: str = Form("")):
+async def generate_codebook(database: str = Form("original"), api_key: str = Form(...), prompt: str = Form(""), name: str = Form(...)):
     # Resolve database path using same logic as database-entries endpoint
     if database.endswith('.db'):
         # Check if it's in the filtered directory first
@@ -598,18 +609,29 @@ async def generate_codebook(database: str = Form("original"), api_key: str = For
     if not db_path.exists():
         return JSONResponse({"error": f"Database not found. Please import data first."}, status_code=404)
     
+    # Validate name
+    codebooks_dir = Path(__file__).parent.parent.parent.parent / "data" / "codebooks"
+    codebooks_dir.mkdir(parents=True, exist_ok=True)
+
+    if not name or not name.strip():
+        return JSONResponse({"error": "A name for the codebook is required"}, status_code=400)
+    # Basic sanitization
+    if any(sep in name for sep in ("/", "\\")) or ".." in name:
+        return JSONResponse({"error": "Invalid name provided"}, status_code=400)
+    if not name.endswith('.txt'):
+        name = f"{name}.txt"
+    candidate = codebooks_dir / name
+    if candidate.exists():
+        return JSONResponse({"error": f"Codebook '{name}' already exists"}, status_code=400)
+
     try:
-        generate_codebook_main(str(db_path), api_key, prompt)
-        codebooks_dir = Path(__file__).parent.parent.parent.parent / "data" / "codebooks"
-        if codebooks_dir.exists():
-            codebook_files = list(codebooks_dir.glob("codebook*.txt"))
-            if codebook_files:
-                # Get the latest codebook (highest number)
-                latest_codebook = max(codebook_files, key=lambda x: int(x.stem.replace("codebook", "")))
-                with open(latest_codebook, 'r') as f:
-                    codebook_content = f.read()
-                return JSONResponse({"codebook": codebook_content})
-        return JSONResponse({"error": "Codebook file not found"})
+        # Pass desired output name to generator
+        generate_codebook_main(str(db_path), api_key, prompt, output_name=name)
+        if candidate.exists():
+            with open(candidate, 'r') as f:
+                codebook_content = f.read()
+            return JSONResponse({"codebook": codebook_content})
+        return JSONResponse({"error": "Codebook file not found after generation"}, status_code=500)
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500)
 

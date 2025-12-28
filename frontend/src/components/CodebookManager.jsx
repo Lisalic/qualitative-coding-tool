@@ -15,7 +15,12 @@ export default function CodebookManager({ onViewCodebook }) {
       const response = await fetch("/api/list-codebooks");
       if (!response.ok) throw new Error("Failed to fetch codebooks");
       const data = await response.json();
-      setCodebooks(data.codebooks);
+      // ensure metadata fields exist for each codebook
+      const enriched = (data.codebooks || []).map((cb) => ({
+        ...cb,
+        metadata: cb.metadata || {},
+      }));
+      setCodebooks(enriched);
     } catch (err) {
       console.error("Error fetching codebooks:", err);
       setError("Failed to load codebooks");
@@ -74,13 +79,71 @@ export default function CodebookManager({ onViewCodebook }) {
     setNewName("");
   };
 
+  const formatMetaText = (cb) => {
+    // prefer explicit metadata.characters (or variants)
+    const meta = cb.metadata || {};
+    const metaChars = meta.characters ?? meta.char_count ?? meta.chars ?? null;
+    const charCount =
+      metaChars != null
+        ? metaChars
+        : cb.content?.length ?? cb.codebook?.length ?? cb.text?.length ?? null;
+
+    const date =
+      meta.date_created && meta.date_created > 0
+        ? (() => {
+            try {
+              return new Date(meta.date_created * 1000).toLocaleString();
+            } catch (e) {
+              return null;
+            }
+          })()
+        : null;
+
+    if (charCount == null && !date) return "No metadata available";
+
+    const parts = [];
+    if (charCount != null)
+      parts.push(`${charCount.toLocaleString()} characters`);
+    if (date) parts.push(date);
+    return parts.join(" • ");
+  };
+
+  const getCharText = (cb) => {
+    const meta = cb.metadata || {};
+    const metaChars = meta.characters ?? meta.char_count ?? meta.chars ?? null;
+    const charCount =
+      metaChars != null
+        ? metaChars
+        : cb.content?.length ?? cb.codebook?.length ?? cb.text?.length ?? 0;
+    return `${charCount.toLocaleString()} characters`;
+  };
+
+  const getDateText = (cb) => {
+    const meta = cb.metadata || {};
+    const ts = meta.date_created;
+    if (!ts || ts <= 0) return "";
+    try {
+      return new Date(ts * 1000).toLocaleString();
+    } catch (e) {
+      return "Unknown";
+    }
+  };
+
   return (
     <div>
       {codebooks.length > 0 && (
         <div className="database-section">
           <div className="database-selection">
-            <h2>Manage Codebooks</h2>
-            <p>Manage your generated codebooks:</p>
+            <h1
+              style={{
+                textAlign: "center",
+                fontSize: "28px",
+                fontWeight: "600",
+                margin: "0 0 30px 0",
+              }}
+            >
+              Manage Codebooks
+            </h1>
             <div className="database-list">
               {codebooks.map((cb) => (
                 <div key={cb.id} className="database-item">
@@ -104,11 +167,39 @@ export default function CodebookManager({ onViewCodebook }) {
                     </div>
                   ) : (
                     <>
-                      <span>{cb.name}</span>
+                      <div className="database-info">
+                        <strong>{cb.name}</strong>
+                        <div className="database-metadata">
+                          <div className="metadata-row">
+                            <span>{getCharText(cb)}</span>
+                          </div>
+                          <div className="metadata-row">
+                            <span>{getDateText(cb)}</span>
+                          </div>
+                        </div>
+                      </div>
                       <div className="database-actions">
                         <button
                           onClick={() => onViewCodebook(cb.id)}
-                          className="edit-btn"
+                          style={{
+                            backgroundColor: "#000000",
+                            color: "#ffffff",
+                            border: "1px solid #ffffff",
+                            padding: "12px 24px",
+                            fontSize: "16px",
+                            cursor: "pointer",
+                            borderRadius: "4px",
+                            transition: "all 0.2s",
+                            marginRight: "10px",
+                          }}
+                          onMouseOver={(e) => {
+                            e.target.style.backgroundColor = "#ffffff";
+                            e.target.style.color = "#000000";
+                          }}
+                          onMouseOut={(e) => {
+                            e.target.style.backgroundColor = "#000000";
+                            e.target.style.color = "#ffffff";
+                          }}
                         >
                           View
                         </button>
@@ -118,8 +209,8 @@ export default function CodebookManager({ onViewCodebook }) {
                             backgroundColor: "#000000",
                             color: "#ffffff",
                             border: "1px solid #ffffff",
-                            padding: "0.5rem 0.75rem",
-                            fontSize: "0.9rem",
+                            padding: "12px 24px",
+                            fontSize: "16px",
                             cursor: "pointer",
                             borderRadius: "4px",
                             transition: "all 0.2s",
@@ -150,8 +241,8 @@ export default function CodebookManager({ onViewCodebook }) {
                             backgroundColor: "#000000",
                             color: "#ffffff",
                             border: "1px solid #ffffff",
-                            padding: "0.5rem 0.75rem",
-                            fontSize: "0.9rem",
+                            padding: "12px 24px",
+                            fontSize: "16px",
                             cursor: "pointer",
                             borderRadius: "4px",
                             transition: "all 0.2s",

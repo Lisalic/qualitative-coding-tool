@@ -262,7 +262,7 @@ ANALYTICAL SUMMARY:
 
 
 
-def main(db_path, api_key, prompt=""):    
+def main(db_path, api_key, prompt="", output_name=None):    
     try:
         POSTS_CONTENT = load_posts_content(db_path)
         if not POSTS_CONTENT:
@@ -271,23 +271,28 @@ def main(db_path, api_key, prompt=""):
         print("Generating codebook...")
         codebook = generate_codebook(POSTS_CONTENT, api_key, custom_prompt=prompt)
         
-        # Save to data/codebooks/ with incremental naming
+        # Save to data/codebooks/ with incremental naming or provided output_name
         data_dir = Path(__file__).parent.parent.parent.parent / "data"
         codebooks_dir = data_dir / "codebooks"
         codebooks_dir.mkdir(parents=True, exist_ok=True)
         
-        # Find the next codebook number
-        existing_codebooks = list(codebooks_dir.glob("codebook*.txt"))
-        numbers = []
-        for cb in existing_codebooks:
-            try:
-                num = int(cb.stem.replace("codebook", ""))
-                numbers.append(num)
-            except ValueError:
-                pass
-        next_num = max(numbers) + 1 if numbers else 1
-        
-        codebook_path = codebooks_dir / f"codebook{next_num}.txt"
+        # If an output_name was provided, use it; otherwise use incremental naming
+        if output_name:
+            # ensure extension
+            out_name = output_name if output_name.endswith('.txt') else f"{output_name}.txt"
+            codebook_path = codebooks_dir / out_name
+        else:
+            existing_codebooks = list(codebooks_dir.glob("codebook*.txt"))
+            numbers = []
+            for cb in existing_codebooks:
+                try:
+                    num = int(cb.stem.replace("codebook", ""))
+                    numbers.append(num)
+                except ValueError:
+                    pass
+            next_num = max(numbers) + 1 if numbers else 1
+            codebook_path = codebooks_dir / f"codebook{next_num}.txt"
+
         write_to_file(str(codebook_path), codebook)
         print(f"Codebook generated and saved to {codebook_path}")
         

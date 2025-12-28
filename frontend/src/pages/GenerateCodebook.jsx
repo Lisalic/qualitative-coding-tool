@@ -101,6 +101,11 @@ export default function GenerateCodebook() {
       if (formData.prompt) {
         requestData.append("prompt", formData.prompt);
       }
+      // Require a name for the generated codebook
+      if (!formData.name || !formData.name.trim()) {
+        throw new Error("Please provide a name for the generated codebook");
+      }
+      requestData.append("name", formData.name.trim());
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 60000);
@@ -164,16 +169,32 @@ export default function GenerateCodebook() {
         "Enter a custom prompt to guide the codebook generation. Leave empty for default behavior.",
       rows: 4,
     },
+    {
+      id: "name",
+      label: "Codebook Name",
+      type: "text",
+      value: "",
+      placeholder: "my-codebook",
+    },
   ];
 
   return (
     <>
       <Navbar />
       <div className="home-container">
-        <div className="page-layout">
-          <div className="form-section">
-            <div className="form-wrapper">
-              <h1>Generate Codebook</h1>
+        <div className="tool-page-layout">
+          <div className="left-section">
+            <div className="file-upload">
+              <h1
+                style={{
+                  textAlign: "center",
+                  fontSize: "28px",
+                  fontWeight: "600",
+                  margin: "0 0 10px 0",
+                }}
+              >
+                Generate Codebook
+              </h1>
 
               <div className="action-buttons">
                 <button onClick={handleViewCodebook} className="view-button">
