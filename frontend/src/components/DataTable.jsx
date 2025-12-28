@@ -13,7 +13,9 @@ export default function DataTable({
   const [currentDatabase, setCurrentDatabase] = useState(database);
   const [selectedEntry, setSelectedEntry] = useState(null);
   const [showModal, setShowModal] = useState(false);
-  const [limit, setLimit] = useState(50);
+  const [limit, setLimit] = useState(10);
+  const [searchTerm, setSearchTerm] = useState("");
+  const MAX_SEARCH_FETCH = 100000000; // when searching, fetch up to this many rows
 
   const fetchEntries = async () => {
     if (!currentDatabase || currentDatabase.trim() === "") {
@@ -26,8 +28,9 @@ export default function DataTable({
       setError("");
       setLoading(true);
 
+      const fetchLimit = (searchTerm || "").trim() ? MAX_SEARCH_FETCH : limit;
       const response = await fetch(
-        `/api/database-entries/?limit=${limit}&database=${currentDatabase}`
+        `/api/database-entries/?limit=${fetchLimit}&database=${currentDatabase}`
       );
 
       if (!response.ok) {
@@ -56,7 +59,7 @@ export default function DataTable({
 
   useEffect(() => {
     fetchEntries();
-  }, [currentDatabase, limit]);
+  }, [currentDatabase, limit, searchTerm]);
 
   const handleRowClick = (entry, type) => {
     setSelectedEntry({ ...entry, type });
@@ -68,10 +71,59 @@ export default function DataTable({
     setSelectedEntry(null);
   };
 
+  const displayDbName =
+    currentDatabase && currentDatabase.trim()
+      ? currentDatabase.replace(/\.db$/i, "")
+      : title;
+
+  let filteredSubmissions = [];
+  let filteredComments = [];
+  if (dbEntries) {
+    const q = (searchTerm || "").trim().toLowerCase();
+    if (q) {
+      filteredSubmissions = (dbEntries.submissions || []).filter((sub) => {
+        return (
+          (sub.title && sub.title.toLowerCase().includes(q)) ||
+          (sub.selftext && sub.selftext.toLowerCase().includes(q)) ||
+          (sub.subreddit && sub.subreddit.toLowerCase().includes(q)) ||
+          (sub.author && sub.author.toLowerCase().includes(q))
+        );
+      });
+      filteredComments = (dbEntries.comments || []).filter((c) => {
+        return (
+          (c.body && c.body.toLowerCase().includes(q)) ||
+          (c.subreddit && c.subreddit.toLowerCase().includes(q)) ||
+          (c.author && c.author.toLowerCase().includes(q))
+        );
+      });
+    } else {
+      filteredSubmissions = dbEntries.submissions || [];
+      filteredComments = dbEntries.comments || [];
+    }
+    // Limit displayed results to the requested `limit`
+    if (Array.isArray(filteredSubmissions)) {
+      filteredSubmissions = filteredSubmissions.slice(0, limit);
+    }
+    if (Array.isArray(filteredComments)) {
+      filteredComments = filteredComments.slice(0, limit);
+    }
+  }
+
   return (
     <div className="data-table-container">
-      <div className="table-header">
-        <h1>{title}</h1>
+      <div
+        className="table-header"
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+        }}
+      >
+        <h1 style={{ margin: 0, textAlign: "center" }}>
+          {currentDatabase && currentDatabase.trim()
+            ? `Database: ${displayDbName}`
+            : title}
+        </h1>
       </div>
 
       {error && <p className="error-message">{error}</p>}
@@ -105,27 +157,51 @@ export default function DataTable({
             </p>
           )}
 
-          <div className="limit-selector">
-            <label htmlFor="entry-limit">Show entries: </label>
-            <select
-              id="entry-limit"
-              value={limit}
-              onChange={(e) => setLimit(Number(e.target.value))}
-              className="limit-select"
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: "1rem",
+              width: "100%",
+            }}
+          >
+            <div
+              style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}
             >
-              <option value={10}>10</option>
-              <option value={25}>25</option>
-              <option value={50}>50</option>
-              <option value={100}>100</option>
-              <option value={200}>200</option>
-            </select>
+              <div className="limit-selector">
+                <label htmlFor="entry-limit">Show entries: </label>
+                <select
+                  id="entry-limit"
+                  value={limit}
+                  onChange={(e) => setLimit(Number(e.target.value))}
+                  className="limit-select"
+                >
+                  <option value={10}>10</option>
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                  <option value={200}>200</option>
+                </select>
+              </div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center" }}>
+              <input
+                type="text"
+                className="search-input"
+                placeholder="Search posts/comments..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                style={{ textAlign: "left" }}
+              />
+            </div>
           </div>
 
           {dbEntries.message && (
             <p className="info-message">{dbEntries.message}</p>
           )}
 
-          {dbEntries.submissions.length > 0 && (
+          {filteredSubmissions.length > 0 && (
             <div className="table-section">
               <h3>Sample Posts ({limit})</h3>
               <div className="table-wrapper">
@@ -149,7 +225,7 @@ export default function DataTable({
                     </tr>
                   </thead>
                   <tbody>
-                    {dbEntries.submissions.map((sub) => (
+                    {filteredSubmissions.map((sub) => (
                       <tr
                         key={sub.id}
                         onClick={() => handleRowClick(sub, "submission")}
@@ -177,7 +253,7 @@ export default function DataTable({
             </div>
           )}
 
-          {dbEntries.comments.length > 0 && (
+          {filteredComments.length > 0 && (
             <div className="table-section">
               <h3>Sample Comments ({limit})</h3>
               <div className="table-wrapper">
@@ -192,7 +268,7 @@ export default function DataTable({
                     </tr>
                   </thead>
                   <tbody>
-                    {dbEntries.comments.map((comment) => (
+                    {filteredComments.map((comment) => (
                       <tr
                         key={comment.id}
                         onClick={() => handleRowClick(comment, "comment")}
