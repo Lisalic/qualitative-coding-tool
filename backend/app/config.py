@@ -1,10 +1,10 @@
 from pathlib import Path
 from pydantic_settings import BaseSettings
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent  # Project root
-REDDIT_DATABASE_PATH = PROJECT_ROOT / "data" / "reddit_data.db"
-DATABASE_DIR = PROJECT_ROOT / "data" / "databases"
-FILTERED_DATABASE_DIR = PROJECT_ROOT / "data" / "filtered_data"
+BACKEND_ROOT = Path(__file__).resolve().parent.parent  # backend folder
+REDDIT_DATABASE_PATH = BACKEND_ROOT / "data" / "reddit_data.db"
+DATABASE_DIR = BACKEND_ROOT / "data" / "databases"
+FILTERED_DATABASE_DIR = BACKEND_ROOT / "data" / "filtered_databases"
 
 
 class Settings(BaseSettings):

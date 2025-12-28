@@ -272,7 +272,7 @@ def main(db_path, api_key, prompt="", output_name=None):
         codebook = generate_codebook(POSTS_CONTENT, api_key, custom_prompt=prompt)
         
         # Save to data/codebooks/ with incremental naming or provided output_name
-        data_dir = Path(__file__).parent.parent.parent.parent / "data"
+        data_dir = Path(__file__).parent.parent.parent / "data"
         codebooks_dir = data_dir / "codebooks"
         codebooks_dir.mkdir(parents=True, exist_ok=True)
         

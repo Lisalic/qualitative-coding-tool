@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import Navbar from "../components/Navbar";
+import SelectionList from "../components/SelectionList";
 import DataTable from "../components/DataTable";
 import "../styles/Data.css";
 
@@ -53,23 +54,17 @@ export default function Data() {
     <>
       <Navbar showBack={true} />
       <div className="data-container">
-        <div className="database-selector">
-          {databaseItems.map((item) => {
-            const itemId = item;
-            const displayName = item.replace(".db", "");
-            return (
-              <button
-                key={itemId}
-                className={`db-button ${
-                  selectedDatabase === itemId ? "active" : ""
-                }`}
-                onClick={() => setSelectedDatabase(itemId)}
-              >
-                {displayName}
-              </button>
-            );
-          })}
-        </div>
+        <SelectionList
+          items={databaseItems.map((d) => ({
+            id: d,
+            name: d.replace(".db", ""),
+          }))}
+          selectedId={selectedDatabase}
+          onSelect={(id) => setSelectedDatabase(id)}
+          className="database-selector"
+          buttonClass="db-button"
+          emptyMessage="No databases available"
+        />
         <DataTable title={getTitle()} database={selectedDatabase} />
       </div>
     </>

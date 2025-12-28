@@ -146,9 +146,18 @@ def get_database_metadata(db_path):
 @router.get("/list-filtered-databases/")
 async def list_filtered_databases():
     filtered_database_dir = Path(settings.filtered_database_dir)
+    # Debug logging to help identify why files might not be listed
+    try:
+        print(f"[DEBUG] list_filtered_databases -> resolved: {filtered_database_dir}")
+        print(f"[DEBUG] exists: {filtered_database_dir.exists()}")
+        if filtered_database_dir.exists():
+            print(f"[DEBUG] contents: {[p.name for p in filtered_database_dir.iterdir()]}")
+    except Exception as e:
+        print(f"[DEBUG] error inspecting filtered_database_dir: {e}")
+
     if not filtered_database_dir.exists():
         return JSONResponse({"databases": []})
-    
+
     databases = [f.name for f in filtered_database_dir.iterdir() if f.is_file() and f.name.endswith('.db')]
     return JSONResponse({"databases": databases})
 
@@ -329,7 +338,7 @@ async def rename_database(old_name: str = Form(...), new_name: str = Form(...)):
 
 @router.get("/codebook")
 async def get_codebook(codebook_id: str = Query(None)):
-    codebooks_dir = Path(__file__).parent.parent.parent.parent / "data" / "codebooks"
+    codebooks_dir = Path(__file__).parent.parent.parent / "data" / "codebooks"
     if codebooks_dir.exists():
         if codebook_id:
             target_file = codebooks_dir / f"{codebook_id}.txt"
@@ -351,7 +360,7 @@ async def get_codebook(codebook_id: str = Query(None)):
 
 @router.get("/list-codebooks")
 async def list_codebooks():
-    codebooks_dir = Path(__file__).parent.parent.parent.parent / "data" / "codebooks"
+    codebooks_dir = Path(__file__).parent.parent.parent / "data" / "codebooks"
     if codebooks_dir.exists():
         codebook_files = list(codebooks_dir.glob("*.txt"))
         codebooks = []
@@ -376,7 +385,7 @@ async def list_codebooks():
 
 @router.post("/rename-codebook/")
 async def rename_codebook(old_id: str = Form(...), new_id: str = Form(...)):
-    codebooks_dir = Path(__file__).parent.parent.parent.parent / "data" / "codebooks"
+    codebooks_dir = Path(__file__).parent.parent.parent / "data" / "codebooks"
     if not codebooks_dir.exists():
         return JSONResponse({"error": "Codebooks directory not found"}, status_code=404)
     
@@ -398,7 +407,7 @@ async def rename_codebook(old_id: str = Form(...), new_id: str = Form(...)):
 
 @router.post("/save-codebook/")
 async def save_codebook(codebook_id: str = Form(...), content: str = Form(...)):
-    codebooks_dir = Path(__file__).parent.parent.parent.parent / "data" / "codebooks"
+    codebooks_dir = Path(__file__).parent.parent.parent / "data" / "codebooks"
     codebooks_dir.mkdir(parents=True, exist_ok=True)
     
     codebook_file = codebooks_dir / f"{codebook_id}.txt"
@@ -413,7 +422,7 @@ async def save_codebook(codebook_id: str = Form(...), content: str = Form(...)):
 
 @router.get("/list-coded-data")
 async def list_coded_data():
-    coded_data_dir = Path(__file__).parent.parent.parent.parent / "data" / "coded_data"
+    coded_data_dir = Path(__file__).parent.parent.parent / "data" / "coded_data"
     if coded_data_dir.exists():
         coded_files = list(coded_data_dir.glob("*.txt"))
         coded_data = []
@@ -427,7 +436,7 @@ async def list_coded_data():
 
 @router.get("/coded-data/{coded_id}")
 async def get_coded_data(coded_id: str):
-    coded_data_dir = Path(__file__).parent.parent.parent.parent / "data" / "coded_data"
+    coded_data_dir = Path(__file__).parent.parent.parent / "data" / "coded_data"
     coded_file = coded_data_dir / f"{coded_id}.txt"
     if coded_file.exists():
         with open(coded_file, 'r') as f:
@@ -437,9 +446,23 @@ async def get_coded_data(coded_id: str):
         return JSONResponse({"error": f"Coded data {coded_id} not found"}, status_code=404)
 
 
+@router.post("/save-coded-data/")
+async def save_coded_data(coded_id: str = Form(...), content: str = Form(...)):
+    coded_data_dir = Path(__file__).parent.parent.parent / "data" / "coded_data"
+    coded_data_dir.mkdir(parents=True, exist_ok=True)
+
+    coded_file = coded_data_dir / f"{coded_id}.txt"
+    try:
+        with open(coded_file, 'w') as f:
+            f.write(content)
+        return JSONResponse({"message": f"Coded data {coded_id} saved successfully"})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @router.get("/classification-report")
 async def get_classification_report():
-    report_path = Path(__file__).parent.parent.parent.parent / "data" / "classification_report.txt"
+    report_path = Path(__file__).parent.parent.parent / "data" / "classification_report.txt"
     if report_path.exists():
         with open(report_path, 'r') as f:
             report_content = f.read()
@@ -610,7 +633,7 @@ async def generate_codebook(database: str = Form("original"), api_key: str = For
         return JSONResponse({"error": f"Database not found. Please import data first."}, status_code=404)
     
     # Validate name
-    codebooks_dir = Path(__file__).parent.parent.parent.parent / "data" / "codebooks"
+    codebooks_dir = Path(__file__).parent.parent.parent / "data" / "codebooks"
     codebooks_dir.mkdir(parents=True, exist_ok=True)
 
     if not name or not name.strip():
