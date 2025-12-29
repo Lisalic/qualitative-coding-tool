@@ -193,9 +193,9 @@ def save_filtered_posts_to_db(posts_list, output_db_path=None) -> bool:
 
 
 def main(api_key: str, prompt: str, db_path: str = None, output_db_path: str = None):
-    # Allow overriding the database path; default to reddit_data.db for backwards compatibility
+    # Require explicit database path; legacy reddit_data.db fallback removed
     if not db_path:
-        db_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "reddit_data.db")
+        raise ValueError("db_path is required. Legacy reddit_data.db fallback is removed; provide an explicit db_path")
 
     if not os.path.exists(db_path):
         print(f"Error: {db_path} not found. Please import data first.")

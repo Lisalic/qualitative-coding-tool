@@ -219,8 +219,7 @@ def import_from_zst_file(file_path, db_path=None, subreddit_filter=None, data_ty
     file_path = str(file_path)
 
     if db_path is None:
-        project_root = Path(__file__).resolve().parents[2]
-        db_path = project_root / 'reddit_data.db'
+        raise ValueError("db_path is required. Provide an explicit path instead of relying on legacy reddit_data.db")
 
     db_path = Path(db_path)
     conn = create_database(db_path)
@@ -261,7 +260,8 @@ def import_from_zst_file(file_path, db_path=None, subreddit_filter=None, data_ty
 
 def main():
     project_root = Path(__file__).resolve().parents[2]
-    db_path = project_root / 'data' / 'reddit_data.db'
+    # Legacy default removed: require explicit db_path when running as a script
+    raise FileNotFoundError(f"Legacy reddit_data.db is not supported. Please provide a target db_path. Tried: {project_root / 'data' / 'reddit_data.db'}")
 
     conn = create_database(db_path)
     

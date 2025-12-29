@@ -27,7 +27,8 @@ from codebook_apply import main as apply_codebook_main
 
 router = APIRouter()
 
-DB_PATH = Path(settings.reddit_db_path)
+# Legacy reddit DB path used by older scripts. Resolve from project root instead
+project_root = Path(__file__).resolve().parent.parent
 
 
 @router.post("/upload-zst/")
@@ -565,9 +566,9 @@ async def get_database_entries(limit: int = 10, database: str = Query(..., descr
     elif database == "filtered":
         db_path = Path(settings.filtered_database_dir) / "filtered_data.db"
     elif database == "codebook":
-        db_path = DB_PATH.parent / "codebook.db"
+        db_path = project_root / "data" / "codebook.db"
     elif database == "coding":
-        db_path = DB_PATH.parent / "codeddata.db"
+        db_path = project_root / "data" / "codeddata.db"
     else:
         raise HTTPException(status_code=400, detail=f"Unknown database type: {database}")
 
@@ -644,7 +645,7 @@ async def get_database_entries(limit: int = 10, database: str = Query(..., descr
 
 @router.post("/filter-data/")
 async def filter_data(api_key: str = Form(...), prompt: str = Form(...), database: str = Form(None), name: str = Form(...)):
-    # Resolve database path similar to other endpoints; if not provided, use settings.reddit_db_path
+    # Resolve database path similar to other endpoints; database must be provided or exist in uploads
     if database and database.endswith('.db'):
         filtered_db_path = Path(settings.filtered_database_dir) / database
         if filtered_db_path.exists():
@@ -654,7 +655,7 @@ async def filter_data(api_key: str = Form(...), prompt: str = Form(...), databas
     elif database in ("filtered_data", "filtered"):
         db_path = Path(settings.filtered_database_dir) / "filtered_data.db"
     else:
-        db_path = Path(settings.reddit_db_path)
+        return JSONResponse({"error": "No database specified. Please provide a database name."}, status_code=400)
 
     if not db_path.exists():
         return JSONResponse({"error": f"Database not found: {db_path}. Please upload data first."}, status_code=404)
@@ -700,11 +701,11 @@ async def generate_codebook(database: str = Form("original"), api_key: str = For
     elif database == "filtered":
         db_path = Path(settings.filtered_database_dir) / "filtered_data.db"
     elif database == "codebook":
-        db_path = DB_PATH.parent / "codebook.db"
+        db_path = project_root / "data" / "codebook.db"
     elif database == "coding":
-        db_path = DB_PATH.parent / "codeddata.db"
-    else:  # "original"
-        db_path = DB_PATH
+        db_path = project_root / "data" / "codeddata.db"
+    else:
+        return JSONResponse({"error": "No database specified. Please provide a database name."}, status_code=400)
     
     if not db_path.exists():
         return JSONResponse({"error": f"Database not found. Please import data first."}, status_code=404)
@@ -756,11 +757,11 @@ async def apply_codebook(
     elif database == "filtered":
         db_path = Path(settings.filtered_database_dir) / "filtered_data.db"
     elif database == "codebook":
-        db_path = DB_PATH.parent / "codebook.db"
+        db_path = project_root / "data" / "codebook.db"
     elif database == "coding":
-        db_path = DB_PATH.parent / "codeddata.db"
-    else:  # "original"
-        db_path = DB_PATH
+        db_path = project_root / "data" / "codeddata.db"
+    else:
+        return JSONResponse({"error": "No database specified. Please provide a database name."}, status_code=400)
     
     if not db_path.exists():
         db_name = "Database"
@@ -784,13 +785,13 @@ async def get_comments_for_submission(submission_id: str, database: str = Query(
     if database.endswith('.db'):
         db_path = Path(settings.database_dir) / database
     elif database == "filtered":
-        db_path = DB_PATH.parent / "filtered_data.db"
+        db_path = project_root / "data" / "filtered_data.db"
     elif database == "codebook":
-        db_path = DB_PATH.parent / "codebook.db"
+        db_path = project_root / "data" / "codebook.db"
     elif database == "coding":
-        db_path = DB_PATH.parent / "codeddata.db"
-    else:  # "original"
-        db_path = DB_PATH
+        db_path = project_root / "data" / "codeddata.db"
+    else:
+        return JSONResponse({"error": "No database specified. Please provide a database name."}, status_code=400)
 
     if not db_path.exists():
         return JSONResponse({"error": f"Database not found: {database}"}, status_code=404)
