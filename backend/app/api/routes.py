@@ -4,7 +4,17 @@ import sys
 import json
 import tempfile
 from pathlib import Path
-from fastapi import APIRouter, File, HTTPException, UploadFile, Form, Query
+from fastapi import APIRouter, File, HTTPException, UploadFile, Form, Query, Depends
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+import hashlib
+import os
+import binascii
+import uuid
+from datetime import datetime
+
+from app.database import get_db, AuthUser
 from fastapi.responses import JSONResponse
 
 from app.config import settings
@@ -288,6 +298,73 @@ async def merge_databases(databases: str = Form(...), name: str = Form(...)):
         print(f"Error closing merged database: {e}")
     
     return JSONResponse({"message": f"Databases merged into '{name}' successfully"})
+
+
+
+class RegisterRequest(BaseModel):
+    email: str
+    password: str
+
+
+def _hash_password(password: str) -> str:
+    """Hash the password using PBKDF2-HMAC-SHA256. Returns salt$iterations$hashhex"""
+    salt = os.urandom(16)
+    iterations = 100_000
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+    return f"{binascii.hexlify(salt).decode()}${iterations}${binascii.hexlify(dk).decode()}"
+
+
+def _verify_password(stored: str, provided: str) -> bool:
+    """Verify a stored password of format salt$iterations$hashhex against a provided password."""
+    try:
+        salt_hex, iterations_s, hash_hex = stored.split("$")
+        salt = binascii.unhexlify(salt_hex)
+        iterations = int(iterations_s)
+        dk = binascii.unhexlify(hash_hex)
+        test_dk = hashlib.pbkdf2_hmac("sha256", provided.encode("utf-8"), salt, iterations)
+        return binascii.hexlify(test_dk) == binascii.hexlify(dk)
+    except Exception:
+        return False
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+@router.post("/login/")
+def login(payload: LoginRequest, db: Session = Depends(get_db)):
+    user = db.query(AuthUser).filter(AuthUser.email == payload.email).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    if not _verify_password(user.hashed_password, payload.password):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    # On success, return minimal user info. In production return a JWT.
+    return JSONResponse({"id": str(user.id), "email": user.email})
+
+
+@router.post("/register/")
+def register(payload: RegisterRequest, db: Session = Depends(get_db)):
+    # Check if email already exists
+    existing = db.query(AuthUser).filter(AuthUser.email == payload.email).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    new_id = uuid.uuid4()
+    hashed = _hash_password(payload.password)
+
+    user = AuthUser(id=new_id, email=payload.email, hashed_password=hashed, date_created=datetime.utcnow())
+    db.add(user)
+    try:
+        db.commit()
+        db.refresh(user)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return JSONResponse({"id": str(user.id), "email": user.email})
 
 
 @router.delete("/delete-database/{db_name}")

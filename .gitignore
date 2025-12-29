@@ -46,3 +46,6 @@ lerna-debug.log*
 Thumbs.db
 
 # Logs
+
+# Maintenance scripts 
+backend/scripts/update_database.py

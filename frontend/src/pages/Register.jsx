@@ -25,11 +25,28 @@ const Register = () => {
       return;
     }
 
-    setMessage("Registration successful!");
-    setMessageType("success");
-    setTimeout(() => {
-      navigate("/login");
-    }, 1000);
+    // POST credentials to backend registration endpoint
+    fetch("/api/register/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || "Registration failed");
+        }
+        return res.json();
+      })
+      .then((data) => {
+        setMessage("Registration successful!");
+        setMessageType("success");
+        setTimeout(() => navigate("/login"), 1000);
+      })
+      .catch((err) => {
+        setMessage(err.message || "Registration failed");
+        setMessageType("error");
+      });
   };
 
   return (

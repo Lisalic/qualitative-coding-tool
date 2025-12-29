@@ -17,12 +17,29 @@ const Login = () => {
       setMessageType("error");
       return;
     }
-
-    setMessage("Login successful!");
-    setMessageType("success");
-    setTimeout(() => {
-      navigate("/home");
-    }, 1000);
+    fetch("/api/login/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || "Login failed");
+        }
+        return res.json();
+      })
+      .then((data) => {
+        setMessage("Login successful!");
+        setMessageType("success");
+        // store minimal user info
+        localStorage.setItem("qc_user", JSON.stringify(data));
+        setTimeout(() => navigate("/home"), 500);
+      })
+      .catch((err) => {
+        setMessage(err.message || "Login failed");
+        setMessageType("error");
+      });
   };
 
   return (
