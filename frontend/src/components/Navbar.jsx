@@ -7,12 +7,31 @@ function Navbar({ showBack, onBack }) {
   const navigate = useNavigate();
   const [apiKey, setApiKey] = useState("");
   const [showApiInput, setShowApiInput] = useState(false);
+  const [isAuth, setIsAuth] = useState(false);
 
   useEffect(() => {
     const savedKey = localStorage.getItem("apiKey");
     if (savedKey) {
       setApiKey(savedKey);
     }
+    // Check authentication status
+    fetch("/api/me/", { credentials: "include" })
+      .then((r) => {
+        if (r.ok) setIsAuth(true);
+        else setIsAuth(false);
+      })
+      .catch(() => setIsAuth(false));
+    // Listen for global auth changes (login/register/logout)
+    const handler = () => {
+      fetch("/api/me/", { credentials: "include" })
+        .then((r) => {
+          if (r.ok) setIsAuth(true);
+          else setIsAuth(false);
+        })
+        .catch(() => setIsAuth(false));
+    };
+    window.addEventListener("auth-changed", handler);
+    return () => window.removeEventListener("auth-changed", handler);
   }, []);
 
   const handleSaveApiKey = () => {
@@ -61,6 +80,25 @@ function Navbar({ showBack, onBack }) {
               className="api-toggle-btn"
             >
               {apiKey ? "API Key Set" : "Set API Key"}
+            </button>
+          )}
+          {isAuth && (
+            <button
+              className="logout-btn"
+              onClick={async () => {
+                try {
+                  await fetch("/api/logout/", {
+                    method: "POST",
+                    credentials: "include",
+                  });
+                } catch (e) {
+                  // ignore
+                }
+                setIsAuth(false);
+                navigate("/");
+              }}
+            >
+              Logout
             </button>
           )}
         </div>

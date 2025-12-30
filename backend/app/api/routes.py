@@ -612,6 +612,14 @@ def rename_project(request: Request, schema_name: str = Form(...), display_name:
     return JSONResponse({"message": "Project renamed", "id": str(proj.id), "display_name": proj.display_name})
 
 
+@router.post("/logout/")
+def logout():
+    resp = JSONResponse({"message": "Logged out"})
+    # clear the HttpOnly cookie by setting an expired cookie
+    resp.set_cookie("access_token", "", httponly=True, samesite="lax", max_age=0)
+    return resp
+
+
 @router.get("/codebook")
 async def get_codebook(codebook_id: str = Query(None)):
     codebooks_dir = Path(__file__).parent.parent.parent / "data" / "codebooks"

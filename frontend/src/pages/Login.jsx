@@ -33,6 +33,10 @@ const Login = () => {
       .then((data) => {
         setMessage("Login successful!");
         setMessageType("success");
+        // notify other components (Navbar) that auth state changed
+        try {
+          window.dispatchEvent(new Event("auth-changed"));
+        } catch (e) {}
         setTimeout(() => navigate("/home"), 500);
       })
       .catch((err) => {

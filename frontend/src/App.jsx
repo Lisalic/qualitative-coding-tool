@@ -94,6 +94,15 @@ function App() {
               </ProtectedRoute>
             }
           />
+          {/* Catch-all: protect all other routes and redirect unauthenticated users to '/' */}
+          <Route
+            path="*"
+            element={
+              <ProtectedRoute>
+                <Home />
+              </ProtectedRoute>
+            }
+          />
         </Routes>
       </div>
     </Router>

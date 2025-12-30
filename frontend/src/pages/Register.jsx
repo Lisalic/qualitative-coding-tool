@@ -42,7 +42,10 @@ const Register = () => {
       .then((data) => {
         setMessage("Registration successful!");
         setMessageType("success");
-        setTimeout(() => navigate("/login"), 1000);
+        try {
+          window.dispatchEvent(new Event("auth-changed"));
+        } catch (e) {}
+        setTimeout(() => navigate("/home"), 1000);
       })
       .catch((err) => {
         setMessage(err.message || "Registration failed");

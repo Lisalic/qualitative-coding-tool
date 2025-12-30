@@ -49,6 +49,22 @@
   right: 20px;
 }
 
+.logout-btn {
+  background-color: transparent;
+  color: #ffffff;
+  border: 1px solid #ffffff;
+  padding: 6px 10px;
+  margin-left: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.logout-btn:hover {
+  background-color: #ffffff;
+  color: #000000;
+}
+
 .api-input-group {
   display: flex;
   align-items: center;
