@@ -259,34 +259,7 @@ def import_from_zst_file(file_path, db_path=None, subreddit_filter=None, data_ty
     return stats
 
 def main():
-    project_root = Path(__file__).resolve().parents[2]
-    # Legacy default removed: require explicit db_path when running as a script
-    raise FileNotFoundError(f"Legacy reddit_data.db is not supported. Please provide a target db_path. Tried: {project_root / 'data' / 'reddit_data.db'}")
-
-    conn = create_database(db_path)
-    
-    submission_files = []
-    comment_files = []
-    
-    for root, dirs, files in os.walk('zst_files'):
-        for file in files:
-            file_path = os.path.join(root, file)
-            if file.endswith('_submissions.zst'):
-                submission_files.append(file_path)
-            elif file.endswith('_comments.zst'):
-                comment_files.append(file_path)
-    
-    for file_path in submission_files:
-        import_submissions(conn, file_path)
-    
-    for file_path in comment_files:
-        import_comments(conn, file_path)
-    
-    cursor = conn.cursor()
-    cursor.execute('SELECT COUNT(*) FROM submissions')
-    cursor.execute('SELECT COUNT(*) FROM comments')
-    
-    conn.close()
+    raise FileNotFoundError(f"Shouldn't be used directly. No code at all.")
 
 if __name__ == '__main__':
     main()

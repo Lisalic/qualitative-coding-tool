@@ -22,11 +22,10 @@ from backend.app.auth import create_access_token, decode_access_token
 
 from backend.app.config import settings
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../scripts'))
-from import_db import import_from_zst_file
-from filter_db import main as filter_database_with_ai
-from codebook_generator import main as generate_codebook_main
-from codebook_apply import main as apply_codebook_main
+from backend.scripts.import_db import import_from_zst_file
+from backend.scripts.filter_db import main as filter_database_with_ai
+from backend.scripts.codebook_generator import main as generate_codebook_main
+from backend.scripts.codebook_apply import main as apply_codebook_main
 from backend.app.services import migrate_sqlite_file
 
 router = APIRouter()
@@ -58,10 +57,9 @@ async def upload_zst_file(
             print("Invalid subreddit JSON")
             raise HTTPException(status_code=400, detail="Invalid subreddits format")
 
-    # Process data type. Accept 'posts' as an alias for legacy 'submissions'.
-    allowed = ("submissions", "comments", "posts")
+    allowed = ("comments", "posts")
     if data_type not in allowed:
-        raise HTTPException(status_code=400, detail="data_type must be 'submissions' (or 'posts') or 'comments'")
+        raise HTTPException(status_code=400, detail="data_type must be 'posts' or 'comments'")
     import_data_type = "submissions" if data_type == "posts" else data_type
     print(f"Data type: {import_data_type}")
 
@@ -162,18 +160,14 @@ def get_database_metadata(db_path):
         conn = sqlite3.connect(str(db_path))
         cursor = conn.cursor()
         
-        # Get submission count
         cursor.execute("SELECT COUNT(*) FROM submissions")
         submission_count = cursor.fetchone()[0]
         
-        # Get comment count
         cursor.execute("SELECT COUNT(*) FROM comments")
         comment_count = cursor.fetchone()[0]
         
         conn.close()
         
-        # Get file creation date
-        import os
         creation_time = os.path.getctime(str(db_path))
         
         return {
