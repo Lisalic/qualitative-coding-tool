@@ -21,6 +21,7 @@ const Login = () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password }),
+      credentials: "include",
     })
       .then(async (res) => {
         if (!res.ok) {
@@ -32,8 +33,6 @@ const Login = () => {
       .then((data) => {
         setMessage("Login successful!");
         setMessageType("success");
-        // store minimal user info
-        localStorage.setItem("qc_user", JSON.stringify(data));
         setTimeout(() => navigate("/home"), 500);
       })
       .catch((err) => {

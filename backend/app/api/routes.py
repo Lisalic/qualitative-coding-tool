@@ -14,10 +14,12 @@ import binascii
 import uuid
 from datetime import datetime
 
-from app.database import get_db, AuthUser
+from backend.app.database import get_db, AuthUser
 from fastapi.responses import JSONResponse
+from fastapi import Request
+from backend.app.auth import create_access_token, decode_access_token
 
-from app.config import settings
+from backend.app.config import settings
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../scripts'))
 from import_db import import_from_zst_file
@@ -342,8 +344,11 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     if not _verify_password(user.hashed_password, payload.password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    # On success, return minimal user info. In production return a JWT.
-    return JSONResponse({"id": str(user.id), "email": user.email})
+    token = create_access_token({"sub": str(user.id), "email": user.email})
+    resp = JSONResponse({"id": str(user.id), "email": user.email})
+    max_age = int(settings.jwt_access_token_expire_minutes) * 60
+    resp.set_cookie("access_token", token, httponly=True, samesite="lax", max_age=max_age)
+    return resp
 
 
 @router.post("/register/")
@@ -364,6 +369,40 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(exc))
+
+    token = create_access_token({"sub": str(user.id), "email": user.email})
+    resp = JSONResponse({"id": str(user.id), "email": user.email})
+    max_age = int(settings.jwt_access_token_expire_minutes) * 60
+    resp.set_cookie("access_token", token, httponly=True, samesite="lax", max_age=max_age)
+    return resp
+
+
+
+@router.get("/me/")
+def me(request: Request, db: Session = Depends(get_db)):
+    # Try cookie first then Authorization header
+    token = None
+    token = request.cookies.get("access_token")
+    if not token:
+        auth = request.headers.get("Authorization")
+        if auth and auth.lower().startswith("bearer "):
+            token = auth.split(None, 1)[1]
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        payload = decode_access_token(token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+
+    user = db.query(AuthUser).filter(AuthUser.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
 
     return JSONResponse({"id": str(user.id), "email": user.email})
 

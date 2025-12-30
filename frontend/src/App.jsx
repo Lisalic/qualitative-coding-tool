@@ -11,6 +11,7 @@ import ViewCoding from "./pages/ViewCoding";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import ProtectedRoute from "./components/ProtectedRoute";
 import "./App.css";
 
 function App() {
@@ -21,15 +22,78 @@ function App() {
           <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
-          <Route path="/home" element={<Home />} />
-          <Route path="/import" element={<Import />} />
-          <Route path="/data" element={<Data />} />
-          <Route path="/filter" element={<Filter />} />
-          <Route path="/filtered-data" element={<FilteredData />} />
-          <Route path="/codebook-generate" element={<GenerateCodebook />} />
-          <Route path="/codebook-view" element={<ViewCodebook />} />
-          <Route path="/codebook-apply" element={<ApplyCodebook />} />
-          <Route path="/coding-view" element={<ViewCoding />} />
+          <Route
+            path="/home"
+            element={
+              <ProtectedRoute>
+                <Home />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/import"
+            element={
+              <ProtectedRoute>
+                <Import />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/data"
+            element={
+              <ProtectedRoute>
+                <Data />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/filter"
+            element={
+              <ProtectedRoute>
+                <Filter />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/filtered-data"
+            element={
+              <ProtectedRoute>
+                <FilteredData />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/codebook-generate"
+            element={
+              <ProtectedRoute>
+                <GenerateCodebook />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/codebook-view"
+            element={
+              <ProtectedRoute>
+                <ViewCodebook />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/codebook-apply"
+            element={
+              <ProtectedRoute>
+                <ApplyCodebook />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/coding-view"
+            element={
+              <ProtectedRoute>
+                <ViewCoding />
+              </ProtectedRoute>
+            }
+          />
         </Routes>
       </div>
     </Router>
