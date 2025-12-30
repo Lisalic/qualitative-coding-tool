@@ -15,7 +15,9 @@ import binascii
 import uuid
 from datetime import datetime
 
-from backend.app.database import get_db, AuthUser, Project, engine
+from backend.app.database import get_db, AuthUser, Project, engine, SessionLocal
+from backend.app.databasemanager import DatabaseManager
+import pandas as pd
 from fastapi.responses import JSONResponse
 from fastapi import Request
 from backend.app.auth import create_access_token, decode_access_token
@@ -137,21 +139,53 @@ async def upload_zst_file(
 
 
 @router.get("/list-databases/")
-async def list_databases():
+async def list_databases(request: Request, db: Session = Depends(get_db)):
+    """List filesystem databases and, if authenticated, include user's Postgres projects.
+    This helps the client determine whether a desired merge name conflicts with an existing
+    project/schema owned by the user.
+    """
     database_dir = Path(settings.database_dir)
     if not database_dir.exists():
-        return JSONResponse({"databases": []})
-    
-    databases = []
-    for f in database_dir.iterdir():
-        if f.is_file() and f.name.endswith('.db'):
-            metadata = get_database_metadata(f)
-            databases.append({
-                "name": f.name,
-                "metadata": metadata
-            })
-    
-    return JSONResponse({"databases": databases})
+        files = []
+    else:
+        files = []
+        for f in database_dir.iterdir():
+            if f.is_file() and f.name.endswith('.db'):
+                metadata = get_database_metadata(f)
+                files.append({
+                    "name": f.name,
+                    "metadata": metadata,
+                })
+
+    projects_list = []
+    # Attempt to authenticate and include projects owned by the user
+    token = None
+    try:
+        token = request.cookies.get("access_token")
+        if not token:
+            auth = request.headers.get("Authorization")
+            if auth and auth.lower().startswith("bearer "):
+                token = auth.split(None, 1)[1]
+    except Exception:
+        token = None
+
+    if token:
+        try:
+            payload = decode_access_token(token)
+            user_id = payload.get("sub")
+            if user_id:
+                projects = db.query(Project).filter(Project.user_id == user_id).all()
+                for p in projects:
+                    projects_list.append({
+                        "id": str(p.id),
+                        "display_name": p.display_name,
+                        "schema_name": p.schema_name,
+                        "project_type": p.project_type,
+                    })
+        except Exception:
+            return JSONResponse({"databases": files, "projects": None})
+
+    return JSONResponse({"databases": files, "projects": projects_list})
 
 
 def get_database_metadata(db_path):
@@ -204,7 +238,7 @@ async def list_filtered_databases():
 
 
 @router.post("/merge-databases/")
-async def merge_databases(databases: str = Form(...), name: str = Form(...)):
+async def merge_databases(request: Request, databases: str = Form(...), name: str = Form(...)):
     try:
         db_list = json.loads(databases)
         print(f"Merging databases: {db_list} into {name}")
@@ -214,122 +248,186 @@ async def merge_databases(databases: str = Form(...), name: str = Form(...)):
     if not name or not name.strip():
         raise HTTPException(status_code=400, detail="Database name is required")
 
-    database_dir = Path(settings.database_dir)
-    print(f"Database directory: {database_dir}")
-    
-    # Ensure name has .db extension
-    if not name.endswith('.db'):
-        name = f"{name}.db"
-    
-    merged_path = database_dir / name
-    print(f"Merged database path: {merged_path}")
-    
-    # Check if database with this name already exists
-    if merged_path.exists():
-        raise HTTPException(status_code=400, detail=f"Database '{name}' already exists")
-
-    # Create new merged DB
+    token = None
     try:
-        merged_conn = sqlite3.connect(str(merged_path))
-        print("Created merged database connection")
-    except Exception as e:
-        print(f"Error creating merged database: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to create database: {str(e)}")
-    merged_conn.execute('''
-        CREATE TABLE submissions (
-        id TEXT PRIMARY KEY,
-        subreddit TEXT,
-        title TEXT,
-        selftext TEXT,
-        author TEXT,
-        created_utc INTEGER,
-        score INTEGER,
-        num_comments INTEGER
-        )
-    ''')
-    merged_conn.execute('''
-        CREATE TABLE comments (
-            id TEXT PRIMARY KEY,
-            subreddit TEXT,
-            body TEXT,
-            author TEXT,
-            created_utc INTEGER,
-            score INTEGER,
-            link_id TEXT,
-            parent_id TEXT
-        )
-    ''')
-    merged_conn.commit()
+        token = request.cookies.get("access_token")
+        if not token:
+            auth = request.headers.get("Authorization")
+            if auth and auth.lower().startswith("bearer "):
+                token = auth.split(None, 1)[1]
+    except Exception:
+        token = None
 
-    for db_name in db_list:
-        db_path = database_dir / db_name
-        print(f"Processing database: {db_name}, path: {db_path}, exists: {db_path.exists()}")
-        if not db_path.exists():
-            print(f"Database {db_name} does not exist, skipping")
-            continue
-        
+    if not token:
+        raise HTTPException(status_code=401, detail="Authentication required to merge databases")
+
+    try:
+        payload = decode_access_token(token)
+        user_id = payload.get("sub")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+
+    # ensure user doesn't already have a project with same display/schema
+    db_check = SessionLocal()
+    try:
+        existing = db_check.query(Project).filter(
+            Project.user_id == user_id,
+        ).filter(
+            (Project.display_name == name) | (Project.schema_name == name)
+        ).first()
+        if existing:
+            raise HTTPException(status_code=400, detail=f"A project with name '{name}' already exists")
+    finally:
         try:
-            conn = sqlite3.connect(str(db_path))
-            cursor = conn.cursor()
-            print(f"Connected to {db_name}")
-            
-            # Check if submissions table exists and copy data
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='submissions'")
-            if cursor.fetchone():
-                cursor.execute('SELECT COUNT(*) FROM submissions')
-                sub_count = cursor.fetchone()[0]
-                print(f"Found {sub_count} submissions in {db_name}")
-                cursor.execute('SELECT * FROM submissions')
-                submissions = cursor.fetchall()
-                print(f"Retrieved {len(submissions)} submissions from {db_name}")
-                try:
-                    merged_conn.executemany('INSERT OR IGNORE INTO submissions VALUES (?, ?, ?, ?, ?, ?, ?, ?)', submissions)
-                    print(f"Inserted submissions from {db_name}")
-                except Exception as e:
-                    print(f"Error inserting submissions from {db_name}: {e}")
-            else:
-                print(f"No submissions table in {db_name}")
-            
-            # Check if comments table exists and copy data
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='comments'")
-            if cursor.fetchone():
-                cursor.execute('SELECT COUNT(*) FROM comments')
-                comment_count = cursor.fetchone()[0]
-                print(f"Found {comment_count} comments in {db_name}")
-                cursor.execute('SELECT * FROM comments')
-                comments = cursor.fetchall()
-                print(f"Retrieved {len(comments)} comments from {db_name}")
-                try:
-                    merged_conn.executemany('INSERT OR IGNORE INTO comments VALUES (?, ?, ?, ?, ?, ?, ?, ?)', comments)
-                    print(f"Inserted comments from {db_name}")
-                except Exception as e:
-                    print(f"Error inserting comments from {db_name}: {e}")
-            else:
-                print(f"No comments table in {db_name}")
-            
-            conn.close()
-            print(f"Successfully processed {db_name}")
-        except Exception as e:
-            print(f"Error merging {db_name}: {e}")
-            import traceback
-            traceback.print_exc()
-            continue
-    
-    try:
-        merged_conn.commit()
-        print("Committed merged database")
-    except Exception as e:
-        print(f"Error committing merged database: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to commit merged database: {str(e)}")
-    
-    try:
-        merged_conn.close()
-        print("Closed merged database connection")
-    except Exception as e:
-        print(f"Error closing merged database: {e}")
-    
-    return JSONResponse({"message": f"Databases merged into '{name}' successfully"})
+            db_check.close()
+        except Exception:
+            pass
 
+    # Create a new Postgres schema and insert rows directly from the listed sqlite DBs
+    unique_id = str(uuid.uuid4()).replace('-', '')[:12]
+    schema_name = f"proj_{unique_id}"
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
+
+        total_rows = 0
+        tables_written = {}
+
+        database_dir = Path(settings.database_dir)
+
+        for db_name in db_list:
+            # Only support Postgres project schema sources (proj_...)
+            if isinstance(db_name, str) and db_name.startswith("proj_"):
+                schema_src = db_name
+                try:
+                    with engine.connect() as conn:
+                        tbls = conn.execute(text("SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = :schema"), {"schema": schema_src}).fetchall()
+                        src_tables = [r[0] for r in tbls]
+                except Exception as e:
+                    print(f"Error listing tables for Postgres schema {schema_src}: {e}")
+                    continue
+
+                for table_name in src_tables:
+                    try:
+                        # Read from Postgres schema.table into dataframe
+                        df = pd.read_sql_query(text(f'SELECT * FROM "{schema_src}"."{table_name}"'), con=engine)
+                    except Exception as e:
+                        print(f"Failed to read table {schema_src}.{table_name} from Postgres: {e}")
+                        continue
+
+                    # skip empty dataframes
+                    if df is None or df.shape[0] == 0:
+                        tables_written[table_name] = 0
+                        continue
+
+                    # Check if target table exists
+                    try:
+                        with engine.connect() as conn:
+                            target_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": f"{schema_name}.{table_name}"}).scalar()
+                    except Exception as e:
+                        print(f"Error checking target table {schema_name}.{table_name}: {e}")
+                        target_exists = None
+
+                    # If target doesn't exist, create it by replacing
+                    if not target_exists:
+                        try:
+                            df.to_sql(name=table_name, con=engine, schema=schema_name, if_exists='replace', index=False, method='multi')
+                            with engine.connect() as conn:
+                                res = conn.execute(text(f'SELECT COUNT(*) FROM "{schema_name}"."{table_name}"'))
+                                pg_count = int(res.scalar() or 0)
+                        except Exception as e:
+                            print(f"Error creating table {schema_name}.{table_name}: {e}")
+                            continue
+                    else:
+                        # Target exists: insert only rows not already present using a temporary table + EXCEPT
+                        tmp_name = f"tmp_merge_{uuid.uuid4().hex[:8]}"
+
+                        # determine common columns between df and target
+                        try:
+                            with engine.connect() as conn:
+                                cols = [r[0] for r in conn.execute(text("SELECT column_name FROM information_schema.columns WHERE table_schema=:schema AND table_name=:table"), {"schema": schema_name, "table": table_name}).fetchall()]
+                        except Exception as e:
+                            print(f"Error fetching columns for target {schema_name}.{table_name}: {e}")
+                            cols = list(df.columns)
+
+                        common_cols = [c for c in df.columns if c in cols]
+                        if not common_cols:
+                            print(f"No common columns for {schema_src}.{table_name} -> {schema_name}.{table_name}, skipping")
+                            tables_written[table_name] = 0
+                            continue
+
+                        cols_quoted = ",".join([f'"{c}"' for c in common_cols])
+
+                        try:
+                            # write source rows to temporary table in target schema
+                            df[common_cols].to_sql(name=tmp_name, con=engine, schema=schema_name, if_exists='replace', index=False, method='multi')
+                        except Exception as e:
+                            print(f"Error creating temporary table {schema_name}.{tmp_name}: {e}")
+                            try:
+                                with engine.begin() as conn:
+                                    conn.execute(text(f'DROP TABLE IF EXISTS "{schema_name}"."{tmp_name}"'))
+                            except Exception:
+                                pass
+                            tables_written[table_name] = 0
+                            continue
+
+                        try:
+                            with engine.begin() as conn:
+                                before = conn.execute(text(f'SELECT COUNT(*) FROM "{schema_name}"."{table_name}"')).scalar() or 0
+                                insert_sql = text(f'INSERT INTO "{schema_name}"."{table_name}" ({cols_quoted}) SELECT {cols_quoted} FROM "{schema_name}"."{tmp_name}" EXCEPT SELECT {cols_quoted} FROM "{schema_name}"."{table_name}"')
+                                conn.execute(insert_sql)
+                                after = conn.execute(text(f'SELECT COUNT(*) FROM "{schema_name}"."{table_name}"')).scalar() or 0
+                                pg_count = int(after - before)
+                        except Exception as e:
+                            print(f"Error inserting deduplicated rows into {schema_name}.{table_name}: {e}")
+                            pg_count = 0
+                        finally:
+                            try:
+                                with engine.begin() as conn:
+                                    conn.execute(text(f'DROP TABLE IF EXISTS "{schema_name}"."{tmp_name}"'))
+                            except Exception:
+                                pass
+
+                    total_rows += pg_count
+                    tables_written[table_name] = pg_count
+
+                continue
+
+            # Non-Postgres sources are not supported in this Postgres-only flow
+            print(f"Skipping non-Postgres source {db_name}; only proj_... schema names are supported")
+            continue
+
+        if total_rows == 0:
+            # nothing to migrate: drop empty schema and inform client
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE'))
+            except Exception:
+                pass
+            return JSONResponse({"message": "No rows found in selected databases; nothing migrated", "database": name, "total_submissions": 0, "total_comments": 0, "project_migrated": False})
+
+        # Create project record and table metadata
+        with DatabaseManager() as dm:
+            proj = dm.projects.create(user_id=uuid.UUID(user_id), display_name=name, schema_name=schema_name, project_type='raw_data')
+            for tbl, cnt in tables_written.items():
+                dm.project_tables.add_table_metadata(project_id=proj.id, table_name=tbl, row_count=cnt)
+
+        return JSONResponse({"message": f"Merged into project schema '{schema_name}'", "project": {"id": str(proj.id), "schema_name": schema_name, "display_name": name}, "project_migrated": True})
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # Attempt to drop the schema on failure
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE'))
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 class RegisterRequest(BaseModel):
@@ -744,7 +842,7 @@ async def save_coded_data(coded_id: str = Form(...), content: str = Form(...)):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@router.get("/classification-report")
+@router.get("/classification-report") #look to remove
 async def get_classification_report():
     report_path = Path(__file__).parent.parent.parent / "data" / "classification_report.txt"
     if report_path.exists():

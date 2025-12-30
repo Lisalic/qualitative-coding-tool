@@ -34,16 +34,37 @@ def migrate_sqlite_file(user_id: uuid.UUID, file_path: str, display_name: str, p
 
         for table_name in tables:
             print(f"    Moving table: {table_name}")
-            df = pd.read_sql_query(f"SELECT * FROM {table_name}", sqlite_conn)
-            df.to_sql(
-                name=table_name,
-                con=engine,
-                schema=schema_name,
-                if_exists="replace",
-                index=False,
-            )
+            try:
+                df = pd.read_sql_query(f"SELECT * FROM {table_name}", sqlite_conn)
+            except Exception as e:
+                print(f"      Failed to read table {table_name} from sqlite: {e}")
+                df = pd.DataFrame()
+
+            try:
+                # Write to Postgres in the target schema
+                df.to_sql(
+                    name=table_name,
+                    con=engine,
+                    schema=schema_name,
+                    if_exists="replace",
+                    index=False,
+                    method="multi",
+                )
+            except Exception as e:
+                # Log error but continue with next table
+                print(f"      Error writing table {table_name} to Postgres schema {schema_name}: {e}")
+
+            # Verify inserted row count directly from Postgres and record metadata
+            try:
+                with engine.connect() as conn:
+                    res = conn.execute(text(f'SELECT COUNT(*) FROM "{schema_name}"."{table_name}"'))
+                    pg_count = int(res.scalar() or 0)
+            except Exception as e:
+                print(f"      Could not verify row count for {schema_name}.{table_name}: {e}")
+                pg_count = len(df)
+
             db.project_tables.add_table_metadata(
-                project_id=project.id, table_name=table_name, row_count=len(df)
+                project_id=project.id, table_name=table_name, row_count=pg_count
             )
 
         sqlite_conn.close()
