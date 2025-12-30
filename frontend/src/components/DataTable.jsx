@@ -29,22 +29,34 @@ export default function DataTable({
       setLoading(true);
 
       const fetchLimit = (searchTerm || "").trim() ? MAX_SEARCH_FETCH : limit;
-      const response = await fetch(
-        `/api/database-entries/?limit=${fetchLimit}&database=${currentDatabase}`
+      let response;
+      // If this 'database' looks like a project schema (created as proj_<id> or proj_<id>.db)
+      const isProjectSchema = /^proj_[A-Za-z0-9_]+(?:\.db)?$/.test(
+        currentDatabase || ""
       );
+      if (currentDatabase && isProjectSchema) {
+        response = await fetch(
+          `/api/project-entries/?limit=${fetchLimit}&schema=${encodeURIComponent(
+            currentDatabase
+          )}`,
+          { credentials: "include" }
+        );
+      } else {
+        response = await fetch(
+          `/api/database-entries/?limit=${fetchLimit}&database=${encodeURIComponent(
+            currentDatabase
+          )}`
+        );
+      }
 
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(`Failed to fetch database entries: ${response.status}`);
+        throw new Error(
+          `Failed to fetch database entries: ${response.status} ${text || ""}`
+        );
       }
 
-      const text = await response.text();
-
-      if (!text) {
-        throw new Error("Empty response from server");
-      }
-
-      const data = JSON.parse(text);
+      const data = await response.json();
       setDbEntries(data);
     } catch (err) {
       setError(`Error: ${err.message}`);

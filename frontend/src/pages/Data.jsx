@@ -10,6 +10,7 @@ export default function Data() {
   const location = useLocation();
   const [databases, setDatabases] = useState([]);
   const [selectedDatabase, setSelectedDatabase] = useState("");
+  const [userProjects, setUserProjects] = useState(null);
 
   useEffect(() => {
     fetchDatabases();
@@ -30,6 +31,26 @@ export default function Data() {
 
   const fetchDatabases = async () => {
     try {
+      // Check if user is logged in
+      const meResp = await fetch("/api/me/", { credentials: "include" });
+      if (meResp.ok) {
+        // user is authenticated; fetch their raw_data projects
+        const projResp = await fetch(
+          "/api/my-projects/?project_type=raw_data",
+          {
+            credentials: "include",
+          }
+        );
+        if (!projResp.ok) throw new Error("Failed to fetch user projects");
+        const projData = await projResp.json();
+        // projects come as objects with display_name and schema_name
+        setUserProjects(projData.projects || []);
+        // represent them in the existing `databases` state as schema_name for compatibility
+        setDatabases((projData.projects || []).map((p) => p.schema_name));
+        return;
+      }
+
+      // Not authenticated — fall back to listing uploaded databases
       const response = await fetch("/api/list-databases/");
       if (!response.ok) throw new Error("Failed to fetch databases");
       const data = await response.json();
@@ -39,7 +60,7 @@ export default function Data() {
       );
       setDatabases(dbNames);
     } catch (err) {
-      console.error("Error fetching databases:", err);
+      console.error("Error fetching databases or projects:", err);
     }
   };
 
@@ -57,13 +78,18 @@ export default function Data() {
         <SelectionList
           items={databaseItems.map((d) => ({
             id: d,
-            name: d.replace(".db", ""),
+            name: userProjects
+              ? userProjects.find((p) => p.schema_name === d)?.display_name ||
+                d.replace(".db", "")
+              : d.replace(".db", ""),
           }))}
           selectedId={selectedDatabase}
           onSelect={(id) => setSelectedDatabase(id)}
           className="database-selector"
           buttonClass="db-button"
-          emptyMessage="No databases available"
+          emptyMessage={
+            userProjects ? "No projects available" : "No databases available"
+          }
         />
         <DataTable title={getTitle()} database={selectedDatabase} />
       </div>

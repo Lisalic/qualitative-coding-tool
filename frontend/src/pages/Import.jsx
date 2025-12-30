@@ -12,6 +12,7 @@ export default function Import() {
   const [error, setError] = useState("");
   const [uploadData, setUploadData] = useState(null);
   const [databases, setDatabases] = useState([]);
+  const [userProjects, setUserProjects] = useState(null);
   const [selectedDatabases, setSelectedDatabases] = useState([]);
   const [loading, setLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
@@ -25,6 +26,27 @@ export default function Import() {
 
   const fetchDatabases = async () => {
     try {
+      // Check authentication and fetch user projects if logged in
+      const meResp = await fetch("/api/me/", { credentials: "include" });
+      if (meResp.ok) {
+        const projResp = await fetch(
+          "/api/my-projects/?project_type=raw_data",
+          {
+            credentials: "include",
+          }
+        );
+        if (!projResp.ok) throw new Error("Failed to fetch user projects");
+        const projData = await projResp.json();
+        setUserProjects(projData.projects || []);
+        // normalize databases to objects with `name` and `display_name` so ManageDatabase can render
+        const normalized = (projData.projects || []).map((p) => ({
+          name: p.schema_name,
+          display_name: p.display_name,
+        }));
+        setDatabases(normalized);
+        return;
+      }
+
       const response = await fetch("/api/list-databases/");
       if (!response.ok) throw new Error("Failed to fetch databases");
       const data = await response.json();

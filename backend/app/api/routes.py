@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, UploadFile, Form, Query, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 import hashlib
 import os
@@ -14,7 +15,7 @@ import binascii
 import uuid
 from datetime import datetime
 
-from backend.app.database import get_db, AuthUser
+from backend.app.database import get_db, AuthUser, Project, engine
 from fastapi.responses import JSONResponse
 from fastapi import Request
 from backend.app.auth import create_access_token, decode_access_token
@@ -407,6 +408,42 @@ def me(request: Request, db: Session = Depends(get_db)):
     return JSONResponse({"id": str(user.id), "email": user.email})
 
 
+@router.get("/my-projects/")
+def my_projects(request: Request, project_type: str = Query("raw_data"), db: Session = Depends(get_db)):
+    # Authenticate same as /me/
+    token = request.cookies.get("access_token")
+    if not token:
+        auth = request.headers.get("Authorization")
+        if auth and auth.lower().startswith("bearer "):
+            token = auth.split(None, 1)[1]
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        payload = decode_access_token(token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+
+    projects = db.query(Project).filter(Project.user_id == user_id, Project.project_type == project_type).all()
+    result = [
+        {
+            "id": str(p.id),
+            "display_name": p.display_name,
+            "schema_name": p.schema_name,
+            "project_type": p.project_type,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+        }
+        for p in projects
+    ]
+
+    return JSONResponse({"projects": result})
+
+
 @router.delete("/delete-database/{db_name}")
 async def delete_database(db_name: str):
     database_dir = Path(settings.database_dir)
@@ -679,6 +716,66 @@ async def get_database_entries(limit: int = 10, database: str = Query(..., descr
         "total_comments": com_count,
         "database": database,
         "date_created": os.path.getctime(str(db_path)) if db_path.exists() and os.path.getctime(str(db_path)) > 0 else None
+    })
+
+
+@router.get("/project-entries/")
+def project_entries(schema: str = Query(..., description="Project schema name"), limit: int = 10):
+    # Allow optional .db suffix (frontend may supply schema.db); validate and strip it.
+    import re
+    if not schema:
+        raise HTTPException(status_code=400, detail="Missing schema name")
+    schema = schema.strip()
+    if schema.endswith(".db"):
+        schema = schema[:-3]
+
+    # Validate schema name (allow only letters, numbers, and underscore, must start with letter)
+    if not re.match(r"^[A-Za-z][A-Za-z0-9_]*$", schema):
+        raise HTTPException(status_code=400, detail="Invalid schema name")
+
+    # Build queries for submissions and comments inside the provided schema
+    submissions = []
+    comments = []
+    sub_count = 0
+    com_count = 0
+
+    try:
+        with engine.connect() as conn:
+            # Check if submissions table exists in schema
+            q = text("SELECT to_regclass(:tbl)")
+            subs_tbl = f"{schema}.submissions"
+            comments_tbl = f"{schema}.comments"
+
+            subs_exists = conn.execute(text(f"SELECT to_regclass(:tbl)"), {"tbl": subs_tbl}).scalar()
+            comm_exists = conn.execute(text(f"SELECT to_regclass(:tbl)"), {"tbl": comments_tbl}).scalar()
+
+            if subs_exists:
+                sub_count = conn.execute(text(f"SELECT COUNT(*) FROM {schema}.submissions")).scalar() or 0
+                rows = conn.execute(text(f"SELECT * FROM {schema}.submissions LIMIT :lim"), {"lim": limit}).fetchall()
+                # convert rows to dicts
+                submissions = [dict(r._mapping) for r in rows]
+
+            if comm_exists:
+                com_count = conn.execute(text(f"SELECT COUNT(*) FROM {schema}.comments")).scalar() or 0
+                rows = conn.execute(text(f"SELECT * FROM {schema}.comments LIMIT :lim"), {"lim": limit}).fetchall()
+                comments = [dict(r._mapping) for r in rows]
+
+    except Exception as exc:
+        return JSONResponse({
+            "submissions": [],
+            "comments": [],
+            "total_submissions": 0,
+            "total_comments": 0,
+            "message": f"Error reading project schema: {exc}"
+        }, status_code=500)
+
+    return JSONResponse({
+        "submissions": submissions,
+        "comments": comments,
+        "total_submissions": sub_count,
+        "total_comments": com_count,
+        "database": schema,
+        "date_created": None,
     })
 
 

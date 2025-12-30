@@ -60,7 +60,11 @@ export default function ManageDatabase({
                           checked={selectedDatabases.includes(dbName)}
                           onChange={() => onSelect(dbName)}
                         />
-                        <strong>{dbName.replace(".db", "")}</strong>
+                        <strong>
+                          {db.display_name
+                            ? db.display_name
+                            : dbName.replace(".db", "")}
+                        </strong>
                       </label>
                       {metadata && (
                         <div className="database-metadata">
