@@ -5,22 +5,26 @@ from sqlalchemy import text
 from backend.app.database import engine
 from backend.app.databasemanager import DatabaseManager
 
-def migrate_sqlite_file(user_id: uuid.UUID, file_path: str, display_name: str):
+def migrate_sqlite_file(user_id: uuid.UUID, file_path: str, display_name: str, project_type: str = "raw_data"):
     unique_id = str(uuid.uuid4()).replace("-", "")[:12]
     schema_name = f"proj_{unique_id}"
 
     print(f"--> Starting migration for '{display_name}' into schema '{schema_name}'...")
 
     with DatabaseManager() as db:
+        # create project record first (project_type may be specified)
         project = db.projects.create(
             user_id=user_id,
             display_name=display_name,
             schema_name=schema_name,
+            project_type=project_type,
         )
 
-        with engine.connect() as conn:
-            conn.execute(text(f"CREATE SCHEMA {schema_name}"))
-            conn.commit()
+        # Use a transactional begin() to ensure CREATE SCHEMA is committed
+        # and avoid calling commit() on a plain Connection.
+        with engine.begin() as conn:
+            # quote the identifier to be safe and use IF NOT EXISTS
+            conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
 
         sqlite_conn = sqlite3.connect(file_path)
         cursor = sqlite_conn.cursor()

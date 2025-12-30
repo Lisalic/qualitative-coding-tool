@@ -118,8 +118,10 @@ export default function Import() {
       return;
 
     try {
+      // Include credentials so project schema deletes (which require auth) work
       const response = await fetch(`/api/delete-database/${dbName}`, {
         method: "DELETE",
+        credentials: "include",
       });
 
       if (!response.ok) throw new Error("Failed to delete database");
@@ -140,19 +142,44 @@ export default function Import() {
     }
 
     try {
-      const formData = new FormData();
-      formData.append("old_name", oldName);
-      formData.append("new_name", newName.trim());
+      // Determine if this is a project schema (userProjects contains schema_name)
+      const isProject = (userProjects || []).some(
+        (p) =>
+          p.schema_name === oldName ||
+          p.schema_name === oldName.replace(".db", "")
+      );
 
-      const response = await fetch("/api/rename-database/", {
-        method: "POST",
-        body: formData,
-      });
+      if (isProject) {
+        const formData = new FormData();
+        // send schema_name and display_name to rename project display name
+        formData.append("schema_name", oldName);
+        formData.append("display_name", newName.trim());
 
-      if (!response.ok) throw new Error("Failed to rename database");
+        const response = await fetch("/api/rename-project/", {
+          method: "POST",
+          body: formData,
+          credentials: "include",
+        });
 
-      const data = await response.json();
-      console.log("Database renamed:", data);
+        if (!response.ok)
+          throw new Error("Failed to rename project display name");
+        const data = await response.json();
+        console.log("Project renamed:", data);
+      } else {
+        const formData = new FormData();
+        formData.append("old_name", oldName);
+        formData.append("new_name", newName.trim());
+
+        const response = await fetch("/api/rename-database/", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!response.ok) throw new Error("Failed to rename database");
+
+        const data = await response.json();
+        console.log("Database renamed:", data);
+      }
       setRenamingDb(null);
       setNewName("");
       fetchDatabases();
@@ -164,7 +191,16 @@ export default function Import() {
 
   const startRename = (dbName) => {
     setRenamingDb(dbName);
-    setNewName(dbName.replace(".db", ""));
+    // If this DB corresponds to a user project, prefill with its display_name
+    const proj = (userProjects || []).find(
+      (p) =>
+        p.schema_name === dbName || p.schema_name === dbName.replace(".db", "")
+    );
+    if (proj && proj.display_name) {
+      setNewName(proj.display_name);
+    } else {
+      setNewName(dbName.replace(".db", ""));
+    }
   };
 
   const cancelRename = () => {

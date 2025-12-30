@@ -76,6 +76,7 @@ export default function FileUpload({ onUploadSuccess, onView }) {
       const response = await fetch("/api/upload-zst/", {
         method: "POST",
         body: formData,
+        credentials: "include",
       });
       console.log("Response received:", response.status, response.statusText);
 
@@ -200,7 +201,7 @@ export default function FileUpload({ onUploadSuccess, onView }) {
                   type="radio"
                   id="data-type-submissions"
                   name="data-type"
-                  value="submissions"
+                  value="posts"
                   checked={dataType === "posts"}
                   onChange={(e) => setDataType(e.target.value)}
                   disabled={loading}

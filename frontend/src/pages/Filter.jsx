@@ -95,6 +95,7 @@ export default function Filter() {
       const response = await fetch("/api/filter-data/", {
         method: "POST",
         body: requestData,
+        credentials: "include",
       });
 
       if (!response.ok) {

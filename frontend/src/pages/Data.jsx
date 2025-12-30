@@ -66,7 +66,23 @@ export default function Data() {
 
   const getTitle = () => {
     if (!selectedDatabase) return "Select a Database";
-    return `Database: ${selectedDatabase.replace(".db", "")}`;
+    const baseName = selectedDatabase.replace(".db", "");
+    if (userProjects) {
+      const proj = userProjects.find(
+        (p) => p.schema_name === selectedDatabase || p.schema_name === baseName
+      );
+      return `Database: ${proj ? proj.display_name : baseName}`;
+    }
+    return `Database: ${baseName}`;
+  };
+
+  const getDisplayName = () => {
+    if (!selectedDatabase || !userProjects) return null;
+    const baseName = selectedDatabase.replace(".db", "");
+    const proj = userProjects.find(
+      (p) => p.schema_name === selectedDatabase || p.schema_name === baseName
+    );
+    return proj ? proj.display_name : null;
   };
 
   const databaseItems = databases;
@@ -91,7 +107,11 @@ export default function Data() {
             userProjects ? "No projects available" : "No databases available"
           }
         />
-        <DataTable title={getTitle()} database={selectedDatabase} />
+        <DataTable
+          title={getTitle()}
+          database={selectedDatabase}
+          displayName={getDisplayName()}
+        />
       </div>
     </>
   );

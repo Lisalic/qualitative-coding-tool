@@ -4,7 +4,7 @@ import sys
 import json
 import tempfile
 from pathlib import Path
-from fastapi import APIRouter, File, HTTPException, UploadFile, Form, Query, Depends
+from fastapi import APIRouter, File, HTTPException, UploadFile, Form, Query, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -27,6 +27,7 @@ from import_db import import_from_zst_file
 from filter_db import main as filter_database_with_ai
 from codebook_generator import main as generate_codebook_main
 from codebook_apply import main as apply_codebook_main
+from backend.app.services import migrate_sqlite_file
 
 router = APIRouter()
 
@@ -36,6 +37,7 @@ project_root = Path(__file__).resolve().parent.parent
 
 @router.post("/upload-zst/")
 async def upload_zst_file(
+    request: Request,
     file: UploadFile = File(...), 
     subreddits: str = Form(None),
     data_type: str = Form(...),
@@ -56,10 +58,11 @@ async def upload_zst_file(
             print("Invalid subreddit JSON")
             raise HTTPException(status_code=400, detail="Invalid subreddits format")
 
-    # Process data type
-    if data_type not in ["submissions", "comments"]:
-        raise HTTPException(status_code=400, detail="data_type must be 'submissions' or 'comments'")
-    import_data_type = data_type
+    # Process data type. Accept 'posts' as an alias for legacy 'submissions'.
+    allowed = ("submissions", "comments", "posts")
+    if data_type not in allowed:
+        raise HTTPException(status_code=400, detail="data_type must be 'submissions' (or 'posts') or 'comments'")
+    import_data_type = "submissions" if data_type == "posts" else data_type
     print(f"Data type: {import_data_type}")
 
     # Generate unique database name
@@ -87,14 +90,44 @@ async def upload_zst_file(
         os.unlink(tmp_path)
 
         count = stats['comments_imported'] if import_data_type == 'comments' else stats['submissions_imported']
-        
+        # If the request is authenticated, migrate the new DB into a per-user project
+        user_id = None
+        try:
+            token = request.cookies.get("access_token")
+            if not token:
+                auth = request.headers.get("Authorization")
+                if auth and auth.lower().startswith("bearer "):
+                    token = auth.split(None, 1)[1]
+            if token:
+                payload = decode_access_token(token)
+                user_id = payload.get("sub")
+        except Exception:
+            user_id = None
+
         response_data = {
             "status": "completed",
             "message": f"Created {db_name} with {count} {import_data_type}",
             "database": db_name,
             "file_name": file.filename,
-            "stats": stats
+            "stats": stats,
         }
+
+        # Indicate whether the request was authenticated (helps debug client behavior)
+        response_data["authenticated"] = bool(user_id)
+
+        # If authenticated, attempt to create a project and migrate the sqlite DB into a schema
+        if user_id:
+            try:
+                # use base_name as display name
+                migrate_sqlite_file(uuid.UUID(user_id), str(db_path), base_name)
+                response_data["project_migrated"] = True
+            except Exception as exc:
+                response_data["project_migrated"] = False
+                response_data["migration_error"] = str(exc)
+        else:
+            # explicitly mark that no migration was attempted due to missing auth
+            response_data["project_migrated"] = False
+
         print(f"Sending response: {response_data}")
         return JSONResponse(response_data)
         
@@ -445,21 +478,74 @@ def my_projects(request: Request, project_type: str = Query("raw_data"), db: Ses
 
 
 @router.delete("/delete-database/{db_name}")
-async def delete_database(db_name: str):
+async def delete_database(db_name: str, request: Request, db: Session = Depends(get_db)):
+    """
+    Delete a filesystem .db file or a project schema.
+    - If `db_name` ends with `.db` or corresponds to a file, delete the file.
+    - If `db_name` looks like a project schema (e.g. starts with `proj_`) and belongs
+      to the authenticated user, drop the schema and delete the `projects` row.
+    """
     database_dir = Path(settings.database_dir)
-    db_path = database_dir / db_name
-    
-    if not db_path.exists():
-        raise HTTPException(status_code=404, detail="Database not found")
-    
-    if not db_name.endswith('.db'):
-        raise HTTPException(status_code=400, detail="Invalid database name")
-    
+
+    # Normalize potential .db suffix
+    name = db_name.strip()
+    # If it's a file path request (endswith .db) try filesystem delete first
+    if name.endswith('.db'):
+        db_path = database_dir / name
+        if not db_path.exists():
+            raise HTTPException(status_code=404, detail="Database not found")
+        try:
+            db_path.unlink()
+            return JSONResponse({"message": f"Database '{name}' deleted successfully"})
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to delete database: {str(e)}")
+
+    # Otherwise treat as possible project schema name. Require auth.
+    schema = name
+    # strip accidental .db suffix if provided
+    if schema.endswith('.db'):
+        schema = schema[:-3]
+
+    # Only allow project schema deletions for safe names starting with proj_
+    if not schema.startswith('proj_'):
+        # Not a project schema and not a .db file -> invalid request
+        raise HTTPException(status_code=400, detail="Invalid database identifier")
+
+    # Authenticate: cookie first then Authorization header
+    token = request.cookies.get("access_token")
+    if not token:
+        auth = request.headers.get("Authorization")
+        if auth and auth.lower().startswith("bearer "):
+            token = auth.split(None, 1)[1]
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
     try:
-        db_path.unlink()
-        return JSONResponse({"message": f"Database '{db_name}' deleted successfully"})
+        payload = decode_access_token(token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+
+    # Find project owned by user with this schema
+    proj = db.query(Project).filter(Project.schema_name == schema, Project.user_id == user_id).first()
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found or you do not have permission")
+
+    # Drop schema in Postgres and delete project row
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+
+        db.delete(proj)
+        db.commit()
+        return JSONResponse({"message": f"Project '{proj.display_name}' and schema '{schema}' deleted"})
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to delete database: {str(e)}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to delete project/schema: {str(e)}")
 
 
 @router.post("/rename-database/")
@@ -488,6 +574,48 @@ async def rename_database(old_name: str = Form(...), new_name: str = Form(...)):
         return JSONResponse({"message": f"Database renamed from '{old_name}' to '{new_name}' successfully"})
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to rename database: {str(e)}")
+
+
+@router.post("/rename-project/")
+def rename_project(request: Request, schema_name: str = Form(...), display_name: str = Form(...), db: Session = Depends(get_db)):
+    """Rename a project's display_name. Requires authentication and ownership."""
+    # auth: cookie or Authorization header
+    token = request.cookies.get("access_token")
+    if not token:
+        auth = request.headers.get("Authorization")
+        if auth and auth.lower().startswith("bearer "):
+            token = auth.split(None, 1)[1]
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        payload = decode_access_token(token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+
+    # normalize schema name
+    schema = schema_name.strip()
+    if schema.endswith('.db'):
+        schema = schema[:-3]
+
+    proj = db.query(Project).filter(Project.schema_name == schema, Project.user_id == user_id).first()
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found or you do not have permission")
+
+    proj.display_name = display_name
+    try:
+        db.commit()
+        db.refresh(proj)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to rename project: {exc}")
+
+    return JSONResponse({"message": "Project renamed", "id": str(proj.id), "display_name": proj.display_name})
 
 
 @router.get("/codebook")
@@ -817,7 +945,36 @@ async def filter_data(api_key: str = Form(...), prompt: str = Form(...), databas
     try:
         # Pass the resolved db path and the desired output path to the filter script
         filter_database_with_ai(api_key, prompt, str(db_path), output_db_path)
-        return JSONResponse({"message": "Data filtered successfully", "output": Path(output_db_path).name})
+
+        response_payload = {"message": "Data filtered successfully", "output": Path(output_db_path).name}
+
+        # If the request is authenticated, migrate the filtered sqlite DB into a Postgres schema
+        # and mark the project_type as 'filtered_data'. This creates a project owned by the user.
+        token = None
+        try:
+            token = request.cookies.get("access_token")
+            if not token:
+                auth = request.headers.get("Authorization")
+                if auth and auth.lower().startswith("bearer "):
+                    token = auth.split(None, 1)[1]
+        except Exception:
+            token = None
+
+        if token:
+            try:
+                payload = decode_access_token(token)
+                user_id = payload.get("sub")
+                if user_id:
+                    # migrate and tag as filtered_data
+                    migrate_sqlite_file(uuid.UUID(user_id), output_db_path, name, project_type="filtered_data")
+                    response_payload["project_migrated"] = True
+                else:
+                    response_payload["project_migrated"] = False
+            except Exception as exc:
+                response_payload["project_migrated"] = False
+                response_payload["migration_error"] = str(exc)
+
+        return JSONResponse(response_payload)
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500)
 

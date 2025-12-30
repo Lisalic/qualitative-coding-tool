@@ -6,6 +6,7 @@ export default function DataTable({
   database = "",
   title = "Database Contents",
   isFilteredView = false,
+  displayName = null,
 }) {
   const [dbEntries, setDbEntries] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -85,7 +86,7 @@ export default function DataTable({
 
   const displayDbName =
     currentDatabase && currentDatabase.trim()
-      ? currentDatabase.replace(/\.db$/i, "")
+      ? displayName || currentDatabase.replace(/\.db$/i, "")
       : title;
 
   let filteredSubmissions = [];

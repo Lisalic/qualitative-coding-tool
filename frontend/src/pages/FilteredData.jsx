@@ -10,6 +10,7 @@ export default function FilteredData() {
   const location = useLocation();
   const [databases, setDatabases] = useState([]);
   const [selectedDatabase, setSelectedDatabase] = useState("");
+  const [userProjects, setUserProjects] = useState(null);
 
   useEffect(() => {
     fetchFilteredDatabases();
@@ -29,6 +30,20 @@ export default function FilteredData() {
 
   const fetchFilteredDatabases = async () => {
     try {
+      // If user is logged in, fetch their filtered_data projects
+      const meResp = await fetch("/api/me/", { credentials: "include" });
+      if (meResp.ok) {
+        const projResp = await fetch(
+          "/api/my-projects/?project_type=filtered_data",
+          { credentials: "include" }
+        );
+        if (!projResp.ok) throw new Error("Failed to fetch user projects");
+        const projData = await projResp.json();
+        setUserProjects(projData.projects || []);
+        setDatabases((projData.projects || []).map((p) => p.schema_name));
+        return;
+      }
+
       const response = await fetch("/api/list-filtered-databases/");
       if (!response.ok) throw new Error("Failed to fetch filtered databases");
       const data = await response.json();
@@ -43,7 +58,23 @@ export default function FilteredData() {
 
   const getTitle = () => {
     if (!selectedDatabase) return "Select a Database";
-    return `Database: ${selectedDatabase.replace(".db", "")}`;
+    const baseName = selectedDatabase.replace(".db", "");
+    if (userProjects) {
+      const proj = userProjects.find(
+        (p) => p.schema_name === selectedDatabase || p.schema_name === baseName
+      );
+      return `Database: ${proj ? proj.display_name : baseName}`;
+    }
+    return `Database: ${baseName}`;
+  };
+
+  const getDisplayName = () => {
+    if (!selectedDatabase || !userProjects) return null;
+    const baseName = selectedDatabase.replace(".db", "");
+    const proj = userProjects.find(
+      (p) => p.schema_name === selectedDatabase || p.schema_name === baseName
+    );
+    return proj ? proj.display_name : null;
   };
 
   const databaseItems = databases;
@@ -55,7 +86,10 @@ export default function FilteredData() {
         <SelectionList
           items={databaseItems.map((d) => ({
             id: d,
-            name: d.replace(".db", ""),
+            name: userProjects
+              ? userProjects.find((p) => p.schema_name === d)?.display_name ||
+                d.replace(".db", "")
+              : d.replace(".db", ""),
           }))}
           selectedId={selectedDatabase}
           onSelect={(id) => setSelectedDatabase(id)}
@@ -67,6 +101,7 @@ export default function FilteredData() {
           title={getTitle()}
           database={selectedDatabase}
           isFilteredView={true}
+          displayName={getDisplayName()}
         />
       </div>
     </>
