@@ -30,7 +30,7 @@ from backend.app.config import settings
 from backend.scripts.import_db import import_from_zst_file
 from backend.scripts.filter_db import main as filter_database_with_ai
 from backend.scripts.codebook_generator import main as generate_codebook_main, generate_codebook as generate_codebook_function
-from backend.scripts.codebook_apply import main as apply_codebook_main
+from backend.scripts.codebook_apply import main as apply_codebook_main, classify_posts
 from backend.app.services import migrate_sqlite_file
 
 router = APIRouter()
@@ -1321,7 +1321,6 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
         return JSONResponse({"error": "This endpoint currently expects a proj_<id> schema name"}, status_code=400)
 
     try:
-        print(f"[INFO] generate_codebook: opening schema {schema}")
         assembled = ""
         with engine.connect() as conn:
             # Check submissions table
@@ -1354,10 +1353,7 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
             else:
                 print(f"[DEBUG] generate_codebook: comments table not found in schema {schema}")
 
-        print(f"[INFO] generate_codebook: reading input - assembled length {len(assembled)}")
 
-        # Call the codebook generator with the assembled content. Use the
-        # `generate_codebook` helper which accepts the posts content.
         try:
             print("[INFO] generate_codebook: calling generate_codebook function")
             raw_out = generate_codebook_function(assembled, api_key, "", "", prompt)
@@ -1366,13 +1362,11 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
                 codebook_output = await raw_out
             else:
                 codebook_output = raw_out
-            print("[INFO] generate_codebook: generator success")
         except Exception as e:
             print(f"Error generating codebook for schema {schema}: {e}")
             traceback.print_exc()
             return JSONResponse({"error": f"Generator failed: {e}"}, status_code=500)
 
-        # Ensure string
         codebook_text = str(codebook_output or "")
 
         # Persist into a new Postgres project schema and create metadata
@@ -1400,23 +1394,18 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
             unique_id = str(uuid.uuid4()).replace('-', '')[:12]
             new_schema = f"proj_{unique_id}"
 
-            print(f"[INFO] generate_codebook: opening new schema for storage {new_schema}")
             with engine.begin() as conn:
                 conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{new_schema}"'))
                 conn.execute(text(f'CREATE TABLE IF NOT EXISTS "{new_schema}".content_store (file_text text)'))
                 conn.execute(text(f'TRUNCATE TABLE "{new_schema}".content_store'))
                 conn.execute(text(f'INSERT INTO "{new_schema}".content_store (file_text) VALUES (:file_text)'), {"file_text": codebook_text})
-            print("[INFO] generate_codebook: storing data success")
 
             # create project row and table metadata
-            print("[INFO] generate_codebook: updating project and project_tables tables")
             with DatabaseManager() as dm:
                 proj = dm.projects.create(user_id=uuid.UUID(user_id), display_name=name, schema_name=new_schema, project_type='codebook')
                 dm.project_tables.add_table_metadata(project_id=proj.id, table_name='content_store', row_count=1)
-            print("[INFO] generate_codebook: updated project and project_tables success")
 
             preview = codebook_text if len(codebook_text) <= 20000 else codebook_text[:20000] + "\n... (truncated)"
-            print("[DEBUG] generate_codebook - stored codebook preview:\n" + (preview or "<empty>"))
             return JSONResponse({"message": "Codebook generated and saved to project", "project": {"id": str(proj.id), "schema_name": new_schema, "display_name": proj.display_name}, "preview": preview})
 
         except Exception as exc:
@@ -1430,44 +1419,150 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
 
 
 @router.post("/apply-codebook/")
-async def apply_codebook(
-    database: str = Form("original"), 
-    api_key: str = Form(...), 
-    methodology: str = Form(""),
-    codebook: str = Form(...)
-):
-    # Resolve database path using same logic as database-entries endpoint
-    if database.endswith('.db'):
-        # Check if it's in the filtered directory first
-        filtered_db_path = Path(settings.filtered_database_dir) / database
-        if filtered_db_path.exists():
-            db_path = filtered_db_path
-        else:
-            db_path = Path(settings.database_dir) / database
-    elif database == "filtered_data":
-        db_path = Path(settings.filtered_database_dir) / "filtered_data.db"
-    elif database == "filtered":
-        db_path = Path(settings.filtered_database_dir) / "filtered_data.db"
-    elif database == "codebook":
-        db_path = project_root / "data" / "codebook.db"
-    elif database == "coding":
-        db_path = project_root / "data" / "codeddata.db"
-    else:
-        return JSONResponse({"error": "No database specified. Please provide a database name."}, status_code=400)
-    
-    if not db_path.exists():
-        db_name = "Database"
-        return JSONResponse({"error": f"{db_name} not found. Please import data first."}, status_code=404)
-    
+async def apply_codebook(request: Request, database: str = Form(...), codebook: str = Form(...), methodology: str = Form(""), api_key: str = Form(...)):
+    """Open the Postgres schema provided by `database`, read `submissions.title`/`selftext`
+    and `comments.body`, assemble them into a single string, print it to stdout and
+    return a preview in the response.
+    """
+    schema = (database or "").strip()
+    if schema.endswith('.db'):
+        schema = schema[:-3]
+
+    if not schema or not schema.startswith('proj_'):
+        return JSONResponse({"error": "This endpoint expects a proj_<id> schema name"}, status_code=400)
+
+    assembled = ""
     try:
-        report_path = apply_codebook_main(str(db_path), api_key, methodology, codebook)
-        if report_path and Path(report_path).exists():
-            with open(report_path, 'r') as f:
-                report_content = f.read()
-            return JSONResponse({"classification_report": report_content})
-        else:
-            return JSONResponse({"error": "Classification report not found"})
+        with engine.connect() as conn:
+            # Submissions
+            subs_tbl = f"{schema}.submissions"
+            subs_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": subs_tbl}).scalar()
+            if subs_exists:
+                rows = conn.execute(text(f'SELECT title, selftext FROM "{schema}"."submissions"')).fetchall()
+                for r in rows:
+                    try:
+                        title = r._mapping.get('title')
+                        selftext = r._mapping.get('selftext')
+                    except Exception:
+                        title = r[0] if len(r) > 0 else ""
+                        selftext = r[1] if len(r) > 1 else ""
+                    assembled += f"Title: {title or ''}\n{selftext or ''}\n\n"
+            else:
+                # submissions table missing — proceed with whatever content was found
+                pass
+
+            # Comments
+            comm_tbl = f"{schema}.comments"
+            comm_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": comm_tbl}).scalar()
+            if comm_exists:
+                rows = conn.execute(text(f'SELECT body FROM "{schema}"."comments"')).fetchall()
+                for r in rows:
+                    try:
+                        body = r._mapping.get('body')
+                    except Exception:
+                        body = r[0] if len(r) > 0 else ""
+                    assembled += f"{body or ''}\n\n"
+            else:
+                # comments table missing — proceed
+                pass
+
+
+        # Also read the codebook project's content_store.file_text and print it
+        cb_schema_raw = (codebook or "").strip()
+        codebook_text = ""
+        try:
+            # provided codebook identifier (no stdout prints)
+
+            resolved_schema = None
+            # If it's already a proj_ schema name, use it
+            if cb_schema_raw and cb_schema_raw.startswith('proj_'):
+                resolved_schema = cb_schema_raw
+            else:
+                # Try to interpret the provided value as a Project.id (UUID) and resolve schema_name
+                try:
+                    pid = uuid.UUID(cb_schema_raw)
+                    db_sess = SessionLocal()
+                    try:
+                        proj = db_sess.query(Project).filter(Project.id == pid).first()
+                        if proj:
+                            resolved_schema = proj.schema_name
+                    finally:
+                        try:
+                            db_sess.close()
+                        except Exception:
+                            pass
+                except Exception:
+                    # not a UUID / could not resolve
+                    resolved_schema = None
+
+            if resolved_schema:
+                with engine.connect() as conn:
+                    tbl_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": f"{resolved_schema}.content_store"}).scalar()
+                    if tbl_exists:
+                        res = conn.execute(text(f'SELECT file_text FROM "{resolved_schema}".content_store LIMIT 1'))
+                        row = res.fetchone()
+                        codebook_text = row[0] if row else ""
+                    else:
+                        pass
+            else:
+                pass
+        except Exception:
+            # swallow errors silently here; classification_output will indicate failures
+            pass
+
+        # Attempt classification using the provided codebook and API key
+        classification_output = ""
+        try:
+            if codebook_text and api_key:
+                classification_output = classify_posts(codebook_text, assembled, methodology or "", api_key)
+            else:
+                classification_output = "API request error"
+        except Exception:
+            classification_output = "API request error"
+
+        # Persist classification_output into a new Postgres project schema of type 'coding'
+        try:
+            # Authenticate user (cookie or Authorization header)
+            token = request.cookies.get("access_token")
+            if not token:
+                auth = request.headers.get("Authorization")
+                if auth and auth.lower().startswith("bearer "):
+                    token = auth.split(None, 1)[1]
+
+            user_id = None
+            if token:
+                try:
+                    payload = decode_access_token(token)
+                    user_id = payload.get("sub")
+                except Exception:
+                    user_id = None
+
+            if user_id:
+                unique_id = str(uuid.uuid4()).replace('-', '')[:12]
+                new_schema = f"proj_{unique_id}"
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{new_schema}"'))
+                        conn.execute(text(f'CREATE TABLE IF NOT EXISTS "{new_schema}".content_store (file_text text)'))
+                        conn.execute(text(f'TRUNCATE TABLE "{new_schema}".content_store'))
+                        conn.execute(text(f'INSERT INTO "{new_schema}".content_store (file_text) VALUES (:file_text)'), {"file_text": classification_output})
+
+                    # create project row and table metadata
+                    with DatabaseManager() as dm:
+                        proj = dm.projects.create(user_id=uuid.UUID(user_id), display_name='coding', schema_name=new_schema, project_type='coding')
+                        dm.project_tables.add_table_metadata(project_id=proj.id, table_name='content_store', row_count=1)
+                except Exception as e:
+                    print(f"Failed to persist classification project/schema: {e}")
+        except Exception:
+            # Swallow persistence/auth errors — do not fail the endpoint
+            pass
+
+        # Print and return only the classification output (no large previews)
+        print(classification_output)
+        return JSONResponse({"classification_output": classification_output})
     except Exception as exc:
+        print(f"Error reading schema {schema}: {exc}")
+        traceback.print_exc()
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 
