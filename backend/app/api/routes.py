@@ -3,6 +3,9 @@ import sqlite3
 import sys
 import json
 import tempfile
+import traceback
+import asyncio
+import inspect
 from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, UploadFile, Form, Query, Depends, Request
 from pydantic import BaseModel
@@ -26,7 +29,7 @@ from backend.app.config import settings
 
 from backend.scripts.import_db import import_from_zst_file
 from backend.scripts.filter_db import main as filter_database_with_ai
-from backend.scripts.codebook_generator import main as generate_codebook_main
+from backend.scripts.codebook_generator import main as generate_codebook_main, generate_codebook as generate_codebook_function
 from backend.scripts.codebook_apply import main as apply_codebook_main
 from backend.app.services import migrate_sqlite_file
 
@@ -1310,53 +1313,119 @@ async def filter_data(api_key: str = Form(...), prompt: str = Form(...), databas
 
 
 @router.post("/generate-codebook/")
-async def generate_codebook(database: str = Form("original"), api_key: str = Form(...), prompt: str = Form(""), name: str = Form(...)):
-    # Resolve database path using same logic as database-entries endpoint
-    if database.endswith('.db'):
-        # Check if it's in the filtered directory first
-        filtered_db_path = Path(settings.filtered_database_dir) / database
-        if filtered_db_path.exists():
-            db_path = filtered_db_path
-        else:
-            db_path = Path(settings.database_dir) / database
-    elif database == "filtered_data":
-        db_path = Path(settings.filtered_database_dir) / "filtered_data.db"
-    elif database == "filtered":
-        db_path = Path(settings.filtered_database_dir) / "filtered_data.db"
-    elif database == "codebook":
-        db_path = project_root / "data" / "codebook.db"
-    elif database == "coding":
-        db_path = project_root / "data" / "codeddata.db"
-    else:
-        return JSONResponse({"error": "No database specified. Please provide a database name."}, status_code=400)
-    
-    if not db_path.exists():
-        return JSONResponse({"error": f"Database not found. Please import data first."}, status_code=404)
-    
-    # Validate name
-    codebooks_dir = Path(__file__).parent.parent.parent / "data" / "codebooks"
-    codebooks_dir.mkdir(parents=True, exist_ok=True)
+async def generate_codebook(request: Request, database: str = Form("original"), api_key: str = Form(...), prompt: str = Form(""), name: str = Form(...)):
+    # Read a Postgres project schema, assemble submissions/comments into text, log it.
+    schema = (database or "").strip()
 
-    if not name or not name.strip():
-        return JSONResponse({"error": "A name for the codebook is required"}, status_code=400)
-    # Basic sanitization
-    if any(sep in name for sep in ("/", "\\")) or ".." in name:
-        return JSONResponse({"error": "Invalid name provided"}, status_code=400)
-    if not name.endswith('.txt'):
-        name = f"{name}.txt"
-    candidate = codebooks_dir / name
-    if candidate.exists():
-        return JSONResponse({"error": f"Codebook '{name}' already exists"}, status_code=400)
+    if not schema.startswith('proj_'):
+        return JSONResponse({"error": "This endpoint currently expects a proj_<id> schema name"}, status_code=400)
 
     try:
-        # Pass desired output name to generator
-        generate_codebook_main(str(db_path), api_key, prompt, output_name=name)
-        if candidate.exists():
-            with open(candidate, 'r') as f:
-                codebook_content = f.read()
-            return JSONResponse({"codebook": codebook_content})
-        return JSONResponse({"error": "Codebook file not found after generation"}, status_code=500)
+        print(f"[INFO] generate_codebook: opening schema {schema}")
+        assembled = ""
+        with engine.connect() as conn:
+            # Check submissions table
+            subs_tbl = f"{schema}.submissions"
+            subs_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": subs_tbl}).scalar()
+            if subs_exists:
+                rows = conn.execute(text(f'SELECT title, selftext FROM "{schema}"."submissions"')).fetchall()
+                for r in rows:
+                    try:
+                        title = r._mapping.get('title')
+                        selftext = r._mapping.get('selftext')
+                    except Exception:
+                        title = r[0] if len(r) > 0 else ""
+                        selftext = r[1] if len(r) > 1 else ""
+                    assembled += f"Title: {title or ''}\n{selftext or ''}\n\n"
+            else:
+                print(f"[DEBUG] generate_codebook: submissions table not found in schema {schema}")
+
+            # Check comments table
+            comm_tbl = f"{schema}.comments"
+            comm_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": comm_tbl}).scalar()
+            if comm_exists:
+                rows = conn.execute(text(f'SELECT body FROM "{schema}"."comments"')).fetchall()
+                for r in rows:
+                    try:
+                        body = r._mapping.get('body')
+                    except Exception:
+                        body = r[0] if len(r) > 0 else ""
+                    assembled += f"{body or ''}\n\n"
+            else:
+                print(f"[DEBUG] generate_codebook: comments table not found in schema {schema}")
+
+        print(f"[INFO] generate_codebook: reading input - assembled length {len(assembled)}")
+
+        # Call the codebook generator with the assembled content. Use the
+        # `generate_codebook` helper which accepts the posts content.
+        try:
+            print("[INFO] generate_codebook: calling generate_codebook function")
+            raw_out = generate_codebook_function(assembled, api_key, "", "", prompt)
+            # handle coroutine or synchronous return
+            if asyncio.iscoroutine(raw_out) or inspect.isawaitable(raw_out):
+                codebook_output = await raw_out
+            else:
+                codebook_output = raw_out
+            print("[INFO] generate_codebook: generator success")
+        except Exception as e:
+            print(f"Error generating codebook for schema {schema}: {e}")
+            traceback.print_exc()
+            return JSONResponse({"error": f"Generator failed: {e}"}, status_code=500)
+
+        # Ensure string
+        codebook_text = str(codebook_output or "")
+
+        # Persist into a new Postgres project schema and create metadata
+        try:
+            # Authenticate user (cookie or Authorization header)
+            token = request.cookies.get("access_token")
+            if not token:
+                auth = request.headers.get("Authorization")
+                if auth and auth.lower().startswith("bearer "):
+                    token = auth.split(None, 1)[1]
+
+            if not token:
+                return JSONResponse({"error": "Authentication required to create project"}, status_code=401)
+
+            try:
+                payload = decode_access_token(token)
+                user_id = payload.get("sub")
+            except Exception:
+                return JSONResponse({"error": "Invalid token"}, status_code=401)
+
+            if not user_id:
+                return JSONResponse({"error": "Invalid token payload"}, status_code=401)
+
+            # generate a unique schema name
+            unique_id = str(uuid.uuid4()).replace('-', '')[:12]
+            new_schema = f"proj_{unique_id}"
+
+            print(f"[INFO] generate_codebook: opening new schema for storage {new_schema}")
+            with engine.begin() as conn:
+                conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{new_schema}"'))
+                conn.execute(text(f'CREATE TABLE IF NOT EXISTS "{new_schema}".content_store (file_text text)'))
+                conn.execute(text(f'TRUNCATE TABLE "{new_schema}".content_store'))
+                conn.execute(text(f'INSERT INTO "{new_schema}".content_store (file_text) VALUES (:file_text)'), {"file_text": codebook_text})
+            print("[INFO] generate_codebook: storing data success")
+
+            # create project row and table metadata
+            print("[INFO] generate_codebook: updating project and project_tables tables")
+            with DatabaseManager() as dm:
+                proj = dm.projects.create(user_id=uuid.UUID(user_id), display_name=name, schema_name=new_schema, project_type='codebook')
+                dm.project_tables.add_table_metadata(project_id=proj.id, table_name='content_store', row_count=1)
+            print("[INFO] generate_codebook: updated project and project_tables success")
+
+            preview = codebook_text if len(codebook_text) <= 20000 else codebook_text[:20000] + "\n... (truncated)"
+            print("[DEBUG] generate_codebook - stored codebook preview:\n" + (preview or "<empty>"))
+            return JSONResponse({"message": "Codebook generated and saved to project", "project": {"id": str(proj.id), "schema_name": new_schema, "display_name": proj.display_name}, "preview": preview})
+
+        except Exception as exc:
+            print(f"Error creating project/schema for generated codebook: {exc}")
+            traceback.print_exc()
+            return JSONResponse({"error": str(exc)}, status_code=500)
     except Exception as exc:
+        print(f"Error reading Postgres schema {schema}: {exc}")
+        traceback.print_exc()
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 
