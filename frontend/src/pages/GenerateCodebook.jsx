@@ -23,16 +23,29 @@ export default function GenerateCodebook() {
 
   const fetchDatabases = async () => {
     try {
-      const response = await fetch("/api/list-databases/");
+      // include credentials so authenticated users receive their Postgres projects
+      const response = await fetch("/api/list-databases/", {
+        credentials: "include",
+      });
       if (!response.ok) throw new Error("Failed to fetch databases");
       const data = await response.json();
-      const dbNames = (data.databases || []).map((d) =>
-        typeof d === "string" ? d : d.name
-      );
-      setDatabases(dbNames);
+
+      const projectOptions = (data.projects || []).map((p) => ({
+        value: p.schema_name,
+        label: p.display_name || p.schema_name,
+        meta: p,
+      }));
+
+      const fileOptions = (data.databases || []).map((d) => {
+        const name = typeof d === "string" ? d : d.name;
+        return { value: name, label: name.replace(/\.db$/, ""), meta: d };
+      });
+
+      const combined = [...projectOptions, ...fileOptions];
+      setDatabases(combined);
       // Set default database if none selected
-      if (!database && dbNames.length > 0) {
-        setDatabase(dbNames[0]);
+      if (!database && combined.length > 0) {
+        setDatabase(combined[0].value);
       }
     } catch (err) {
       console.error("Error fetching databases:", err);
@@ -41,13 +54,38 @@ export default function GenerateCodebook() {
 
   const fetchFilteredDatabases = async () => {
     try {
-      const response = await fetch("/api/list-filtered-databases/");
+      const projResp = await fetch(
+        "/api/my-projects/?project_type=filtered_data",
+        { credentials: "include" }
+      );
+      if (projResp.ok) {
+        const projData = await projResp.json();
+        const projects = projData.projects || [];
+        const projectOptions = projects.map((p) => ({
+          value: p.schema_name,
+          label: p.display_name || p.schema_name,
+          meta: p,
+        }));
+        setFilteredDatabases(projectOptions);
+        if (databaseType === "filtered" && (!database || database === "")) {
+          if (projectOptions.length > 0) setDatabase(projectOptions[0].value);
+        }
+        return;
+      }
+
+      const response = await fetch("/api/list-filtered-databases/", {
+        credentials: "include",
+      });
       if (!response.ok) throw new Error("Failed to fetch filtered databases");
       const data = await response.json();
-      const fdNames = (data.databases || []).map((d) =>
-        typeof d === "string" ? d : d.name
-      );
-      setFilteredDatabases(fdNames);
+      const fdOptions = (data.databases || []).map((d) => {
+        const name = typeof d === "string" ? d : d.name;
+        return { value: name, label: name.replace(/\.db$/, ""), meta: d };
+      });
+      setFilteredDatabases(fdOptions);
+      if (databaseType === "filtered" && (!database || database === "")) {
+        if (fdOptions.length > 0) setDatabase(fdOptions[0].value);
+      }
     } catch (err) {
       console.error("Error fetching filtered databases:", err);
     }
@@ -64,14 +102,18 @@ export default function GenerateCodebook() {
   };
 
   const getDisplayName = (item) => {
-    return item.replace(".db", "");
+    if (!item) return "";
+    if (typeof item === "string") return item.replace(".db", "");
+    if (item.label) return item.label;
+    if (item.value) return String(item.value).replace(".db", "");
+    return "";
   };
 
   const handleDatabaseTypeChange = (type) => {
     setDatabaseType(type);
     const available = getAvailableDatabases();
     if (available.length > 0) {
-      setDatabase(available[0]);
+      setDatabase(available[0].value || available[0]);
     }
   };
 
@@ -96,27 +138,19 @@ export default function GenerateCodebook() {
       setResult(null);
 
       const requestData = new FormData();
-      requestData.append("database", database);
       requestData.append("api_key", savedApiKey);
-      if (formData.prompt) {
-        requestData.append("prompt", formData.prompt);
-      }
-      // Require a name for the generated codebook
+      requestData.append("database", formData.database || database);
+      if (formData.prompt) requestData.append("prompt", formData.prompt);
+
       if (!formData.name || !formData.name.trim()) {
         throw new Error("Please provide a name for the generated codebook");
       }
       requestData.append("name", formData.name.trim());
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 60000);
-
       const response = await fetch("/api/generate-codebook/", {
         method: "POST",
         body: requestData,
-        signal: controller.signal,
       });
-
-      clearTimeout(timeoutId);
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -157,8 +191,8 @@ export default function GenerateCodebook() {
       type: "select",
       value: database,
       options: getAvailableDatabases().map((item) => ({
-        value: item,
-        label: getDisplayName(item),
+        value: item.value || item,
+        label: item.label || getDisplayName(item),
       })),
     },
     {

@@ -34,14 +34,27 @@ export default function Filter() {
 
   const fetchDatabases = async () => {
     try {
-      const response = await fetch("/api/list-databases/");
+      // include credentials so authenticated users receive their Postgres projects
+      const response = await fetch("/api/list-databases/", {
+        credentials: "include",
+      });
       if (!response.ok) throw new Error("Failed to fetch databases");
       const data = await response.json();
-      const dbNames = (data.databases || []).map((d) =>
-        typeof d === "string" ? d : d.name
-      );
-      setDatabases(dbNames);
-      if (!database && dbNames.length > 0) setDatabase(dbNames[0]);
+      // Normalize: prefer DB-backed projects (returned in data.projects)
+      const projectOptions = (data.projects || []).map((p) => ({
+        value: p.schema_name,
+        label: p.display_name || p.schema_name,
+        meta: p,
+      }));
+
+      const fileOptions = (data.databases || []).map((d) => {
+        const name = typeof d === "string" ? d : d.name;
+        return { value: name, label: name.replace(/\.db$/, ""), meta: d };
+      });
+
+      const combined = [...projectOptions, ...fileOptions];
+      setDatabases(combined);
+      if (!database && combined.length > 0) setDatabase(combined[0].value);
     } catch (err) {
       console.error("Error fetching databases:", err);
     }
@@ -148,8 +161,8 @@ export default function Filter() {
       type: "select",
       value: database,
       options: databases.map((d) => ({
-        value: d,
-        label: d.replace(".db", ""),
+        value: d.value,
+        label: d.label,
       })),
     },
   ];

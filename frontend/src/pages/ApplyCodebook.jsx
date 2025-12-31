@@ -40,6 +40,23 @@ export default function ApplyCodebook() {
 
   const fetchDatabases = async () => {
     try {
+      // Prefer server-side Postgres projects for authenticated users
+      const projResp = await fetch("/api/my-projects/?project_type=raw_data", {
+        credentials: "include",
+      });
+      if (projResp.ok) {
+        const projData = await projResp.json();
+        const projects = projData.projects || [];
+        const normalized = projects.map((p) => ({
+          name: p.schema_name,
+          display_name: p.display_name,
+          metadata: p,
+        }));
+        setDatabases(normalized);
+        if (!database && normalized.length > 0) setDatabase(normalized[0].name);
+        return;
+      }
+
       const response = await fetch("/api/list-databases/");
       if (!response.ok) throw new Error("Failed to fetch databases");
       const data = await response.json();
@@ -57,6 +74,24 @@ export default function ApplyCodebook() {
 
   const fetchFilteredDatabases = async () => {
     try {
+      // Prefer server-side Postgres projects for authenticated users
+      const projResp = await fetch(
+        "/api/my-projects/?project_type=filtered_data",
+        { credentials: "include" }
+      );
+      if (projResp.ok) {
+        const projData = await projResp.json();
+        const projects = projData.projects || [];
+        const normalized = projects.map((p) => ({
+          name: p.schema_name,
+          display_name: p.display_name,
+          metadata: p,
+        }));
+        setFilteredDatabases(normalized);
+        // Do not early return; keep behavior consistent with databases selection
+        return;
+      }
+
       const response = await fetch("/api/list-filtered-databases/");
       if (!response.ok) throw new Error("Failed to fetch filtered databases");
       const data = await response.json();
@@ -117,6 +152,8 @@ export default function ApplyCodebook() {
   };
 
   const getDisplayName = (item) => {
+    if (!item) return "";
+    if (typeof item === "object") return item.display_name || item.name || "";
     return item.replace(".db", "");
   };
 
@@ -146,7 +183,7 @@ export default function ApplyCodebook() {
       type: "select",
       value: database,
       options: getAvailableDatabases().map((item) => ({
-        value: item,
+        value: typeof item === "string" ? item : item.name,
         label: getDisplayName(item),
       })),
     },

@@ -174,7 +174,7 @@ async def list_databases(request: Request, db: Session = Depends(get_db)):
             payload = decode_access_token(token)
             user_id = payload.get("sub")
             if user_id:
-                projects = db.query(Project).filter(Project.user_id == user_id).all()
+                projects = db.query(Project).filter(Project.user_id == user_id, Project.project_type == 'raw_data').all()
                 for p in projects:
                     projects_list.append({
                         "id": str(p.id),
