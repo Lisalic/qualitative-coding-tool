@@ -400,6 +400,24 @@ async def merge_databases(request: Request, databases: str = Form(...), name: st
             print(f"Skipping non-Postgres source {db_name}; only proj_... schema names are supported")
             continue
 
+        # After writing all tables, compute final per-table row counts from the new schema
+        final_table_counts = {}
+        try:
+            with engine.connect() as conn:
+                tbls = conn.execute(text("SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = :schema"), {"schema": schema_name}).fetchall()
+                schema_tables = [r[0] for r in tbls]
+                for table_name in schema_tables:
+                    try:
+                        res = conn.execute(text(f'SELECT COUNT(*) FROM "{schema_name}"."{table_name}"'))
+                        final_table_counts[table_name] = int(res.scalar() or 0)
+                    except Exception as e:
+                        print(f"Warning: could not count rows for {schema_name}.{table_name}: {e}")
+                        final_table_counts[table_name] = 0
+        except Exception as e:
+            print(f"Warning: could not list tables for schema {schema_name}: {e}")
+
+        total_rows = sum(final_table_counts.values())
+
         if total_rows == 0:
             # nothing to migrate: drop empty schema and inform client
             try:
@@ -409,10 +427,10 @@ async def merge_databases(request: Request, databases: str = Form(...), name: st
                 pass
             return JSONResponse({"message": "No rows found in selected databases; nothing migrated", "database": name, "total_submissions": 0, "total_comments": 0, "project_migrated": False})
 
-        # Create project record and table metadata
+        # Create project record and table metadata using the final counts
         with DatabaseManager() as dm:
             proj = dm.projects.create(user_id=uuid.UUID(user_id), display_name=name, schema_name=schema_name, project_type='raw_data')
-            for tbl, cnt in tables_written.items():
+            for tbl, cnt in final_table_counts.items():
                 dm.project_tables.add_table_metadata(project_id=proj.id, table_name=tbl, row_count=cnt)
 
         return JSONResponse({"message": f"Merged into project schema '{schema_name}'", "project": {"id": str(proj.id), "schema_name": schema_name, "display_name": name}, "project_migrated": True})
