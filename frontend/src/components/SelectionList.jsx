@@ -24,7 +24,7 @@ export default function SelectionList({
           className={`${buttonClass} ${selectedId === it.id ? "active" : ""}`}
           onClick={() => onSelect(it.id)}
         >
-          {it.name ?? it.id}
+          {it.display_name ?? it.name ?? it.id}
         </button>
       ))}
     </div>

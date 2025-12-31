@@ -286,7 +286,6 @@ async def merge_databases(request: Request, databases: str = Form(...), name: st
         except Exception:
             pass
 
-    # Create a new Postgres schema and insert rows directly from the listed sqlite DBs
     unique_id = str(uuid.uuid4()).replace('-', '')[:12]
     schema_name = f"proj_{unique_id}"
 
@@ -719,50 +718,65 @@ def logout():
 
 
 @router.get("/codebook")
-async def get_codebook(codebook_id: str = Query(None)):
-    codebooks_dir = Path(__file__).parent.parent.parent / "data" / "codebooks"
-    if codebooks_dir.exists():
-        if codebook_id:
-            target_file = codebooks_dir / f"{codebook_id}.txt"
-            if target_file.exists():
-                with open(target_file, 'r') as f:
-                    codebook_content = f.read()
-                return JSONResponse({"codebook": codebook_content})
-            else:
-                return JSONResponse({"error": f"Codebook {codebook_id} not found"}, status_code=404)
-        else:
-            codebook_files = list(codebooks_dir.glob("*.txt"))
-            if codebook_files:
-                latest_codebook = sorted(codebook_files, key=lambda x: x.name)[0]
-                with open(latest_codebook, 'r') as f:
-                    codebook_content = f.read()
-                return JSONResponse({"codebook": codebook_content})
-    return JSONResponse({"status": "processing", "message": "No codebooks found."})
+async def get_codebook(codebook_id: str = Query(None), db: Session = Depends(get_db)):
+    """Return a codebook. Prefer a Postgres project with project_type='codebook'.
+    Falls back to filesystem codebooks in backend/data/codebooks if no project found.
+    """
+    # First try to find a matching project (by schema_name or display_name or id)
+    project = None
+    if codebook_id:
+        # try schema_name match
+        project = db.query(Project).filter(Project.project_type == 'codebook', Project.schema_name == codebook_id).first()
+        if not project:
+            # try display_name match
+            project = db.query(Project).filter(Project.project_type == 'codebook', Project.display_name == codebook_id).first()
+        if not project:
+            # try id match
+            try:
+                pid = uuid.UUID(codebook_id)
+                project = db.query(Project).filter(Project.project_type == 'codebook', Project.id == pid).first()
+            except Exception:
+                project = None
+
+    else:
+        # No id supplied: pick latest codebook project if any
+        project = db.query(Project).filter(Project.project_type == 'codebook').order_by(Project.created_at.desc()).first()
+
+    if project:
+        schema = project.schema_name
+        try:
+            with engine.connect() as conn:
+                res = conn.execute(text(f'SELECT file_text FROM "{schema}".content_store LIMIT 1'))
+                row = res.fetchone()
+                if row:
+                    return JSONResponse({"codebook": row[0]})
+                else:
+                    return JSONResponse({"error": "Codebook content not found in project"}, status_code=404)
+        except Exception as e:
+            print(f"Error reading codebook from schema {schema}: {e}")
+            return JSONResponse({"error": f"Error reading codebook: {e}"}, status_code=500)
+
+    return JSONResponse({"error": "No codebook project found"}, status_code=404)
 
 
 @router.get("/list-codebooks")
-async def list_codebooks():
-    codebooks_dir = Path(__file__).parent.parent.parent / "data" / "codebooks"
-    if codebooks_dir.exists():
-        codebook_files = list(codebooks_dir.glob("*.txt"))
-        codebooks = []
-        for cb in codebook_files:
-            codebook_id = cb.stem  # filename without .txt
-            # collect metadata: character count and modification time
-            try:
-                with open(cb, 'r') as f:
-                    content = f.read()
-                stat = cb.stat()
-                metadata = {
-                    "characters": len(content),
-                    "date_created": int(stat.st_mtime)
-                }
-            except Exception:
-                metadata = {}
-            codebooks.append({"id": codebook_id, "name": codebook_id, "metadata": metadata})
-        codebooks.sort(key=lambda x: x["id"])
-        return JSONResponse({"codebooks": codebooks})
-    return JSONResponse({"codebooks": []})
+async def list_codebooks(db: Session = Depends(get_db)):
+    # Only return DB-backed codebook projects
+    codebooks = []
+    try:
+        projects = db.query(Project).filter(Project.project_type == 'codebook').all()
+        for p in projects:
+            codebooks.append({
+                "id": str(p.id),
+                "name": p.display_name,
+                "metadata": {"schema": p.schema_name, "created_at": p.created_at.isoformat() if p.created_at else None},
+                "source": "project",
+            })
+    except Exception:
+        return JSONResponse({"codebooks": []})
+
+    codebooks.sort(key=lambda x: x.get("name") or x.get("id"))
+    return JSONResponse({"codebooks": codebooks})
 
 
 @router.post("/rename-codebook/")
@@ -799,6 +813,83 @@ async def save_codebook(codebook_id: str = Form(...), content: str = Form(...)):
             f.write(content)
         return JSONResponse({"message": f"Codebook {codebook_id} saved successfully"})
     except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.post("/save-project-codebook/")
+async def save_project_codebook(request: Request, schema_name: str = Form(...), content: str = Form(...), db: Session = Depends(get_db)):
+    """Save codebook content into a Postgres project schema's content_store table.
+    Requires authentication and project ownership.
+    """
+    # auth: cookie or Authorization header
+    token = request.cookies.get("access_token")
+    if not token:
+        auth = request.headers.get("Authorization")
+        if auth and auth.lower().startswith("bearer "):
+            token = auth.split(None, 1)[1]
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        payload = decode_access_token(token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+
+    schema = schema_name.strip()
+    if schema.endswith('.db'):
+        schema = schema[:-3]
+
+    proj = db.query(Project).filter(Project.schema_name == schema, Project.user_id == user_id).first()
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found or you do not have permission")
+
+    # Ensure content_store table exists and upsert the single row
+    display_name = None
+    try:
+        # Try to read optional display_name from form data
+        form = await request.form()
+        if "display_name" in form:
+            display_name = str(form.get("display_name"))
+    except Exception:
+        display_name = None
+
+    # Debug logging to help diagnose save failures
+    try:
+        print(f"[DEBUG] save_project_codebook called; token_present={bool(token)}, user_id={user_id}, schema={schema}")
+        try:
+            # show form keys and sizes but not full content for privacy
+            form_keys = list((await request.form()).keys())
+        except Exception:
+            form_keys = []
+        print(f"[DEBUG] form_keys: {form_keys}, display_name_provided={bool(display_name)}, content_length={len(content) if content else 0}")
+    except Exception:
+        pass
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(f'CREATE TABLE IF NOT EXISTS "{schema}".content_store (file_text text)'))
+            # Remove existing rows and insert the new content (single-row store)
+            conn.execute(text(f'TRUNCATE TABLE "{schema}".content_store'))
+            conn.execute(text(f'INSERT INTO "{schema}".content_store (file_text) VALUES (:file_text)'), {"file_text": content})
+
+        # If a display_name was provided, update the projects table
+        if display_name:
+            proj.display_name = display_name
+            try:
+                db.commit()
+                db.refresh(proj)
+            except Exception as exc:
+                db.rollback()
+                print(f"Failed to update project display_name for {schema}: {exc}")
+
+        return JSONResponse({"message": "Project codebook saved", "id": str(proj.id), "display_name": proj.display_name})
+    except Exception as e:
+        print(f"Error saving project codebook to schema {schema}: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 

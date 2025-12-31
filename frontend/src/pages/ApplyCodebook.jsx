@@ -47,7 +47,6 @@ export default function ApplyCodebook() {
         typeof d === "string" ? d : d.name
       );
       setDatabases(dbNames);
-      // Set default database if none selected
       if (!database && dbNames.length > 0) {
         setDatabase(dbNames[0]);
       }
@@ -158,7 +157,7 @@ export default function ApplyCodebook() {
       value: codebook,
       options: codebooks.map((cb) => ({
         value: cb.id.toString(),
-        label: cb.id.toString(),
+        label: cb.name || cb.display_name || cb.id.toString(),
       })),
     },
     {

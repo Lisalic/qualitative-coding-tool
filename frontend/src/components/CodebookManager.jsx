@@ -32,18 +32,40 @@ export default function CodebookManager({ onViewCodebook }) {
       setError("New ID cannot be empty");
       return;
     }
-
+    // find the codebook object
+    const cb = codebooks.find(
+      (c) => c.id === oldId || String(c.id) === String(oldId)
+    );
     try {
-      const formData = new FormData();
-      formData.append("old_id", oldId);
-      formData.append("new_id", newName.trim());
+      if (cb && cb.source === "project") {
+        const formData = new FormData();
+        const schema =
+          cb.metadata?.schema || cb.schema_name || cb.metadata?.schema_name;
+        if (!schema)
+          throw new Error("Project schema name not found for rename");
+        formData.append("schema_name", schema);
+        formData.append("display_name", newName.trim());
 
-      const response = await fetch("/api/rename-codebook/", {
-        method: "POST",
-        body: formData,
-      });
+        const response = await fetch("/api/rename-project/", {
+          method: "POST",
+          body: formData,
+          credentials: "include",
+        });
 
-      if (!response.ok) throw new Error("Failed to rename codebook");
+        if (!response.ok) throw new Error("Failed to rename project");
+      } else {
+        // fallback to filesystem rename endpoint (try to rename this later maybe)
+        const formData = new FormData();
+        formData.append("old_id", oldId);
+        formData.append("new_id", newName.trim());
+
+        const response = await fetch("/api/rename-codebook/", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!response.ok) throw new Error("Failed to rename codebook");
+      }
 
       setRenamingCb(null);
       setNewName("");
@@ -56,11 +78,31 @@ export default function CodebookManager({ onViewCodebook }) {
 
   const handleDeleteCodebook = async (cbId) => {
     try {
-      const response = await fetch(`/api/delete-codebook/${cbId}`, {
-        method: "DELETE",
-      });
-
-      if (!response.ok) throw new Error("Failed to delete codebook");
+      const cb = codebooks.find(
+        (c) => c.id === cbId || String(c.id) === String(cbId)
+      );
+      if (cb && cb.source === "project") {
+        // delete project schema (with auth)
+        const schema =
+          cb.metadata?.schema ||
+          cb.schema_name ||
+          cb.metadata?.schema_name ||
+          cb.id;
+        const response = await fetch(
+          `/api/delete-database/${encodeURIComponent(schema)}`,
+          {
+            method: "DELETE",
+            credentials: "include",
+          }
+        );
+        if (!response.ok) throw new Error("Failed to delete project schema");
+      } else {
+        // fallback to file-based deletion endpoint (try to delete this later maybe)
+        const response = await fetch(`/api/delete-codebook/${cbId}`, {
+          method: "DELETE",
+        });
+        if (!response.ok) throw new Error("Failed to delete codebook file");
+      }
 
       fetchCodebooks();
     } catch (err) {
@@ -71,7 +113,10 @@ export default function CodebookManager({ onViewCodebook }) {
 
   const startRename = (cbId) => {
     setRenamingCb(cbId);
-    setNewName(cbId.toString());
+    const cb = codebooks.find(
+      (c) => c.id === cbId || String(c.id) === String(cbId)
+    );
+    setNewName(cb?.name || cb?.display_name || String(cbId));
   };
 
   const cancelRename = () => {
@@ -168,7 +213,7 @@ export default function CodebookManager({ onViewCodebook }) {
                   ) : (
                     <>
                       <div className="database-info">
-                        <strong>{cb.name}</strong>
+                        <strong>{cb.name || cb.display_name || cb.id}</strong>
                         <div className="database-metadata">
                           <div className="metadata-row">
                             <span>{getCharText(cb)}</span>

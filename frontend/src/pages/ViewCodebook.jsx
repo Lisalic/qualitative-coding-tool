@@ -11,6 +11,7 @@ export default function ViewCodebook() {
   const [availableCodebooks, setAvailableCodebooks] = useState([]);
   const [selectedCodebook, setSelectedCodebook] = useState(null);
   const [codebookContent, setCodebookContent] = useState("");
+  const [selectedCodebookName, setSelectedCodebookName] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -33,6 +34,14 @@ export default function ViewCodebook() {
         } else {
           setSelectedCodebook(data.codebooks[data.codebooks.length - 1].id);
         }
+        const sel = data.codebooks.find(
+          (cb) =>
+            cb.id ===
+            (selectedFromUrl || data.codebooks[data.codebooks.length - 1].id)
+        );
+        setSelectedCodebookName(
+          sel?.display_name || sel?.name || sel?.id || ""
+        );
       }
     } catch (err) {
       console.error("Error fetching codebooks list:", err);
@@ -68,6 +77,8 @@ export default function ViewCodebook() {
   useEffect(() => {
     if (selectedCodebook) {
       fetchCodebook(selectedCodebook);
+      const sel = availableCodebooks.find((cb) => cb.id === selectedCodebook);
+      setSelectedCodebookName(sel?.display_name || sel?.name || sel?.id || "");
     }
   }, [selectedCodebook]);
 
@@ -91,21 +102,47 @@ export default function ViewCodebook() {
             backgroundColor: "#000000",
           }}
         >
-          <MarkdownView
-            selectedId={selectedCodebook}
-            fetchStyle="query"
-            fetchBase="/api/codebook"
-            queryParamName="codebook_id"
-            saveUrl="/api/save-codebook/"
-            saveIdFieldName="codebook_id"
-            onSaved={(newId) => {
-              if (newId !== selectedCodebook) {
-                setSelectedCodebook(newId);
-                fetchAvailableCodebooks();
-              }
-            }}
-            emptyLabel="View Codebook"
-          />
+          {(() => {
+            const selObj = availableCodebooks.find(
+              (cb) => cb.id === selectedCodebook
+            );
+            const isProject = selObj?.source === "project";
+            const projectSchema =
+              selObj?.metadata?.schema ||
+              selObj?.schema_name ||
+              selObj?.id ||
+              null;
+            return (
+              <MarkdownView
+                selectedId={selectedCodebook}
+                title={selectedCodebookName}
+                fetchStyle="query"
+                fetchBase="/api/codebook"
+                queryParamName="codebook_id"
+                saveUrl={
+                  isProject
+                    ? "/api/save-project-codebook/"
+                    : "/api/save-codebook/"
+                }
+                saveIdFieldName={isProject ? "schema_name" : "codebook_id"}
+                saveAsProject={Boolean(isProject)}
+                projectSchema={projectSchema}
+                onSaved={(resp) => {
+                  if (typeof resp === "string") {
+                    if (resp !== selectedCodebook) {
+                      setSelectedCodebook(resp);
+                      fetchAvailableCodebooks();
+                    }
+                  } else if (resp && resp.display_name) {
+                    // update UI with new display name and refresh list
+                    setSelectedCodebookName(resp.display_name);
+                    fetchAvailableCodebooks();
+                  }
+                }}
+                emptyLabel="View Codebook"
+              />
+            );
+          })()}
           {!codebookContent && !loading && !error && (
             <p>No codebook selected or found. Generate a codebook first.</p>
           )}

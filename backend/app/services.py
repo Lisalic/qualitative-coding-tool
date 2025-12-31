@@ -12,7 +12,6 @@ def migrate_sqlite_file(user_id: uuid.UUID, file_path: str, display_name: str, p
     print(f"--> Starting migration for '{display_name}' into schema '{schema_name}'...")
 
     with DatabaseManager() as db:
-        # create project record first (project_type may be specified)
         project = db.projects.create(
             user_id=user_id,
             display_name=display_name,
@@ -20,10 +19,7 @@ def migrate_sqlite_file(user_id: uuid.UUID, file_path: str, display_name: str, p
             project_type=project_type,
         )
 
-        # Use a transactional begin() to ensure CREATE SCHEMA is committed
-        # and avoid calling commit() on a plain Connection.
         with engine.begin() as conn:
-            # quote the identifier to be safe and use IF NOT EXISTS
             conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
 
         sqlite_conn = sqlite3.connect(file_path)
@@ -51,10 +47,8 @@ def migrate_sqlite_file(user_id: uuid.UUID, file_path: str, display_name: str, p
                     method="multi",
                 )
             except Exception as e:
-                # Log error but continue with next table
                 print(f"      Error writing table {table_name} to Postgres schema {schema_name}: {e}")
 
-            # Verify inserted row count directly from Postgres and record metadata
             try:
                 with engine.connect() as conn:
                     res = conn.execute(text(f'SELECT COUNT(*) FROM "{schema_name}"."{table_name}"'))
@@ -69,3 +63,55 @@ def migrate_sqlite_file(user_id: uuid.UUID, file_path: str, display_name: str, p
 
         sqlite_conn.close()
         print(f"--> Successfully migrated '{display_name}'!")
+
+def migrate_text_file(user_id: uuid.UUID, file_path: str, display_name: str, project_type: str):
+    """
+    Migrates a .txt file into a Postgres Schema.
+    Structure: 1 Schema -> 1 Table ('content_store') -> 1 Column ('file_text')
+    """
+    
+    valid_types = ['codebook', 'coding', 'raw_data','filtered_data'] 
+    if project_type not in valid_types:
+        raise ValueError(f"Invalid Type. Must be one of: {valid_types}")
+
+    unique_id = str(uuid.uuid4()).replace("-", "")[:12]
+    schema_name = f"proj_{unique_id}"
+    
+    print(f"--> Importing text '{display_name}' as type '{project_type}'...")
+
+    with DatabaseManager() as db:
+        project = db.projects.create(
+            user_id=user_id,
+            display_name=display_name,
+            schema_name=schema_name,
+            project_type=project_type # 'codebook' or 'coding'
+        )
+        
+        with engine.connect() as conn:
+            conn.execute(text(f"CREATE SCHEMA {schema_name}"))
+            conn.commit()
+
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                raw_text = f.read()
+        except UnicodeDecodeError:
+            with open(file_path, "r", encoding="latin-1") as f:
+                raw_text = f.read()
+
+        df = pd.DataFrame([{"file_text": raw_text}])
+
+        df.to_sql(
+            name="content_store", 
+            con=engine,
+            schema=schema_name,
+            if_exists='replace',
+            index=False          
+        )
+
+        db.project_tables.add_table_metadata(
+            project_id=project.id,
+            table_name="content_store",
+            row_count=1
+        )
+        
+        print(f"--> Success! Text saved to {schema_name}.content_store")

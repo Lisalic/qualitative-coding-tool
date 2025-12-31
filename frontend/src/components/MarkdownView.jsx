@@ -3,6 +3,10 @@ import ReactMarkdown from "react-markdown";
 
 export default function MarkdownView({
   selectedId,
+  title,
+  // If true, this save targets a Postgres project and will send schema_name instead
+  saveAsProject = false,
+  projectSchema = null,
   fetchStyle = "query",
   fetchBase = "/api/codebook",
   queryParamName = "codebook_id",
@@ -46,7 +50,7 @@ export default function MarkdownView({
         const fetched = data.codebook ?? data.coded_data ?? "";
         setContent(fetched);
         setEditedContent(fetched);
-        setNewName(selectedId);
+        setNewName(title || selectedId);
       } catch (err) {
         console.error("Fetch content error:", err);
         setError(err.message);
@@ -66,17 +70,39 @@ export default function MarkdownView({
 
     try {
       const formData = new FormData();
-      formData.append(saveIdFieldName, newName.trim());
+      if (saveAsProject && projectSchema) {
+        // For project-backed codebooks, send the schema identifier and include optional display_name
+        formData.append(saveIdFieldName, projectSchema);
+        formData.append("display_name", newName.trim());
+      } else {
+        formData.append(saveIdFieldName, newName.trim());
+      }
       formData.append("content", editedContent || "");
 
-      const res = await fetch(saveUrl, {
-        method: "POST",
-        body: formData,
-      });
-      if (!res.ok) throw new Error("Failed to save");
+      const fetchOpts = { method: "POST", body: formData };
+      if (saveAsProject) fetchOpts.credentials = "include";
+      const res = await fetch(saveUrl, fetchOpts);
+      if (!res.ok) {
+        let errText = "Failed to save";
+        try {
+          const j = await res.json();
+          errText = j.error || j.message || errText;
+        } catch (e) {}
+        throw new Error(errText);
+      }
 
-      if (onSaved) onSaved(newName.trim());
-      else {
+      // Parse response JSON and call onSaved with either returned object or new name
+      let respJson = null;
+      try {
+        respJson = await res.json();
+      } catch (e) {
+        respJson = null;
+      }
+
+      if (onSaved) {
+        if (saveAsProject && respJson) onSaved(respJson);
+        else onSaved(newName.trim());
+      } else {
         setContent(editedContent);
       }
       setIsEditing(false);
@@ -124,7 +150,7 @@ export default function MarkdownView({
               onClick={() => {
                 setIsEditing(false);
                 setEditedContent(content);
-                setNewName(selectedId);
+                setNewName(title || selectedId);
                 setError(null);
               }}
               className="view-button"
@@ -140,14 +166,14 @@ export default function MarkdownView({
         ) : (
           <>
             <h1 style={{ color: "#ffffff", margin: 0 }}>
-              {selectedId ? `${selectedId}` : emptyLabel}
+              {title || (selectedId ? `${selectedId}` : emptyLabel)}
             </h1>
             {selectedId && (
               <button
                 onClick={() => {
                   setIsEditing(true);
                   setEditedContent(content);
-                  setNewName(selectedId);
+                  setNewName(title || selectedId);
                 }}
                 className="view-button"
                 style={{ fontSize: "14px", padding: "8px 16px" }}
