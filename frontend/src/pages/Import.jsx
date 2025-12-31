@@ -39,10 +39,26 @@ export default function Import() {
         const projData = await projResp.json();
         setUserProjects(projData.projects || []);
         // normalize databases to objects with `name` and `display_name` so ManageDatabase can render
-        const normalized = (projData.projects || []).map((p) => ({
-          name: p.schema_name,
-          display_name: p.display_name,
-        }));
+        const normalized = (projData.projects || []).map((p) => {
+          const tables = p.tables || [];
+          const submissionsTable = tables.find(
+            (t) => t.table_name === "submissions"
+          );
+          const commentsTable = tables.find((t) => t.table_name === "comments");
+          return {
+            name: p.schema_name,
+            display_name: p.display_name,
+            metadata: {
+              // Include created_at from projects table (ISO string)
+              created_at: p.created_at || null,
+              tables: tables,
+              total_submissions: submissionsTable
+                ? submissionsTable.row_count
+                : 0,
+              total_comments: commentsTable ? commentsTable.row_count : 0,
+            },
+          };
+        });
         setDatabases(normalized);
         return;
       }

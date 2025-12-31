@@ -16,10 +16,36 @@ export default function CodebookManager({ onViewCodebook }) {
       if (!response.ok) throw new Error("Failed to fetch codebooks");
       const data = await response.json();
       // ensure metadata fields exist for each codebook
-      const enriched = (data.codebooks || []).map((cb) => ({
+      const raw = (data.codebooks || []).map((cb) => ({
         ...cb,
         metadata: cb.metadata || {},
       }));
+
+      // For project-backed codebooks, fetch the project's content_store to compute accurate character counts
+      const enriched = await Promise.all(
+        raw.map(async (cb) => {
+          if (cb.source === "project") {
+            const schema = cb.metadata?.schema || cb.schema_name || cb.id;
+            try {
+              const resp = await fetch(
+                `/api/codebook?codebook_id=${encodeURIComponent(schema)}`
+              );
+              if (resp.ok) {
+                const j = await resp.json();
+                const content = j.codebook || "";
+                const updatedMeta = { ...cb.metadata };
+                updatedMeta.characters = content.length;
+                return { ...cb, metadata: updatedMeta, content };
+              }
+            } catch (err) {
+              // ignore fetch error and return cb as-is
+              console.error("Failed to fetch project codebook content:", err);
+            }
+          }
+          return cb;
+        })
+      );
+
       setCodebooks(enriched);
     } catch (err) {
       console.error("Error fetching codebooks:", err);

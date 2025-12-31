@@ -18,14 +18,19 @@ export default function Data() {
 
   useEffect(() => {
     if (location.state?.selectedDatabase) {
-      setSelectedDatabase(location.state.selectedDatabase);
+      const sel = location.state.selectedDatabase;
+      const selId = typeof sel === "string" ? sel : sel?.name || sel?.id || "";
+      setSelectedDatabase(selId);
     }
   }, [location.state]);
 
   useEffect(() => {
     // Set default database if none selected and we have databases loaded
     if (!selectedDatabase && databases.length > 0) {
-      setSelectedDatabase(databases[0]);
+      const first = databases[0];
+      const id =
+        typeof first === "string" ? first : first.name || first.id || "";
+      setSelectedDatabase(id);
     }
   }, [databases, selectedDatabase]);
 
@@ -43,10 +48,28 @@ export default function Data() {
         );
         if (!projResp.ok) throw new Error("Failed to fetch user projects");
         const projData = await projResp.json();
-        // projects come as objects with display_name and schema_name
-        setUserProjects(projData.projects || []);
-        // represent them in the existing `databases` state as schema_name for compatibility
-        setDatabases((projData.projects || []).map((p) => p.schema_name));
+        const projects = projData.projects || [];
+        setUserProjects(projects);
+        const normalized = projects.map((p) => {
+          const tables = p.tables || [];
+          const submissionsTable = tables.find(
+            (t) => t.table_name === "submissions"
+          );
+          const commentsTable = tables.find((t) => t.table_name === "comments");
+          return {
+            name: p.schema_name,
+            display_name: p.display_name,
+            metadata: {
+              created_at: p.created_at || null,
+              tables: tables,
+              total_submissions: submissionsTable
+                ? submissionsTable.row_count
+                : 0,
+              total_comments: commentsTable ? commentsTable.row_count : 0,
+            },
+          };
+        });
+        setDatabases(normalized);
         return;
       }
 
@@ -66,23 +89,22 @@ export default function Data() {
 
   const getTitle = () => {
     if (!selectedDatabase) return "Select a Database";
-    const baseName = selectedDatabase.replace(".db", "");
-    if (userProjects) {
-      const proj = userProjects.find(
-        (p) => p.schema_name === selectedDatabase || p.schema_name === baseName
-      );
-      return `Database: ${proj ? proj.display_name : baseName}`;
-    }
+    const baseName = String(selectedDatabase).replace(".db", "");
+    // attempt to find a normalized database object in `databases`
+    const projObj = (databases || []).find(
+      (d) => d && (d.name === selectedDatabase || d.name === baseName)
+    );
+    if (projObj) return `Database: ${projObj.display_name || baseName}`;
     return `Database: ${baseName}`;
   };
 
   const getDisplayName = () => {
-    if (!selectedDatabase || !userProjects) return null;
-    const baseName = selectedDatabase.replace(".db", "");
-    const proj = userProjects.find(
-      (p) => p.schema_name === selectedDatabase || p.schema_name === baseName
+    if (!selectedDatabase) return null;
+    const baseName = String(selectedDatabase).replace(".db", "");
+    const projObj = (databases || []).find(
+      (d) => d && (d.name === selectedDatabase || d.name === baseName)
     );
-    return proj ? proj.display_name : null;
+    return projObj ? projObj.display_name : null;
   };
 
   const databaseItems = databases;
@@ -92,13 +114,18 @@ export default function Data() {
       <Navbar showBack={true} />
       <div className="data-container">
         <SelectionList
-          items={databaseItems.map((d) => ({
-            id: d,
-            name: userProjects
-              ? userProjects.find((p) => p.schema_name === d)?.display_name ||
-                d.replace(".db", "")
-              : d.replace(".db", ""),
-          }))}
+          items={(databases || []).map((d) => {
+            const id = typeof d === "string" ? d : d.name || "";
+            const display = userProjects
+              ? userProjects.find((p) => p.schema_name === id)?.display_name ||
+                (typeof d === "string"
+                  ? id.replace(".db", "")
+                  : d.display_name || id.replace(".db", ""))
+              : typeof d === "string"
+              ? id.replace(".db", "")
+              : d.display_name || id.replace(".db", "");
+            return { id, name: display };
+          })}
           selectedId={selectedDatabase}
           onSelect={(id) => setSelectedDatabase(id)}
           className="database-selector"
@@ -111,6 +138,14 @@ export default function Data() {
           title={getTitle()}
           database={selectedDatabase}
           displayName={getDisplayName()}
+          metadata={
+            (databases || []).find(
+              (d) =>
+                d &&
+                (d.name === selectedDatabase ||
+                  d.name === String(selectedDatabase).replace(".db", ""))
+            )?.metadata
+          }
         />
       </div>
     </>

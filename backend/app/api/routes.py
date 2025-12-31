@@ -15,7 +15,7 @@ import binascii
 import uuid
 from datetime import datetime
 
-from backend.app.database import get_db, AuthUser, Project, engine, SessionLocal
+from backend.app.database import get_db, AuthUser, Project, ProjectTable, engine, SessionLocal
 from backend.app.databasemanager import DatabaseManager
 import pandas as pd
 from fastapi.responses import JSONResponse
@@ -554,16 +554,24 @@ def my_projects(request: Request, project_type: str = Query("raw_data"), db: Ses
         raise HTTPException(status_code=401, detail="Invalid token payload")
 
     projects = db.query(Project).filter(Project.user_id == user_id, Project.project_type == project_type).all()
-    result = [
-        {
+    result = []
+    for p in projects:
+        tables = []
+        try:
+            rows = db.query(ProjectTable).filter(ProjectTable.project_id == p.id).all()
+            for r in rows:
+                tables.append({"table_name": r.table_name, "row_count": r.row_count})
+        except Exception:
+            tables = []
+
+        result.append({
             "id": str(p.id),
             "display_name": p.display_name,
             "schema_name": p.schema_name,
             "project_type": p.project_type,
             "created_at": p.created_at.isoformat() if p.created_at else None,
-        }
-        for p in projects
-    ]
+            "tables": tables,
+        })
 
     return JSONResponse({"projects": result})
 

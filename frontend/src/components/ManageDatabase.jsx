@@ -68,31 +68,71 @@ export default function ManageDatabase({
                       </label>
                       {metadata && (
                         <div className="database-metadata">
-                          <div className="metadata-row">
-                            <span>
-                              {metadata.total_submissions?.toLocaleString() ||
-                                0}{" "}
-                              Posts,{" "}
-                              {metadata.total_comments?.toLocaleString() || 0}{" "}
-                              Comments
-                            </span>
-                          </div>
-                          {metadata.date_created &&
-                            metadata.date_created > 0 && (
+                          {metadata.tables ? (
+                            (() => {
+                              const submissions =
+                                metadata.tables.find(
+                                  (t) => t.table_name === "submissions"
+                                )?.row_count || 0;
+                              const comments =
+                                metadata.tables.find(
+                                  (t) => t.table_name === "comments"
+                                )?.row_count || 0;
+                              return (
+                                <div className="metadata-row">
+                                  <span>
+                                    {submissions.toLocaleString()} Posts,{" "}
+                                    {comments.toLocaleString()} Comments
+                                  </span>
+                                </div>
+                              );
+                            })()
+                          ) : (
+                            <>
                               <div className="metadata-row">
                                 <span>
-                                  {(() => {
-                                    try {
-                                      return new Date(
-                                        metadata.date_created * 1000
-                                      ).toLocaleString();
-                                    } catch (e) {
-                                      return "Unknown";
-                                    }
-                                  })()}
+                                  {metadata.total_submissions?.toLocaleString() ||
+                                    0}{" "}
+                                  Posts,{" "}
+                                  {metadata.total_comments?.toLocaleString() ||
+                                    0}{" "}
+                                  Comments
                                 </span>
                               </div>
-                            )}
+                              {metadata.date_created &&
+                                metadata.date_created > 0 && (
+                                  <div className="metadata-row">
+                                    <span>
+                                      {(() => {
+                                        try {
+                                          return new Date(
+                                            metadata.date_created * 1000
+                                          ).toLocaleString();
+                                        } catch (e) {
+                                          return "Unknown";
+                                        }
+                                      })()}
+                                    </span>
+                                  </div>
+                                )}
+                            </>
+                          )}
+                          {/* If project-backed (tables present) also show created_at if provided */}
+                          {metadata.tables && metadata.created_at && (
+                            <div className="metadata-row">
+                              <span>
+                                {(() => {
+                                  try {
+                                    return new Date(
+                                      metadata.created_at
+                                    ).toLocaleString();
+                                  } catch (e) {
+                                    return "Unknown";
+                                  }
+                                })()}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>

@@ -7,6 +7,7 @@ export default function DataTable({
   title = "Database Contents",
   isFilteredView = false,
   displayName = null,
+  metadata = null,
 }) {
   const [dbEntries, setDbEntries] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -19,7 +20,7 @@ export default function DataTable({
   const MAX_SEARCH_FETCH = 100000000; // when searching, fetch up to this many rows
 
   const fetchEntries = async () => {
-    if (!currentDatabase || currentDatabase.trim() === "") {
+    if (!currentDatabase || String(currentDatabase).trim() === "") {
       setDbEntries(null);
       setLoading(false);
       return;
@@ -33,19 +34,19 @@ export default function DataTable({
       let response;
       // If this 'database' looks like a project schema (created as proj_<id> or proj_<id>.db)
       const isProjectSchema = /^proj_[A-Za-z0-9_]+(?:\.db)?$/.test(
-        currentDatabase || ""
+        String(currentDatabase) || ""
       );
       if (currentDatabase && isProjectSchema) {
         response = await fetch(
           `/api/project-entries/?limit=${fetchLimit}&schema=${encodeURIComponent(
-            currentDatabase
+            String(currentDatabase)
           )}`,
           { credentials: "include" }
         );
       } else {
         response = await fetch(
           `/api/database-entries/?limit=${fetchLimit}&database=${encodeURIComponent(
-            currentDatabase
+            String(currentDatabase)
           )}`
         );
       }
@@ -85,8 +86,8 @@ export default function DataTable({
   };
 
   const displayDbName =
-    currentDatabase && currentDatabase.trim()
-      ? displayName || currentDatabase.replace(/\.db$/i, "")
+    currentDatabase && String(currentDatabase).trim()
+      ? displayName || String(currentDatabase).replace(/\.db$/i, "")
       : title;
 
   let filteredSubmissions = [];
@@ -133,7 +134,7 @@ export default function DataTable({
         }}
       >
         <h1 style={{ margin: 0, textAlign: "center" }}>
-          {currentDatabase && currentDatabase.trim()
+          {currentDatabase && String(currentDatabase).trim()
             ? `Database: ${displayDbName}`
             : title}
         </h1>
@@ -151,23 +152,72 @@ export default function DataTable({
 
       {dbEntries && (
         <>
-          <p className="stats">
-            Total: {dbEntries.total_submissions} Posts,{" "}
-            {dbEntries.total_comments} Comments
-          </p>
-          {dbEntries.date_created && dbEntries.date_created > 0 && (
-            <p className="stats">
-              Date Created:{" "}
-              {(() => {
-                try {
-                  return new Date(
-                    dbEntries.date_created * 1000
-                  ).toLocaleString();
-                } catch (e) {
-                  return "Unknown";
-                }
-              })()}
-            </p>
+          {/* Render metadata (counts/date) similarly to ManageDatabase */}
+          {metadata && (
+            <div
+              className="database-metadata"
+              style={{ marginBottom: "0.75rem" }}
+            >
+              {metadata.tables ? (
+                (() => {
+                  const submissions =
+                    metadata.tables.find((t) => t.table_name === "submissions")
+                      ?.row_count || 0;
+                  const comments =
+                    metadata.tables.find((t) => t.table_name === "comments")
+                      ?.row_count || 0;
+                  return (
+                    <>
+                      <div className="metadata-row">
+                        <span>Posts: {submissions.toLocaleString()}</span>
+                      </div>
+                      <div className="metadata-row">
+                        <span>Comments: {comments.toLocaleString()}</span>
+                      </div>
+                    </>
+                  );
+                })()
+              ) : (
+                <>
+                  <div className="metadata-row">
+                    <span>Posts: {metadata.total_submissions?.toLocaleString() || 0}</span>
+                  </div>
+                  <div className="metadata-row">
+                    <span>Comments: {metadata.total_comments?.toLocaleString() || 0}</span>
+                  </div>
+                  {metadata.date_created && metadata.date_created > 0 && (
+                    <div className="metadata-row">
+                      <span>
+                        Date Created:{" "}
+                        {(() => {
+                          try {
+                            return new Date(
+                              metadata.date_created * 1000
+                            ).toLocaleString();
+                          } catch (e) {
+                            return "Unknown";
+                          }
+                        })()}
+                      </span>
+                    </div>
+                  )}
+                </>
+              )}
+              {metadata.tables && metadata.created_at && (
+                <div className="metadata-row">
+                  <span>
+                    Date Created:{" "}
+                    {(() => {
+                      try {
+                        return new Date(metadata.created_at).toLocaleString();
+                      } catch (e) {
+                        return "Unknown";
+                      }
+                    })()}
+                  </span>
+                </div>
+              )}
+            </div>
           )}
 
           <div

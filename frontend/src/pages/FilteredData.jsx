@@ -18,13 +18,18 @@ export default function FilteredData() {
 
   useEffect(() => {
     if (location.state?.selectedDatabase) {
-      setSelectedDatabase(location.state.selectedDatabase);
+      const sel = location.state.selectedDatabase;
+      const selId = typeof sel === "string" ? sel : sel?.name || sel?.id || "";
+      setSelectedDatabase(selId);
     }
   }, [location.state]);
 
   useEffect(() => {
     if (!selectedDatabase && databases.length > 0) {
-      setSelectedDatabase(databases[0]);
+      const first = databases[0];
+      const id =
+        typeof first === "string" ? first : first.name || first.id || "";
+      setSelectedDatabase(id);
     }
   }, [databases, selectedDatabase]);
 
@@ -39,8 +44,29 @@ export default function FilteredData() {
         );
         if (!projResp.ok) throw new Error("Failed to fetch user projects");
         const projData = await projResp.json();
-        setUserProjects(projData.projects || []);
-        setDatabases((projData.projects || []).map((p) => p.schema_name));
+        const projects = projData.projects || [];
+        setUserProjects(projects);
+        // normalize to objects with metadata similar to Data.jsx / Import.jsx
+        const normalized = projects.map((p) => {
+          const tables = p.tables || [];
+          const submissionsTable = tables.find(
+            (t) => t.table_name === "submissions"
+          );
+          const commentsTable = tables.find((t) => t.table_name === "comments");
+          return {
+            name: p.schema_name,
+            display_name: p.display_name,
+            metadata: {
+              created_at: p.created_at || null,
+              tables: tables,
+              total_submissions: submissionsTable
+                ? submissionsTable.row_count
+                : 0,
+              total_comments: commentsTable ? commentsTable.row_count : 0,
+            },
+          };
+        });
+        setDatabases(normalized);
         return;
       }
 
@@ -84,13 +110,18 @@ export default function FilteredData() {
       <Navbar showBack={true} />
       <div className="data-container">
         <SelectionList
-          items={databaseItems.map((d) => ({
-            id: d,
-            name: userProjects
-              ? userProjects.find((p) => p.schema_name === d)?.display_name ||
-                d.replace(".db", "")
-              : d.replace(".db", ""),
-          }))}
+          items={(databases || []).map((d) => {
+            const id = typeof d === "string" ? d : d.name || "";
+            const display = userProjects
+              ? userProjects.find((p) => p.schema_name === id)?.display_name ||
+                (typeof d === "string"
+                  ? id.replace(".db", "")
+                  : d.display_name || id.replace(".db", ""))
+              : typeof d === "string"
+              ? id.replace(".db", "")
+              : d.display_name || id.replace(".db", "");
+            return { id, name: display };
+          })}
           selectedId={selectedDatabase}
           onSelect={(id) => setSelectedDatabase(id)}
           className="database-selector"
@@ -102,6 +133,14 @@ export default function FilteredData() {
           database={selectedDatabase}
           isFilteredView={true}
           displayName={getDisplayName()}
+          metadata={
+            (databases || []).find(
+              (d) =>
+                d &&
+                (d.name === selectedDatabase ||
+                  d.name === String(selectedDatabase).replace(".db", ""))
+            )?.metadata
+          }
         />
       </div>
     </>
