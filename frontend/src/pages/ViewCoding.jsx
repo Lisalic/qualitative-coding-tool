@@ -8,24 +8,49 @@ import MarkdownView from "../components/MarkdownView";
 export default function ViewCoding() {
   const [availableCodedData, setAvailableCodedData] = useState([]);
   const [selectedCodedData, setSelectedCodedData] = useState(null);
+  const [selectedCodedDataName, setSelectedCodedDataName] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const fetchAvailableCodedData = async () => {
     try {
+      // Prefer user-owned coded projects from Postgres
+      const resp = await fetch("/api/my-projects/?project_type=coding", {
+        credentials: "include",
+      });
+      if (resp.ok) {
+        const json = await resp.json();
+        const projects = json.projects || [];
+        // map to the shape SelectionList expects
+        const items = projects.map((p) => ({
+          id: p.schema_name || p.id,
+          name: p.display_name || p.schema_name || p.id,
+          display_name: p.display_name,
+          metadata: { schema: p.schema_name },
+          source: "project",
+        }));
+        setAvailableCodedData(items);
+        if (items.length > 0) {
+          const defaultId = items[0].id;
+          setSelectedCodedData(defaultId);
+          const sel = items.find((cd) => cd.id === defaultId);
+          setSelectedCodedDataName(
+            sel?.display_name || sel?.name || sel?.id || ""
+          );
+        }
+        return;
+      }
+
+      // Fallback to filesystem-coded-data list (try to remove this later)
       const response = await fetch("/api/list-coded-data");
       if (!response.ok) throw new Error("Failed to fetch coded data list");
       const data = await response.json();
-      setAvailableCodedData(data.coded_data || []);
-      if ((data.coded_data || []).length > 0) {
-        const urlParams = new URLSearchParams(window.location.search);
-        const selectedFromUrl = urlParams.get("selected");
-        if (
-          selectedFromUrl &&
-          data.coded_data.some((cd) => cd.id === selectedFromUrl)
-        ) {
-          setSelectedCodedData(selectedFromUrl);
-        } else {
-          setSelectedCodedData(data.coded_data[0].id);
-        }
+      const fallback = (data.coded_data || []).map((cd) => ({
+        id: cd.id,
+        name: cd.name || cd.id,
+      }));
+      setAvailableCodedData(fallback);
+      if (fallback.length > 0) {
+        setSelectedCodedData(fallback[0].id);
       }
     } catch (err) {
       console.error("Error fetching coded data list:", err);
@@ -38,9 +63,8 @@ export default function ViewCoding() {
 
   const handleCodedDataChange = (codedDataId) => {
     setSelectedCodedData(codedDataId);
-    const url = new URL(window.location);
-    url.searchParams.set("selected", codedDataId);
-    window.history.pushState({}, "", url);
+    const sel = availableCodedData.find((cd) => cd.id === codedDataId);
+    setSelectedCodedDataName(sel?.display_name || sel?.name || codedDataId);
   };
 
   return (
@@ -65,17 +89,32 @@ export default function ViewCoding() {
           }}
         >
           <MarkdownView
+            key={
+              selectedCodedData
+                ? `${selectedCodedData}-${refreshKey}`
+                : `none-${refreshKey}`
+            }
             selectedId={selectedCodedData}
-            fetchStyle="path"
+            title={selectedCodedDataName}
+            fetchStyle="query"
             fetchBase="/api/coded-data"
-            queryParamName=""
-            saveUrl="/api/save-coded-data/"
-            saveIdFieldName="coded_id"
-            onSaved={(newId) => {
-              if (newId !== selectedCodedData) {
-                setSelectedCodedData(newId);
+            queryParamName="coded_id"
+            saveUrl={"/api/save-project-coded-data/"}
+            saveIdFieldName={"schema_name"}
+            saveAsProject={true}
+            projectSchema={selectedCodedData}
+            onSaved={(resp) => {
+              if (typeof resp === "string") {
+                if (resp !== selectedCodedData) {
+                  setSelectedCodedData(resp);
+                  fetchAvailableCodedData();
+                }
+              } else if (resp && resp.display_name) {
+                setSelectedCodedDataName(resp.display_name);
                 fetchAvailableCodedData();
               }
+              // force remount/refresh of MarkdownView to reload content
+              setRefreshKey((k) => k + 1);
             }}
             emptyLabel="View Coding"
           />

@@ -904,7 +904,61 @@ async def list_coded_data():
             coded_data.append({"id": coded_id, "name": coded_id})
         coded_data.sort(key=lambda x: x["id"], reverse=True)  # Most recent first
         return JSONResponse({"coded_data": coded_data})
-    return JSONResponse({"coded_data": []})
+
+
+@router.get("/coded-data")
+async def get_coded_data_query(coded_id: str = Query(None), db: Session = Depends(get_db)):
+    """Return coded data. Prefer a Postgres project with project_type='coding'.
+    Falls back to filesystem coded_data in backend/data/coded_data if no project found.
+    """
+    project = None
+    if coded_id:
+        # try schema_name match
+        project = db.query(Project).filter(Project.project_type == 'coding', Project.schema_name == coded_id).first()
+        if not project:
+            project = db.query(Project).filter(Project.project_type == 'coding', Project.display_name == coded_id).first()
+        if not project:
+            try:
+                pid = uuid.UUID(coded_id)
+                project = db.query(Project).filter(Project.project_type == 'coding', Project.id == pid).first()
+            except Exception:
+                project = None
+    else:
+        project = db.query(Project).filter(Project.project_type == 'coding').order_by(Project.created_at.desc()).first()
+
+    if project:
+        schema = project.schema_name
+        try:
+            print(f"[DEBUG] get_coded_data -> selected project id={project.id} schema={schema} user_project_type={project.project_type}")
+            with engine.connect() as conn:
+                # Check if content_store table exists in the target schema
+                tbl_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": f"{schema}.content_store"}).scalar()
+                if not tbl_exists:
+                    print(f"[DEBUG] get_coded_data -> content_store not found in schema {schema}")
+                    return JSONResponse({"error": f"content_store table not found in schema {schema}"}, status_code=404)
+
+                # Check for file_text column
+                cols = conn.execute(text("SELECT column_name FROM information_schema.columns WHERE table_schema = :schema AND table_name = :table"), {"schema": schema, "table": "content_store"}).fetchall()
+                col_names = [c[0] for c in cols]
+                if 'file_text' not in col_names:
+                    print(f"[DEBUG] get_coded_data -> file_text column missing in {schema}.content_store; cols={col_names}")
+                    return JSONResponse({"error": f"file_text column missing in {schema}.content_store"}, status_code=404)
+
+                # Fetch the single row
+                res = conn.execute(text(f'SELECT file_text FROM "{schema}".content_store LIMIT 1'))
+                row = res.fetchone()
+                if row:
+                    return JSONResponse({"coded_data": row[0]})
+                else:
+                    print(f"[DEBUG] get_coded_data -> no rows in {schema}.content_store")
+                    return JSONResponse({"error": "Coded data content not found in project"}, status_code=404)
+        except Exception as e:
+            print(f"Error reading coded data from schema {schema}: {e}")
+            import traceback
+            traceback.print_exc()
+            return JSONResponse({"error": f"Error reading coded data: {e}"}, status_code=500)
+
+    return JSONResponse({"error": "No coded data project found"}, status_code=404)
 
 
 @router.get("/coded-data/{coded_id}")
@@ -930,6 +984,65 @@ async def save_coded_data(coded_id: str = Form(...), content: str = Form(...)):
             f.write(content)
         return JSONResponse({"message": f"Coded data {coded_id} saved successfully"})
     except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.post("/save-project-coded-data/")
+async def save_project_coded_data(request: Request, schema_name: str = Form(...), content: str = Form(...), db: Session = Depends(get_db)):
+    """Save coded content into a Postgres project schema's content_store table for project_type 'coding'.
+    Requires authentication and project ownership.
+    """
+    token = request.cookies.get("access_token")
+    if not token:
+        auth = request.headers.get("Authorization")
+        if auth and auth.lower().startswith("bearer "):
+            token = auth.split(None, 1)[1]
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        payload = decode_access_token(token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+
+    schema = schema_name.strip()
+    if schema.endswith('.db'):
+        schema = schema[:-3]
+
+    proj = db.query(Project).filter(Project.schema_name == schema, Project.user_id == user_id, Project.project_type == 'coding').first()
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found or you do not have permission")
+
+    display_name = None
+    try:
+        form = await request.form()
+        if "display_name" in form:
+            display_name = str(form.get("display_name"))
+    except Exception:
+        display_name = None
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(f'CREATE TABLE IF NOT EXISTS "{schema}".content_store (file_text text)'))
+            conn.execute(text(f'TRUNCATE TABLE "{schema}".content_store'))
+            conn.execute(text(f'INSERT INTO "{schema}".content_store (file_text) VALUES (:file_text)'), {"file_text": content})
+
+        if display_name:
+            proj.display_name = display_name
+            try:
+                db.commit()
+                db.refresh(proj)
+            except Exception:
+                db.rollback()
+
+        return JSONResponse({"message": "Project coded data saved", "id": str(proj.id), "display_name": proj.display_name})
+    except Exception as e:
+        print(f"Error saving project coded data to schema {schema}: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 

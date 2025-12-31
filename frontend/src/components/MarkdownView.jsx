@@ -45,7 +45,16 @@ export default function MarkdownView({
           url = `${fetchBase}/${encodeURIComponent(selectedId)}`;
         }
         const resp = await fetch(url);
-        if (!resp.ok) throw new Error("Failed to fetch content");
+        if (!resp.ok) {
+          // try parse server error message
+          try {
+            const err = await resp.json();
+            const msg = err.error || err.message || JSON.stringify(err);
+            throw new Error(msg || "Failed to fetch content");
+          } catch (e) {
+            throw new Error("Failed to fetch content");
+          }
+        }
         const data = await resp.json();
         const fetched = data.codebook ?? data.coded_data ?? "";
         setContent(fetched);
