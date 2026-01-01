@@ -13,7 +13,6 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 import hashlib
-import os
 import binascii
 import uuid
 from datetime import datetime
@@ -28,14 +27,14 @@ from backend.app.auth import create_access_token, decode_access_token
 from backend.app.config import settings
 
 from backend.scripts.import_db import import_from_zst_file
-from backend.scripts.filter_db import main as filter_database_with_ai
+from backend.scripts.filter_db import main as filter_database_with_ai, filter_posts_with_ai, filter_comments_with_ai
 from backend.scripts.codebook_generator import main as generate_codebook_main, generate_codebook as generate_codebook_function
 from backend.scripts.codebook_apply import main as apply_codebook_main, classify_posts
 from backend.app.services import migrate_sqlite_file
 
 router = APIRouter()
 
-# Legacy reddit DB path used by older scripts. Resolve from project root instead
+# Legacy behavior to remove later
 project_root = Path(__file__).resolve().parent.parent
 
 
@@ -1241,49 +1240,147 @@ def project_entries(schema: str = Query(..., description="Project schema name"),
 
 
 @router.post("/filter-data/")
-async def filter_data(api_key: str = Form(...), prompt: str = Form(...), database: str = Form(None), name: str = Form(...)):
-    # Resolve database path similar to other endpoints; database must be provided or exist in uploads
-    if database and database.endswith('.db'):
-        filtered_db_path = Path(settings.filtered_database_dir) / database
-        if filtered_db_path.exists():
-            db_path = filtered_db_path
-        else:
-            db_path = Path(settings.database_dir) / database
-    elif database in ("filtered_data", "filtered"):
-        db_path = Path(settings.filtered_database_dir) / "filtered_data.db"
-    else:
-        return JSONResponse({"error": "No database specified. Please provide a database name."}, status_code=400)
+async def filter_data(request: Request, api_key: str = Form(...), prompt: str = Form(...), database: str = Form(None), name: str = Form(...)):
+    """Read a Postgres project schema (provided in `database`), assemble submissions and comments,
+    merge into a single string and print it to the server stdout.
+    """
+    schema = (database or "").strip()
 
-    if not db_path.exists():
-        return JSONResponse({"error": f"Database not found: {db_path}. Please upload data first."}, status_code=404)
+    if not schema or not schema.startswith('proj_'):
+        return JSONResponse({"error": "This endpoint expects a proj_<id> schema name in 'database'"}, status_code=400)
 
-    # Validate output name for filtered DB (required)
-    filtered_dir = Path(settings.filtered_database_dir)
-    filtered_dir.mkdir(parents=True, exist_ok=True)
-
-    if not name or not name.strip():
-        return JSONResponse({"error": "A name for the filtered database is required"}, status_code=400)
-
-    # Basic sanitization: no path separators, no parent traversal
-    if any(sep in name for sep in ("/", "\\")) or ".." in name:
-        return JSONResponse({"error": "Invalid name provided"}, status_code=400)
-    if not name.endswith('.db'):
-        name = f"{name}.db"
-    candidate = filtered_dir / name
-    if candidate.exists():
-        return JSONResponse({"error": f"Filtered database '{name}' already exists"}, status_code=400)
-
-    output_db_path = str(candidate)
-
+    submissions_text = ""
+    comments_text = ""
     try:
-        # Pass the resolved db path and the desired output path to the filter script
-        filter_database_with_ai(api_key, prompt, str(db_path), output_db_path)
+        with engine.connect() as conn:
+            # Submissions: id, title, selftext
+            subs_tbl = f"{schema}.submissions"
+            subs_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": subs_tbl}).scalar()
+            if subs_exists:
+                rows = conn.execute(text(f'SELECT id, title, selftext FROM "{schema}"."submissions"')).fetchall()
+                for r in rows:
+                    try:
+                        rid = r._mapping.get('id')
+                        title = r._mapping.get('title')
+                        selftext = r._mapping.get('selftext')
+                    except Exception:
+                        rid = r[0] if len(r) > 0 else ""
+                        title = r[1] if len(r) > 1 else ""
+                        selftext = r[2] if len(r) > 2 else ""
+                    submissions_text += f"ID: {rid or ''}\nTitle: {title or ''}\n{selftext or ''}\n\n"
 
-        response_payload = {"message": "Data filtered successfully", "output": Path(output_db_path).name}
+            # Comments: id, body
+            comm_tbl = f"{schema}.comments"
+            comm_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": comm_tbl}).scalar()
+            if comm_exists:
+                rows = conn.execute(text(f'SELECT id, body FROM "{schema}"."comments"')).fetchall()
+                for r in rows:
+                    try:
+                        cid = r._mapping.get('id')
+                        body = r._mapping.get('body')
+                    except Exception:
+                        cid = r[0] if len(r) > 0 else ""
+                        body = r[1] if len(r) > 1 else ""
+                    comments_text += f"CommentID: {cid or ''}\n{body or ''}\n\n"
 
-        # If the request is authenticated, migrate the filtered sqlite DB into a Postgres schema
-        # and mark the project_type as 'filtered_data'. This creates a project owned by the user.
-        token = None
+        # Print only lengths
+        try:
+            print(f"[filter-data] submissions length: {len(submissions_text)}")
+            print(f"[filter-data] comments length: {len(comments_text)}")
+        except Exception as e:
+            print(f"[filter-data] Error printing lengths: {e}")
+
+        # Call AI filter functions and print their responses
+        posts_filtered = None
+        comments_filtered = None
+        try:
+            if submissions_text and submissions_text.strip():
+                posts_filtered = filter_posts_with_ai(prompt or "", submissions_text, api_key)
+                print(f"[filter-data] posts_filtered: {posts_filtered}")
+            else:
+                posts_filtered = '[]'
+
+            if comments_text and comments_text.strip():
+                comments_filtered = filter_comments_with_ai(prompt or "", comments_text, api_key)
+                print(f"[filter-data] comments_filtered: {comments_filtered}")
+            else:
+                comments_filtered = '[]'
+        except Exception as e:
+            print(f"[filter-data] Error calling filter functions: {e}")
+            traceback.print_exc()
+            posts_filtered = f'[{{"error": "Filtering failed: {e}"}}]'
+            comments_filtered = f'[{{"error": "Filtering failed: {e}"}}]'
+
+        # Ensure the returned strings are valid JSON lists; try to fix common truncation issues
+        def _ensure_closed_list(s: str) -> str:
+            if not s:
+                return '[]'
+            s = s.strip()
+            if s.endswith(']'):
+                return s
+            # if it ends with '}' or '},' add closing bracket
+            if s.endswith('}'): 
+                return s + ']'
+            if s.endswith('},'):
+                return s[:-1] + ']'
+            # otherwise, try to find last '}' and close after it
+            last_rbrace = s.rfind('}')
+            if last_rbrace != -1:
+                return s[: last_rbrace + 1] + ']'
+            # fallback: append closing bracket
+            return s + ']'
+
+        def _strip_code_fence(s: str) -> str:
+            if not s:
+                return s
+            s = s.strip()
+            # remove leading code fence markers like ```json or ```
+            if s.startswith('```json'):
+                s = s[len('```json'):].lstrip('\n\r ')
+            elif s.startswith('```'):
+                s = s[3:].lstrip('\n\r ')
+            # remove trailing fence
+            if s.endswith('```'):
+                s = s[:-3].rstrip('\n\r ')
+            return s
+
+        import json, ast
+
+        posts_list = []
+        comments_list = []
+
+        try:
+            pf = _ensure_closed_list(_strip_code_fence(posts_filtered or ''))
+            try:
+                posts_list = json.loads(pf)
+            except Exception:
+                try:
+                    posts_list = ast.literal_eval(pf)
+                except Exception:
+                    posts_list = []
+        except Exception:
+            posts_list = []
+
+        try:
+            cf = _ensure_closed_list(_strip_code_fence(comments_filtered or ''))
+            try:
+                comments_list = json.loads(cf)
+            except Exception:
+                try:
+                    comments_list = ast.literal_eval(cf)
+                except Exception:
+                    comments_list = []
+        except Exception:
+            comments_list = []
+
+        # Progress prints: show parsing results
+        try:
+            print(f"[filter-data] Parsed posts_list length: {len(posts_list)}")
+            print(f"[filter-data] Parsed comments_list length: {len(comments_list)}")
+        except Exception:
+            pass
+
+        # Create a new Postgres schema and store results there; attach to authenticated user if present
         try:
             token = request.cookies.get("access_token")
             if not token:
@@ -1293,22 +1390,97 @@ async def filter_data(api_key: str = Form(...), prompt: str = Form(...), databas
         except Exception:
             token = None
 
+        user_id = None
         if token:
             try:
                 payload = decode_access_token(token)
                 user_id = payload.get("sub")
-                if user_id:
-                    # migrate and tag as filtered_data
-                    migrate_sqlite_file(uuid.UUID(user_id), output_db_path, name, project_type="filtered_data")
-                    response_payload["project_migrated"] = True
-                else:
-                    response_payload["project_migrated"] = False
-            except Exception as exc:
-                response_payload["project_migrated"] = False
-                response_payload["migration_error"] = str(exc)
+            except Exception:
+                user_id = None
 
-        return JSONResponse(response_payload)
+        new_schema = None
+        proj = None
+        try:
+            unique_id = str(uuid.uuid4()).replace('-', '')[:12]
+            new_schema = f"proj_{unique_id}"
+            with engine.begin() as conn:
+                print(f"[filter-data] Creating schema {new_schema}")
+                conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{new_schema}"'))
+                # create submissions and comments tables
+                conn.execute(text(f"CREATE TABLE IF NOT EXISTS \"{new_schema}\".submissions (id text PRIMARY KEY, title text, selftext text)"))
+                conn.execute(text(f"CREATE TABLE IF NOT EXISTS \"{new_schema}\".comments (id text PRIMARY KEY, body text)"))
+                print(f"[filter-data] Created tables in schema {new_schema}")
+
+                # insert submissions
+                inserted_subs = 0
+                total_subs = len(posts_list)
+                print(f"[filter-data] Inserting {total_subs} submissions into {new_schema}.submissions")
+                for item in posts_list:
+                    try:
+                        sid = str(item.get('id') if isinstance(item, dict) else item[0]) if item else None
+                        title = item.get('title') if isinstance(item, dict) else None
+                        selftext = item.get('selftext') if isinstance(item, dict) else None
+                        if sid is None:
+                            continue
+                        conn.execute(text(f'INSERT INTO "{new_schema}".submissions (id, title, selftext) VALUES (:id, :title, :selftext)'), {"id": sid, "title": title, "selftext": selftext})
+                        inserted_subs += 1
+                    except Exception as ie:
+                        print(f"[filter-data] Skipping invalid submission row: {ie}")
+
+                print(f"[filter-data] Inserted {inserted_subs}/{total_subs} submissions")
+
+                # insert comments
+                inserted_comments = 0
+                total_comments = len(comments_list)
+                print(f"[filter-data] Inserting {total_comments} comments into {new_schema}.comments")
+                for item in comments_list:
+                    try:
+                        cid = str(item.get('id') if isinstance(item, dict) else item[0]) if item else None
+                        body = item.get('body') if isinstance(item, dict) else None
+                        if cid is None:
+                            continue
+                        conn.execute(text(f'INSERT INTO "{new_schema}".comments (id, body) VALUES (:id, :body)'), {"id": cid, "body": body})
+                        inserted_comments += 1
+                    except Exception as ie:
+                        print(f"[filter-data] Skipping invalid comment row: {ie}")
+
+                print(f"[filter-data] Inserted {inserted_comments}/{total_comments} comments")
+
+            # create project row and metadata if user authenticated
+            if user_id:
+                try:
+                    print(f"[filter-data] Creating project metadata for schema {new_schema} (user={user_id})")
+                    with DatabaseManager() as dm:
+                        proj = dm.projects.create(user_id=uuid.UUID(user_id), display_name=name or new_schema, schema_name=new_schema, project_type='filtered_data')
+                        print(f"[filter-data] Created project id={proj.id} schema={proj.schema_name}")
+                        try:
+                            dm.project_tables.add_table_metadata(project_id=proj.id, table_name='submissions', row_count=len(posts_list))
+                            print(f"[filter-data] Added project_tables entry for submissions (rows={len(posts_list)})")
+                        except Exception as e:
+                            print(f"[filter-data] Failed to add submissions table metadata: {e}")
+                        try:
+                            dm.project_tables.add_table_metadata(project_id=proj.id, table_name='comments', row_count=len(comments_list))
+                            print(f"[filter-data] Added project_tables entry for comments (rows={len(comments_list)})")
+                        except Exception as e:
+                            print(f"[filter-data] Failed to add comments table metadata: {e}")
+                except Exception as e:
+                    print(f"[filter-data] Failed to create project metadata: {e}")
+
+        except Exception as e:
+            print(f"[filter-data] Failed to persist filtered results to Postgres: {e}")
+            traceback.print_exc()
+
+        return JSONResponse({
+            "message": "Printed lengths and filter responses to server logs; persisted to schema",
+            "submissions_length": len(submissions_text),
+            "comments_length": len(comments_text),
+            "posts_filtered_count": len(posts_list),
+            "comments_filtered_count": len(comments_list),
+            "project": {"id": str(proj.id), "schema_name": new_schema, "display_name": proj.display_name} if proj else None,
+        })
     except Exception as exc:
+        print(f"[filter-data] Error reading schema {schema}: {exc}")
+        traceback.print_exc()
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 

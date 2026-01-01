@@ -86,7 +86,7 @@ INSTRUCTIONS:
 1. Analyze each post in the provided content
 2. Determine which posts match the filtering criteria
 3. Return ONLY a valid JSON array where each object contains "id", "title", and "selftext" fields
-4. LIMIT your response to MAXIMUM 10 posts that best match the criteria
+4. LIMIT your response to MAXIMUM 100 posts that best match the criteria (unless user prompt specifies different number)
 5. Only include posts that clearly match the filtering criteria
 6. If no posts match, return an empty JSON array []
 7. ALWAYS ensure the JSON array is complete and properly closed with ]
@@ -124,6 +124,66 @@ CRITICAL: Return ONLY the raw JSON array with NO markdown code blocks, NO backti
 
     except Exception as e:
         return f'[{{"error": "Failed to filter posts: {str(e)}"}}]'
+
+
+def filter_comments_with_ai(filter_prompt: str, comments_content: str, api_key: str) -> str:
+    """
+    Use AI to filter comments based on a given prompt and return results in JSON format.
+
+    Args:
+        filter_prompt (str): The filtering criteria/prompt
+        comments_content (str): The comments content to filter through
+        api_key (str): OpenRouter API key
+
+    Returns:
+        str: JSON string with filtered comments as an array of objects: [{id, body}, ...]
+    """
+    system_prompt = f"""You are an expert content analyst. Your task is to filter comments based on the given criteria.
+
+FILTERING CRITERIA: {filter_prompt}
+
+INSTRUCTIONS:
+1. Analyze each comment in the provided content
+2. Determine which comments match the filtering criteria
+3. Return ONLY a valid JSON array where each object contains "id" and "body" fields
+4. LIMIT your response to MAXIMUM 100 comments that best match the criteria (unless user prompt specifies different number)
+5. Only include comments that clearly match the filtering criteria
+6. If no comments match, return an empty JSON array []
+7. ALWAYS ensure the JSON array is complete and properly closed with ]
+
+EXAMPLE OUTPUT FORMAT:
+[
+  {{"id": "comment_id_1", "body": "Comment text 1"}},
+  {{"id": "comment_id_2", "body": "Comment text 2"}}
+]
+
+CRITICAL: Return ONLY the raw JSON array with NO markdown code blocks, NO backticks, NO "```json" wrappers, and NO additional text or explanation."""
+
+    user_prompt = f"Here are the comments to filter:\n\n{comments_content}"
+
+    try:
+        response = get_client(system_prompt, user_prompt, api_key)
+
+        response = response.strip()
+        print(response)
+        if not response.startswith('['):
+            return '[]'
+        if not response.endswith(']'):
+            last_comma = response.rfind(',')
+            if last_comma > 0:
+                response = response[:last_comma] + ']'
+            else:
+                response = response.rstrip() + ']'
+
+        try:
+            import json
+            json.loads(response)
+            return response
+        except json.JSONDecodeError:
+            return '[]'
+
+    except Exception as e:
+        return f'[{{"error": "Failed to filter comments: {str(e)}"}}]'
 
 
 def save_filtered_posts_to_db(posts_list, output_db_path=None) -> bool:
