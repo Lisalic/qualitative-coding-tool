@@ -176,56 +176,6 @@ async def upload_zst_file(
             pass
 
 
-@router.get("/list-databases/")
-async def list_databases(request: Request, db: Session = Depends(get_db)):
-    """List filesystem databases and, if authenticated, include user's Postgres projects.
-    This helps the client determine whether a desired merge name conflicts with an existing
-    project/schema owned by the user.
-    """
-    database_dir = Path(settings.database_dir)
-    if not database_dir.exists():
-        files = []
-    else:
-        files = []
-        for f in database_dir.iterdir():
-            if f.is_file() and f.name.endswith('.db'):
-                metadata = get_database_metadata(f)
-                files.append({
-                    "name": f.name,
-                    "metadata": metadata,
-                })
-
-    projects_list = []
-    # Attempt to authenticate and include projects owned by the user
-    token = None
-    try:
-        token = request.cookies.get("access_token")
-        if not token:
-            auth = request.headers.get("Authorization")
-            if auth and auth.lower().startswith("bearer "):
-                token = auth.split(None, 1)[1]
-    except Exception:
-        token = None
-
-    if token:
-        try:
-            payload = decode_access_token(token)
-            user_id = payload.get("sub")
-            if user_id:
-                projects = db.query(Project).filter(Project.user_id == user_id, Project.project_type == 'raw_data').all()
-                for p in projects:
-                    projects_list.append({
-                        "id": str(p.id),
-                        "display_name": p.display_name,
-                        "schema_name": p.schema_name,
-                        "project_type": p.project_type,
-                    })
-        except Exception:
-            return JSONResponse({"databases": files, "projects": None})
-
-    return JSONResponse({"databases": files, "projects": projects_list})
-
-
 def get_database_metadata(db_path):
     """Get metadata for a database file."""
     try:
@@ -256,7 +206,7 @@ def get_database_metadata(db_path):
         }
 
 
-@router.get("/list-filtered-databases/")
+@router.get("/list-filtered-databases/") #try to remove
 async def list_filtered_databases():
     filtered_database_dir = Path(settings.filtered_database_dir)
     # Debug logging to help identify why files might not be listed
@@ -558,7 +508,6 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
     return resp
 
 
-
 @router.get("/me/")
 def me(request: Request, db: Session = Depends(get_db)):
     # Try cookie first then Authorization header
@@ -634,37 +583,10 @@ def my_projects(request: Request, project_type: str = Query("raw_data"), db: Ses
 
 @router.delete("/delete-database/{db_name}")
 async def delete_database(db_name: str, request: Request, db: Session = Depends(get_db)):
-    """
-    Delete a filesystem .db file or a project schema.
-    - If `db_name` ends with `.db` or corresponds to a file, delete the file.
-    - If `db_name` looks like a project schema (e.g. starts with `proj_`) and belongs
-      to the authenticated user, drop the schema and delete the `projects` row.
-    """
-    database_dir = Path(settings.database_dir)
+    schema = db_name.strip()
 
-    # Normalize potential .db suffix
-    name = db_name.strip()
-    # If it's a file path request (endswith .db) try filesystem delete first
-    if name.endswith('.db'):
-        db_path = database_dir / name
-        if not db_path.exists():
-            raise HTTPException(status_code=404, detail="Database not found")
-        try:
-            db_path.unlink()
-            return JSONResponse({"message": f"Database '{name}' deleted successfully"})
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to delete database: {str(e)}")
-
-    # Otherwise treat as possible project schema name. Require auth.
-    schema = name
-    # strip accidental .db suffix if provided
-    if schema.endswith('.db'):
-        schema = schema[:-3]
-
-    # Only allow project schema deletions for safe names starting with proj_
     if not schema.startswith('proj_'):
-        # Not a project schema and not a .db file -> invalid request
-        raise HTTPException(status_code=400, detail="Invalid database identifier")
+        raise HTTPException(status_code=400, detail="Invalid project schema identifier")
 
     # Authenticate: cookie first then Authorization header
     token = request.cookies.get("access_token")
@@ -685,12 +607,10 @@ async def delete_database(db_name: str, request: Request, db: Session = Depends(
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid token payload")
 
-    # Find project owned by user with this schema
     proj = db.query(Project).filter(Project.schema_name == schema, Project.user_id == user_id).first()
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found or you do not have permission")
 
-    # Drop schema in Postgres and delete project row
     try:
         with engine.begin() as conn:
             conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
@@ -701,34 +621,6 @@ async def delete_database(db_name: str, request: Request, db: Session = Depends(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to delete project/schema: {str(e)}")
-
-
-@router.post("/rename-database/") #not needed
-async def rename_database(old_name: str = Form(...), new_name: str = Form(...)):
-    database_dir = Path(settings.database_dir)
-    
-    if not old_name.endswith('.db'):
-        old_name += '.db'
-    if not new_name.endswith('.db'):
-        new_name += '.db'
-    
-    old_path = database_dir / old_name
-    new_path = database_dir / new_name
-    
-    if old_path == new_path:
-        return JSONResponse({"message": "Database name unchanged"})
-    
-    if not old_path.exists():
-        raise HTTPException(status_code=404, detail="Database not found")
-    
-    if new_path.exists():
-        raise HTTPException(status_code=400, detail="Database with new name already exists")
-    
-    try:
-        old_path.rename(new_path)
-        return JSONResponse({"message": f"Database renamed from '{old_name}' to '{new_name}' successfully"})
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to rename database: {str(e)}")
 
 
 @router.post("/rename-project/")
@@ -783,8 +675,7 @@ def logout():
 
 @router.get("/codebook")
 async def get_codebook(codebook_id: str = Query(None), db: Session = Depends(get_db)):
-    """Return a codebook. Prefer a Postgres project with project_type='codebook'.
-    Falls back to filesystem codebooks in backend/data/codebooks if no project found.
+    """Return a codebook stored in a Postgres project with project_type='codebook'.
     """
     # First try to find a matching project (by schema_name or display_name or id)
     project = None
@@ -842,9 +733,6 @@ async def list_codebooks(db: Session = Depends(get_db)):
     codebooks.sort(key=lambda x: x.get("name") or x.get("id"))
     return JSONResponse({"codebooks": codebooks})
 
-
-@router.post("/rename-codebook/")
-async def rename_codebook(old_id: str = Form(...), new_id: str = Form(...)):
     codebooks_dir = Path(__file__).parent.parent.parent / "data" / "codebooks"
     if not codebooks_dir.exists():
         return JSONResponse({"error": "Codebooks directory not found"}, status_code=404)
@@ -861,21 +749,6 @@ async def rename_codebook(old_id: str = Form(...), new_id: str = Form(...)):
     try:
         old_file.rename(new_file)
         return JSONResponse({"message": f"Codebook {old_id} renamed to {new_id}"})
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-@router.post("/save-codebook/")
-async def save_codebook(codebook_id: str = Form(...), content: str = Form(...)):
-    codebooks_dir = Path(__file__).parent.parent.parent / "data" / "codebooks"
-    codebooks_dir.mkdir(parents=True, exist_ok=True)
-    
-    codebook_file = codebooks_dir / f"{codebook_id}.txt"
-    
-    try:
-        with open(codebook_file, 'w') as f:
-            f.write(content)
-        return JSONResponse({"message": f"Codebook {codebook_id} saved successfully"})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -957,23 +830,9 @@ async def save_project_codebook(request: Request, schema_name: str = Form(...), 
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@router.get("/list-coded-data")
-async def list_coded_data():
-    coded_data_dir = Path(__file__).parent.parent.parent / "data" / "coded_data"
-    if coded_data_dir.exists():
-        coded_files = list(coded_data_dir.glob("*.txt"))
-        coded_data = []
-        for cf in coded_files:
-            coded_id = cf.stem  # filename without .txt
-            coded_data.append({"id": coded_id, "name": coded_id})
-        coded_data.sort(key=lambda x: x["id"], reverse=True)  # Most recent first
-        return JSONResponse({"coded_data": coded_data})
-
-
-@router.get("/coded-data")
+@router.get("/coded-data") 
 async def get_coded_data_query(coded_id: str = Query(None), db: Session = Depends(get_db)):
-    """Return coded data. Prefer a Postgres project with project_type='coding'.
-    Falls back to filesystem coded_data in backend/data/coded_data if no project found.
+    """Return coded data stored in a Postgres project with project_type='coding'.
     """
     project = None
     if coded_id:
@@ -1025,8 +884,7 @@ async def get_coded_data_query(coded_id: str = Query(None), db: Session = Depend
     return JSONResponse({"error": "No coded data project found"}, status_code=404)
 
 
-@router.get("/coded-data/{coded_id}")
-async def get_coded_data(coded_id: str):
+
     coded_data_dir = Path(__file__).parent.parent.parent / "data" / "coded_data"
     coded_file = coded_data_dir / f"{coded_id}.txt"
     if coded_file.exists():
@@ -1035,20 +893,6 @@ async def get_coded_data(coded_id: str):
         return JSONResponse({"coded_data": coded_content})
     else:
         return JSONResponse({"error": f"Coded data {coded_id} not found"}, status_code=404)
-
-
-@router.post("/save-coded-data/")
-async def save_coded_data(coded_id: str = Form(...), content: str = Form(...)):
-    coded_data_dir = Path(__file__).parent.parent.parent / "data" / "coded_data"
-    coded_data_dir.mkdir(parents=True, exist_ok=True)
-
-    coded_file = coded_data_dir / f"{coded_id}.txt"
-    try:
-        with open(coded_file, 'w') as f:
-            f.write(content)
-        return JSONResponse({"message": f"Coded data {coded_id} saved successfully"})
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @router.post("/save-project-coded-data/")
@@ -1075,8 +919,6 @@ async def save_project_coded_data(request: Request, schema_name: str = Form(...)
         raise HTTPException(status_code=401, detail="Invalid token payload")
 
     schema = schema_name.strip()
-    if schema.endswith('.db'):
-        schema = schema[:-3]
 
     proj = db.query(Project).filter(Project.schema_name == schema, Project.user_id == user_id, Project.project_type == 'coding').first()
     if not proj:
@@ -1110,19 +952,7 @@ async def save_project_coded_data(request: Request, schema_name: str = Form(...)
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@router.get("/classification-report") #look to remove
-async def get_classification_report():
-    report_path = Path(__file__).parent.parent.parent / "data" / "classification_report.txt"
-    if report_path.exists():
-        with open(report_path, 'r') as f:
-            report_content = f.read()
-        return JSONResponse({"classification_report": report_content})
-    else:
-        return JSONResponse({"error": "Classification report not found. Please apply a codebook first."}, status_code=404)
 
-
-@router.get("/database-entries/")
-async def get_database_entries(limit: int = 10, database: str = Query(..., description="Database name")):
     if not database:
         raise HTTPException(status_code=400, detail="Database name is required")
         
@@ -1770,7 +1600,7 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 
-@router.get("/comments/{submission_id}")
+@router.get("/comments/{submission_id}") #needs to be migrated
 async def get_comments_for_submission(submission_id: str, database: str = Query("original")):
     """Fetch all comments for a specific submission"""
     if database.endswith('.db'):

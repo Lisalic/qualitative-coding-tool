@@ -36,25 +36,19 @@ export default function Filter() {
 
   const fetchDatabases = async () => {
     try {
-      // include credentials so authenticated users receive their Postgres projects
-      const response = await fetch("/api/list-databases/", {
+      // Prefer Postgres projects; list-databases removed in favor of my-projects
+      const response = await fetch("/api/my-projects/?project_type=raw_data", {
         credentials: "include",
       });
-      if (!response.ok) throw new Error("Failed to fetch databases");
+      if (!response.ok) throw new Error("Failed to fetch projects");
       const data = await response.json();
-      // Normalize: prefer DB-backed projects (returned in data.projects)
       const projectOptions = (data.projects || []).map((p) => ({
         value: p.schema_name,
         label: p.display_name || p.schema_name,
         meta: p,
       }));
 
-      const fileOptions = (data.databases || []).map((d) => {
-        const name = typeof d === "string" ? d : d.name;
-        return { value: name, label: name.replace(/\.db$/, ""), meta: d };
-      });
-
-      const combined = [...projectOptions, ...fileOptions];
+      const combined = [...projectOptions];
       setDatabases(combined);
       if (!database && combined.length > 0) setDatabase(combined[0].value);
     } catch (err) {

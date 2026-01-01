@@ -32,7 +32,6 @@ export default function DataTable({
 
       const fetchLimit = (searchTerm || "").trim() ? MAX_SEARCH_FETCH : limit;
       let response;
-      // If this 'database' looks like a project schema (created as proj_<id> or proj_<id>.db)
       const isProjectSchema = /^proj_[A-Za-z0-9_]+(?:\.db)?$/.test(
         String(currentDatabase) || ""
       );
@@ -42,12 +41,6 @@ export default function DataTable({
             String(currentDatabase)
           )}`,
           { credentials: "include" }
-        );
-      } else {
-        response = await fetch(
-          `/api/database-entries/?limit=${fetchLimit}&database=${encodeURIComponent(
-            String(currentDatabase)
-          )}`
         );
       }
 
@@ -180,10 +173,14 @@ export default function DataTable({
               ) : (
                 <>
                   <div className="metadata-row">
-                    <span>Posts: {metadata.total_submissions?.toLocaleString() || 0}</span>
+                    <span>
+                      Posts: {metadata.total_submissions?.toLocaleString() || 0}
+                    </span>
                   </div>
                   <div className="metadata-row">
-                    <span>Comments: {metadata.total_comments?.toLocaleString() || 0}</span>
+                    <span>
+                      Comments: {metadata.total_comments?.toLocaleString() || 0}
+                    </span>
                   </div>
                   {metadata.date_created && metadata.date_created > 0 && (
                     <div className="metadata-row">

@@ -63,10 +63,34 @@ export default function Import() {
         return;
       }
 
-      const response = await fetch("/api/list-databases/");
-      if (!response.ok) throw new Error("Failed to fetch databases");
-      const data = await response.json();
-      setDatabases(data.databases);
+      // If not authenticated, still try to use my-projects for raw_data (may be empty)
+      const response = await fetch("/api/my-projects/?project_type=raw_data", {
+        credentials: "include",
+      });
+      if (response.ok) {
+        const data = await response.json();
+        const normalized = (data.projects || []).map((p) => {
+          const tables = p.tables || [];
+          const submissionsTable = tables.find(
+            (t) => t.table_name === "submissions"
+          );
+          const commentsTable = tables.find((t) => t.table_name === "comments");
+          return {
+            name: p.schema_name,
+            display_name: p.display_name,
+            metadata: {
+              created_at: p.created_at || null,
+              tables: tables,
+              total_submissions: submissionsTable
+                ? submissionsTable.row_count
+                : 0,
+              total_comments: commentsTable ? commentsTable.row_count : 0,
+            },
+          };
+        });
+        setDatabases(normalized);
+        return;
+      }
     } catch (err) {
       console.error("Error fetching databases:", err);
     }
@@ -181,20 +205,6 @@ export default function Import() {
           throw new Error("Failed to rename project display name");
         const data = await response.json();
         console.log("Project renamed:", data);
-      } else {
-        const formData = new FormData();
-        formData.append("old_name", oldName);
-        formData.append("new_name", newName.trim());
-
-        const response = await fetch("/api/rename-database/", {
-          method: "POST",
-          body: formData,
-        });
-
-        if (!response.ok) throw new Error("Failed to rename database");
-
-        const data = await response.json();
-        console.log("Database renamed:", data);
       }
       setRenamingDb(null);
       setNewName("");

@@ -73,15 +73,36 @@ export default function Data() {
         return;
       }
 
-      // Not authenticated — fall back to listing uploaded databases
-      const response = await fetch("/api/list-databases/");
-      if (!response.ok) throw new Error("Failed to fetch databases");
-      const data = await response.json();
-      // Handle both old format (array of strings) and new format (array of objects)
-      const dbNames = data.databases.map((db) =>
-        typeof db === "string" ? db : db.name
-      );
-      setDatabases(dbNames);
+      // Not authenticated — try my-projects for raw_data (may return empty)
+      const response = await fetch("/api/my-projects/?project_type=raw_data", {
+        credentials: "include",
+      });
+      if (response.ok) {
+        const projData = await response.json();
+        const projects = projData.projects || [];
+        setUserProjects(projects);
+        const normalized = projects.map((p) => {
+          const tables = p.tables || [];
+          const submissionsTable = tables.find(
+            (t) => t.table_name === "submissions"
+          );
+          const commentsTable = tables.find((t) => t.table_name === "comments");
+          return {
+            name: p.schema_name,
+            display_name: p.display_name,
+            metadata: {
+              created_at: p.created_at || null,
+              tables: tables,
+              total_submissions: submissionsTable
+                ? submissionsTable.row_count
+                : 0,
+              total_comments: commentsTable ? commentsTable.row_count : 0,
+            },
+          };
+        });
+        setDatabases(normalized);
+        return;
+      }
     } catch (err) {
       console.error("Error fetching databases or projects:", err);
     }

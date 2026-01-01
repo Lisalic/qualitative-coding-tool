@@ -79,18 +79,6 @@ export default function CodebookManager({ onViewCodebook }) {
         });
 
         if (!response.ok) throw new Error("Failed to rename project");
-      } else {
-        // fallback to filesystem rename endpoint (try to rename this later maybe)
-        const formData = new FormData();
-        formData.append("old_id", oldId);
-        formData.append("new_id", newName.trim());
-
-        const response = await fetch("/api/rename-codebook/", {
-          method: "POST",
-          body: formData,
-        });
-
-        if (!response.ok) throw new Error("Failed to rename codebook");
       }
 
       setRenamingCb(null);

@@ -40,18 +40,11 @@ export default function ViewCoding() {
         return;
       }
 
-      // Fallback to filesystem-coded-data list (try to remove this later)
-      const response = await fetch("/api/list-coded-data");
-      if (!response.ok) throw new Error("Failed to fetch coded data list");
-      const data = await response.json();
-      const fallback = (data.coded_data || []).map((cd) => ({
-        id: cd.id,
-        name: cd.name || cd.id,
-      }));
-      setAvailableCodedData(fallback);
-      if (fallback.length > 0) {
-        setSelectedCodedData(fallback[0].id);
-      }
+      // If project-backed listing fails, expose empty list (no filesystem fallback)
+      console.warn("Failed to fetch coded data list; no coded data available");
+      setAvailableCodedData([]);
+      setSelectedCodedData(null);
+      setSelectedCodedDataName("");
     } catch (err) {
       console.error("Error fetching coded data list:", err);
     }

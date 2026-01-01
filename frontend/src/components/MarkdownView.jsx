@@ -10,8 +10,8 @@ export default function MarkdownView({
   fetchStyle = "query",
   fetchBase = "/api/codebook",
   queryParamName = "codebook_id",
-  saveUrl = "/api/save-codebook/",
-  saveIdFieldName = "codebook_id",
+  saveUrl = "/api/save-project-codebook/",
+  saveIdFieldName = "schema_name",
   onSaved = null,
   emptyLabel = "No item selected",
 }) {

@@ -119,13 +119,9 @@ export default function ViewCodebook() {
                 fetchStyle="query"
                 fetchBase="/api/codebook"
                 queryParamName="codebook_id"
-                saveUrl={
-                  isProject
-                    ? "/api/save-project-codebook/"
-                    : "/api/save-codebook/"
-                }
-                saveIdFieldName={isProject ? "schema_name" : "codebook_id"}
-                saveAsProject={Boolean(isProject)}
+                saveUrl={"/api/save-project-codebook/"}
+                saveIdFieldName={"schema_name"}
+                saveAsProject={true}
                 projectSchema={projectSchema}
                 onSaved={(resp) => {
                   if (typeof resp === "string") {

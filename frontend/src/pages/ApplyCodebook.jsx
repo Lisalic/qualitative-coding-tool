@@ -60,13 +60,18 @@ export default function ApplyCodebook() {
         return;
       }
 
-      const response = await fetch("/api/list-databases/");
-      if (!response.ok) throw new Error("Failed to fetch databases");
+      // Fallback: prefer Postgres projects instead of filesystem list
+      const response = await fetch("/api/my-projects/?project_type=raw_data", {
+        credentials: "include",
+      });
+      if (!response.ok) throw new Error("Failed to fetch projects");
       const data = await response.json();
-      const dbNames = (data.databases || []).map((d) =>
-        typeof d === "string" ? d : d.name
-      );
-      setDatabases(dbNames);
+      const normalized = (data.projects || []).map((p) => ({
+        name: p.schema_name,
+        display_name: p.display_name,
+        metadata: p,
+      }));
+      setDatabases(normalized);
       if (!database && dbNames.length > 0) {
         setDatabase(dbNames[0]);
       }
