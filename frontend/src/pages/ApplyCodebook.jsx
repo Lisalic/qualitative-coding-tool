@@ -9,6 +9,7 @@ export default function ApplyCodebook() {
   const navigate = useNavigate();
   const [methodology, setMethodology] = useState("");
   const [database, setDatabase] = useState("");
+  const [reportName, setReportName] = useState("");
   const [databaseType, setDatabaseType] = useState("unfiltered");
   const [codebook, setCodebook] = useState("");
   const [loading, setLoading] = useState(false);
@@ -114,6 +115,12 @@ export default function ApplyCodebook() {
       setError("Please set your API key in the navbar first.");
       return;
     }
+    if (!formData.report_name || !formData.report_name.trim()) {
+      setError(
+        "Please provide an output display name (report name) before applying the codebook."
+      );
+      return;
+    }
     try {
       setLoading(true);
       setError(null);
@@ -122,6 +129,7 @@ export default function ApplyCodebook() {
       const requestData = new FormData();
       requestData.append("api_key", savedApiKey);
       requestData.append("database", formData.database);
+      requestData.append("report_name", formData.report_name);
       requestData.append("codebook", formData.codebook);
       requestData.append("methodology", formData.methodology);
 
@@ -204,6 +212,13 @@ export default function ApplyCodebook() {
       value: methodology,
       placeholder: "Enter your coding methodology or leave blank...",
       rows: 4,
+    },
+    {
+      id: "report_name",
+      label: "Report Name",
+      type: "text",
+      value: reportName,
+      placeholder: "Enter report name... ",
     },
   ];
 

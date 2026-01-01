@@ -1591,7 +1591,7 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
 
 
 @router.post("/apply-codebook/")
-async def apply_codebook(request: Request, database: str = Form(...), codebook: str = Form(...), methodology: str = Form(""), api_key: str = Form(...)):
+async def apply_codebook(request: Request, database: str = Form(...), codebook: str = Form(...), methodology: str = Form(""), report_name: str = Form(None), api_key: str = Form(...)):
     """Open the Postgres schema provided by `database`, read `submissions.title`/`selftext`
     and `comments.body`, assemble them into a single string, print it to stdout and
     return a preview in the response.
@@ -1639,14 +1639,12 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
                 pass
 
 
-        # Also read the codebook project's content_store.file_text and print it
         cb_schema_raw = (codebook or "").strip()
         codebook_text = ""
         try:
             # provided codebook identifier (no stdout prints)
 
             resolved_schema = None
-            # If it's already a proj_ schema name, use it
             if cb_schema_raw and cb_schema_raw.startswith('proj_'):
                 resolved_schema = cb_schema_raw
             else:
@@ -1679,7 +1677,6 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
             else:
                 pass
         except Exception:
-            # swallow errors silently here; classification_output will indicate failures
             pass
 
         # Attempt classification using the provided codebook and API key
@@ -1692,7 +1689,6 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
         except Exception:
             classification_output = "API request error"
 
-        # Persist classification_output into a new Postgres project schema of type 'coding'
         try:
             # Authenticate user (cookie or Authorization header)
             token = request.cookies.get("access_token")
@@ -1710,6 +1706,9 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
                     user_id = None
 
             if user_id:
+                provided_name = (report_name or "").strip()
+                display_name = provided_name if provided_name else 'coding'
+
                 unique_id = str(uuid.uuid4()).replace('-', '')[:12]
                 new_schema = f"proj_{unique_id}"
                 try:
@@ -1721,16 +1720,13 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
 
                     # create project row and table metadata
                     with DatabaseManager() as dm:
-                        proj = dm.projects.create(user_id=uuid.UUID(user_id), display_name='coding', schema_name=new_schema, project_type='coding')
+                        proj = dm.projects.create(user_id=uuid.UUID(user_id), display_name=display_name, schema_name=new_schema, project_type='coding')
                         dm.project_tables.add_table_metadata(project_id=proj.id, table_name='content_store', row_count=1)
                 except Exception as e:
                     print(f"Failed to persist classification project/schema: {e}")
         except Exception:
-            # Swallow persistence/auth errors — do not fail the endpoint
             pass
 
-        # Print and return only the classification output (no large previews)
-        print(classification_output)
         return JSONResponse({"classification_output": classification_output})
     except Exception as exc:
         print(f"Error reading schema {schema}: {exc}")
