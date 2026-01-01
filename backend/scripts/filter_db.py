@@ -1,22 +1,10 @@
-import os
 import time
-import sqlite3
-import ast
 from openai import OpenAI
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
 FREE_MODEL = "google/gemini-2.0-flash-exp:free"
 MAX_RETRIES = 3
 INITIAL_RETRY_DELAY = 2  
-
-
-def write_to_file(filename: str, content: str):
-    try:
-        with open(filename, 'w', encoding='utf-8') as f:
-            f.write(content)
-    except IOError as e:
-        print(f"ERROR: Could not write to file {filename}. Reason: {e}")
-
 
 def get_client(system_prompt: str, user_prompt: str, api_key: str) -> str:
     if not api_key:
@@ -48,23 +36,6 @@ def get_client(system_prompt: str, user_prompt: str, api_key: str) -> str:
             print(f"\nAPI call failed (attempt {attempt}/{MAX_RETRIES}): {type(e).__name__}")
             print(f"Retrying in {wait_time}s...")
             time.sleep(wait_time)
-
-
-def load_posts_content(db_path: str) -> str:
-    try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, title, selftext FROM submissions")
-        posts = cursor.fetchall()
-        conn.close()
-
-        content = ""
-        for post_id, title, selftext in posts:
-            content += f"ID: {post_id}\nTitle: {title}\nText: {selftext}\n\n"
-        return content
-    except Exception as e:
-        return f"Error loading posts: {e}"
-
 
 def filter_posts_with_ai(filter_prompt: str, posts_content: str, api_key: str) -> str:
     """
@@ -125,7 +96,6 @@ CRITICAL: Return ONLY the raw JSON array with NO markdown code blocks, NO backti
     except Exception as e:
         return f'[{{"error": "Failed to filter posts: {str(e)}"}}]'
 
-
 def filter_comments_with_ai(filter_prompt: str, comments_content: str, api_key: str) -> str:
     """
     Use AI to filter comments based on a given prompt and return results in JSON format.
@@ -184,96 +154,3 @@ CRITICAL: Return ONLY the raw JSON array with NO markdown code blocks, NO backti
 
     except Exception as e:
         return f'[{{"error": "Failed to filter comments: {str(e)}"}}]'
-
-
-def save_filtered_posts_to_db(posts_list, output_db_path=None) -> bool:
-    """
-    Save filtered posts to database.
-
-    Args:
-        posts_list: A string which contains a list of post dictionaries, each containing 'id', 'title', and 'selftext' keys
-
-    Returns:
-        bool: True if successful, False if failed
-    """
-    try:
-        posts = ast.literal_eval(posts_list)
-        
-        if not isinstance(posts, list):
-            print(f"Error: Expected list after parsing, got {type(posts)}")
-            return False
-
-        print(f"Processing {len(posts)} posts")
-
-        # Determine output path (use provided path or default filtered_data.db)
-        if output_db_path:
-            filtered_db_path = output_db_path
-            os.makedirs(os.path.dirname(filtered_db_path), exist_ok=True)
-        else:
-            data_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data")
-            os.makedirs(data_dir, exist_ok=True)
-            filtered_db_path = os.path.join(data_dir, "filtered_data.db")
-
-        conn = sqlite3.connect(filtered_db_path)
-        cursor = conn.cursor()
-
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS submissions (
-        id TEXT PRIMARY KEY,
-        title TEXT,
-        selftext TEXT
-        )
-        ''')
-
-        for post in posts:
-            if isinstance(post, dict) and 'id' in post and 'title' in post and 'selftext' in post:
-                cursor.execute('''
-                INSERT OR REPLACE INTO submissions (id, title, selftext)
-                VALUES (?, ?, ?)
-                ''', (
-                    post['id'],
-                    post['title'],
-                    post['selftext']
-                ))
-            else:
-                print(f"Warning: Skipping invalid post: {post}")
-
-        conn.commit()
-        conn.close()
-
-        print(f"Successfully saved {len(posts)} filtered posts to {filtered_db_path}")
-        return True
-
-    except (ValueError, SyntaxError) as e:
-        print(f"Error parsing string to list: {e}")
-        return False
-    except Exception as e:
-        print(f"Error saving filtered posts to database: {e}")
-        return False
-
-
-def main(api_key: str, prompt: str, db_path: str = None, output_db_path: str = None):
-    # Require explicit database path; legacy reddit_data.db fallback removed
-    if not db_path:
-        raise ValueError("db_path is required. Legacy reddit_data.db fallback is removed; provide an explicit db_path")
-
-    if not os.path.exists(db_path):
-        print(f"Error: {db_path} not found. Please import data first.")
-        return
-
-    posts_content = load_posts_content(db_path)
-    if not posts_content or posts_content.startswith("Error"):
-        print(posts_content)
-        return
-
-    filtered_list = filter_posts_with_ai(prompt, posts_content, api_key)
-    if filtered_list.startswith('[{{"error":'):
-        print(f"Filtering failed: {filtered_list}")
-        return
-
-    # Save into the provided output path if given
-    save_success = save_filtered_posts_to_db(filtered_list, output_db_path)
-    if save_success:
-        print("Filtering completed successfully!")
-    else:
-        print("Failed to save filtered data.")

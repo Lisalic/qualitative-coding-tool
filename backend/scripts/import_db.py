@@ -1,49 +1,8 @@
-import sqlite3
 import json
 import zstandard as zstd
-import os
 import io
-from pathlib import Path
-
-def create_database(db_path):
-    db_path = Path(db_path)
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS submissions (
-    id TEXT PRIMARY KEY,
-    subreddit TEXT,
-    title TEXT,
-    selftext TEXT,
-    author TEXT,
-    created_utc INTEGER,
-    score INTEGER,
-    num_comments INTEGER
-    )
-    ''')
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS comments (
-        id TEXT PRIMARY KEY,
-        subreddit TEXT,
-        body TEXT,
-        author TEXT,
-        created_utc INTEGER,
-        score INTEGER,
-        link_id TEXT,
-        parent_id TEXT
-    )
-    ''')
-    
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_submissions_subreddit ON submissions(subreddit)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_submissions_author ON submissions(author)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_submissions_created ON submissions(created_utc)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_comments_link_id ON comments(link_id)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_comments_author ON comments(author)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_comments_subreddit ON comments(subreddit)')
-    
-    conn.commit()
-    return conn
+from sqlalchemy import text
+from backend.app.database import engine
 
 def decompress_zst_file(file_path, chunk_size=16384): 
     try:
@@ -71,195 +30,180 @@ def decompress_zst_file(file_path, chunk_size=16384):
         print(f"Error decompressing {file_path}: {e}")
         return
 
-def import_submissions(conn, file_path, batch_size=100000, subreddit_filter=None):
-    cursor = conn.cursor()
-    submissions = []
-    count = 0
-    errors = 0
-    processed_lines = 0
+def stream_zst_to_postgres(file_path: str, schema_name: str, data_type: str, subreddit_filter=None, batch_size: int = 1000) -> dict:
+    """Stream a .zst file into a Postgres schema's submissions/comments tables.
 
-    print(f"Starting submission import from {file_path}")
-    
-    try:
-        for line in decompress_zst_file(file_path):
-            processed_lines += 1
-            
-            if processed_lines % 10000 == 0:
-                print(f"Processed {processed_lines} lines, imported {count} submissions")
-                
-            try:
-                data = json.loads(line)
-                subreddit = data.get('subreddit')
-                
-                if subreddit_filter and subreddit and subreddit.lower() not in subreddit_filter:
-                    continue
-                
-                submission_id = data.get("id")
-                external_url = data.get("url")
-
-
-                selftext = data.get("selftext")
-                if not selftext:
-                    if not data.get("is_self") and external_url:
-                        selftext = external_url
-                    else:
-                        selftext = None
-
-                submissions.append((
-                    submission_id,
-                    subreddit,
-                    data.get('title'),
-                    selftext,          
-                    data.get('author'),
-                    data.get('created_utc'),
-                    data.get('score'),
-                    data.get('num_comments'),
-                ))
-
-                count += 1
-
-                if len(submissions) >= batch_size:
-                    cursor.executemany('''
-                    INSERT OR REPLACE INTO submissions 
-                    VALUES (?,?,?,?,?,?,?,?)
-                    ''', submissions)
-                    conn.commit()
-                    print(f"Committed batch of {len(submissions)} submissions")
-                    submissions = []
-
-            except json.JSONDecodeError as e:
-                errors += 1
-                continue
-            except Exception as e:
-                errors += 1
-                continue
-
-        if submissions:
-            cursor.executemany('''
-            INSERT OR REPLACE INTO submissions 
-            VALUES (?,?,?,?,?,?,?,?)
-            ''', submissions)
-            conn.commit()
-            print(f"Committed final batch of {len(submissions)} submissions")
-
-        print(f"Submission import complete: {count} imported, {errors} errors, {processed_lines} lines processed")
-
-    except Exception as e:
-        print(f"Error in import_submissions: {e}")
-
-def import_comments(conn, file_path, batch_size=100000, subreddit_filter=None):
-    cursor = conn.cursor()
-    comments = []
-    count = 0
-    errors = 0
-    
-    try:
-        for line in decompress_zst_file(file_path):
-            try:
-                data = json.loads(line)
-                subreddit = data.get('subreddit')
-                
-                if subreddit_filter and subreddit and subreddit.lower() not in subreddit_filter:
-                    continue
-                
-                link_id = data.get('link_id', '').replace('t3_', '')
-                parent_id = data.get('parent_id', '')
-                
-                comments.append((
-                    data['id'],
-                    subreddit,
-                    data.get('body'),
-                    data.get('author'),
-                    data.get('created_utc'),
-                    data.get('score'),
-                    link_id,
-                    parent_id,
-                ))
-                
-                count += 1
-                
-                if len(comments) >= batch_size:
-                    cursor.executemany('''
-                    INSERT OR REPLACE INTO comments VALUES (?,?,?,?,?,?,?,?)
-                    ''', comments)
-                    conn.commit()
-                    comments = []
-                    
-            except json.JSONDecodeError as e:
-                errors += 1
-                continue
-            except Exception as e:
-                errors += 1
-                continue
-        
-        if comments:
-            cursor.executemany('''
-            INSERT OR REPLACE INTO comments VALUES (?,?,?,?,?,?,?,?)
-            ''', comments)
-            conn.commit()
-        
-    except Exception as e:
-        print(f"Error in import_comments: {e}")
-
-def get_file_size_mb(file_path):
-    size_bytes = os.path.getsize(file_path)
-    return size_bytes / (1024 * 1024)
-
-def import_from_zst_file(file_path, db_path=None, subreddit_filter=None, data_type=None):
-    """
-    Import data from a single zst file and create/update database.
-    Returns a dictionary with import statistics.
-    
     Args:
-        file_path: Path to the .zst file
-        db_path: Path to the database (optional)
-        subreddit_filter: List of subreddit names to import (optional, None imports all)
-        data_type: 'submissions' or 'comments' (required)
+        file_path: path to the uploaded .zst file
+        schema_name: target Postgres schema (e.g., 'proj_abcd')
+        data_type: 'submissions' or 'comments'
+        subreddit_filter: optional list of subreddit names (lowercase) to keep
+        batch_size: number of rows per insert batch
+
+    Returns:
+        dict with counts: {'submissions': int, 'comments': int}
     """
-    file_path = str(file_path)
+    inserted_counts = {"submissions": 0, "comments": 0}
 
-    if db_path is None:
-        raise ValueError("db_path is required. Provide an explicit path instead of relying on legacy reddit_data.db")
-
-    db_path = Path(db_path)
-    conn = create_database(db_path)
-    
-    stats = {
-        'submissions_imported': 0,
-        'comments_imported': 0,
-        'errors': 0,
-        'db_path': str(db_path),
-        'file_path': file_path,
-        'subreddit_filter': subreddit_filter
-    }
-    
+    # Ensure filter list is normalized
     filter_list = None
     if subreddit_filter:
         filter_list = [s.lower() for s in subreddit_filter]
-    
-    try:
-        if data_type == 'comments':
-            import_comments(conn, file_path, subreddit_filter=filter_list)
-        elif data_type == 'submissions':
-            import_submissions(conn, file_path, subreddit_filter=filter_list)
+
+    # Create schema and tables if they don't exist
+    with engine.begin() as conn:
+        conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
+        conn.execute(text(f'''
+        CREATE TABLE IF NOT EXISTS "{schema_name}"."submissions" (
+            id TEXT PRIMARY KEY,
+            subreddit TEXT,
+            title TEXT,
+            selftext TEXT,
+            author TEXT,
+            created_utc BIGINT,
+            score INTEGER,
+            num_comments INTEGER
+        )
+        '''))
+        conn.execute(text(f'''
+        CREATE TABLE IF NOT EXISTS "{schema_name}"."comments" (
+            id TEXT PRIMARY KEY,
+            subreddit TEXT,
+            body TEXT,
+            author TEXT,
+            created_utc BIGINT,
+            score INTEGER,
+            link_id TEXT,
+            parent_id TEXT
+        )
+        '''))
+
+    subs_batch = []
+    comm_batch = []
+
+    for line in decompress_zst_file(file_path):
+        try:
+            data = json.loads(line)
+        except Exception:
+            continue
+
+        if data_type == 'submissions':
+            subreddit = data.get('subreddit')
+            if filter_list and subreddit and subreddit.lower() not in filter_list:
+                continue
+
+            submission_id = data.get('id')
+            external_url = data.get('url')
+            selftext = data.get('selftext')
+            if not selftext:
+                if not data.get('is_self') and external_url:
+                    selftext = external_url
+                else:
+                    selftext = None
+
+            subs_batch.append({
+                'id': submission_id,
+                'subreddit': subreddit,
+                'title': data.get('title'),
+                'selftext': selftext,
+                'author': data.get('author'),
+                'created_utc': data.get('created_utc'),
+                'score': data.get('score'),
+                'num_comments': data.get('num_comments'),
+            })
+
+            if len(subs_batch) >= batch_size:
+                insert_sql = text(f'''
+                    INSERT INTO "{schema_name}"."submissions"
+                    (id, subreddit, title, selftext, author, created_utc, score, num_comments)
+                    VALUES (:id, :subreddit, :title, :selftext, :author, :created_utc, :score, :num_comments)
+                    ON CONFLICT (id) DO UPDATE SET
+                        subreddit = EXCLUDED.subreddit,
+                        title = EXCLUDED.title,
+                        selftext = EXCLUDED.selftext,
+                        author = EXCLUDED.author,
+                        created_utc = EXCLUDED.created_utc,
+                        score = EXCLUDED.score,
+                        num_comments = EXCLUDED.num_comments
+                ''')
+                with engine.begin() as conn:
+                    conn.execute(insert_sql, subs_batch)
+                inserted_counts['submissions'] += len(subs_batch)
+                subs_batch = []
+
         else:
-            raise ValueError(f"Invalid data_type: {data_type}. Must be 'submissions' or 'comments'")
-    except Exception as e:
-        print(f"Error importing {file_path}: {e}")
-        stats['errors'] += 1
-    
-    cursor = conn.cursor()
-    cursor.execute('SELECT COUNT(*) FROM submissions')
-    stats['submissions_imported'] = cursor.fetchone()[0]
-    cursor.execute('SELECT COUNT(*) FROM comments')
-    stats['comments_imported'] = cursor.fetchone()[0]
-    
-    print(f"Final stats: {stats}")
-    conn.close()
-    return stats
+            subreddit = data.get('subreddit')
+            if filter_list and subreddit and subreddit.lower() not in filter_list:
+                continue
 
-def main():
-    raise FileNotFoundError(f"Shouldn't be used directly. No code at all.")
+            link_id = data.get('link_id', '').replace('t3_', '')
+            parent_id = data.get('parent_id', '')
 
-if __name__ == '__main__':
-    main()
+            comm_batch.append({
+                'id': data.get('id'),
+                'subreddit': subreddit,
+                'body': data.get('body'),
+                'author': data.get('author'),
+                'created_utc': data.get('created_utc'),
+                'score': data.get('score'),
+                'link_id': link_id,
+                'parent_id': parent_id,
+            })
+
+            if len(comm_batch) >= batch_size:
+                insert_sql = text(f'''
+                    INSERT INTO "{schema_name}"."comments"
+                    (id, subreddit, body, author, created_utc, score, link_id, parent_id)
+                    VALUES (:id, :subreddit, :body, :author, :created_utc, :score, :link_id, :parent_id)
+                    ON CONFLICT (id) DO UPDATE SET
+                        subreddit = EXCLUDED.subreddit,
+                        body = EXCLUDED.body,
+                        author = EXCLUDED.author,
+                        created_utc = EXCLUDED.created_utc,
+                        score = EXCLUDED.score,
+                        link_id = EXCLUDED.link_id,
+                        parent_id = EXCLUDED.parent_id
+                ''')
+                with engine.begin() as conn:
+                    conn.execute(insert_sql, comm_batch)
+                inserted_counts['comments'] += len(comm_batch)
+                comm_batch = []
+
+    # flush remaining
+    if subs_batch:
+        insert_sql = text(f'''
+            INSERT INTO "{schema_name}"."submissions"
+            (id, subreddit, title, selftext, author, created_utc, score, num_comments)
+            VALUES (:id, :subreddit, :title, :selftext, :author, :created_utc, :score, :num_comments)
+            ON CONFLICT (id) DO UPDATE SET
+                subreddit = EXCLUDED.subreddit,
+                title = EXCLUDED.title,
+                selftext = EXCLUDED.selftext,
+                author = EXCLUDED.author,
+                created_utc = EXCLUDED.created_utc,
+                score = EXCLUDED.score,
+                num_comments = EXCLUDED.num_comments
+        ''')
+        with engine.begin() as conn:
+            conn.execute(insert_sql, subs_batch)
+        inserted_counts['submissions'] += len(subs_batch)
+
+    if comm_batch:
+        insert_sql = text(f'''
+            INSERT INTO "{schema_name}"."comments"
+            (id, subreddit, body, author, created_utc, score, link_id, parent_id)
+            VALUES (:id, :subreddit, :body, :author, :created_utc, :score, :link_id, :parent_id)
+            ON CONFLICT (id) DO UPDATE SET
+                subreddit = EXCLUDED.subreddit,
+                body = EXCLUDED.body,
+                author = EXCLUDED.author,
+                created_utc = EXCLUDED.created_utc,
+                score = EXCLUDED.score,
+                link_id = EXCLUDED.link_id,
+                parent_id = EXCLUDED.parent_id
+        ''')
+        with engine.begin() as conn:
+            conn.execute(insert_sql, comm_batch)
+        inserted_counts['comments'] += len(comm_batch)
+
+    return inserted_counts

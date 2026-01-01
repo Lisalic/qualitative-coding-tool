@@ -1,6 +1,5 @@
 import os
 import sqlite3
-import sys
 import json
 import tempfile
 import traceback
@@ -26,10 +25,10 @@ from backend.app.auth import create_access_token, decode_access_token
 
 from backend.app.config import settings
 
-from backend.scripts.import_db import import_from_zst_file
-from backend.scripts.filter_db import main as filter_database_with_ai, filter_posts_with_ai, filter_comments_with_ai
-from backend.scripts.codebook_generator import main as generate_codebook_main, generate_codebook as generate_codebook_function
-from backend.scripts.codebook_apply import main as apply_codebook_main, classify_posts
+from backend.scripts.import_db import stream_zst_to_postgres
+from backend.scripts.filter_db import filter_posts_with_ai, filter_comments_with_ai
+from backend.scripts.codebook_generator import generate_codebook as generate_codebook_function
+from backend.scripts.codebook_apply import classify_posts
 from backend.app.services import migrate_sqlite_file
 
 router = APIRouter()
@@ -46,98 +45,135 @@ async def upload_zst_file(
     data_type: str = Form(...),
     name: str = Form(None)
 ):
-    print(f"Received upload request for file: {file.filename}")
-    
+
     if not file.filename.endswith('.zst'):
-        print("File rejected: not a .zst file")
         raise HTTPException(status_code=400, detail="File must be a .zst file")
 
     subreddit_list = None
     if subreddits:
         try:
             subreddit_list = json.loads(subreddits)
-            print(f"Subreddit filter: {subreddit_list}")
         except json.JSONDecodeError:
-            print("Invalid subreddit JSON")
             raise HTTPException(status_code=400, detail="Invalid subreddits format")
 
     allowed = ("comments", "posts")
     if data_type not in allowed:
         raise HTTPException(status_code=400, detail="data_type must be 'posts' or 'comments'")
     import_data_type = "submissions" if data_type == "posts" else data_type
-    print(f"Data type: {import_data_type}")
 
-    # Generate unique database name
-    database_dir = Path(settings.database_dir)
-    database_dir.mkdir(parents=True, exist_ok=True)
-    base_name = name.strip() if name else file.filename.replace('.zst', '')
-    counter = 1
-    db_name = f"{base_name}{counter}.db"
-    db_path = database_dir / db_name
-    while db_path.exists():
-        counter += 1
-        db_name = f"{base_name}{counter}.db"
-        db_path = database_dir / db_name
-
+    # Save upload to a temporary .zst file
     try:
         content = await file.read()
         with tempfile.NamedTemporaryFile(suffix='.zst', delete=False) as tmp:
             tmp.write(content)
             tmp_path = tmp.name
-        print(f"File temporarily saved to: {tmp_path}, size: {len(content)} bytes")
-
-        stats = import_from_zst_file(tmp_path, str(db_path), subreddit_list, import_data_type)
-        print(f"Import completed successfully: {stats}")
-
-        os.unlink(tmp_path)
-
-        count = stats['comments_imported'] if import_data_type == 'comments' else stats['submissions_imported']
-        # If the request is authenticated, migrate the new DB into a per-user project
-        user_id = None
-        try:
-            token = request.cookies.get("access_token")
-            if not token:
-                auth = request.headers.get("Authorization")
-                if auth and auth.lower().startswith("bearer "):
-                    token = auth.split(None, 1)[1]
-            if token:
-                payload = decode_access_token(token)
-                user_id = payload.get("sub")
-        except Exception:
-            user_id = None
-
-        response_data = {
-            "status": "completed",
-            "message": f"Created {db_name} with {count} {import_data_type}",
-            "database": db_name,
-            "file_name": file.filename,
-            "stats": stats,
-        }
-
-        # Indicate whether the request was authenticated (helps debug client behavior)
-        response_data["authenticated"] = bool(user_id)
-
-        # If authenticated, attempt to create a project and migrate the sqlite DB into a schema
-        if user_id:
-            try:
-                # use base_name as display name
-                migrate_sqlite_file(uuid.UUID(user_id), str(db_path), base_name)
-                response_data["project_migrated"] = True
-            except Exception as exc:
-                response_data["project_migrated"] = False
-                response_data["migration_error"] = str(exc)
-        else:
-            # explicitly mark that no migration was attempted due to missing auth
-            response_data["project_migrated"] = False
-
-        print(f"Sending response: {response_data}")
-        return JSONResponse(response_data)
-        
     except Exception as exc:
-        print(f"Error during upload/import: {exc}")
+        raise HTTPException(status_code=500, detail=f"Failed to save uploaded file: {exc}")
+
+    # Resolve authenticated user (cookie or bearer)
+    user_id = None
+    try:
+        token = request.cookies.get("access_token")
+        if not token:
+            auth = request.headers.get("Authorization")
+            if auth and auth.lower().startswith("bearer "):
+                token = auth.split(None, 1)[1]
+        if token:
+            payload = decode_access_token(token)
+            user_id = payload.get("sub")
+    except Exception:
+        user_id = None
+
+    response_data = {
+        "status": "processing",
+        "file_name": file.filename,
+        "authenticated": bool(user_id),
+    }
+
+    # If unauthenticated, reject the request
+    if not user_id:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+        raise HTTPException(status_code=401, detail="Unauthenticated")
+
+    # Authenticated path: create Postgres schema, tables and stream-insert rows
+    base_name = name if name is not None else file.filename.replace('.zst', '')
+    unique_id = str(uuid.uuid4()).replace('-', '')[:12]
+    schema_name = f"proj_{unique_id}"
+    inserted_counts = {"submissions": 0, "comments": 0}
+
+    try:
+        with DatabaseManager() as dm:
+            project = dm.projects.create(
+                user_id=uuid.UUID(user_id),
+                display_name=base_name,
+                schema_name=schema_name,
+                project_type="raw_data",
+            )
+            # create schema and tables
+            with engine.begin() as conn:
+                conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
+                conn.execute(text(f'''
+                CREATE TABLE IF NOT EXISTS "{schema_name}"."submissions" (
+                    id TEXT PRIMARY KEY,
+                    subreddit TEXT,
+                    title TEXT,
+                    selftext TEXT,
+                    author TEXT,
+                    created_utc BIGINT,
+                    score INTEGER,
+                    num_comments INTEGER
+                )
+                '''))
+                conn.execute(text(f'''
+                CREATE TABLE IF NOT EXISTS "{schema_name}"."comments" (
+                    id TEXT PRIMARY KEY,
+                    subreddit TEXT,
+                    body TEXT,
+                    author TEXT,
+                    created_utc BIGINT,
+                    score INTEGER,
+                    link_id TEXT,
+                    parent_id TEXT
+                )
+                '''))
+
+            inserted_counts = stream_zst_to_postgres(tmp_path, schema_name, import_data_type, subreddit_filter=subreddit_list, batch_size=1000)
+
+            # add project_tables metadata
+            if inserted_counts.get('submissions', 0) > 0:
+                dm.project_tables.add_table_metadata(
+                    project_id=project.id,
+                    table_name='submissions',
+                    row_count=inserted_counts.get('submissions', 0)
+                )
+            if inserted_counts.get('comments', 0) > 0:
+                dm.project_tables.add_table_metadata(
+                    project_id=project.id,
+                    table_name='comments',
+                    row_count=inserted_counts.get('comments', 0)
+                )
+
+            response_data.update({
+                'status': 'completed',
+                'display_name': base_name,
+                'schema_name': schema_name,
+                'inserted_counts': inserted_counts,
+            })
+            return JSONResponse(response_data)
+
+    except Exception as exc:
         import traceback
         traceback.print_exc()
         return JSONResponse({"error": str(exc)}, status_code=500)
+
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
 
 
 @router.get("/list-databases/")
@@ -667,7 +703,7 @@ async def delete_database(db_name: str, request: Request, db: Session = Depends(
         raise HTTPException(status_code=500, detail=f"Failed to delete project/schema: {str(e)}")
 
 
-@router.post("/rename-database/")
+@router.post("/rename-database/") #not needed
 async def rename_database(old_name: str = Form(...), new_name: str = Form(...)):
     database_dir = Path(settings.database_dir)
     
