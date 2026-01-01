@@ -81,9 +81,12 @@ export default function ActionForm({
                   checked={value === option.value}
                   onChange={(e) => handleFieldChange(field, e.target.value)}
                   disabled={submitButton?.disabled}
-                  style={{ display: 'none' }}
+                  style={{ display: "none" }}
                 />
-                <label htmlFor={`${field.id}-${option.value}`} className="radio-option">
+                <label
+                  htmlFor={`${field.id}-${option.value}`}
+                  className="radio-option"
+                >
                   {option.label}
                 </label>
               </div>
@@ -96,11 +99,7 @@ export default function ActionForm({
         return <input {...commonProps} type="password" />;
       case "button":
         return (
-          <button
-            type="button"
-            onClick={field.onClick}
-            className="view-button"
-          >
+          <button type="button" onClick={field.onClick} className="view-button">
             {field.label}
           </button>
         );
@@ -119,11 +118,33 @@ export default function ActionForm({
             return <div key={field.id}>{renderField(field)}</div>;
           }
           if (field.type === "button") {
-            return <div key={field.id} className="action-buttons">{renderField(field)}</div>;
+            return (
+              <div key={field.id} className="action-buttons">
+                {renderField(field)}
+              </div>
+            );
           }
           return (
             <div key={field.id} className="form-group">
-              <label htmlFor={field.id}>{field.label}</label>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                }}
+              >
+                <label htmlFor={field.id}>{field.label}</label>
+                {field.extraButton && (
+                  <button
+                    type="button"
+                    onClick={field.extraButton.onClick}
+                    className={field.extraButton.className || "load-prompt-btn"}
+                    disabled={submitButton?.disabled}
+                  >
+                    {field.extraButton.label}
+                  </button>
+                )}
+              </div>
               {renderField(field)}
             </div>
           );
@@ -135,7 +156,9 @@ export default function ActionForm({
             disabled={submitButton.disabled}
             className="form-submit-btn"
           >
-            {submitButton.disabled ? submitButton.loadingText : submitButton.text}
+            {submitButton.disabled
+              ? submitButton.loadingText
+              : submitButton.text}
           </button>
         )}
       </form>

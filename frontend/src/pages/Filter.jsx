@@ -14,6 +14,8 @@ export default function Filter() {
   const [databases, setDatabases] = useState([]);
   const [name, setName] = useState("");
 
+  const EXAMPLE_PROMPT = `You are a filter-only assistant. For each input item, decide whether it should be kept or removed. Apply these rules: remove spam/automated posts, remove obvious duplicates, and remove non-topical noise. Keep authentic human discussion and on-topic content.`;
+
   const handleViewFilteredData = () => {
     navigate("/filtered-data");
   };
@@ -138,11 +140,16 @@ export default function Filter() {
   const fields = [
     {
       id: "filterPrompt",
-      label: "Enter or load a prompt to filter",
+      label: "Enter prompt",
       type: "textarea",
       value: filterPrompt,
       placeholder: "Enter your filter prompt...",
       rows: 5,
+      extraButton: {
+        label: "Load example prompt",
+        onClick: () => setFilterPrompt(EXAMPLE_PROMPT),
+        className: "load-prompt-btn",
+      },
     },
   ];
 

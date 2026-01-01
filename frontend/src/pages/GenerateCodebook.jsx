@@ -8,6 +8,9 @@ import "../styles/Data.css";
 
 export default function GenerateCodebook() {
   const navigate = useNavigate();
+  // Example prompt provided by user for codebook generation
+  const EXAMPLE_PROMPT = `You are a codebook generator. Read representative dataset excerpts and propose a concise codebook of [topic]. Keep entries concise and focused; do not add unrelated commentary.`;
+  const [prompt, setPrompt] = useState("");
   const [database, setDatabase] = useState("");
   const [databaseType, setDatabaseType] = useState("unfiltered");
   const [databases, setDatabases] = useState([]);
@@ -199,9 +202,15 @@ export default function GenerateCodebook() {
       id: "prompt",
       label: "Prompt (Optional)",
       type: "textarea",
+      value: prompt,
       placeholder:
         "Enter a custom prompt to guide the codebook generation. Leave empty for default behavior.",
       rows: 4,
+      extraButton: {
+        label: "Load example prompt",
+        onClick: () => setPrompt(EXAMPLE_PROMPT),
+        className: "load-prompt-btn",
+      },
     },
     {
       id: "name",
