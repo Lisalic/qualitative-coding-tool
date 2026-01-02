@@ -33,9 +33,32 @@ from backend.app.services import migrate_sqlite_file
 
 router = APIRouter()
 
-# Legacy behavior to remove later
-project_root = Path(__file__).resolve().parent.parent
 
+def get_user_id_from_request(request: Request):
+    """Extract access token from cookie or Authorization header and decode it.
+
+    Returns the `sub` claim (user id as string) on success, or None on failure.
+    """
+    token = None
+    try:
+        token = request.cookies.get("access_token")
+    except Exception:
+        token = None
+
+    if not token:
+        auth = request.headers.get("Authorization") if hasattr(request, "headers") else None
+        if auth and isinstance(auth, str) and auth.lower().startswith("bearer "):
+            token = auth.split(None, 1)[1]
+
+    if not token:
+        return None
+
+    try:
+        payload = decode_access_token(token)
+    except Exception:
+        return None
+
+    return payload.get("sub")
 
 @router.post("/upload-zst/")
 async def upload_zst_file(
@@ -70,19 +93,8 @@ async def upload_zst_file(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to save uploaded file: {exc}")
 
-    # Resolve authenticated user (cookie or bearer)
-    user_id = None
-    try:
-        token = request.cookies.get("access_token")
-        if not token:
-            auth = request.headers.get("Authorization")
-            if auth and auth.lower().startswith("bearer "):
-                token = auth.split(None, 1)[1]
-        if token:
-            payload = decode_access_token(token)
-            user_id = payload.get("sub")
-    except Exception:
-        user_id = None
+    # Resolve authenticated user from token
+    user_id = get_user_id_from_request(request)
 
     response_data = {
         "status": "processing",
@@ -206,25 +218,6 @@ def get_database_metadata(db_path):
         }
 
 
-@router.get("/list-filtered-databases/") #try to remove
-async def list_filtered_databases():
-    filtered_database_dir = Path(settings.filtered_database_dir)
-    # Debug logging to help identify why files might not be listed
-    try:
-        print(f"[DEBUG] list_filtered_databases -> resolved: {filtered_database_dir}")
-        print(f"[DEBUG] exists: {filtered_database_dir.exists()}")
-        if filtered_database_dir.exists():
-            print(f"[DEBUG] contents: {[p.name for p in filtered_database_dir.iterdir()]}")
-    except Exception as e:
-        print(f"[DEBUG] error inspecting filtered_database_dir: {e}")
-
-    if not filtered_database_dir.exists():
-        return JSONResponse({"databases": []})
-
-    databases = [f.name for f in filtered_database_dir.iterdir() if f.is_file() and f.name.endswith('.db')]
-    return JSONResponse({"databases": databases})
-
-
 @router.post("/merge-databases/")
 async def merge_databases(request: Request, databases: str = Form(...), name: str = Form(...)):
     try:
@@ -236,27 +229,10 @@ async def merge_databases(request: Request, databases: str = Form(...), name: st
     if not name or not name.strip():
         raise HTTPException(status_code=400, detail="Database name is required")
 
-    token = None
-    try:
-        token = request.cookies.get("access_token")
-        if not token:
-            auth = request.headers.get("Authorization")
-            if auth and auth.lower().startswith("bearer "):
-                token = auth.split(None, 1)[1]
-    except Exception:
-        token = None
-
-    if not token:
-        raise HTTPException(status_code=401, detail="Authentication required to merge databases")
-
-    try:
-        payload = decode_access_token(token)
-        user_id = payload.get("sub")
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
+    # Resolve authenticated user from token
+    user_id = get_user_id_from_request(request)
     if not user_id:
-        raise HTTPException(status_code=401, detail="Invalid token payload")
+        raise HTTPException(status_code=401, detail="Authentication required to merge databases")
 
     # ensure user doesn't already have a project with same display/schema
     db_check = SessionLocal()
@@ -510,25 +486,10 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
 
 @router.get("/me/")
 def me(request: Request, db: Session = Depends(get_db)):
-    # Try cookie first then Authorization header
-    token = None
-    token = request.cookies.get("access_token")
-    if not token:
-        auth = request.headers.get("Authorization")
-        if auth and auth.lower().startswith("bearer "):
-            token = auth.split(None, 1)[1]
-
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    try:
-        payload = decode_access_token(token)
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-    user_id = payload.get("sub")
+    # Use token helper to get the user id; then return user record
+    user_id = get_user_id_from_request(request)
     if not user_id:
-        raise HTTPException(status_code=401, detail="Invalid token payload")
+        raise HTTPException(status_code=401, detail="Not authenticated")
 
     user = db.query(AuthUser).filter(AuthUser.id == user_id).first()
     if not user:
@@ -539,24 +500,10 @@ def me(request: Request, db: Session = Depends(get_db)):
 
 @router.get("/my-projects/")
 def my_projects(request: Request, project_type: str = Query("raw_data"), db: Session = Depends(get_db)):
-    # Authenticate same as /me/
-    token = request.cookies.get("access_token")
-    if not token:
-        auth = request.headers.get("Authorization")
-        if auth and auth.lower().startswith("bearer "):
-            token = auth.split(None, 1)[1]
-
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    try:
-        payload = decode_access_token(token)
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-    user_id = payload.get("sub")
+    # Resolve authenticated user from token
+    user_id = get_user_id_from_request(request)
     if not user_id:
-        raise HTTPException(status_code=401, detail="Invalid token payload")
+        raise HTTPException(status_code=401, detail="Not authenticated")
 
     projects = db.query(Project).filter(Project.user_id == user_id, Project.project_type == project_type).all()
     result = []
@@ -588,24 +535,10 @@ async def delete_database(db_name: str, request: Request, db: Session = Depends(
     if not schema.startswith('proj_'):
         raise HTTPException(status_code=400, detail="Invalid project schema identifier")
 
-    # Authenticate: cookie first then Authorization header
-    token = request.cookies.get("access_token")
-    if not token:
-        auth = request.headers.get("Authorization")
-        if auth and auth.lower().startswith("bearer "):
-            token = auth.split(None, 1)[1]
-
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    try:
-        payload = decode_access_token(token)
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-    user_id = payload.get("sub")
+    # Resolve authenticated user from token
+    user_id = get_user_id_from_request(request)
     if not user_id:
-        raise HTTPException(status_code=401, detail="Invalid token payload")
+        raise HTTPException(status_code=401, detail="Not authenticated")
 
     proj = db.query(Project).filter(Project.schema_name == schema, Project.user_id == user_id).first()
     if not proj:
@@ -626,29 +559,13 @@ async def delete_database(db_name: str, request: Request, db: Session = Depends(
 @router.post("/rename-project/")
 def rename_project(request: Request, schema_name: str = Form(...), display_name: str = Form(...), db: Session = Depends(get_db)):
     """Rename a project's display_name. Requires authentication and ownership."""
-    # auth: cookie or Authorization header
-    token = request.cookies.get("access_token")
-    if not token:
-        auth = request.headers.get("Authorization")
-        if auth and auth.lower().startswith("bearer "):
-            token = auth.split(None, 1)[1]
-
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    try:
-        payload = decode_access_token(token)
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-    user_id = payload.get("sub")
+    # Resolve authenticated user from token
+    user_id = get_user_id_from_request(request)
     if not user_id:
-        raise HTTPException(status_code=401, detail="Invalid token payload")
+        raise HTTPException(status_code=401, detail="Not authenticated")
 
     # normalize schema name
     schema = schema_name.strip()
-    if schema.endswith('.db'):
-        schema = schema[:-3]
 
     proj = db.query(Project).filter(Project.schema_name == schema, Project.user_id == user_id).first()
     if not proj:
@@ -733,53 +650,18 @@ async def list_codebooks(db: Session = Depends(get_db)):
     codebooks.sort(key=lambda x: x.get("name") or x.get("id"))
     return JSONResponse({"codebooks": codebooks})
 
-    codebooks_dir = Path(__file__).parent.parent.parent / "data" / "codebooks"
-    if not codebooks_dir.exists():
-        return JSONResponse({"error": "Codebooks directory not found"}, status_code=404)
-    
-    old_file = codebooks_dir / f"{old_id}.txt"
-    new_file = codebooks_dir / f"{new_id}.txt"
-    
-    if not old_file.exists():
-        return JSONResponse({"error": f"Codebook {old_id} not found"}, status_code=404)
-    
-    if new_file.exists():
-        return JSONResponse({"error": f"Codebook {new_id} already exists"}, status_code=400)
-    
-    try:
-        old_file.rename(new_file)
-        return JSONResponse({"message": f"Codebook {old_id} renamed to {new_id}"})
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
 
 @router.post("/save-project-codebook/")
 async def save_project_codebook(request: Request, schema_name: str = Form(...), content: str = Form(...), db: Session = Depends(get_db)):
     """Save codebook content into a Postgres project schema's content_store table.
     Requires authentication and project ownership.
     """
-    # auth: cookie or Authorization header
-    token = request.cookies.get("access_token")
-    if not token:
-        auth = request.headers.get("Authorization")
-        if auth and auth.lower().startswith("bearer "):
-            token = auth.split(None, 1)[1]
-
-    if not token:
+    # Resolve authenticated user from token
+    user_id = get_user_id_from_request(request)
+    if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    try:
-        payload = decode_access_token(token)
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-    user_id = payload.get("sub")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Invalid token payload")
-
     schema = schema_name.strip()
-    if schema.endswith('.db'):
-        schema = schema[:-3]
 
     proj = db.query(Project).filter(Project.schema_name == schema, Project.user_id == user_id).first()
     if not proj:
@@ -797,7 +679,7 @@ async def save_project_codebook(request: Request, schema_name: str = Form(...), 
 
     # Debug logging to help diagnose save failures
     try:
-        print(f"[DEBUG] save_project_codebook called; token_present={bool(token)}, user_id={user_id}, schema={schema}")
+        print(f"[DEBUG] save_project_codebook called; authenticated={bool(user_id)}, user_id={user_id}, schema={schema}")
         try:
             # show form keys and sizes but not full content for privacy
             form_keys = list((await request.form()).keys())
@@ -884,39 +766,15 @@ async def get_coded_data_query(coded_id: str = Query(None), db: Session = Depend
     return JSONResponse({"error": "No coded data project found"}, status_code=404)
 
 
-
-    coded_data_dir = Path(__file__).parent.parent.parent / "data" / "coded_data"
-    coded_file = coded_data_dir / f"{coded_id}.txt"
-    if coded_file.exists():
-        with open(coded_file, 'r') as f:
-            coded_content = f.read()
-        return JSONResponse({"coded_data": coded_content})
-    else:
-        return JSONResponse({"error": f"Coded data {coded_id} not found"}, status_code=404)
-
-
 @router.post("/save-project-coded-data/")
 async def save_project_coded_data(request: Request, schema_name: str = Form(...), content: str = Form(...), db: Session = Depends(get_db)):
     """Save coded content into a Postgres project schema's content_store table for project_type 'coding'.
     Requires authentication and project ownership.
     """
-    token = request.cookies.get("access_token")
-    if not token:
-        auth = request.headers.get("Authorization")
-        if auth and auth.lower().startswith("bearer "):
-            token = auth.split(None, 1)[1]
-
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    try:
-        payload = decode_access_token(token)
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-    user_id = payload.get("sub")
+    # Resolve authenticated user from token
+    user_id = get_user_id_from_request(request)
     if not user_id:
-        raise HTTPException(status_code=401, detail="Invalid token payload")
+        raise HTTPException(status_code=401, detail="Not authenticated")
 
     schema = schema_name.strip()
 
@@ -1154,22 +1012,8 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
             pass
 
         # Create a new Postgres schema and store results there; attach to authenticated user if present
-        try:
-            token = request.cookies.get("access_token")
-            if not token:
-                auth = request.headers.get("Authorization")
-                if auth and auth.lower().startswith("bearer "):
-                    token = auth.split(None, 1)[1]
-        except Exception:
-            token = None
-
-        user_id = None
-        if token:
-            try:
-                payload = decode_access_token(token)
-                user_id = payload.get("sub")
-            except Exception:
-                user_id = None
+        # Resolve authenticated user (optional)
+        user_id = get_user_id_from_request(request)
 
         new_schema = None
         proj = None
@@ -1316,24 +1160,10 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
 
         # Persist into a new Postgres project schema and create metadata
         try:
-            # Authenticate user (cookie or Authorization header)
-            token = request.cookies.get("access_token")
-            if not token:
-                auth = request.headers.get("Authorization")
-                if auth and auth.lower().startswith("bearer "):
-                    token = auth.split(None, 1)[1]
-
-            if not token:
-                return JSONResponse({"error": "Authentication required to create project"}, status_code=401)
-
-            try:
-                payload = decode_access_token(token)
-                user_id = payload.get("sub")
-            except Exception:
-                return JSONResponse({"error": "Invalid token"}, status_code=401)
-
+            # Require authentication to create the codebook project
+            user_id = get_user_id_from_request(request)
             if not user_id:
-                return JSONResponse({"error": "Invalid token payload"}, status_code=401)
+                return JSONResponse({"error": "Authentication required to create project"}, status_code=401)
 
             # generate a unique schema name
             unique_id = str(uuid.uuid4()).replace('-', '')[:12]
@@ -1462,43 +1292,28 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
         except Exception:
             classification_output = "API request error"
 
-        try:
-            # Authenticate user (cookie or Authorization header)
-            token = request.cookies.get("access_token")
-            if not token:
-                auth = request.headers.get("Authorization")
-                if auth and auth.lower().startswith("bearer "):
-                    token = auth.split(None, 1)[1]
+        # resolve auth (optional)
+        user_id = get_user_id_from_request(request)
+        if user_id:
+            provided_name = (report_name or "").strip()
+            display_name = provided_name if provided_name else 'coding'
 
-            user_id = None
-            if token:
-                try:
-                    payload = decode_access_token(token)
-                    user_id = payload.get("sub")
-                except Exception:
-                    user_id = None
-
-            if user_id:
-                provided_name = (report_name or "").strip()
-                display_name = provided_name if provided_name else 'coding'
-
-                unique_id = str(uuid.uuid4()).replace('-', '')[:12]
-                new_schema = f"proj_{unique_id}"
-                try:
-                    with engine.begin() as conn:
-                        conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{new_schema}"'))
-                        conn.execute(text(f'CREATE TABLE IF NOT EXISTS "{new_schema}".content_store (file_text text)'))
-                        conn.execute(text(f'TRUNCATE TABLE "{new_schema}".content_store'))
-                        conn.execute(text(f'INSERT INTO "{new_schema}".content_store (file_text) VALUES (:file_text)'), {"file_text": classification_output})
+            unique_id = str(uuid.uuid4()).replace('-', '')[:12]
+            new_schema = f"proj_{unique_id}"
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{new_schema}"'))
+                    conn.execute(text(f'CREATE TABLE IF NOT EXISTS "{new_schema}".content_store (file_text text)'))
+                    conn.execute(text(f'TRUNCATE TABLE "{new_schema}".content_store'))
+                    conn.execute(text(f'INSERT INTO "{new_schema}".content_store (file_text) VALUES (:file_text)'), {"file_text": classification_output})
 
                     # create project row and table metadata
                     with DatabaseManager() as dm:
                         proj = dm.projects.create(user_id=uuid.UUID(user_id), display_name=display_name, schema_name=new_schema, project_type='coding')
                         dm.project_tables.add_table_metadata(project_id=proj.id, table_name='content_store', row_count=1)
-                except Exception as e:
+            except Exception as e:
                     print(f"Failed to persist classification project/schema: {e}")
-        except Exception:
-            pass
+        
 
         return JSONResponse({"classification_output": classification_output})
     except Exception as exc:

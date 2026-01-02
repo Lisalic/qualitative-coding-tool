@@ -96,12 +96,9 @@ export default function ApplyCodebook() {
           metadata: p,
         }));
         setFilteredDatabases(normalized);
-        // Do not early return; keep behavior consistent with databases selection
         return;
       }
 
-      // No server-side filtered projects available; do not fallback to filesystem.
-      // Rely on Postgres `my-projects` results instead.
       setFilteredDatabases([]);
     } catch (err) {
       console.error("Error fetching filtered databases:", err);

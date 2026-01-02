@@ -71,8 +71,6 @@ export default function GenerateCodebook() {
         return;
       }
 
-      // No server-side filtered projects available; do not fallback to filesystem.
-      // Rely on Postgres `my-projects` results instead.
       setFilteredDatabases([]);
     } catch (err) {
       console.error("Error fetching filtered databases:", err);

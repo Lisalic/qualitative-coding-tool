@@ -22,7 +22,7 @@
   font-weight: 600;
   cursor: pointer;
   border-radius: 4px;
-  transition: all 0.2s;
+  transition: background-color 0.2s, color 0.2s;
 }
 
 .navbar-back-button:hover {
@@ -53,11 +53,18 @@
   background-color: transparent;
   color: #ffffff;
   border: 1px solid #ffffff;
-  padding: 6px 10px;
+  padding: 0 12px;
   margin-left: 8px;
   font-size: 13px;
   cursor: pointer;
   border-radius: 4px;
+  height: 36px;
+  min-width: 72px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  transition: background-color 0.15s, color 0.15s;
 }
 
 .logout-btn:hover {
