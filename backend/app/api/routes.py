@@ -952,99 +952,6 @@ async def save_project_coded_data(request: Request, schema_name: str = Form(...)
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-
-    if not database:
-        raise HTTPException(status_code=400, detail="Database name is required")
-        
-    if database.endswith('.db'):
-        # Check if it's in the filtered directory first
-        filtered_db_path = Path(settings.filtered_database_dir) / database
-        if filtered_db_path.exists():
-            db_path = filtered_db_path
-        else:
-            db_path = Path(settings.database_dir) / database
-    elif database == "filtered_data":
-        db_path = Path(settings.filtered_database_dir) / "filtered_data.db"
-    elif database == "filtered":
-        db_path = Path(settings.filtered_database_dir) / "filtered_data.db"
-    elif database == "codebook":
-        db_path = project_root / "data" / "codebook.db"
-    elif database == "coding":
-        db_path = project_root / "data" / "codeddata.db"
-    else:
-        raise HTTPException(status_code=400, detail=f"Unknown database type: {database}")
-
-    if not db_path.exists():
-        return JSONResponse({
-            "submissions": [],
-            "comments": [],
-            "total_submissions": 0,
-            "total_comments": 0,
-            "message": f"Database not found. Please upload a file first.",
-        })
-
-    conn = None
-    try:
-        conn = sqlite3.connect(str(db_path))
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-
-        if database == "codebook":
-            cursor.execute('SELECT COUNT(*) as count FROM codebooks')
-            sub_count = cursor.fetchone()['count']
-            cursor.execute('SELECT * FROM codebooks LIMIT ?', (limit,))
-            submissions = [dict(row) for row in cursor.fetchall()]
-            comments = []
-            com_count = 0
-        elif database == "coding":
-            cursor.execute('SELECT COUNT(*) as count FROM codings')
-            sub_count = cursor.fetchone()['count']
-            cursor.execute('SELECT * FROM codings LIMIT ?', (limit,))
-            submissions = [dict(row) for row in cursor.fetchall()]
-            comments = []
-            com_count = 0
-        elif database == "filtered" or (database.endswith('.db') and str(db_path).startswith(str(settings.filtered_database_dir))):
-            # Filtered databases only have submissions table
-            cursor.execute('SELECT COUNT(*) as count FROM submissions')
-            sub_count = cursor.fetchone()['count']
-            com_count = 0
-            cursor.execute('SELECT * FROM submissions LIMIT ?', (limit,))
-            submissions = [dict(row) for row in cursor.fetchall()]
-            comments = []
-        else:
-            cursor.execute('SELECT COUNT(*) as count FROM submissions')
-            sub_count = cursor.fetchone()['count']
-            cursor.execute('SELECT COUNT(*) as count FROM comments')
-            com_count = cursor.fetchone()['count']
-
-            cursor.execute('SELECT * FROM submissions LIMIT ?', (limit,))
-            submissions = [dict(row) for row in cursor.fetchall()]
-            cursor.execute('SELECT * FROM comments LIMIT ?', (limit,))
-            comments = [dict(row) for row in cursor.fetchall()]
-    except sqlite3.OperationalError as exc:
-        if conn:
-            conn.close()
-        return JSONResponse({
-            "submissions": [],
-            "comments": [],
-            "total_submissions": 0,
-            "total_comments": 0,
-            "message": f"Database schema missing or invalid: {exc}"
-        }, status_code=500)
-    finally:
-        if conn:
-            conn.close()
-
-    return JSONResponse({
-        "submissions": submissions,
-        "comments": comments,
-        "total_submissions": sub_count,
-        "total_comments": com_count,
-        "database": database,
-        "date_created": os.path.getctime(str(db_path)) if db_path.exists() and os.path.getctime(str(db_path)) > 0 else None
-    })
-
-
 @router.get("/project-entries/")
 def project_entries(schema: str = Query(..., description="Project schema name"), limit: int = 10):
     # Allow optional .db suffix (frontend may supply schema.db); validate and strip it.
@@ -1600,34 +1507,35 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 
-@router.get("/comments/{submission_id}") #needs to be migrated
+@router.get("/comments/{submission_id}") 
 async def get_comments_for_submission(submission_id: str, database: str = Query("original")):
-    """Fetch all comments for a specific submission"""
-    if database.endswith('.db'):
-        db_path = Path(settings.database_dir) / database
-    elif database == "filtered":
-        db_path = project_root / "data" / "filtered_data.db"
-    elif database == "codebook":
-        db_path = project_root / "data" / "codebook.db"
-    elif database == "coding":
-        db_path = project_root / "data" / "codeddata.db"
-    else:
-        return JSONResponse({"error": "No database specified. Please provide a database name."}, status_code=400)
+    """Fetch all comments for a specific submission from a Postgres project schema.
 
-    if not db_path.exists():
-        return JSONResponse({"error": f"Database not found: {database}"}, status_code=404)
+    The `database` parameter should provide a Postgres project schema name (e.g. proj_xxx).
+    A trailing `.db` is tolerated and will be stripped. Returns 404 if the schema or
+    comments table is not present.
+    """
+    schema = (database or "").strip()
+
+    if not schema or not schema.startswith('proj_'):
+        return JSONResponse({"error": "This endpoint expects a proj_<id> schema name in 'database'"}, status_code=400)
 
     try:
-        conn = sqlite3.connect(str(db_path))
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
+        with engine.connect() as conn:
+            # Verify comments table exists in the schema
+            tbl = f"{schema}.comments"
+            tbl_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": tbl}).scalar()
+            if not tbl_exists:
+                return JSONResponse({"error": f"Comments table not found in schema {schema}"}, status_code=404)
 
-        # Fetch comments where link_id matches the submission_id
-        cursor.execute('SELECT * FROM comments WHERE link_id = ? ORDER BY created_utc ASC', (submission_id,))
-        comments = [dict(row) for row in cursor.fetchall()]
+            # Fetch rows where link_id matches submission_id
+            q = text(f'SELECT * FROM "{schema}"."comments" WHERE link_id = :link ORDER BY created_utc ASC')
+            rows = conn.execute(q, {"link": submission_id}).fetchall()
+            comments = [dict(r._mapping) for r in rows]
 
-        conn.close()
-        return JSONResponse({"comments": comments})
+            return JSONResponse({"comments": comments})
 
     except Exception as exc:
+        print(f"Error reading comments from schema {schema}: {exc}")
+        traceback.print_exc()
         return JSONResponse({"error": str(exc)}, status_code=500)
