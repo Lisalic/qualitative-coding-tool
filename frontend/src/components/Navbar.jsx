@@ -82,7 +82,7 @@ function Navbar({ showBack, onBack }) {
               {apiKey ? "API Key Set" : "Set API Key"}
             </button>
           )}
-          {isAuth && (
+          {isAuth ? (
             <button
               className="logout-btn"
               onClick={async () => {
@@ -99,6 +99,15 @@ function Navbar({ showBack, onBack }) {
               }}
             >
               Logout
+            </button>
+          ) : (
+            <button
+              className="login-btn"
+              onClick={() => {
+                navigate("/login");
+              }}
+            >
+              Log in
             </button>
           )}
         </div>

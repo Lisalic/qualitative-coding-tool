@@ -71,19 +71,9 @@ export default function GenerateCodebook() {
         return;
       }
 
-      const response = await fetch("/api/list-filtered-databases/", {
-        credentials: "include",
-      });
-      if (!response.ok) throw new Error("Failed to fetch filtered databases");
-      const data = await response.json();
-      const fdOptions = (data.databases || []).map((d) => {
-        const name = typeof d === "string" ? d : d.name;
-        return { value: name, label: name.replace(/\.db$/, ""), meta: d };
-      });
-      setFilteredDatabases(fdOptions);
-      if (databaseType === "filtered" && (!database || database === "")) {
-        if (fdOptions.length > 0) setDatabase(fdOptions[0].value);
-      }
+      // No server-side filtered projects available; do not fallback to filesystem.
+      // Rely on Postgres `my-projects` results instead.
+      setFilteredDatabases([]);
     } catch (err) {
       console.error("Error fetching filtered databases:", err);
     }

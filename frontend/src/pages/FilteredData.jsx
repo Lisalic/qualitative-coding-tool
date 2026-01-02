@@ -70,13 +70,9 @@ export default function FilteredData() {
         return;
       }
 
-      const response = await fetch("/api/list-filtered-databases/");
-      if (!response.ok) throw new Error("Failed to fetch filtered databases");
-      const data = await response.json();
-      const dbNames = (data.databases || []).map((db) =>
-        typeof db === "string" ? db : db.name
-      );
-      setDatabases(dbNames);
+      // No server-side filtered projects available; do not fallback to filesystem.
+      // Rely on Postgres `my-projects` results instead.
+      setDatabases([]);
     } catch (err) {
       console.error("Error fetching filtered databases:", err);
     }

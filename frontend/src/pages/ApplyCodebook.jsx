@@ -100,13 +100,9 @@ export default function ApplyCodebook() {
         return;
       }
 
-      const response = await fetch("/api/list-filtered-databases/");
-      if (!response.ok) throw new Error("Failed to fetch filtered databases");
-      const data = await response.json();
-      const fdNames = (data.databases || []).map((d) =>
-        typeof d === "string" ? d : d.name
-      );
-      setFilteredDatabases(fdNames);
+      // No server-side filtered projects available; do not fallback to filesystem.
+      // Rely on Postgres `my-projects` results instead.
+      setFilteredDatabases([]);
     } catch (err) {
       console.error("Error fetching filtered databases:", err);
     }
