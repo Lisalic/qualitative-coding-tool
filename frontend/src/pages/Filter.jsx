@@ -2,6 +2,7 @@ import { useNavigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import ActionForm from "../components/ActionForm";
 import PromptManager from "../components/PromptManager";
+import ManageDatabase from "../components/ManageDatabase";
 import { useState, useEffect } from "react";
 import "../styles/Home.css";
 
@@ -11,8 +12,12 @@ export default function Filter() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [database, setDatabase] = useState("");
-  const [databases, setDatabases] = useState([]);
+  const [databases, setDatabases] = useState([]); // raw data projects for selection
+  const [filteredDatabases, setFilteredDatabases] = useState([]); // filtered projects for ManageDatabase
   const [name, setName] = useState("");
+  const [rightView, setRightView] = useState("prompts"); // 'prompts' or 'database'
+  const [renamingDb, setRenamingDb] = useState(null);
+  const [newName, setNewName] = useState("");
 
   const EXAMPLE_PROMPT = `You are a filter-only assistant. For each input item, decide whether it should be kept or removed. Apply these rules: remove spam/automated posts, remove obvious duplicates, and remove non-topical noise. Keep authentic human discussion and on-topic content.`;
 
@@ -36,23 +41,112 @@ export default function Filter() {
 
   const fetchDatabases = async () => {
     try {
-      // Prefer Postgres projects; list-databases removed in favor of my-projects
-      const response = await fetch("/api/my-projects/?project_type=raw_data", {
+      // Fetch raw_data projects for the database select
+      const respRaw = await fetch("/api/my-projects/?project_type=raw_data", {
         credentials: "include",
       });
-      if (!response.ok) throw new Error("Failed to fetch projects");
-      const data = await response.json();
-      const projectOptions = (data.projects || []).map((p) => ({
+      if (!respRaw.ok) throw new Error("Failed to fetch raw projects");
+      const rawData = await respRaw.json();
+      const rawOptions = (rawData.projects || []).map((p) => ({
         value: p.schema_name,
         label: p.display_name || p.schema_name,
         meta: p,
       }));
 
-      const combined = [...projectOptions];
-      setDatabases(combined);
-      if (!database && combined.length > 0) setDatabase(combined[0].value);
+      // Fetch filtered_data projects for ManageDatabase view
+      const respFiltered = await fetch(
+        "/api/my-projects/?project_type=filtered_data",
+        { credentials: "include" }
+      );
+      if (!respFiltered.ok)
+        throw new Error("Failed to fetch filtered projects");
+      const filtData = await respFiltered.json();
+      const filtOptions = (filtData.projects || []).map((p) => ({
+        value: p.schema_name,
+        label: p.display_name || p.schema_name,
+        meta: p,
+      }));
+
+      setDatabases(rawOptions);
+      setFilteredDatabases(filtOptions);
+      if (!database && rawOptions.length > 0) setDatabase(rawOptions[0].value);
     } catch (err) {
       console.error("Error fetching databases:", err);
+    }
+  };
+
+  const startRename = (dbName) => {
+    setRenamingDb(dbName);
+    const proj = filteredDatabases.find((d) => d.value === dbName);
+    if (proj && proj.label) setNewName(proj.label);
+    else setNewName(dbName.replace(".db", ""));
+  };
+
+  const cancelRename = () => {
+    setRenamingDb(null);
+    setNewName("");
+  };
+
+  const handleRenameDatabase = async (oldName) => {
+    if (!newName.trim()) {
+      setMessage("New name cannot be empty");
+      return;
+    }
+
+    try {
+      const formData = new FormData();
+      formData.append("schema_name", oldName);
+      formData.append("display_name", newName.trim());
+
+      const response = await fetch("/api/rename-project/", {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+
+      if (!response.ok) {
+        let errMsg = "Failed to rename project";
+        try {
+          const errData = await response.json();
+          errMsg = errData.detail || errMsg;
+        } catch (e) {}
+        throw new Error(errMsg);
+      }
+
+      setRenamingDb(null);
+      setNewName("");
+      // refresh lists
+      await fetchDatabases();
+    } catch (err) {
+      console.error("Rename error:", err);
+      setMessage(`Error renaming database: ${err.message}`);
+    }
+  };
+
+  const handleDeleteDatabase = async (dbName) => {
+    if (!confirm(`Are you sure you want to delete the database "${dbName}"?`))
+      return;
+
+    try {
+      const response = await fetch(`/api/delete-database/${dbName}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+
+      if (!response.ok) {
+        let errMsg = "Failed to delete database";
+        try {
+          const data = await response.json();
+          errMsg = data.detail || errMsg;
+        } catch (e) {}
+        throw new Error(errMsg);
+      }
+
+      setMessage(`Deleted ${dbName}`);
+      await fetchDatabases();
+    } catch (err) {
+      console.error("Delete error:", err);
+      setMessage(`Error deleting database: ${err.message}`);
     }
   };
 
@@ -208,10 +302,59 @@ export default function Filter() {
             </div>
           </div>
           <div className="prompt-manager-section">
-            <PromptManager
-              onLoadPrompt={handleLoadPrompt}
-              currentPrompt={filterPrompt}
-            />
+            <div
+              className="prompt-manager-controls"
+              style={{ display: "flex", gap: "8px", marginBottom: "12px" }}
+            >
+              <button
+                className={rightView === "prompts" ? "active" : ""}
+                onClick={() => setRightView("prompts")}
+              >
+                Manage Prompts
+              </button>
+              <button
+                className={rightView === "database" ? "active" : ""}
+                onClick={() => setRightView("database")}
+              >
+                Manage Database
+              </button>
+            </div>
+
+            {rightView === "prompts" ? (
+              <PromptManager
+                onLoadPrompt={handleLoadPrompt}
+                currentPrompt={filterPrompt}
+              />
+            ) : (
+              <ManageDatabase
+                databases={filteredDatabases.map((d) => ({
+                  name: d.value,
+                  display_name: d.label,
+                  metadata: d.meta,
+                }))}
+                selectedDatabases={[]}
+                onSelect={() => {}}
+                onMergeDatabases={() => {}}
+                mergeName={""}
+                onMergeNameChange={() => {}}
+                loading={false}
+                successMessage={null}
+                errorMessage={message}
+                renamingDb={renamingDb}
+                newName={newName}
+                onNewNameChange={(v) => setNewName(v)}
+                onRename={(oldName) => handleRenameDatabase(oldName)}
+                onStartRename={(dbName) => startRename(dbName)}
+                onCancelRename={() => cancelRename()}
+                onDelete={(dbName) => handleDeleteDatabase(dbName)}
+                onView={(dbName) => {
+                  setDatabase(dbName);
+                  navigate("/filtered-data", {
+                    state: { selectedDatabase: dbName },
+                  });
+                }}
+              />
+            )}
           </div>
         </div>
       </div>
