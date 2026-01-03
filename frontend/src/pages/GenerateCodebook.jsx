@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import ActionForm from "../components/ActionForm";
 import CodebookManager from "../components/CodebookManager";
+import PromptManager from "../components/PromptManager";
 import "../styles/Home.css";
 import "../styles/Data.css";
 
@@ -18,6 +19,7 @@ export default function GenerateCodebook() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  const [rightView, setRightView] = useState("codebooks"); // 'codebooks' or 'prompts'
 
   useEffect(() => {
     fetchDatabases();
@@ -243,11 +245,37 @@ export default function GenerateCodebook() {
             </div>
           </div>
           <div className="manager-section">
-            <CodebookManager
-              onViewCodebook={(codebookId) =>
-                navigate(`/codebook-view?selected=${codebookId}`)
-              }
-            />
+            <div className="prompt-manager-controls">
+              <div className="left-group">
+                <button
+                  className={rightView === "prompts" ? "active" : ""}
+                  onClick={() => setRightView("prompts")}
+                >
+                  Manage Prompts
+                </button>
+              </div>
+              <div className="right-group">
+                <button
+                  className={rightView === "codebooks" ? "active" : ""}
+                  onClick={() => setRightView("codebooks")}
+                >
+                  Manage Codebooks
+                </button>
+              </div>
+            </div>
+
+            {rightView === "prompts" ? (
+              <PromptManager
+                onLoadPrompt={(p) => setPrompt(p)}
+                currentPrompt={prompt}
+              />
+            ) : (
+              <CodebookManager
+                onViewCodebook={(codebookId) =>
+                  navigate(`/codebook-view?selected=${codebookId}`)
+                }
+              />
+            )}
           </div>
         </div>
       </div>

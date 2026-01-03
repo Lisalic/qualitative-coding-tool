@@ -283,11 +283,45 @@ input[type="radio"]:disabled + .radio-option {
   margin-bottom: 30px;
 }
 
+/* Controls used on pages to toggle between manager views */
+.prompt-manager-controls {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.prompt-manager-controls .left-group,
+.prompt-manager-controls .right-group {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.prompt-manager-controls button {
+  background-color: transparent;
+  color: #ffffff;
+  border: 1px solid #ffffff;
+  padding: 8px 18px;
+  font-size: 14px;
+  cursor: pointer;
+  border-radius: 4px;
+  min-width: 200px;
+  text-align: center;
+  box-sizing: border-box;
+}
+
+.prompt-manager-controls button.active {
+  background-color: #ffffff;
+  color: #000000;
+}
+
 .prompt-manager {
   margin: 0;
-  padding: 0;
-  border: none;
-  border-radius: 0;
+  padding: 12px;
+  border: 2px solid #ffffff;
+  border-radius: 8px;
   background-color: transparent;
 }
 

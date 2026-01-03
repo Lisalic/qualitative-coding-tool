@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import ActionForm from "../components/ActionForm";
 import CodebookManager from "../components/CodebookManager";
+import PromptManager from "../components/PromptManager";
 import "../styles/Home.css";
 
 export default function ApplyCodebook() {
@@ -20,6 +21,7 @@ export default function ApplyCodebook() {
   const [codebooks, setCodebooks] = useState([]);
   const [databases, setDatabases] = useState([]);
   const [filteredDatabases, setFilteredDatabases] = useState([]);
+  const [rightView, setRightView] = useState("codebooks"); // 'codebooks' or 'prompts'
 
   useEffect(() => {
     fetchCodebooks();
@@ -232,7 +234,7 @@ export default function ApplyCodebook() {
       <Navbar />
       <div className="home-container">
         <div className="page-layout">
-          <div className="form-section">
+          <div className="left-section">
             <div className="form-wrapper">
               <h1>Apply Codebook</h1>
 
@@ -257,11 +259,37 @@ export default function ApplyCodebook() {
             </div>
           </div>
           <div className="manager-section">
-            <CodebookManager
-              onViewCodebook={(codebookId) =>
-                navigate(`/codebook-view?selected=${codebookId}`)
-              }
-            />
+            <div className="prompt-manager-controls">
+              <div className="left-group">
+                <button
+                  className={rightView === "prompts" ? "active" : ""}
+                  onClick={() => setRightView("prompts")}
+                >
+                  Manage Prompts
+                </button>
+              </div>
+              <div className="right-group">
+                <button
+                  className={rightView === "codebooks" ? "active" : ""}
+                  onClick={() => setRightView("codebooks")}
+                >
+                  Manage Codebooks
+                </button>
+              </div>
+            </div>
+
+            {rightView === "prompts" ? (
+              <PromptManager
+                onLoadPrompt={(p) => setMethodology(p)}
+                currentPrompt={methodology}
+              />
+            ) : (
+              <CodebookManager
+                onViewCodebook={(codebookId) =>
+                  navigate(`/codebook-view?selected=${codebookId}`)
+                }
+              />
+            )}
           </div>
         </div>
       </div>

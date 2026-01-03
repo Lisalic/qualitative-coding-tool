@@ -302,22 +302,23 @@ export default function Filter() {
             </div>
           </div>
           <div className="prompt-manager-section">
-            <div
-              className="prompt-manager-controls"
-              style={{ display: "flex", gap: "8px", marginBottom: "12px" }}
-            >
-              <button
-                className={rightView === "prompts" ? "active" : ""}
-                onClick={() => setRightView("prompts")}
-              >
-                Manage Prompts
-              </button>
-              <button
-                className={rightView === "database" ? "active" : ""}
-                onClick={() => setRightView("database")}
-              >
-                Manage Database
-              </button>
+            <div className="prompt-manager-controls">
+              <div className="left-group">
+                <button
+                  className={rightView === "prompts" ? "active" : ""}
+                  onClick={() => setRightView("prompts")}
+                >
+                  Manage Prompts
+                </button>
+              </div>
+              <div className="right-group">
+                <button
+                  className={rightView === "database" ? "active" : ""}
+                  onClick={() => setRightView("database")}
+                >
+                  Manage Database
+                </button>
+              </div>
             </div>
 
             {rightView === "prompts" ? (
