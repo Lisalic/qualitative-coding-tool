@@ -39,7 +39,7 @@ def get_client(system_prompt: str, user_prompt: str, api_key: str) -> str:
 
 def filter_posts_with_ai(filter_prompt: str, posts_content: str, api_key: str) -> str:
     """
-    Use AI to filter posts based on a given prompt and return results in JSON format.
+    Use AI to filter posts based on a given prompt and return results in Python format.
 
     Args:
         filter_prompt (str): The filtering criteria/prompt
@@ -47,7 +47,7 @@ def filter_posts_with_ai(filter_prompt: str, posts_content: str, api_key: str) -
         api_key (str): OpenRouter API key
 
     Returns:
-        str: JSON string with filtered posts as an array of objects: [{id, title, selftext}, ...]
+        str: Python string with filtered posts as an array of objects: [{id, title, selftext}, ...]
     """
     system_prompt = f"""You are an expert content analyst. Your task is to filter posts based on the given criteria.
 
@@ -56,11 +56,11 @@ FILTERING CRITERIA: {filter_prompt}
 INSTRUCTIONS:
 1. Analyze each post in the provided content
 2. Determine which posts match the filtering criteria
-3. Return ONLY a valid JSON array where each object contains "id", "title", and "selftext" fields
-4. LIMIT your response to MAXIMUM 100 posts that best match the criteria (unless user prompt specifies different number)
+3. Return ONLY a valid Python array where each object is a dictionary that contains "id", "title", and "selftext" fields
+4. LIMIT your response to MAXIMUM 1000posts that best match the criteria (unless user prompt specifies different number)
 5. Only include posts that clearly match the filtering criteria
-6. If no posts match, return an empty JSON array []
-7. ALWAYS ensure the JSON array is complete and properly closed with ]
+6. If no posts match, return an empty Python array []
+7. ALWAYS ensure the Python array is complete and properly closed with ]
 
 EXAMPLE OUTPUT FORMAT:
 [
@@ -68,7 +68,7 @@ EXAMPLE OUTPUT FORMAT:
   {{"id": "post_id_2", "title": "Post Title 2", "selftext": "Post content 2"}}
 ]
 
-CRITICAL: Return ONLY the raw JSON array with NO markdown code blocks, NO backticks, NO "```json" wrappers, and NO additional text or explanation."""
+CRITICAL: Return ONLY the raw Python array with NO markdown code blocks, NO backticks, NO wrappers around the array, and NO additional text or explanation."""
 
     user_prompt = f"Here are the posts to filter:\n\n{posts_content}"
 
@@ -98,7 +98,7 @@ CRITICAL: Return ONLY the raw JSON array with NO markdown code blocks, NO backti
 
 def filter_comments_with_ai(filter_prompt: str, comments_content: str, api_key: str) -> str:
     """
-    Use AI to filter comments based on a given prompt and return results in JSON format.
+    Use AI to filter comments based on a given prompt and return results in Python format.
 
     Args:
         filter_prompt (str): The filtering criteria/prompt
@@ -106,7 +106,7 @@ def filter_comments_with_ai(filter_prompt: str, comments_content: str, api_key: 
         api_key (str): OpenRouter API key
 
     Returns:
-        str: JSON string with filtered comments as an array of objects: [{id, body}, ...]
+        str: Python string with filtered comments as an array of objects: [{id, body}, ...]
     """
     system_prompt = f"""You are an expert content analyst. Your task is to filter comments based on the given criteria.
 
@@ -115,11 +115,11 @@ FILTERING CRITERIA: {filter_prompt}
 INSTRUCTIONS:
 1. Analyze each comment in the provided content
 2. Determine which comments match the filtering criteria
-3. Return ONLY a valid JSON array where each object contains "id" and "body" fields
-4. LIMIT your response to MAXIMUM 100 comments that best match the criteria (unless user prompt specifies different number)
+3. Return ONLY a valid Python array where each object contains "id" and "body" fields
+4. LIMIT your response to MAXIMUM 1000 comments that best match the criteria (unless user prompt specifies different number)
 5. Only include comments that clearly match the filtering criteria
-6. If no comments match, return an empty JSON array []
-7. ALWAYS ensure the JSON array is complete and properly closed with ]
+6. If no comments match, return an empty Python array []
+7. ALWAYS ensure the Python array is complete and properly closed with ]
 
 EXAMPLE OUTPUT FORMAT:
 [
@@ -127,7 +127,7 @@ EXAMPLE OUTPUT FORMAT:
   {{"id": "comment_id_2", "body": "Comment text 2"}}
 ]
 
-CRITICAL: Return ONLY the raw JSON array with NO markdown code blocks, NO backticks, NO "```json" wrappers, and NO additional text or explanation."""
+CRITICAL: Return ONLY the raw Python array with NO markdown code blocks, NO backticks, NO wrappers around the array, and NO additional text or explanation."""
 
     user_prompt = f"Here are the comments to filter:\n\n{comments_content}"
 

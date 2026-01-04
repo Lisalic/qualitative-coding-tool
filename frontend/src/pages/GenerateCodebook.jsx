@@ -9,8 +9,8 @@ import "../styles/Data.css";
 
 export default function GenerateCodebook() {
   const navigate = useNavigate();
-  // Example prompt provided by user for codebook generation
-  const EXAMPLE_PROMPT = `You are a codebook generator. Read representative dataset excerpts and propose a concise codebook of [topic]. Keep entries concise and focused; do not add unrelated commentary.`;
+  const EXAMPLE_PROMPT = `You are a codebook generator. Read representative dataset excerpts and propose a concise codebook of [topic]. Keep entries concise and focused; do not add unrelated commentary.
+Research Context: These are excerpts from [e.g., reddit stories about bullying]. Specific Focus: Please generate codes specifically related to [e.g., retrospective bullying experiences.]`;
   const [prompt, setPrompt] = useState("");
   const [database, setDatabase] = useState("");
   const [databaseType, setDatabaseType] = useState("unfiltered");

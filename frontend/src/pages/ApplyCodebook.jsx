@@ -8,7 +8,6 @@ import "../styles/Home.css";
 
 export default function ApplyCodebook() {
   const navigate = useNavigate();
-  // Example prompt provided by user for applying a codebook
   const EXAMPLE_PROMPT = `You are a coding assistant. Given a codebook and an input item, decide which code(s) from the codebook apply and provide a one-sentence justification. Focus on selecting the single best code when applicable; do not invent new codes. Keep responses concise.`;
   const [methodology, setMethodology] = useState("");
   const [database, setDatabase] = useState("");

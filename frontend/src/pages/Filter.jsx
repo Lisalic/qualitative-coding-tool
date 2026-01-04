@@ -19,7 +19,7 @@ export default function Filter() {
   const [renamingDb, setRenamingDb] = useState(null);
   const [newName, setNewName] = useState("");
 
-  const EXAMPLE_PROMPT = `You are a filter-only assistant. For each input item, decide whether it should be kept or removed. Apply these rules: remove spam/automated posts, remove obvious duplicates, and remove non-topical noise. Keep authentic human discussion and on-topic content.`;
+  const EXAMPLE_PROMPT = `Act as a qualitative research assistant tasked with cleaning raw data transcripts for analysis. For each input item, decide whether it should be kept or removed. Apply these rules: remove spam/automated posts, remove obvious duplicates, and remove non-topical noise. Keep authentic human discussion and on-topic content.`;
 
   const handleViewFilteredData = () => {
     navigate("/filtered-data");
