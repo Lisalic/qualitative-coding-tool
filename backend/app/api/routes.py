@@ -556,6 +556,67 @@ async def delete_database(db_name: str, request: Request, db: Session = Depends(
         raise HTTPException(status_code=500, detail=f"Failed to delete project/schema: {str(e)}")
 
 
+@router.post("/delete-row/")
+async def delete_row(request: Request, schema: str = Form(...), table: str = Form(...), row_id: str = Form(...), db: Session = Depends(get_db)):
+    """Delete a single row (by id) from a project's table (submissions or comments).
+
+    Requires authentication and project ownership.
+    """
+    schema = (schema or "").strip()
+    if schema.endswith('.db'):
+        schema = schema[:-3]
+
+    if not schema or not schema.startswith('proj_'):
+        return JSONResponse({"error": "Invalid project schema"}, status_code=400)
+
+    if table not in ("submissions", "comments"):
+        return JSONResponse({"error": "Invalid table"}, status_code=400)
+
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    try:
+        proj = db.query(Project).filter(Project.schema_name == schema, Project.user_id == user_id).first()
+        if not proj:
+            return JSONResponse({"error": "Project not found or not owned by user"}, status_code=403)
+
+        with engine.begin() as conn:
+            res = conn.execute(text(f'DELETE FROM "{schema}"."{table}" WHERE id = :id'), {"id": row_id})
+            try:
+                deleted = int(res.rowcount or 0)
+            except Exception:
+                deleted = 0
+
+        # Update project_tables metadata: recount rows and persist
+        try:
+            with engine.connect() as conn:
+                cnt = conn.execute(text(f'SELECT COUNT(*) FROM "{schema}"."{table}"')).scalar() or 0
+
+            # update or insert project_tables row using ORM session `db`
+            pt = db.query(ProjectTable).filter(ProjectTable.project_id == proj.id, ProjectTable.table_name == table).first()
+            if pt:
+                pt.row_count = int(cnt)
+            else:
+                # create new metadata row
+                new_pt = ProjectTable(project_id=proj.id, table_name=table, row_count=int(cnt))
+                db.add(new_pt)
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
+
+        except Exception:
+            # non-fatal: continue even if metadata update fails
+            pass
+
+        return JSONResponse({"deleted": deleted})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @router.post("/rename-project/")
 def rename_project(request: Request, schema_name: str = Form(...), display_name: str = Form(...), db: Session = Depends(get_db)):
     """Rename a project's display_name. Requires authentication and ownership."""
@@ -888,7 +949,7 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
             subs_tbl = f"{schema}.submissions"
             subs_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": subs_tbl}).scalar()
             if subs_exists:
-                rows = conn.execute(text(f'SELECT id, title, selftext FROM "{schema}"."submissions"')).fetchall()
+                rows = conn.execute(text(f'SELECT * FROM "{schema}"."submissions"')).fetchall()
                 for r in rows:
                     try:
                         rid = r._mapping.get('id')
@@ -904,7 +965,7 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
             comm_tbl = f"{schema}.comments"
             comm_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": comm_tbl}).scalar()
             if comm_exists:
-                rows = conn.execute(text(f'SELECT id, body FROM "{schema}"."comments"')).fetchall()
+                rows = conn.execute(text(f'SELECT * FROM "{schema}"."comments"')).fetchall()
                 for r in rows:
                     try:
                         cid = r._mapping.get('id')
@@ -942,74 +1003,66 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
             posts_filtered = f'[{{"error": "Filtering failed: {e}"}}]'
             comments_filtered = f'[{{"error": "Filtering failed: {e}"}}]'
 
-        # Ensure the returned strings are valid JSON lists; try to fix common truncation issues
-        def _ensure_closed_list(s: str) -> str:
-            if not s:
-                return '[]'
-            s = s.strip()
-            if s.endswith(']'):
-                return s
-            # if it ends with '}' or '},' add closing bracket
-            if s.endswith('}'): 
-                return s + ']'
-            if s.endswith('},'):
-                return s[:-1] + ']'
-            # otherwise, try to find last '}' and close after it
-            last_rbrace = s.rfind('}')
-            if last_rbrace != -1:
-                return s[: last_rbrace + 1] + ']'
-            # fallback: append closing bracket
-            return s + ']'
-
-        def _strip_code_fence(s: str) -> str:
-            if not s:
-                return s
-            s = s.strip()
-            # remove leading code fence markers like ```json or ```
-            if s.startswith('```json'):
-                s = s[len('```json'):].lstrip('\n\r ')
-            elif s.startswith('```'):
-                s = s[3:].lstrip('\n\r ')
-            # remove trailing fence
-            if s.endswith('```'):
-                s = s[:-3].rstrip('\n\r ')
-            return s
-
-        import json, ast
-
-        posts_list = []
-        comments_list = []
-
+        posts_list = posts_filtered if isinstance(posts_filtered, list) else []
+        comments_list = comments_filtered if isinstance(comments_filtered, list) else []
+        print(len(posts_list), len(comments_list))
         try:
-            pf = _ensure_closed_list(_strip_code_fence(posts_filtered or ''))
+            selected_posts = []
+            selected_comments = []
+            with engine.connect() as conn:
+                # posts_list is expected to be a list of id strings; fetch records for each id
+                if isinstance(posts_list, list):
+                    for item in posts_list:
+                        if not item:
+                            continue
+                        try:
+                            row = conn.execute(text(f'SELECT * FROM "{schema}"."submissions" WHERE id = :id'), {"id": item}).fetchone()
+                            if row:
+                                try:
+                                    sid = row._mapping.get('id')
+                                    title = row._mapping.get('title')
+                                    selftext = row._mapping.get('selftext')
+                                except Exception:
+                                    sid = row[0] if len(row) > 0 else None
+                                    title = row[1] if len(row) > 1 else None
+                                    selftext = row[2] if len(row) > 2 else None
+                                selected_posts.append({"id": sid, "title": title, "selftext": selftext})
+                        except Exception:
+                            pass
+
+                # comments_list is expected to be a list of id strings; fetch records for each id
+                if isinstance(comments_list, list):
+                    for item in comments_list:
+                        if not item:
+                            continue
+                        try:
+                            row = conn.execute(text(f'SELECT * FROM "{schema}"."comments" WHERE id = :id'), {"id": item}).fetchone()
+                            if row:
+                                try:
+                                    cid = row._mapping.get('id')
+                                    body = row._mapping.get('body')
+                                except Exception:
+                                    cid = row[0] if len(row) > 0 else None
+                                    body = row[1] if len(row) > 1 else None
+                                selected_comments.append({"id": cid, "body": body})
+                        except Exception:
+                            pass
+
+            # Use the fetched records (may be empty lists)
+            posts_list = selected_posts
+            comments_list = selected_comments
+
             try:
-                posts_list = json.loads(pf)
+                print(f"[filter-data] Parsed posts_list length: {len(posts_list)}")
+                print(f"[filter-data] Parsed comments_list length: {len(comments_list)}")
             except Exception:
-                try:
-                    posts_list = ast.literal_eval(pf)
-                except Exception:
-                    posts_list = []
-        except Exception:
-            posts_list = []
-
-        try:
-            cf = _ensure_closed_list(_strip_code_fence(comments_filtered or ''))
+                pass
+        except Exception as e:
+            print(f"[filter-data] Error normalizing parsed results: {e}")
             try:
-                comments_list = json.loads(cf)
+                print(f"[filter-data] Raw posts_list type: {type(posts_list)}, comments_list type: {type(comments_list)}")
             except Exception:
-                try:
-                    comments_list = ast.literal_eval(cf)
-                except Exception:
-                    comments_list = []
-        except Exception:
-            comments_list = []
-
-        # Progress prints: show parsing results
-        try:
-            print(f"[filter-data] Parsed posts_list length: {len(posts_list)}")
-            print(f"[filter-data] Parsed comments_list length: {len(comments_list)}")
-        except Exception:
-            pass
+                pass
 
         # Create a new Postgres schema and store results there; attach to authenticated user if present
         # Resolve authenticated user (optional)
@@ -1034,9 +1087,11 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
                 print(f"[filter-data] Inserting {total_subs} submissions into {new_schema}.submissions")
                 for item in posts_list:
                     try:
-                        sid = str(item.get('id') if isinstance(item, dict) else item[0]) if item else None
-                        title = item.get('title') if isinstance(item, dict) else None
-                        selftext = item.get('selftext') if isinstance(item, dict) else None
+                        if not isinstance(item, dict):
+                            continue
+                        sid = str(item.get('id')) if item.get('id') is not None else None
+                        title = item.get('title')
+                        selftext = item.get('selftext')
                         if sid is None:
                             continue
                         conn.execute(text(f'INSERT INTO "{new_schema}".submissions (id, title, selftext) VALUES (:id, :title, :selftext)'), {"id": sid, "title": title, "selftext": selftext})
@@ -1052,8 +1107,8 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
                 print(f"[filter-data] Inserting {total_comments} comments into {new_schema}.comments")
                 for item in comments_list:
                     try:
-                        cid = str(item.get('id') if isinstance(item, dict) else item[0]) if item else None
-                        body = item.get('body') if isinstance(item, dict) else None
+                        cid = str(item.get('id')) if item.get('id') is not None else None
+                        body = item.get('body')
                         if cid is None:
                             continue
                         conn.execute(text(f'INSERT INTO "{new_schema}".comments (id, body) VALUES (:id, :body)'), {"id": cid, "body": body})
@@ -1116,7 +1171,7 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
             subs_tbl = f"{schema}.submissions"
             subs_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": subs_tbl}).scalar()
             if subs_exists:
-                rows = conn.execute(text(f'SELECT title, selftext FROM "{schema}"."submissions"')).fetchall()
+                rows = conn.execute(text(f'SELECT * FROM "{schema}"."submissions"')).fetchall()
                 for r in rows:
                     try:
                         title = r._mapping.get('title')
@@ -1132,7 +1187,7 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
             comm_tbl = f"{schema}.comments"
             comm_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": comm_tbl}).scalar()
             if comm_exists:
-                rows = conn.execute(text(f'SELECT body FROM "{schema}"."comments"')).fetchall()
+                rows = conn.execute(text(f'SELECT * FROM "{schema}"."comments"')).fetchall()
                 for r in rows:
                     try:
                         body = r._mapping.get('body')
@@ -1213,7 +1268,7 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
             subs_tbl = f"{schema}.submissions"
             subs_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": subs_tbl}).scalar()
             if subs_exists:
-                rows = conn.execute(text(f'SELECT title, selftext FROM "{schema}"."submissions"')).fetchall()
+                rows = conn.execute(text(f'SELECT * FROM "{schema}"."submissions"')).fetchall()
                 for r in rows:
                     try:
                         title = r._mapping.get('title')
@@ -1230,7 +1285,7 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
             comm_tbl = f"{schema}.comments"
             comm_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": comm_tbl}).scalar()
             if comm_exists:
-                rows = conn.execute(text(f'SELECT body FROM "{schema}"."comments"')).fetchall()
+                rows = conn.execute(text(f'SELECT * FROM "{schema}"."comments"')).fetchall()
                 for r in rows:
                     try:
                         body = r._mapping.get('body')

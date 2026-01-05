@@ -78,6 +78,38 @@ export default function DataTable({
     setSelectedEntry(null);
   };
 
+  const deleteRow = async (table, id) => {
+    if (!currentDatabase || !id) return;
+    try {
+      setLoading(true);
+      const form = new FormData();
+      form.append("schema", currentDatabase);
+      form.append("table", table);
+      form.append("row_id", id);
+
+      const resp = await fetch(`/api/delete-row/`, {
+        method: "POST",
+        credentials: "include",
+        body: form,
+      });
+
+      if (!resp.ok) {
+        const txt = await resp.text();
+        throw new Error(`Delete failed: ${resp.status} ${txt}`);
+      }
+
+      const data = await resp.json();
+      if (data.error) throw new Error(data.error);
+
+      // refresh entries
+      await fetchEntries();
+    } catch (err) {
+      setError(`Error deleting row: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const displayDbName =
     currentDatabase && String(currentDatabase).trim()
       ? displayName || String(currentDatabase).replace(/\.db$/i, "")
@@ -273,6 +305,7 @@ export default function DataTable({
                         <>
                           <th>Title</th>
                           <th>Selftext</th>
+                          <th>Actions</th>
                         </>
                       ) : (
                         <>
@@ -280,6 +313,7 @@ export default function DataTable({
                           <th>Title</th>
                           <th>Author</th>
                           <th>Score</th>
+                          <th>Actions</th>
                         </>
                       )}
                     </tr>
@@ -296,6 +330,19 @@ export default function DataTable({
                           <>
                             <td className="truncate">{sub.title}</td>
                             <td className="truncate">{sub.selftext}</td>
+                            <td>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (!confirm("Delete this post permanently?"))
+                                    return;
+                                  deleteRow("submissions", sub.id);
+                                }}
+                                className="btn btn-secondary"
+                              >
+                                Delete
+                              </button>
+                            </td>
                           </>
                         ) : (
                           <>
@@ -303,6 +350,19 @@ export default function DataTable({
                             <td className="truncate">{sub.title}</td>
                             <td>{sub.author}</td>
                             <td>{sub.score}</td>
+                            <td>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (!confirm("Delete this post permanently?"))
+                                    return;
+                                  deleteRow("submissions", sub.id);
+                                }}
+                                className="btn btn-secondary"
+                              >
+                                Delete
+                              </button>
+                            </td>
                           </>
                         )}
                       </tr>
@@ -325,6 +385,7 @@ export default function DataTable({
                       <th>Body</th>
                       <th>Author</th>
                       <th>Score</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -339,6 +400,19 @@ export default function DataTable({
                         <td className="truncate">{comment.body}</td>
                         <td>{comment.author}</td>
                         <td>{comment.score}</td>
+                        <td>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (!confirm("Delete this comment permanently?"))
+                                return;
+                              deleteRow("comments", comment.id);
+                            }}
+                            className="btn btn-secondary"
+                          >
+                            Delete
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>

@@ -1,4 +1,6 @@
 import time
+import ast
+import json
 from openai import OpenAI
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
@@ -49,108 +51,97 @@ def filter_posts_with_ai(filter_prompt: str, posts_content: str, api_key: str) -
     Returns:
         str: Python string with filtered posts as an array of objects: [{id, title, selftext}, ...]
     """
-    system_prompt = f"""You are an expert content analyst. Your task is to filter posts based on the given criteria.
+    system_prompt = f"""You are an expert content analyst. Your task is to filter posts and return ONLY a Python array of post IDs.
 
 FILTERING CRITERIA: {filter_prompt}
 
 INSTRUCTIONS:
-1. Analyze each post in the provided content
-2. Determine which posts match the filtering criteria
-3. Return ONLY a valid Python array where each object is a dictionary that contains "id", "title", and "selftext" fields
-4. LIMIT your response to MAXIMUM 1000posts that best match the criteria (unless user prompt specifies different number)
-5. Only include posts that clearly match the filtering criteria
-6. If no posts match, return an empty Python array []
-7. ALWAYS ensure the Python array is complete and properly closed with ]
+1. Analyze each post in the provided content.
+2. Determine which posts match the filtering criteria.
+3. RETURN ONLY a valid Python array of STRING IDs. Each ID must be a quoted string (e.g. 't3_abcd' or "t3_abcd").
+4. LIMIT your response to AT MOST 1000 IDs unless the user specifies a different number.
+5. Include ONLY the matching IDs. Do NOT return objects, dictionaries, additional fields, or any explanatory text.
+6. If no posts match, return an empty array: []
+7. ALWAYS ensure the Python array is syntactically valid and properly closed with ].
 
 EXAMPLE OUTPUT FORMAT:
-[
-  {{"id": "post_id_1", "title": "Post Title 1", "selftext": "Post content 1"}},
-  {{"id": "post_id_2", "title": "Post Title 2", "selftext": "Post content 2"}}
-]
+['id1','id2','id3']
 
-CRITICAL: Return ONLY the raw Python array with NO markdown code blocks, NO backticks, NO wrappers around the array, and NO additional text or explanation."""
+CRITICAL: Return ONLY the raw Python array with NO markdown, NO backticks, NO code fences, and NO additional text or commentary."""
 
     user_prompt = f"Here are the posts to filter:\n\n{posts_content}"
 
     try:
         response = get_client(system_prompt, user_prompt, api_key)
-
-        response = response.strip()
-        print(response)
-        if not response.startswith('['):
-            return '[]'
-        if not response.endswith(']'):
-            last_comma = response.rfind(',')
-            if last_comma > 0:
-                response = response[:last_comma] + ']'
-            else:
-                response = response.rstrip() + ']'
-
-        try:
-            import json
-            json.loads(response)
-            return response
-        except json.JSONDecodeError:
-            return '[]'
+        print(response[:100])
+        print("...")
+        print(response[-100:])
+        return wrap_in_python_array(response)
 
     except Exception as e:
-        return f'[{{"error": "Failed to filter posts: {str(e)}"}}]'
+        return [{"error": f"Failed to filter posts: {str(e)}"}]
 
-def filter_comments_with_ai(filter_prompt: str, comments_content: str, api_key: str) -> str:
+
+def filter_comments_with_ai(filter_prompt: str, comments_content: str, api_key: str):
     """
-    Use AI to filter comments based on a given prompt and return results in Python format.
+    Use AI to filter comments based on a given prompt and return results as a Python list.
 
-    Args:
-        filter_prompt (str): The filtering criteria/prompt
-        comments_content (str): The comments content to filter through
-        api_key (str): OpenRouter API key
-
-    Returns:
-        str: Python string with filtered comments as an array of objects: [{id, body}, ...]
+    Returns an array of objects with ids.
     """
-    system_prompt = f"""You are an expert content analyst. Your task is to filter comments based on the given criteria.
+    system_prompt = f"""You are an expert content analyst. Your task is to filter comments and return ONLY a Python array of comment IDs.
 
 FILTERING CRITERIA: {filter_prompt}
 
 INSTRUCTIONS:
-1. Analyze each comment in the provided content
-2. Determine which comments match the filtering criteria
-3. Return ONLY a valid Python array where each object contains "id" and "body" fields
-4. LIMIT your response to MAXIMUM 1000 comments that best match the criteria (unless user prompt specifies different number)
-5. Only include comments that clearly match the filtering criteria
-6. If no comments match, return an empty Python array []
-7. ALWAYS ensure the Python array is complete and properly closed with ]
+1. Analyze each comment in the provided content.
+2. Determine which comments match the filtering criteria.
+3. RETURN ONLY a valid Python array of STRING IDs. Each ID must be a quoted string (e.g. 'c1_xyz' or "c1_xyz").
+4. If no comments match, return an empty array: []
+5. ALWAYS ensure the Python array is syntactically valid and properly closed with ].
 
 EXAMPLE OUTPUT FORMAT:
-[
-  {{"id": "comment_id_1", "body": "Comment text 1"}},
-  {{"id": "comment_id_2", "body": "Comment text 2"}}
-]
+['id1','id2','id3']
 
-CRITICAL: Return ONLY the raw Python array with NO markdown code blocks, NO backticks, NO wrappers around the array, and NO additional text or explanation."""
+CRITICAL: Return ONLY the raw Python array with NO markdown, NO backticks, NO code fences, and NO additional text or commentary."""
 
     user_prompt = f"Here are the comments to filter:\n\n{comments_content}"
 
     try:
         response = get_client(system_prompt, user_prompt, api_key)
-
-        response = response.strip()
-        print(response)
-        if not response.startswith('['):
-            return '[]'
-        if not response.endswith(']'):
-            last_comma = response.rfind(',')
-            if last_comma > 0:
-                response = response[:last_comma] + ']'
-            else:
-                response = response.rstrip() + ']'
-
-        try:
-            import json
-            json.loads(response)
-            return response
-        except json.JSONDecodeError:
-            return '[]'
-
+        print(response[:100])
+        print("...")
+        print(response[-100:])
+        return wrap_in_python_array(response)
     except Exception as e:
-        return f'[{{"error": "Failed to filter comments: {str(e)}"}}]'
+        return [{"error": f"Failed to filter comments: {str(e)}"}]
+
+
+
+def wrap_in_python_array(content: str):
+    lp = 0
+    while lp < len(content) and content[lp] != "[":
+        lp += 1
+
+    content = content[lp:]
+    rp = len(content) - 1
+    while rp >= 0 and content[rp] != "]":
+        rp -= 1
+    content = content[:rp+1]
+
+    if not content:
+        return []
+
+    try:
+        parsed = ast.literal_eval(content)
+    except Exception:
+        try:
+            parsed = json.loads(content)
+        except Exception:
+            raise ValueError(f"Could not parse array from content: {content[:200]}")
+
+    if isinstance(parsed, list):
+        return parsed
+    if isinstance(parsed, tuple):
+        return list(parsed)
+
+    return [parsed]
