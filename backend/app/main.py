@@ -1,6 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from backend.app.api import routes
+try:
+    from app.api import routes
+except Exception:
+    from backend.app.api import routes
 from backend.app.database import engine
 from backend.app.models import models
 from backend.app.config import settings

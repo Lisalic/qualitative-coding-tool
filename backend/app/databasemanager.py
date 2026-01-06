@@ -1,4 +1,7 @@
-from backend.app.database import SessionLocal, Project, ProjectTable, User
+try:
+    from app.database import SessionLocal, Project, ProjectTable, User
+except Exception:
+    from backend.app.database import SessionLocal, Project, ProjectTable, User
 from typing import Optional
 
 
