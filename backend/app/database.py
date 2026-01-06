@@ -29,7 +29,7 @@ if not DATABASE_URL:
         DATABASE_URL = f"postgresql://{pg_user}:{pg_pass}@{pg_host}:{pg_port}/{pg_db}"
     else:
         DATABASE_URL = f"postgresql://{pg_user}@{pg_host}:{pg_port}/{pg_db}"
-
+print(DATABASE_URL)
 # Create SQLAlchemy engine and session factory
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
