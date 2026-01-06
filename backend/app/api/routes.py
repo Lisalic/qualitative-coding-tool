@@ -20,28 +20,16 @@ import pandas as pd
 from fastapi.responses import JSONResponse
 from fastapi import Request
 
-try:
-    from app.database import get_db, AuthUser, Project, ProjectTable, engine, SessionLocal
-    from app.databasemanager import DatabaseManager
-    from app.auth import create_access_token, decode_access_token
-    from app.config import settings
+from app.database import get_db, AuthUser, Project, ProjectTable, engine, SessionLocal
+from app.databasemanager import DatabaseManager
+from app.auth import create_access_token, decode_access_token
+from app.config import settings
 
-    from scripts.import_db import stream_zst_to_postgres
-    from scripts.filter_db import filter_posts_with_ai, filter_comments_with_ai
-    from scripts.codebook_generator import generate_codebook as generate_codebook_function
-    from scripts.codebook_apply import classify_posts
-    from app.services import migrate_sqlite_file
-except Exception:
-    from backend.app.database import get_db, AuthUser, Project, ProjectTable, engine, SessionLocal
-    from backend.app.databasemanager import DatabaseManager
-    from backend.app.auth import create_access_token, decode_access_token
-    from backend.app.config import settings
-
-    from backend.scripts.import_db import stream_zst_to_postgres
-    from backend.scripts.filter_db import filter_posts_with_ai, filter_comments_with_ai
-    from backend.scripts.codebook_generator import generate_codebook as generate_codebook_function
-    from backend.scripts.codebook_apply import classify_posts
-    from backend.app.services import migrate_sqlite_file
+from scripts.import_db import stream_zst_to_postgres
+from scripts.filter_db import filter_posts_with_ai, filter_comments_with_ai
+from scripts.codebook_generator import generate_codebook as generate_codebook_function
+from scripts.codebook_apply import classify_posts
+from app.services import migrate_sqlite_file
 
 router = APIRouter()
 
