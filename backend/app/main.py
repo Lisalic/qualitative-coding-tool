@@ -1,12 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import routes
-from app.database import engine
-from app.models import models
+from app.database import engine, Base
 from app.config import settings
 import os
 
-models.Base.metadata.create_all(bind=engine)
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Qualitative Coding API")
 
