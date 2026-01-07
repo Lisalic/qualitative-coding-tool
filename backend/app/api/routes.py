@@ -1177,7 +1177,7 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
             traceback.print_exc()
 
         return JSONResponse({
-            "message": "Printed lengths and filter responses to server logs; persisted to schema",
+            "message": "Database filtered and saved",
             "submissions_length": len(submissions_text),
             "comments_length": len(comments_text),
             "posts_filtered_count": len(posts_list),
