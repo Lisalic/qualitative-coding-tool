@@ -175,7 +175,7 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
     },
     {
       id: "database",
-      label: "Specific Database",
+      label: "Select Database",
       type: "select",
       value: database,
       options: getAvailableDatabases().map((item) => ({
@@ -185,7 +185,7 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
     },
     {
       id: "prompt",
-      label: "Prompt (Optional)",
+      label: "Enter Prompt",
       type: "textarea",
       value: prompt,
       placeholder:

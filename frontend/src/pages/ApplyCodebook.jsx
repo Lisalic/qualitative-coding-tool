@@ -188,7 +188,7 @@ export default function ApplyCodebook() {
     },
     {
       id: "database",
-      label: "Specific Database",
+      label: "Select Database",
       type: "select",
       value: database,
       options: getAvailableDatabases().map((item) => ({
@@ -198,7 +198,7 @@ export default function ApplyCodebook() {
     },
     {
       id: "codebook",
-      label: "Codebook",
+      label: "Select Codebook",
       type: "select",
       value: codebook,
       options: codebooks.map((cb) => ({
@@ -208,7 +208,7 @@ export default function ApplyCodebook() {
     },
     {
       id: "methodology",
-      label: "Methodology (Optional)",
+      label: "Enter Prompt",
       type: "textarea",
       value: methodology,
       extraButton: {

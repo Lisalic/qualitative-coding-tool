@@ -247,7 +247,7 @@ export default function Filter() {
   const databaseFields = [
     {
       id: "database",
-      label: "Database",
+      label: "Select Database",
       type: "select",
       value: database,
       options: databases.map((d) => ({
