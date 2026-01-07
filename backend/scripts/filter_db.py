@@ -1,6 +1,7 @@
 import time
 import ast
 import json
+import re
 from openai import OpenAI
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
@@ -119,41 +120,10 @@ CRITICAL: Return ONLY the raw Python array with NO markdown, NO backticks, NO co
 
 
 def wrap_in_python_array(content: str):
-    lp = 0
-    while lp < len(content) and content[lp] != "[":
-        lp += 1
+    matches = re.findall(r"['\"]([a-zA-Z0-9]+)['\"]", content)
 
-    content = content[lp:]
-    rp = len(content) - 1
-    while rp >= 0 and content[rp] not in ["]", ","]:
-        rp -= 1
-    if rp < 0:
-        # nothing found; leave as-is (will fail parsing later)
-        pass
-    else:
-        if content[rp] == ",":
-            # replace trailing comma with a closing bracket
-            content = content[:rp] + "]"
-        else:
-            content = content[:rp+1]
-
-    print(content[:200])
-    print("...")
-    print(content[-200:])
-    if not content:
+    if not matches:
+        print("Warning: No IDs found in content")
         return []
 
-    try:
-        parsed = ast.literal_eval(content)
-    except Exception:
-        try:
-            parsed = json.loads(content)
-        except Exception:
-            raise ValueError(f"Could not parse array from content: {content[:200]}")
-
-    if isinstance(parsed, list):
-        return parsed
-    if isinstance(parsed, tuple):
-        return list(parsed)
-
-    return [parsed]
+    return matches

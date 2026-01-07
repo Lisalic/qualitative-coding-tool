@@ -1110,8 +1110,18 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
                         selftext = item.get('selftext')
                         if sid is None:
                             continue
-                        conn.execute(text(f'INSERT INTO "{new_schema}".submissions (id, title, selftext) VALUES (:id, :title, :selftext)'), {"id": sid, "title": title, "selftext": selftext})
-                        inserted_subs += 1
+                        try:
+                            # Use a nested transaction (savepoint) so a single bad row
+                            # does not abort the outer transaction.
+                            with conn.begin_nested():
+                                conn.execute(
+                                    text(f'INSERT INTO "{new_schema}".submissions (id, title, selftext) VALUES (:id, :title, :selftext)'),
+                                    {"id": sid, "title": title, "selftext": selftext},
+                                )
+                            inserted_subs += 1
+                        except Exception as ie:
+                            print(f"[filter-data] Skipping invalid submission row (savepoint rollback): {ie}")
+                            # continue to next item
                     except Exception as ie:
                         print(f"[filter-data] Skipping invalid submission row: {ie}")
 
@@ -1127,8 +1137,16 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
                         body = item.get('body')
                         if cid is None:
                             continue
-                        conn.execute(text(f'INSERT INTO "{new_schema}".comments (id, body) VALUES (:id, :body)'), {"id": cid, "body": body})
-                        inserted_comments += 1
+                        try:
+                            with conn.begin_nested():
+                                conn.execute(
+                                    text(f'INSERT INTO "{new_schema}".comments (id, body) VALUES (:id, :body)'),
+                                    {"id": cid, "body": body},
+                                )
+                            inserted_comments += 1
+                        except Exception as ie:
+                            print(f"[filter-data] Skipping invalid comment row (savepoint rollback): {ie}")
+                            # continue to next item
                     except Exception as ie:
                         print(f"[filter-data] Skipping invalid comment row: {ie}")
 
