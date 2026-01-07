@@ -1,5 +1,12 @@
-from app.database import SessionLocal, Project, ProjectTable, User
 from typing import Optional
+try:
+    from app.database import SessionLocal, Project, ProjectTable, User
+except Exception as exc:
+    try:
+        from backend.app.database import SessionLocal, Project, ProjectTable, User
+    except Exception:
+        print("Failed to import app.database in databasemanager.py:", exc)
+        raise exc
 
 
 class DatabaseManager:

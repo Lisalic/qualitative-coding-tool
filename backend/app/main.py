@@ -1,8 +1,17 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import routes
-from app.database import engine, Base
-from app.config import settings
+try:
+    from app.api import routes
+    from app.database import engine, Base
+    from app.config import settings
+except:
+    try:
+        from backend.app.api import routes
+        from backend.app.database import engine, Base
+        from backend.app.config import settings
+    except Exception as exc:
+        print("Failed", exc)
+        raise exc
 import os
 
 Base.metadata.create_all(bind=engine)

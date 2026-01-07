@@ -4,7 +4,14 @@ import hmac
 import hashlib
 import base64
 from typing import Dict, Any
-from app.config import settings
+try:
+    from app.config import settings
+except:
+    try:
+        from backend.app.config import settings
+    except Exception as exc:
+        print("Failed", exc)
+        raise exc
 
 
 def _b64url_encode(data: bytes) -> str:

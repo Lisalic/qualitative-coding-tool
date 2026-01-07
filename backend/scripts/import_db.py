@@ -2,7 +2,14 @@ import json
 import zstandard as zstd
 import io
 from sqlalchemy import text
-from app.database import engine
+try:
+    from app.database import engine
+except Exception as exc:
+    try:
+        from backend.app.database import engine
+    except Exception:
+        print("Failed", exc)
+        raise exc
 
 def decompress_zst_file(file_path, chunk_size=16384): 
     try:

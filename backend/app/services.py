@@ -2,8 +2,17 @@ import uuid
 import sqlite3
 import pandas as pd
 from sqlalchemy import text
-from app.database import engine
-from app.databasemanager import DatabaseManager
+try:
+    from app.database import engine
+    from app.databasemanager import DatabaseManager
+except Exception as exc:
+    try:
+        from backend.app.database import engine
+        from backend.app.databasemanager import DatabaseManager
+    except Exception:
+        print("Failed", exc)
+        raise exc
+
 
 def migrate_sqlite_file(user_id: uuid.UUID, file_path: str, display_name: str, project_type: str = "raw_data"):
     unique_id = str(uuid.uuid4()).replace("-", "")[:12]
