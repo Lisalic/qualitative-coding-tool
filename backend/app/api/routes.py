@@ -468,7 +468,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     token = create_access_token({"sub": str(user.id), "email": user.email})
-    resp = JSONResponse({"id": str(user.id), "email": user.email})
+    resp = JSONResponse({"id": str(user.id), "email": user.email, "access_token": token})
     max_age = int(settings.jwt_access_token_expire_minutes) * 60
     resp.set_cookie("access_token", token, httponly=True, samesite="lax", max_age=max_age)
     return resp
@@ -494,7 +494,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(exc))
 
     token = create_access_token({"sub": str(user.id), "email": user.email})
-    resp = JSONResponse({"id": str(user.id), "email": user.email})
+    resp = JSONResponse({"id": str(user.id), "email": user.email, "access_token": token})
     max_age = int(settings.jwt_access_token_expire_minutes) * 60
     resp.set_cookie("access_token", token, httponly=True, samesite="lax", max_age=max_age)
     return resp

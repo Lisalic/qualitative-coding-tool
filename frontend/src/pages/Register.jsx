@@ -28,6 +28,13 @@ const Register = () => {
 
     try {
       const res = await api.post("/api/register/", { email, password });
+      try {
+        const token = res && res.data && res.data.access_token;
+        if (token) {
+          localStorage.setItem("access_token", token);
+          api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
+        }
+      } catch (e) {}
       setMessage("Registration successful!");
       setMessageType("success");
       try {

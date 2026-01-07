@@ -92,6 +92,11 @@ function Navbar({ showBack, onBack }) {
                 } catch (e) {
                   // ignore
                 }
+                // clear local token and axios header
+                try {
+                  localStorage.removeItem("access_token");
+                  delete api.defaults.headers.common["Authorization"];
+                } catch (e) {}
                 setIsAuth(false);
                 // notify other components that auth changed
                 window.dispatchEvent(new Event("auth-changed"));

@@ -21,6 +21,14 @@ const Login = () => {
 
     try {
       const res = await api.post("/api/login/", { email, password });
+      // store access token (insecure) for Authorization header usage
+      try {
+        const token = res && res.data && res.data.access_token;
+        if (token) {
+          localStorage.setItem("access_token", token);
+          api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
+        }
+      } catch (e) {}
       setMessage("Login successful!");
       setMessageType("success");
       try {

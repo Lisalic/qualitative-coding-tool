@@ -11,7 +11,29 @@ export const api = axios.create({
 
 // Fetch wrapper that prefixes the BASE_URL and includes credentials by default.
 export async function apiFetch(path, options = {}) {
-  const url = path.startsWith("http") ? path : `${BASE_URL}${path}`;
+  if (path.startsWith("http")) {
+    const opts = { credentials: "include", ...options };
+    return fetch(path, opts);
+  }
+
+  // Ensure we join base and path without producing a double-slash
+  const base = String(BASE_URL).replace(/\/+$/g, "");
+  const rel = String(path).replace(/^\/+/g, "");
+  const url = `${base}/${rel}`;
   const opts = { credentials: "include", ...options };
+  // Attach Authorization header from localStorage token when present
+  const token =
+    typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+  const headers = Object.assign({}, opts.headers || {});
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  opts.headers = headers;
   return fetch(url, opts);
 }
+
+// Ensure axios instance uses Authorization header if token exists
+try {
+  if (typeof window !== "undefined") {
+    const t = localStorage.getItem("access_token");
+    if (t) api.defaults.headers.common["Authorization"] = `Bearer ${t}`;
+  }
+} catch (e) {}
