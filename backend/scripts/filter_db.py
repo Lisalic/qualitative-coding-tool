@@ -112,6 +112,7 @@ CRITICAL: Return ONLY the raw Python array with NO markdown, NO backticks, NO co
         print("...")
         print(response[-100:])
         return wrap_in_python_array(response)
+        
     except Exception as e:
         return [{"error": f"Failed to filter comments: {str(e)}"}]
 
@@ -124,10 +125,21 @@ def wrap_in_python_array(content: str):
 
     content = content[lp:]
     rp = len(content) - 1
-    while rp >= 0 and content[rp] != "]":
+    while rp >= 0 and content[rp] not in ["]", ","]:
         rp -= 1
-    content = content[:rp+1]
+    if rp < 0:
+        # nothing found; leave as-is (will fail parsing later)
+        pass
+    else:
+        if content[rp] == ",":
+            # replace trailing comma with a closing bracket
+            content = content[:rp] + "]"
+        else:
+            content = content[:rp+1]
 
+    print(content[:200])
+    print("...")
+    print(content[-200:])
     if not content:
         return []
 
