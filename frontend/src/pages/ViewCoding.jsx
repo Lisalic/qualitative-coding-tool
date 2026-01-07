@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { apiFetch } from "../api";
 import Navbar from "../components/Navbar";
 import SelectionList from "../components/SelectionList";
 import "../styles/Data.css";
@@ -14,9 +15,7 @@ export default function ViewCoding() {
   const fetchAvailableCodedData = async () => {
     try {
       // Prefer user-owned coded projects from Postgres
-      const resp = await fetch("/api/my-projects/?project_type=coding", {
-        credentials: "include",
-      });
+      const resp = await apiFetch("/api/my-projects/?project_type=coding");
       if (resp.ok) {
         const json = await resp.json();
         const projects = json.projects || [];

@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import "../styles/Auth.css";
+import { api } from "../api";
 
 const Register = () => {
   const [email, setEmail] = useState("");
@@ -10,7 +11,7 @@ const Register = () => {
   const [messageType, setMessageType] = useState("");
   const navigate = useNavigate();
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
 
     if (!email || !password || !confirmPassword) {
@@ -25,32 +26,25 @@ const Register = () => {
       return;
     }
 
-    // POST credentials to backend registration endpoint
-    fetch("/api/register/", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-      credentials: "include",
-    })
-      .then(async (res) => {
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.detail || "Registration failed");
-        }
-        return res.json();
-      })
-      .then((data) => {
-        setMessage("Registration successful!");
-        setMessageType("success");
-        try {
-          window.dispatchEvent(new Event("auth-changed"));
-        } catch (e) {}
-        setTimeout(() => navigate("/home"), 1000);
-      })
-      .catch((err) => {
-        setMessage(err.message || "Registration failed");
-        setMessageType("error");
-      });
+    try {
+      const res = await api.post("/api/register/", { email, password });
+      setMessage("Registration successful!");
+      setMessageType("success");
+      try {
+        window.dispatchEvent(new Event("auth-changed"));
+      } catch (e) {}
+      setTimeout(() => navigate("/home"), 1000);
+    } catch (err) {
+      const msg =
+        (err &&
+          err.response &&
+          err.response.data &&
+          err.response.data.detail) ||
+        err.message ||
+        "Registration failed";
+      setMessage(msg);
+      setMessageType("error");
+    }
   };
 
   return (

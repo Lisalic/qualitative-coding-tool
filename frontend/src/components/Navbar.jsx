@@ -1,5 +1,6 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
+import { apiFetch } from "../api";
 import "./Navbar.css";
 
 function Navbar({ showBack, onBack }) {
@@ -15,7 +16,7 @@ function Navbar({ showBack, onBack }) {
       setApiKey(savedKey);
     }
     // Check authentication status
-    fetch("/api/me/", { credentials: "include" })
+    apiFetch("/api/me/")
       .then((r) => {
         if (r.ok) setIsAuth(true);
         else setIsAuth(false);
@@ -23,7 +24,7 @@ function Navbar({ showBack, onBack }) {
       .catch(() => setIsAuth(false));
     // Listen for global auth changes (login/register/logout)
     const handler = () => {
-      fetch("/api/me/", { credentials: "include" })
+      apiFetch("/api/me/")
         .then((r) => {
           if (r.ok) setIsAuth(true);
           else setIsAuth(false);
@@ -87,14 +88,13 @@ function Navbar({ showBack, onBack }) {
               className="logout-btn"
               onClick={async () => {
                 try {
-                  await fetch("/api/logout/", {
-                    method: "POST",
-                    credentials: "include",
-                  });
+                  await apiFetch("/api/logout/", { method: "POST" });
                 } catch (e) {
                   // ignore
                 }
                 setIsAuth(false);
+                // notify other components that auth changed
+                window.dispatchEvent(new Event("auth-changed"));
                 navigate("/");
               }}
             >

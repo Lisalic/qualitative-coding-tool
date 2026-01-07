@@ -5,6 +5,7 @@ import ActionForm from "../components/ActionForm";
 import CodebookManager from "../components/CodebookManager";
 import PromptManager from "../components/PromptManager";
 import "../styles/Home.css";
+import { apiFetch } from "../api";
 
 export default function ApplyCodebook() {
   const navigate = useNavigate();
@@ -30,7 +31,7 @@ export default function ApplyCodebook() {
 
   const fetchCodebooks = async () => {
     try {
-      const response = await fetch("/api/list-codebooks");
+      const response = await apiFetch("/api/list-codebooks");
       if (!response.ok) throw new Error("Failed to fetch codebooks");
       const data = await response.json();
       setCodebooks(data.codebooks);
@@ -45,9 +46,9 @@ export default function ApplyCodebook() {
   const fetchDatabases = async () => {
     try {
       // Prefer server-side Postgres projects for authenticated users
-      const projResp = await fetch("/api/my-projects/?project_type=raw_data", {
-        credentials: "include",
-      });
+      const projResp = await apiFetch(
+        "/api/my-projects/?project_type=raw_data"
+      );
       if (projResp.ok) {
         const projData = await projResp.json();
         const projects = projData.projects || [];
@@ -62,9 +63,9 @@ export default function ApplyCodebook() {
       }
 
       // Fallback: prefer Postgres projects instead of filesystem list
-      const response = await fetch("/api/my-projects/?project_type=raw_data", {
-        credentials: "include",
-      });
+      const response = await apiFetch(
+        "/api/my-projects/?project_type=raw_data"
+      );
       if (!response.ok) throw new Error("Failed to fetch projects");
       const data = await response.json();
       const normalized = (data.projects || []).map((p) => ({
@@ -84,9 +85,8 @@ export default function ApplyCodebook() {
   const fetchFilteredDatabases = async () => {
     try {
       // Prefer server-side Postgres projects for authenticated users
-      const projResp = await fetch(
-        "/api/my-projects/?project_type=filtered_data",
-        { credentials: "include" }
+      const projResp = await apiFetch(
+        "/api/my-projects/?project_type=filtered_data"
       );
       if (projResp.ok) {
         const projData = await projResp.json();
@@ -134,7 +134,7 @@ export default function ApplyCodebook() {
       requestData.append("codebook", formData.codebook);
       requestData.append("methodology", formData.methodology);
 
-      const response = await fetch("/api/apply-codebook/", {
+      const response = await apiFetch("/api/apply-codebook/", {
         method: "POST",
         body: requestData,
       });

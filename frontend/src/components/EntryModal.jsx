@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { apiFetch } from "../api";
 import "../styles/DataTable.css";
 
 export default function EntryModal({ entry, isOpen, onClose, database = "" }) {
@@ -16,7 +17,7 @@ export default function EntryModal({ entry, isOpen, onClose, database = "" }) {
   const fetchComments = async (submissionId) => {
     try {
       setLoadingComments(true);
-      const response = await fetch(
+      const response = await apiFetch(
         `/api/comments/${submissionId}?database=${database}`
       );
       if (!response.ok) throw new Error("Failed to fetch comments");

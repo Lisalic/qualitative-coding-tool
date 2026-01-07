@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { apiFetch } from "../api";
 
 export default function CodebookManager({ onViewCodebook }) {
   const [codebooks, setCodebooks] = useState([]);
@@ -12,7 +13,7 @@ export default function CodebookManager({ onViewCodebook }) {
 
   const fetchCodebooks = async () => {
     try {
-      const response = await fetch("/api/list-codebooks");
+      const response = await apiFetch("/api/list-codebooks");
       if (!response.ok) throw new Error("Failed to fetch codebooks");
       const data = await response.json();
       // ensure metadata fields exist for each codebook
@@ -27,7 +28,7 @@ export default function CodebookManager({ onViewCodebook }) {
           if (cb.source === "project") {
             const schema = cb.metadata?.schema || cb.schema_name || cb.id;
             try {
-              const resp = await fetch(
+              const resp = await apiFetch(
                 `/api/codebook?codebook_id=${encodeURIComponent(schema)}`
               );
               if (resp.ok) {
@@ -72,10 +73,9 @@ export default function CodebookManager({ onViewCodebook }) {
         formData.append("schema_name", schema);
         formData.append("display_name", newName.trim());
 
-        const response = await fetch("/api/rename-project/", {
+        const response = await apiFetch("/api/rename-project/", {
           method: "POST",
           body: formData,
-          credentials: "include",
         });
 
         if (!response.ok) throw new Error("Failed to rename project");
@@ -102,17 +102,16 @@ export default function CodebookManager({ onViewCodebook }) {
           cb.schema_name ||
           cb.metadata?.schema_name ||
           cb.id;
-        const response = await fetch(
+        const response = await apiFetch(
           `/api/delete-database/${encodeURIComponent(schema)}`,
           {
             method: "DELETE",
-            credentials: "include",
           }
         );
         if (!response.ok) throw new Error("Failed to delete project schema");
       } else {
         // fallback to file-based deletion endpoint (try to delete this later maybe)
-        const response = await fetch(`/api/delete-codebook/${cbId}`, {
+        const response = await apiFetch(`/api/delete-codebook/${cbId}`, {
           method: "DELETE",
         });
         if (!response.ok) throw new Error("Failed to delete codebook file");

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { apiFetch } from "../api";
 import EntryModal from "./EntryModal";
 import "../styles/DataTable.css";
 
@@ -36,11 +37,10 @@ export default function DataTable({
         String(currentDatabase) || ""
       );
       if (currentDatabase && isProjectSchema) {
-        response = await fetch(
+        response = await apiFetch(
           `/api/project-entries/?limit=${fetchLimit}&schema=${encodeURIComponent(
             String(currentDatabase)
-          )}`,
-          { credentials: "include" }
+          )}`
         );
       }
 
@@ -87,9 +87,8 @@ export default function DataTable({
       form.append("table", table);
       form.append("row_id", id);
 
-      const resp = await fetch(`/api/delete-row/`, {
+      const resp = await apiFetch(`/api/delete-row/`, {
         method: "POST",
-        credentials: "include",
         body: form,
       });
 

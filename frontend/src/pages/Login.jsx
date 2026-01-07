@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import "../styles/Auth.css";
+import { api } from "../api";
 
 const Login = () => {
   const [email, setEmail] = useState("");
@@ -9,7 +10,7 @@ const Login = () => {
   const [messageType, setMessageType] = useState("");
   const navigate = useNavigate();
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
 
     if (!email || !password) {
@@ -17,32 +18,26 @@ const Login = () => {
       setMessageType("error");
       return;
     }
-    fetch("/api/login/", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-      credentials: "include",
-    })
-      .then(async (res) => {
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.detail || "Login failed");
-        }
-        return res.json();
-      })
-      .then((data) => {
-        setMessage("Login successful!");
-        setMessageType("success");
-        // notify other components (Navbar) that auth state changed
-        try {
-          window.dispatchEvent(new Event("auth-changed"));
-        } catch (e) {}
-        setTimeout(() => navigate("/home"), 500);
-      })
-      .catch((err) => {
-        setMessage(err.message || "Login failed");
-        setMessageType("error");
-      });
+
+    try {
+      const res = await api.post("/api/login/", { email, password });
+      setMessage("Login successful!");
+      setMessageType("success");
+      try {
+        window.dispatchEvent(new Event("auth-changed"));
+      } catch (e) {}
+      setTimeout(() => navigate("/home"), 500);
+    } catch (err) {
+      const msg =
+        (err &&
+          err.response &&
+          err.response.data &&
+          err.response.data.detail) ||
+        err.message ||
+        "Login failed";
+      setMessage(msg);
+      setMessageType("error");
+    }
   };
 
   return (

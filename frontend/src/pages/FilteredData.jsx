@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { apiFetch } from "../api";
 import { useNavigate, useLocation } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import SelectionList from "../components/SelectionList";
@@ -36,11 +37,10 @@ export default function FilteredData() {
   const fetchFilteredDatabases = async () => {
     try {
       // If user is logged in, fetch their filtered_data projects
-      const meResp = await fetch("/api/me/", { credentials: "include" });
+      const meResp = await apiFetch("/api/me/");
       if (meResp.ok) {
-        const projResp = await fetch(
-          "/api/my-projects/?project_type=filtered_data",
-          { credentials: "include" }
+        const projResp = await apiFetch(
+          "/api/my-projects/?project_type=filtered_data"
         );
         if (!projResp.ok) throw new Error("Failed to fetch user projects");
         const projData = await projResp.json();

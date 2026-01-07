@@ -1,5 +1,6 @@
 import { useState } from "react";
 import "../styles/FileUpload.css";
+import { apiFetch } from "../api";
 
 export default function FileUpload({ onUploadSuccess, onView }) {
   const [file, setFile] = useState(null);
@@ -73,10 +74,9 @@ export default function FileUpload({ onUploadSuccess, onView }) {
       formData.append("data_type", dataType);
       formData.append("name", customName.trim());
 
-      const response = await fetch("/api/upload-zst/", {
+      const response = await apiFetch("/api/upload-zst/", {
         method: "POST",
         body: formData,
-        credentials: "include",
       });
       console.log("Response received:", response.status, response.statusText);
 

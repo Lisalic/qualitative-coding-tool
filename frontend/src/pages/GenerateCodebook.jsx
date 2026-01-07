@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { apiFetch } from "../api";
 import { useNavigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import ActionForm from "../components/ActionForm";
@@ -29,9 +30,9 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
   const fetchDatabases = async () => {
     try {
       // Prefer Postgres projects; list-databases removed in favor of my-projects
-      const response = await fetch("/api/my-projects/?project_type=raw_data", {
-        credentials: "include",
-      });
+      const response = await apiFetch(
+        "/api/my-projects/?project_type=raw_data"
+      );
       if (!response.ok) throw new Error("Failed to fetch projects");
       const data = await response.json();
 
@@ -54,9 +55,8 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
 
   const fetchFilteredDatabases = async () => {
     try {
-      const projResp = await fetch(
-        "/api/my-projects/?project_type=filtered_data",
-        { credentials: "include" }
+      const projResp = await apiFetch(
+        "/api/my-projects/?project_type=filtered_data"
       );
       if (projResp.ok) {
         const projData = await projResp.json();
@@ -135,7 +135,7 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
       }
       requestData.append("name", formData.name.trim());
 
-      const response = await fetch("/api/generate-codebook/", {
+      const response = await apiFetch("/api/generate-codebook/", {
         method: "POST",
         body: requestData,
       });

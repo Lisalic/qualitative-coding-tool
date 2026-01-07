@@ -4,6 +4,7 @@ import ActionForm from "../components/ActionForm";
 import PromptManager from "../components/PromptManager";
 import ManageDatabase from "../components/ManageDatabase";
 import { useState, useEffect } from "react";
+import { apiFetch } from "../api";
 import "../styles/Home.css";
 
 export default function Filter() {
@@ -42,9 +43,7 @@ export default function Filter() {
   const fetchDatabases = async () => {
     try {
       // Fetch raw_data projects for the database select
-      const respRaw = await fetch("/api/my-projects/?project_type=raw_data", {
-        credentials: "include",
-      });
+      const respRaw = await apiFetch("/api/my-projects/?project_type=raw_data");
       if (!respRaw.ok) throw new Error("Failed to fetch raw projects");
       const rawData = await respRaw.json();
       const rawOptions = (rawData.projects || []).map((p) => ({
@@ -54,9 +53,8 @@ export default function Filter() {
       }));
 
       // Fetch filtered_data projects for ManageDatabase view
-      const respFiltered = await fetch(
-        "/api/my-projects/?project_type=filtered_data",
-        { credentials: "include" }
+      const respFiltered = await apiFetch(
+        "/api/my-projects/?project_type=filtered_data"
       );
       if (!respFiltered.ok)
         throw new Error("Failed to fetch filtered projects");
@@ -98,10 +96,9 @@ export default function Filter() {
       formData.append("schema_name", oldName);
       formData.append("display_name", newName.trim());
 
-      const response = await fetch("/api/rename-project/", {
+      const response = await apiFetch("/api/rename-project/", {
         method: "POST",
         body: formData,
-        credentials: "include",
       });
 
       if (!response.ok) {
@@ -128,9 +125,8 @@ export default function Filter() {
       return;
 
     try {
-      const response = await fetch(`/api/delete-database/${dbName}`, {
+      const response = await apiFetch(`/api/delete-database/${dbName}`, {
         method: "DELETE",
-        credentials: "include",
       });
 
       if (!response.ok) {
@@ -195,10 +191,9 @@ export default function Filter() {
         requestData.append("database", formData.database);
       }
 
-      const response = await fetch("/api/filter-data/", {
+      const response = await apiFetch("/api/filter-data/", {
         method: "POST",
         body: requestData,
-        credentials: "include",
       });
 
       if (!response.ok) {

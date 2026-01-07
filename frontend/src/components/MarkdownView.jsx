@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { apiFetch } from "../api";
 import ReactMarkdown from "react-markdown";
 
 export default function MarkdownView({
@@ -44,7 +45,7 @@ export default function MarkdownView({
         } else {
           url = `${fetchBase}/${encodeURIComponent(selectedId)}`;
         }
-        const resp = await fetch(url);
+        const resp = await apiFetch(url);
         if (!resp.ok) {
           // try parse server error message
           try {
@@ -89,8 +90,7 @@ export default function MarkdownView({
       formData.append("content", editedContent || "");
 
       const fetchOpts = { method: "POST", body: formData };
-      if (saveAsProject) fetchOpts.credentials = "include";
-      const res = await fetch(saveUrl, fetchOpts);
+      const res = await apiFetch(saveUrl, fetchOpts);
       if (!res.ok) {
         let errText = "Failed to save";
         try {

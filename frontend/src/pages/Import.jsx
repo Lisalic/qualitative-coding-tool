@@ -6,6 +6,7 @@ import ManageDatabase from "../components/ManageDatabase";
 import { useState, useEffect } from "react";
 import "../styles/Home.css";
 import "../styles/Data.css";
+import { apiFetch } from "../api";
 
 export default function Import() {
   const navigate = useNavigate();
@@ -27,13 +28,10 @@ export default function Import() {
   const fetchDatabases = async () => {
     try {
       // Check authentication and fetch user projects if logged in
-      const meResp = await fetch("/api/me/", { credentials: "include" });
+      const meResp = await apiFetch("/api/me/");
       if (meResp.ok) {
-        const projResp = await fetch(
-          "/api/my-projects/?project_type=raw_data",
-          {
-            credentials: "include",
-          }
+        const projResp = await apiFetch(
+          "/api/my-projects/?project_type=raw_data"
         );
         if (!projResp.ok) throw new Error("Failed to fetch user projects");
         const projData = await projResp.json();
@@ -64,9 +62,9 @@ export default function Import() {
       }
 
       // If not authenticated, still try to use my-projects for raw_data (may be empty)
-      const response = await fetch("/api/my-projects/?project_type=raw_data", {
-        credentials: "include",
-      });
+      const response = await apiFetch(
+        "/api/my-projects/?project_type=raw_data"
+      );
       if (response.ok) {
         const data = await response.json();
         const normalized = (data.projects || []).map((p) => {
@@ -123,7 +121,7 @@ export default function Import() {
       formData.append("databases", JSON.stringify(selectedDatabases));
       formData.append("name", mergeName.trim());
 
-      const response = await fetch("/api/merge-databases/", {
+      const response = await apiFetch("/api/merge-databases/", {
         method: "POST",
         body: formData,
       });
@@ -159,9 +157,8 @@ export default function Import() {
 
     try {
       // Include credentials so project schema deletes (which require auth) work
-      const response = await fetch(`/api/delete-database/${dbName}`, {
+      const response = await apiFetch(`/api/delete-database/${dbName}`, {
         method: "DELETE",
-        credentials: "include",
       });
 
       if (!response.ok) throw new Error("Failed to delete database");
@@ -195,10 +192,9 @@ export default function Import() {
         formData.append("schema_name", oldName);
         formData.append("display_name", newName.trim());
 
-        const response = await fetch("/api/rename-project/", {
+        const response = await apiFetch("/api/rename-project/", {
           method: "POST",
           body: formData,
-          credentials: "include",
         });
 
         if (!response.ok)

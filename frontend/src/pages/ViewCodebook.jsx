@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { apiFetch } from "../api";
 import { useNavigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import "../styles/Data.css";
@@ -17,7 +18,7 @@ export default function ViewCodebook() {
 
   const fetchAvailableCodebooks = async () => {
     try {
-      const response = await fetch("/api/list-codebooks");
+      const response = await apiFetch("/api/list-codebooks");
       if (!response.ok) {
         throw new Error("Failed to fetch codebooks list");
       }
@@ -53,7 +54,9 @@ export default function ViewCodebook() {
       setLoading(true);
       setError(null);
 
-      const response = await fetch(`/api/codebook?codebook_id=${codebookId}`);
+      const response = await apiFetch(
+        `/api/codebook?codebook_id=${codebookId}`
+      );
       if (!response.ok) {
         throw new Error("Failed to fetch codebook");
       }
