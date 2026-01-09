@@ -1,4 +1,5 @@
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import React, { useEffect, useState } from "react";
 import Home from "./pages/Home";
 import Import from "./pages/Import";
 import Filter from "./pages/Filter";
@@ -9,27 +10,52 @@ import ViewCodebook from "./pages/ViewCodebook";
 import ApplyCodebook from "./pages/ApplyCodebook";
 import ViewCoding from "./pages/ViewCoding";
 import Landing from "./pages/Landing";
+import { apiFetch } from "./api";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import ProtectedRoute from "./components/ProtectedRoute";
 import "./App.css";
 
 function App() {
+  const AuthGate = () => {
+    const [status, setStatus] = useState("loading");
+
+    useEffect(() => {
+      let mounted = true;
+      const check = () => {
+        apiFetch("/api/me/")
+          .then((r) => {
+            if (!mounted) return;
+            setStatus(r.ok ? "auth" : "unauth");
+          })
+          .catch(() => mounted && setStatus("unauth"));
+      };
+
+      check();
+
+      const handler = () => {
+        check();
+      };
+
+      window.addEventListener("auth-changed", handler);
+
+      return () => {
+        mounted = false;
+        window.removeEventListener("auth-changed", handler);
+      };
+    }, []);
+
+    if (status === "loading") return null;
+    return status === "auth" ? <Home /> : <Landing />;
+  };
+
   return (
     <Router>
       <div className="App">
         <Routes>
-          <Route path="/" element={<Landing />} />
+          <Route path="/" element={<AuthGate />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
-          <Route
-            path="/home"
-            element={
-              <ProtectedRoute>
-                <Home />
-              </ProtectedRoute>
-            }
-          />
           <Route
             path="/import"
             element={
@@ -94,15 +120,8 @@ function App() {
               </ProtectedRoute>
             }
           />
-          {/* Catch-all: protect all other routes and redirect unauthenticated users to '/' */}
-          <Route
-            path="*"
-            element={
-              <ProtectedRoute>
-                <Home />
-              </ProtectedRoute>
-            }
-          />
+          {/* Catch-all: render AuthGate to show Home or Landing based on auth */}
+          <Route path="*" element={<AuthGate />} />
         </Routes>
       </div>
     </Router>

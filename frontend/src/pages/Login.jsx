@@ -34,7 +34,7 @@ const Login = () => {
       try {
         window.dispatchEvent(new Event("auth-changed"));
       } catch (e) {}
-      setTimeout(() => navigate("/home"), 500);
+      setTimeout(() => navigate("/"), 500);
     } catch (err) {
       const msg =
         (err &&

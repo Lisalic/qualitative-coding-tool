@@ -40,7 +40,7 @@ const Register = () => {
       try {
         window.dispatchEvent(new Event("auth-changed"));
       } catch (e) {}
-      setTimeout(() => navigate("/home"), 1000);
+      setTimeout(() => navigate("/"), 1000);
     } catch (err) {
       const msg =
         (err &&
