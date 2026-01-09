@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { apiFetch } from "../api";
 import { useNavigate } from "react-router-dom";
-import Navbar from "../components/Navbar";
 import "../styles/Data.css";
 import "../styles/DataTable.css";
 import MarkdownView from "../components/MarkdownView";
@@ -87,7 +86,6 @@ export default function ViewCodebook() {
 
   return (
     <>
-      <Navbar />
       <div className="data-container">
         <SelectionList
           items={availableCodebooks}

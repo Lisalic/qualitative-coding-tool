@@ -1,28 +1,32 @@
 .navbar {
+  min-height: 60px;
+  position: sticky;
+  top: 0;
+  z-index: 1000;
   background-color: #000000;
   border-bottom: 1px solid #ffffff;
-  padding: 1rem 2rem;
+  padding: 0.5rem 1rem;
 }
 
 .navbar-container {
   max-width: 1200px;
-  margin: 0 auto;
+  margin: 0;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  position: relative;
+  gap: 8px;
+  padding: 0 8px;
 }
 
 .navbar-back-button {
   background-color: #ffffff;
   color: #000000;
   border: none;
-  padding: 8px 16px;
-  font-size: 14px;
+  padding: 6px 10px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   border-radius: 4px;
   transition: background-color 0.2s, color 0.2s;
+  margin-right: 8px;
 }
 
 .navbar-back-button:hover {
@@ -30,23 +34,24 @@
 }
 
 .navbar-brand {
-  font-size: 1.5rem;
+  font-size: 1.25rem;
   font-weight: 400;
   color: #ffffff;
   text-decoration: none;
-  flex: 1;
   text-align: center;
+  padding: 0 8px;
 }
 
 .navbar-spacer {
-  width: 80px;
+  width: 48px;
 }
 
 .navbar-api {
   display: flex;
   align-items: center;
   position: absolute;
-  right: 20px;
+  right: 12px;
+  gap: 8px;
 }
 
 .logout-btn {
@@ -76,6 +81,25 @@
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.sidebar-expand {
+  background-color: transparent;
+  color: #ffffff;
+  border: 1px solid rgba(255,255,255,0.12);
+  padding: 6px 8px;
+  margin-right: 12px;
+  font-size: 14px;
+  cursor: pointer;
+  border-radius: 4px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sidebar-expand:hover {
+  background-color: rgba(255,255,255,0.06);
 }
 
 .api-input {

@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import Navbar from "../components/Navbar";
 import ActionForm from "../components/ActionForm";
 import CodebookManager from "../components/CodebookManager";
 import PromptManager from "../components/PromptManager";
@@ -230,7 +229,6 @@ export default function ApplyCodebook() {
 
   return (
     <>
-      <Navbar />
       <div className="home-container">
         <div className="page-layout">
           <div className="left-section">

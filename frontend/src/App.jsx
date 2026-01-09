@@ -14,6 +14,8 @@ import { apiFetch } from "./api";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import ProtectedRoute from "./components/ProtectedRoute";
+import Sidebar from "./components/Sidebar";
+import Navbar from "./components/Navbar";
 import "./App.css";
 
 function App() {
@@ -52,77 +54,83 @@ function App() {
   return (
     <Router>
       <div className="App">
-        <Routes>
-          <Route path="/" element={<AuthGate />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
-          <Route
-            path="/import"
-            element={
-              <ProtectedRoute>
-                <Import />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/data"
-            element={
-              <ProtectedRoute>
-                <Data />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/filter"
-            element={
-              <ProtectedRoute>
-                <Filter />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/filtered-data"
-            element={
-              <ProtectedRoute>
-                <FilteredData />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/codebook-generate"
-            element={
-              <ProtectedRoute>
-                <GenerateCodebook />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/codebook-view"
-            element={
-              <ProtectedRoute>
-                <ViewCodebook />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/codebook-apply"
-            element={
-              <ProtectedRoute>
-                <ApplyCodebook />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/coding-view"
-            element={
-              <ProtectedRoute>
-                <ViewCoding />
-              </ProtectedRoute>
-            }
-          />
-          {/* Catch-all: render AuthGate to show Home or Landing based on auth */}
-          <Route path="*" element={<AuthGate />} />
-        </Routes>
+        <Navbar />
+        <main className="app-content">
+          <Sidebar />
+          <div className="app-main">
+            <Routes>
+              <Route path="/" element={<AuthGate />} />
+              <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Register />} />
+              <Route
+                path="/import"
+                element={
+                  <ProtectedRoute>
+                    <Import />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/data"
+                element={
+                  <ProtectedRoute>
+                    <Data />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/filter"
+                element={
+                  <ProtectedRoute>
+                    <Filter />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/filtered-data"
+                element={
+                  <ProtectedRoute>
+                    <FilteredData />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/codebook-generate"
+                element={
+                  <ProtectedRoute>
+                    <GenerateCodebook />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/codebook-view"
+                element={
+                  <ProtectedRoute>
+                    <ViewCodebook />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/codebook-apply"
+                element={
+                  <ProtectedRoute>
+                    <ApplyCodebook />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/coding-view"
+                element={
+                  <ProtectedRoute>
+                    <ViewCoding />
+                  </ProtectedRoute>
+                }
+              />
+              {/* Catch-all: render AuthGate to show Home or Landing based on auth */}
+              <Route path="*" element={<AuthGate />} />
+            </Routes>
+          </div>
+        </main>
       </div>
     </Router>
   );

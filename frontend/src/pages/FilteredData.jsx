@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { apiFetch } from "../api";
 import { useNavigate, useLocation } from "react-router-dom";
-import Navbar from "../components/Navbar";
 import SelectionList from "../components/SelectionList";
 import DataTable from "../components/DataTable";
 import "../styles/Data.css";
@@ -101,7 +100,6 @@ export default function FilteredData() {
 
   return (
     <>
-      <Navbar showBack={true} />
       <div className="data-container">
         <SelectionList
           items={(databases || []).map((d) => {

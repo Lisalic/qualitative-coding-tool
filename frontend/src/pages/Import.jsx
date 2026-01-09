@@ -1,5 +1,4 @@
 import { useNavigate } from "react-router-dom";
-import Navbar from "../components/Navbar";
 import ErrorDisplay from "../components/ErrorDisplay";
 import UploadData from "../components/UploadData";
 import ManageDatabase from "../components/ManageDatabase";
@@ -246,7 +245,6 @@ export default function Import() {
 
   return (
     <>
-      <Navbar showBack={true} />
       <div className="home-container">
         {error &&
           !error.includes("select at least") &&

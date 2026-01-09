@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { apiFetch } from "../api";
-import Navbar from "../components/Navbar";
 import SelectionList from "../components/SelectionList";
 import "../styles/Data.css";
 import "../styles/DataTable.css";
@@ -61,7 +60,6 @@ export default function ViewCoding() {
 
   return (
     <>
-      <Navbar showBack={true} />
       <div className="data-container">
         <SelectionList
           items={availableCodedData}

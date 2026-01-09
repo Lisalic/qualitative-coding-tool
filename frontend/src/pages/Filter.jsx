@@ -1,5 +1,4 @@
 import { useNavigate } from "react-router-dom";
-import Navbar from "../components/Navbar";
 import ActionForm from "../components/ActionForm";
 import PromptManager from "../components/PromptManager";
 import ManageDatabase from "../components/ManageDatabase";
@@ -259,7 +258,6 @@ export default function Filter() {
 
   return (
     <>
-      <Navbar showBack={true} />
       <div className="home-container">
         <div className="tool-page-layout">
           <div className="left-section">

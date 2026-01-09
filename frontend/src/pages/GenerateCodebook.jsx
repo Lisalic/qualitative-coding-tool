@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { apiFetch } from "../api";
 import { useNavigate } from "react-router-dom";
-import Navbar from "../components/Navbar";
 import ActionForm from "../components/ActionForm";
 import CodebookManager from "../components/CodebookManager";
 import PromptManager from "../components/PromptManager";
@@ -208,7 +207,6 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
 
   return (
     <>
-      <Navbar />
       <div className="home-container">
         <div className="tool-page-layout">
           <div className="left-section">

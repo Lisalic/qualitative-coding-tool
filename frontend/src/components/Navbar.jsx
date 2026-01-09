@@ -9,6 +9,13 @@ function Navbar({ showBack, onBack }) {
   const [apiKey, setApiKey] = useState("");
   const [showApiInput, setShowApiInput] = useState(false);
   const [isAuth, setIsAuth] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem("sidebarCollapsed") === "true";
+    } catch (e) {
+      return false;
+    }
+  });
 
   useEffect(() => {
     const savedKey = localStorage.getItem("apiKey");
@@ -35,6 +42,20 @@ function Navbar({ showBack, onBack }) {
     return () => window.removeEventListener("auth-changed", handler);
   }, []);
 
+  useEffect(() => {
+    const handler = () => {
+      try {
+        setSidebarCollapsed(
+          localStorage.getItem("sidebarCollapsed") === "true"
+        );
+      } catch (e) {
+        setSidebarCollapsed(false);
+      }
+    };
+    window.addEventListener("sidebar-toggle", handler);
+    return () => window.removeEventListener("sidebar-toggle", handler);
+  }, []);
+
   const handleSaveApiKey = () => {
     localStorage.setItem("apiKey", apiKey);
     setShowApiInput(false);
@@ -49,12 +70,32 @@ function Navbar({ showBack, onBack }) {
   return (
     <nav className="navbar">
       <div className="navbar-container">
+        <button
+          className="sidebar-expand"
+          aria-label="Toggle sidebar"
+          onClick={() => {
+            try {
+              const cur = localStorage.getItem("sidebarCollapsed") === "true";
+              localStorage.setItem("sidebarCollapsed", (!cur).toString());
+            } catch (e) {}
+            window.dispatchEvent(new Event("sidebar-toggle"));
+            setSidebarCollapsed((s) => !s);
+          }}
+        >
+          ☰
+        </button>
         {shouldShowBack && (
           <button className="navbar-back-button" onClick={handleBack}>
             ← Back
           </button>
         )}
-        <div className="navbar-brand">Qualitative Coding Tool</div>
+        <div
+          className="navbar-brand"
+          onClick={() => navigate("/")}
+          style={{ cursor: "pointer" }}
+        >
+          Qualitative Coding Tool
+        </div>
         <div className="navbar-api">
           {showApiInput ? (
             <div className="api-input-group">
