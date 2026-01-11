@@ -17,7 +17,7 @@ import uuid
 from datetime import datetime
 
 import pandas as pd
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi import Request
 
 try:
@@ -28,7 +28,7 @@ try:
 
     from scripts.import_db import stream_zst_to_postgres
     from scripts.filter_db import filter_posts_with_ai, filter_comments_with_ai
-    from scripts.codebook_generator import generate_codebook as generate_codebook_function
+    from scripts.codebook_generator import generate_codebook as generate_codebook_function, compare_agreement as compare_agreement_function, MODEL_1, MODEL_2
     from scripts.codebook_apply import classify_posts
     from app.services import migrate_sqlite_file
 except:
@@ -40,7 +40,7 @@ except:
 
         from backend.scripts.import_db import stream_zst_to_postgres
         from backend.scripts.filter_db import filter_posts_with_ai, filter_comments_with_ai
-        from backend.scripts.codebook_generator import generate_codebook as generate_codebook_function
+        from backend.scripts.codebook_generator import generate_codebook as generate_codebook_function, compare_agreement as compare_agreement_function, MODEL_1, MODEL_2
         from backend.scripts.codebook_apply import classify_posts
         from backend.app.services import migrate_sqlite_file
     except Exception as exc:
@@ -1233,19 +1233,34 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
 
 
         try:
-            print("[INFO] generate_codebook: calling generate_codebook function")
-            raw_out = generate_codebook_function(assembled, api_key, "", "", prompt)
-            # handle coroutine or synchronous return
-            if asyncio.iscoroutine(raw_out) or inspect.isawaitable(raw_out):
-                codebook_output = await raw_out
+            print("[INFO] generate_codebook: calling generate_codebook function for MODEL_1")
+            raw_out1 = generate_codebook_function(assembled, api_key, "", "", prompt, MODEL=MODEL_1)
+            if asyncio.iscoroutine(raw_out1) or inspect.isawaitable(raw_out1):
+                codebook1 = await raw_out1
             else:
-                codebook_output = raw_out
+                codebook1 = raw_out1
+
+            print("[INFO] generate_codebook: calling generate_codebook function for MODEL_2")
+            raw_out2 = generate_codebook_function(assembled, api_key, "", "", prompt, MODEL=MODEL_2)
+            if asyncio.iscoroutine(raw_out2) or inspect.isawaitable(raw_out2):
+                codebook2 = await raw_out2
+            else:
+                codebook2 = raw_out2
+
+            print("[INFO] generate_codebook: calling compare_agreement function")
+            raw_pct = compare_agreement_function(str(codebook1 or ""), str(codebook2 or ""), api_key)
+            if asyncio.iscoroutine(raw_pct) or inspect.isawaitable(raw_pct):
+                percent = await raw_pct
+            else:
+                percent = raw_pct
+
         except Exception as e:
-            print(f"Error generating codebook for schema {schema}: {e}")
+            print(f"Error generating or comparing codebooks for schema {schema}: {e}")
             traceback.print_exc()
             return JSONResponse({"error": f"Generator failed: {e}"}, status_code=500)
 
-        codebook_text = str(codebook_output or "")
+        codebook_text = str(codebook1 or "")
+        agreement_percent = str(percent or "")
 
         # Persist into a new Postgres project schema and create metadata
         try:
@@ -1269,8 +1284,9 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
                 proj = dm.projects.create(user_id=uuid.UUID(user_id), display_name=name, schema_name=new_schema, project_type='codebook')
                 dm.project_tables.add_table_metadata(project_id=proj.id, table_name='content_store', row_count=1)
 
-            preview = codebook_text if len(codebook_text) <= 20000 else codebook_text[:20000] + "\n... (truncated)"
-            return JSONResponse({"message": "Codebook generated and saved to project", "project": {"id": str(proj.id), "schema_name": new_schema, "display_name": proj.display_name}, "preview": preview})
+            # Return a plain-text concatenation: <agreement_percent> + <model_1 output>
+            final_text = f"{agreement_percent}\n{codebook_text}"
+            return PlainTextResponse(content=final_text)
 
         except Exception as exc:
             print(f"Error creating project/schema for generated codebook: {exc}")

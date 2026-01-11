@@ -1,12 +1,14 @@
 import time
+import re
 from openai import OpenAI
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
-FREE_MODEL = "google/gemini-2.0-flash-exp:free"
+MODEL_1 = "google/gemini-2.0-flash-exp:free"
+MODEL_2 = "xiaomi/mimo-v2-flash:free"
 MAX_RETRIES = 3
 INITIAL_RETRY_DELAY = 2  
 
-def get_client(system_prompt: str, user_prompt: str, api_key: str) -> str:
+def get_client(system_prompt: str, user_prompt: str, api_key: str, MODEL: str) -> str:
     if not api_key:
         raise ValueError("OpenRouter API key is required")
     for attempt in range(1, MAX_RETRIES + 1):
@@ -16,7 +18,7 @@ def get_client(system_prompt: str, user_prompt: str, api_key: str) -> str:
                 base_url=OPENROUTER_URL,
             )
             response = client.chat.completions.create(
-                model=FREE_MODEL,
+                model=MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
@@ -37,7 +39,7 @@ def get_client(system_prompt: str, user_prompt: str, api_key: str) -> str:
             print(f"Retrying in {wait_time}s...")
             time.sleep(wait_time)
 
-def generate_codebook(posts_content: str, api_key: str, previous_codebook: str = "", feedback_text: str = "", custom_prompt: str = "") -> str:
+def generate_codebook(posts_content: str, api_key: str, previous_codebook: str = "", feedback_text: str = "", custom_prompt: str = "", MODEL: str = MODEL_1) -> str:
     base_system_prompt = """
     Act as a qualitative researcher analyzing the following Reddit posts. Your task is to develop or refine a **Codebook** based on an open coding process.
     
@@ -87,4 +89,40 @@ def generate_codebook(posts_content: str, api_key: str, previous_codebook: str =
     {feedback_text}
     """
 
-    return get_client(system_prompt, user_prompt, api_key)
+    return get_client(system_prompt, user_prompt, api_key, MODEL)
+
+
+def compare_agreement(codebook_a: str, codebook_b: str, api_key: str) -> str:
+    system_prompt = (
+        "You are an assistant that compares two codebooks and returns ONLY a single numeric percentage "
+        "(0-100) representing how much they agree. Do NOT include any explanation, text, or punctuation beyond "
+        "optional trailing percent sign. Respond with something like or '85%'."
+    )
+
+    user_prompt = f"Codebook A:\n{codebook_a}\n\nCodebook B:\n{codebook_b}\n\nReturn only a single percentage value (0-100) indicating percent agreement between the two codebooks."
+
+    resp = get_client(system_prompt, user_prompt, api_key, MODEL_1)
+
+    if not resp:
+        raise ValueError("Empty response from agreement comparator")
+
+    # Extract first number (integer or float) and normalize to an integer percent string
+    m = re.search(r"(\d{1,3}(?:\.\d+)?)", resp)
+    if not m:
+        # fallback: return raw response stripped
+        return resp.strip()
+
+    # Convert to integer percent if possible
+    try:
+        val = float(m.group(1))
+        if val < 0:
+            val = 0.0
+        if val > 100:
+            val = 100.0
+        # Format without decimals when it's whole
+        if val.is_integer():
+            return str(int(val)) + "%"
+        return f"{val}%"
+    except Exception:
+        return m.group(1)
+
