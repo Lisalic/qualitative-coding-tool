@@ -221,9 +221,10 @@
   background-color: #000000;
   border: 2px solid #ffffff;
   border-radius: 8px;
-  max-width: 600px;
-  width: 90%;
-  max-height: 80vh;
+  max-width: 1100px;
+  width: 85%;
+  /* fixed larger height */
+  height: 85vh;
   overflow-y: auto;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
 }
@@ -241,13 +242,24 @@
   margin: 0;
   font-size: 1.5rem;
 }
-
+.modal-close {
+  background: none;
+  border: none;
+  color: #ffffff;
+  font-size: 1.25rem;
+  cursor: pointer;
+  padding: 0;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 50%;
   transition: background-color 0.2s;
 }
 
 .modal-close:hover {
-  background-color: rgba(255, 255, 255, 0.1);
+  background-color: rgba(255, 255, 255, 0.08);
 }
 
 .modal-body {

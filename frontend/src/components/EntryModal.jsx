@@ -2,7 +2,16 @@ import { useState, useEffect } from "react";
 import { apiFetch } from "../api";
 import "../styles/DataTable.css";
 
-export default function EntryModal({ entry, isOpen, onClose, database = "" }) {
+export default function EntryModal({
+  entry,
+  isOpen,
+  onClose,
+  database = "",
+  onPrev,
+  onNext,
+  hasPrev = false,
+  hasNext = false,
+}) {
   const [comments, setComments] = useState([]);
   const [loadingComments, setLoadingComments] = useState(false);
 
@@ -41,8 +50,34 @@ export default function EntryModal({ entry, isOpen, onClose, database = "" }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2>{entry.type === "submission" ? "Post" : "Comment"} Details</h2>
+        <div
+          className="modal-header"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "0.5rem",
+          }}
+        >
+          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+            <button
+              onClick={onPrev}
+              className="btn btn-secondary"
+              disabled={!hasPrev}
+            >
+              Previous
+            </button>
+            <button
+              onClick={onNext}
+              className="btn btn-secondary"
+              disabled={!hasNext}
+            >
+              Next
+            </button>
+          </div>
+          <h2 style={{ margin: 0 }}>
+            {entry.type === "submission" ? "Post" : "Comment"} Details
+          </h2>
           <button className="modal-close" onClick={onClose}>
             ×
           </button>

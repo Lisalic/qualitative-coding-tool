@@ -162,6 +162,34 @@ export default function DataTable({
       }
     }
   }
+
+  // Helpers for modal navigation
+  let currentList = [];
+  if (selectedEntry) {
+    if (selectedEntry.type === "submission") {
+      currentList = filteredSubmissions || [];
+    } else {
+      currentList = filteredComments || [];
+    }
+  }
+
+  const currentIndex = selectedEntry
+    ? currentList.findIndex((it) => String(it.id) === String(selectedEntry.id))
+    : -1;
+
+  const goToPrev = () => {
+    if (currentIndex > 0) {
+      const prev = currentList[currentIndex - 1];
+      setSelectedEntry({ ...prev, type: selectedEntry.type });
+    }
+  };
+
+  const goToNext = () => {
+    if (currentIndex >= 0 && currentIndex < currentList.length - 1) {
+      const next = currentList[currentIndex + 1];
+      setSelectedEntry({ ...next, type: selectedEntry.type });
+    }
+  };
   return (
     <div className="data-table-container">
       <div
@@ -489,6 +517,10 @@ export default function DataTable({
         isOpen={showModal}
         onClose={closeModal}
         database={currentDatabase}
+        onPrev={goToPrev}
+        onNext={goToNext}
+        hasPrev={currentIndex > 0}
+        hasNext={currentIndex >= 0 && currentIndex < currentList.length - 1}
       />
     </div>
   );
