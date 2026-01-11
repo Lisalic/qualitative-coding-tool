@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import "../styles/Data.css";
 import "../styles/DataTable.css";
 import MarkdownView from "../components/MarkdownView";
+import CodebookTree from "../components/CodebookTree";
 import SelectionList from "../components/SelectionList";
 
 export default function ViewCodebook() {
@@ -140,9 +141,13 @@ export default function ViewCodebook() {
               />
             );
           })()}
-          {!codebookContent && !loading && !error && (
-            <p>No codebook selected or found. Generate a codebook first.</p>
-          )}
+            {!codebookContent && !loading && !error && (
+              <p>No codebook selected or found. Generate a codebook first.</p>
+            )}
+            {/* Codebook tree view (parsed) shown beneath the markdown/text */}
+            <div style={{ marginTop: 18 }}>
+              <CodebookTree codebookId={selectedCodebook} />
+            </div>
         </div>
       </div>
     </>

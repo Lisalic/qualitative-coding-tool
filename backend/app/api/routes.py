@@ -30,6 +30,7 @@ try:
     from scripts.filter_db import filter_posts_with_ai, filter_comments_with_ai
     from scripts.codebook_generator import generate_codebook as generate_codebook_function, compare_agreement as compare_agreement_function, MODEL_1, MODEL_2
     from scripts.codebook_apply import classify_posts
+    from scripts.display_codebook import parse_codebook_to_json
     from app.services import migrate_sqlite_file
 except:
     try:
@@ -42,6 +43,7 @@ except:
         from backend.scripts.filter_db import filter_posts_with_ai, filter_comments_with_ai
         from backend.scripts.codebook_generator import generate_codebook as generate_codebook_function, compare_agreement as compare_agreement_function, MODEL_1, MODEL_2
         from backend.scripts.codebook_apply import classify_posts
+        from backend.scripts.display_codebook import parse_codebook_to_json
         from backend.app.services import migrate_sqlite_file
     except Exception as exc:
         print("Failed", exc)
@@ -798,6 +800,47 @@ async def get_codebook(codebook_id: str = Query(None), db: Session = Depends(get
             return JSONResponse({"error": f"Error reading codebook: {e}"}, status_code=500)
 
     return JSONResponse({"error": "No codebook project found"}, status_code=404)
+
+
+@router.get("/parse-codebook")
+async def parse_codebook(codebook_id: str = Query(None), db: Session = Depends(get_db)):
+    """Return a parsed JSON structure for a codebook project using the display_codebook helper.
+    The response will be { "parsed": [ ... ] } where parsed is an array of families with codes.
+    """
+    project = None
+    if codebook_id:
+        project = db.query(Project).filter(Project.project_type == 'codebook', Project.schema_name == codebook_id).first()
+        if not project:
+            project = db.query(Project).filter(Project.project_type == 'codebook', Project.display_name == codebook_id).first()
+        if not project:
+            try:
+                pid = uuid.UUID(codebook_id)
+                project = db.query(Project).filter(Project.project_type == 'codebook', Project.id == pid).first()
+            except Exception:
+                project = None
+    else:
+        project = db.query(Project).filter(Project.project_type == 'codebook').order_by(Project.created_at.desc()).first()
+
+    if not project:
+        return JSONResponse({"error": "No codebook project found"}, status_code=404)
+
+    schema = project.schema_name
+    try:
+        with engine.connect() as conn:
+            res = conn.execute(text(f'SELECT file_text FROM "{schema}".content_store LIMIT 1'))
+            row = res.fetchone()
+            if not row:
+                return JSONResponse({"error": "Codebook content not found in project"}, status_code=404)
+            raw = row[0] or ""
+            try:
+                parsed_text = parse_codebook_to_json(raw)
+                parsed_obj = json.loads(parsed_text)
+                return JSONResponse({"parsed": parsed_obj})
+            except Exception as e:
+                return JSONResponse({"error": f"Failed to parse codebook: {e}", "raw": raw}, status_code=500)
+    except Exception as e:
+        print(f"Error reading codebook from schema {schema}: {e}")
+        return JSONResponse({"error": f"Error reading codebook: {e}"}, status_code=500)
 
 
 @router.get("/list-codebooks")

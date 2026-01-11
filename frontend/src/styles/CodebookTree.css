@@ -1,0 +1,64 @@
+.codebook-tree {
+  border: 1px solid #222222;
+  padding: 12px;
+  border-radius: 6px;
+  background: #000000;
+  color: #ffffff;
+}
+.codebook-tree-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.codebook-tree-actions button {
+  margin-left: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  background: #111111;
+  color: #ffffff;
+  border: 1px solid #333333;
+  border-radius: 4px;
+}
+.cb-family {
+  margin: 8px 0;
+}
+.cb-family-title {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: #0f0f0f;
+  border-radius: 4px;
+}
+.cb-toggle {
+  width: 18px;
+  display: inline-block;
+  text-align: center;
+}
+.cb-codes {
+  list-style: none;
+  padding-left: 20px;
+  margin: 6px 0 0 0;
+}
+.cb-code {
+  padding: 8px 10px;
+  border-left: 2px solid #222222;
+  margin-bottom: 6px;
+  background: #070707;
+  border-radius: 4px;
+}
+.cb-code-name {
+  font-weight: 600;
+  color: #ffffff;
+}
+.cb-code-def {
+  margin-top: 4px;
+  color: #dddddd;
+  font-size: 14px;
+}
+.cb-loading, .cb-error, .cb-empty {
+  padding: 8px;
+  color: #bbbbbb;
+}

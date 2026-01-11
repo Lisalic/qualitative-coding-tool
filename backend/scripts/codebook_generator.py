@@ -5,6 +5,7 @@ from openai import OpenAI
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
 MODEL_1 = "google/gemini-2.0-flash-exp:free"
 MODEL_2 = "xiaomi/mimo-v2-flash:free"
+MODEL_3 = "mistralai/devstral-2512:free"
 MAX_RETRIES = 3
 INITIAL_RETRY_DELAY = 2  
 
@@ -92,7 +93,7 @@ def generate_codebook(posts_content: str, api_key: str, previous_codebook: str =
     return get_client(system_prompt, user_prompt, api_key, MODEL)
 
 
-def compare_agreement(codebook_a: str, codebook_b: str, api_key: str) -> str:
+def compare_agreement(codebook_a: str, codebook_b: str, api_key: str, MODEL: str = MODEL_3) -> str:
     system_prompt = (
         "You are an assistant that compares two codebooks and returns ONLY a single numeric percentage "
         "(0-100) representing how much they agree. Do NOT include any explanation, text, or punctuation beyond "
@@ -101,7 +102,7 @@ def compare_agreement(codebook_a: str, codebook_b: str, api_key: str) -> str:
 
     user_prompt = f"Codebook A:\n{codebook_a}\n\nCodebook B:\n{codebook_b}\n\nReturn only a single percentage value (0-100) indicating percent agreement between the two codebooks."
 
-    resp = get_client(system_prompt, user_prompt, api_key, MODEL_1)
+    resp = get_client(system_prompt, user_prompt, api_key, MODEL)
 
     if not resp:
         raise ValueError("Empty response from agreement comparator")
