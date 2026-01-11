@@ -18,6 +18,7 @@ export default function DataTable({
   const [showModal, setShowModal] = useState(false);
   const [limit, setLimit] = useState(10);
   const [searchTerm, setSearchTerm] = useState("");
+  const [page, setPage] = useState(0);
   const MAX_SEARCH_FETCH = 100000000; // when searching, fetch up to this many rows
 
   const fetchEntries = async () => {
@@ -31,14 +32,17 @@ export default function DataTable({
       setError("");
       setLoading(true);
 
-      const fetchLimit = (searchTerm || "").trim() ? MAX_SEARCH_FETCH : limit;
+      const isSearching = (searchTerm || "").trim();
+      const fetchLimit = isSearching ? MAX_SEARCH_FETCH : limit;
+      const offset = page * limit;
+      const offsetParam = isSearching ? 0 : offset;
       let response;
       const isProjectSchema = /^proj_[A-Za-z0-9_]+(?:\.db)?$/.test(
         String(currentDatabase) || ""
       );
       if (currentDatabase && isProjectSchema) {
         response = await apiFetch(
-          `/api/project-entries/?limit=${fetchLimit}&schema=${encodeURIComponent(
+          `/api/project-entries/?limit=${fetchLimit}&offset=${offsetParam}&schema=${encodeURIComponent(
             String(currentDatabase)
           )}`
         );
@@ -62,11 +66,12 @@ export default function DataTable({
 
   useEffect(() => {
     setCurrentDatabase(database);
+    setPage(0);
   }, [database]);
 
   useEffect(() => {
     fetchEntries();
-  }, [currentDatabase, limit, searchTerm]);
+  }, [currentDatabase, limit, searchTerm, page]);
 
   const handleRowClick = (entry, type) => {
     setSelectedEntry({ ...entry, type });
@@ -118,6 +123,7 @@ export default function DataTable({
   let filteredComments = [];
   if (dbEntries) {
     const q = (searchTerm || "").trim().toLowerCase();
+    const isSearchingLocal = (searchTerm || "").trim();
     if (q) {
       filteredSubmissions = (dbEntries.submissions || []).filter((sub) => {
         return (
@@ -138,15 +144,24 @@ export default function DataTable({
       filteredSubmissions = dbEntries.submissions || [];
       filteredComments = dbEntries.comments || [];
     }
-    // Limit displayed results to the requested `limit`
+
     if (Array.isArray(filteredSubmissions)) {
-      filteredSubmissions = filteredSubmissions.slice(0, limit);
+      if (isSearchingLocal) {
+        const start = page * limit;
+        filteredSubmissions = filteredSubmissions.slice(start, start + limit);
+      } else {
+        filteredSubmissions = filteredSubmissions.slice(0, limit);
+      }
     }
     if (Array.isArray(filteredComments)) {
-      filteredComments = filteredComments.slice(0, limit);
+      if (isSearchingLocal) {
+        const start = page * limit;
+        filteredComments = filteredComments.slice(start, start + limit);
+      } else {
+        filteredComments = filteredComments.slice(0, limit);
+      }
     }
   }
-
   return (
     <div className="data-table-container">
       <div
@@ -265,7 +280,10 @@ export default function DataTable({
                 <select
                   id="entry-limit"
                   value={limit}
-                  onChange={(e) => setLimit(Number(e.target.value))}
+                  onChange={(e) => {
+                    setLimit(Number(e.target.value));
+                    setPage(0);
+                  }}
                   className="limit-select"
                 >
                   <option value={10}>10</option>
@@ -282,7 +300,10 @@ export default function DataTable({
                 className="search-input"
                 placeholder="Search posts/comments..."
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setPage(0);
+                }}
                 style={{ textAlign: "left" }}
               />
             </div>
@@ -426,6 +447,40 @@ export default function DataTable({
                 No data available. Please upload a file first.
               </p>
             )}
+
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              gap: "0.75rem",
+              marginTop: "1rem",
+            }}
+          >
+            <button
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              className="btn btn-secondary"
+              disabled={page === 0}
+            >
+              Previous
+            </button>
+            <span style={{ minWidth: 80, textAlign: "center" }}>
+              Page {page + 1}
+            </span>
+            <button
+              onClick={() => setPage((p) => p + 1)}
+              className="btn btn-secondary"
+              disabled={
+                !dbEntries ||
+                !(
+                  (dbEntries.total_submissions || 0) > (page + 1) * limit ||
+                  (dbEntries.total_comments || 0) > (page + 1) * limit
+                )
+              }
+            >
+              Next
+            </button>
+          </div>
         </>
       )}
 

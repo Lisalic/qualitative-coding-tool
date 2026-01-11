@@ -888,7 +888,7 @@ async def save_project_coded_data(request: Request, schema_name: str = Form(...)
 
 
 @router.get("/project-entries/")
-def project_entries(schema: str = Query(..., description="Project schema name"), limit: int = 10):
+def project_entries(schema: str = Query(..., description="Project schema name"), limit: int = 10, offset: int = 0):
     # Allow optional .db suffix (frontend may supply schema.db); validate and strip it.
     import re
     if not schema:
@@ -919,13 +919,12 @@ def project_entries(schema: str = Query(..., description="Project schema name"),
 
             if subs_exists:
                 sub_count = conn.execute(text(f"SELECT COUNT(*) FROM {schema}.submissions")).scalar() or 0
-                rows = conn.execute(text(f"SELECT * FROM {schema}.submissions LIMIT :lim"), {"lim": limit}).fetchall()
-                # convert rows to dicts
+                rows = conn.execute(text(f"SELECT * FROM {schema}.submissions ORDER BY id LIMIT :lim OFFSET :off"), {"lim": limit, "off": max(0, offset)}).fetchall()
                 submissions = [dict(r._mapping) for r in rows]
 
             if comm_exists:
                 com_count = conn.execute(text(f"SELECT COUNT(*) FROM {schema}.comments")).scalar() or 0
-                rows = conn.execute(text(f"SELECT * FROM {schema}.comments LIMIT :lim"), {"lim": limit}).fetchall()
+                rows = conn.execute(text(f"SELECT * FROM {schema}.comments ORDER BY id LIMIT :lim OFFSET :off"), {"lim": limit, "off": max(0, offset)}).fetchall()
                 comments = [dict(r._mapping) for r in rows]
 
     except Exception as exc:
