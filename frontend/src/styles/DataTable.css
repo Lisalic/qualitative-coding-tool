@@ -176,6 +176,17 @@
   text-overflow: ellipsis;
 }
 
+/* Larger, more tappable checkboxes inside data tables */
+.data-table input[type="checkbox"],
+.data-table th input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  vertical-align: middle;
+  margin: 0;
+  accent-color: #ffffff;
+  cursor: pointer;
+}
+
 .no-data {
   color: #cccccc;
   padding: 1rem;

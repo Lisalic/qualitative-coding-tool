@@ -19,6 +19,9 @@ export default function DataTable({
   const [limit, setLimit] = useState(10);
   const [searchTerm, setSearchTerm] = useState("");
   const [page, setPage] = useState(0);
+  const [selectedItems, setSelectedItems] = useState(new Set());
+  const [projects, setProjects] = useState([]);
+  const [targetDb, setTargetDb] = useState("");
   const MAX_SEARCH_FETCH = 100000000; // when searching, fetch up to this many rows
 
   const fetchEntries = async () => {
@@ -72,6 +75,33 @@ export default function DataTable({
   useEffect(() => {
     fetchEntries();
   }, [currentDatabase, limit, searchTerm, page]);
+
+  // Clear selections when view changes (new DB, page, limit, or search)
+  useEffect(() => {
+    setSelectedItems(new Set());
+  }, [currentDatabase, page, limit, searchTerm]);
+
+  // Fetch user's projects for move target dropdown
+  useEffect(() => {
+    (async () => {
+      try {
+        const resp = await apiFetch(`/api/my-projects/?project_type=raw_data`);
+        if (resp.ok) {
+          const data = await resp.json();
+          setProjects(data.projects || []);
+          // set default target if not set and there is another project
+          if (!targetDb) {
+            const other = (data.projects || []).find(
+              (p) => p.schema_name !== currentDatabase
+            );
+            if (other) setTargetDb(other.schema_name);
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    })();
+  }, [currentDatabase]);
 
   const handleRowClick = (entry, type) => {
     setSelectedEntry({ ...entry, type });
@@ -189,6 +219,129 @@ export default function DataTable({
       const next = currentList[currentIndex + 1];
       setSelectedEntry({ ...next, type: selectedEntry.type });
     }
+  };
+
+  const deleteSelected = async () => {
+    if (!currentDatabase) return;
+    const count = selectedItems.size;
+    if (!count) return;
+    if (!confirm(`Delete ${count} selected entries permanently?`)) return;
+
+    try {
+      setLoading(true);
+      setError("");
+      for (const k of Array.from(selectedItems)) {
+        const parts = String(k).split(":");
+        const type = parts[0];
+        const id = parts.slice(1).join(":");
+        const table = type === "submission" ? "submissions" : "comments";
+
+        const form = new FormData();
+        form.append("schema", currentDatabase);
+        form.append("table", table);
+        form.append("row_id", id);
+
+        const resp = await apiFetch(`/api/delete-row/`, {
+          method: "POST",
+          body: form,
+        });
+
+        if (!resp.ok) {
+          const txt = await resp.text();
+          throw new Error(`Delete failed: ${resp.status} ${txt}`);
+        }
+
+        const data = await resp.json();
+        if (data.error) throw new Error(data.error);
+      }
+
+      setSelectedItems(new Set());
+      await fetchEntries();
+    } catch (err) {
+      setError(`Error deleting selected: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const moveSelected = async () => {
+    if (!currentDatabase || !targetDb) return;
+    if (targetDb === currentDatabase) {
+      alert("Select a different target database");
+      return;
+    }
+    if (selectedItems.size === 0) return;
+    if (!confirm(`Move ${selectedItems.size} selected entries to ${targetDb}?`))
+      return;
+
+    // group by type
+    const groups = { submission: [], comment: [] };
+    for (const k of Array.from(selectedItems)) {
+      const [type, ...rest] = k.split(":");
+      const id = rest.join(":");
+      if (type === "submission") groups.submission.push(id);
+      else groups.comment.push(id);
+    }
+
+    try {
+      setLoading(true);
+      setError("");
+      // For each non-empty group, call move endpoint
+      for (const [typeKey, ids] of Object.entries(groups)) {
+        if (!ids.length) continue;
+        const table = typeKey === "submission" ? "submissions" : "comments";
+        const resp = await apiFetch(`/api/move-rows/`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            source_schema: currentDatabase,
+            target_schema: targetDb,
+            table,
+            row_ids: ids,
+          }),
+        });
+
+        if (!resp.ok) {
+          const txt = await resp.text();
+          throw new Error(`Move failed: ${resp.status} ${txt}`);
+        }
+      }
+
+      setSelectedItems(new Set());
+      await fetchEntries();
+    } catch (err) {
+      setError(`Error moving selected: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Selection helpers (for checkboxes)
+  const keyFor = (type, id) => `${type}:${id}`;
+  const isSelected = (type, id) => selectedItems.has(keyFor(type, id));
+  const toggleSelection = (type, id, e) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+    setSelectedItems((prev) => {
+      const next = new Set(prev);
+      const k = keyFor(type, id);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = (type, list) => {
+    const keys = (list || []).map((it) => keyFor(type, it.id));
+    setSelectedItems((prev) => {
+      const next = new Set(prev);
+      const allSelected = keys.length > 0 && keys.every((k) => next.has(k));
+      if (allSelected) {
+        keys.forEach((k) => next.delete(k));
+      } else {
+        keys.forEach((k) => next.add(k));
+      }
+      return next;
+    });
   };
   return (
     <div className="data-table-container">
@@ -348,6 +501,21 @@ export default function DataTable({
                 <table className="data-table">
                   <thead>
                     <tr>
+                      <th style={{ width: 48 }}>
+                        <input
+                          type="checkbox"
+                          aria-label="select-all-submissions"
+                          checked={
+                            filteredSubmissions.length > 0 &&
+                            filteredSubmissions.every((s) =>
+                              selectedItems.has(keyFor("submission", s.id))
+                            )
+                          }
+                          onChange={() =>
+                            toggleSelectAll("submission", filteredSubmissions)
+                          }
+                        />
+                      </th>
                       <th>ID</th>
                       {isFilteredView || currentDatabase === "filtered" ? (
                         <>
@@ -373,6 +541,16 @@ export default function DataTable({
                         onClick={() => handleRowClick(sub, "submission")}
                         className="clickable-row"
                       >
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={isSelected("submission", sub.id)}
+                            onChange={(e) =>
+                              toggleSelection("submission", sub.id, e)
+                            }
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        </td>
                         <td>{sub.id}</td>
                         {isFilteredView || currentDatabase === "filtered" ? (
                           <>
@@ -428,6 +606,21 @@ export default function DataTable({
                 <table className="data-table">
                   <thead>
                     <tr>
+                      <th style={{ width: 48 }}>
+                        <input
+                          type="checkbox"
+                          aria-label="select-all-comments"
+                          checked={
+                            filteredComments.length > 0 &&
+                            filteredComments.every((c) =>
+                              selectedItems.has(keyFor("comment", c.id))
+                            )
+                          }
+                          onChange={() =>
+                            toggleSelectAll("comment", filteredComments)
+                          }
+                        />
+                      </th>
                       <th>ID</th>
                       <th>Subreddit</th>
                       <th>Body</th>
@@ -443,6 +636,16 @@ export default function DataTable({
                         onClick={() => handleRowClick(comment, "comment")}
                         className="clickable-row"
                       >
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={isSelected("comment", comment.id)}
+                            onChange={(e) =>
+                              toggleSelection("comment", comment.id, e)
+                            }
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        </td>
                         <td>{comment.id}</td>
                         <td>{comment.subreddit}</td>
                         <td className="truncate">{comment.body}</td>
@@ -507,6 +710,58 @@ export default function DataTable({
               }
             >
               Next
+            </button>
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              marginTop: "0.5rem",
+            }}
+          >
+            <button
+              onClick={deleteSelected}
+              className="btn btn-danger"
+              disabled={selectedItems.size === 0 || loading}
+            >
+              Delete Selected ({selectedItems.size})
+            </button>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              gap: "0.75rem",
+              marginTop: "0.5rem",
+            }}
+          >
+            <label style={{ color: "#fff", alignSelf: "center" }}>
+              Move selected to:
+            </label>
+            <select
+              value={targetDb}
+              onChange={(e) => setTargetDb(e.target.value)}
+              style={{ minWidth: 280 }}
+            >
+              <option value="">-- select database --</option>
+              {projects.map((p) => (
+                <option key={p.schema_name} value={p.schema_name}>
+                  {p.display_name || p.schema_name}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={moveSelected}
+              className="btn btn-secondary"
+              disabled={
+                selectedItems.size === 0 ||
+                !targetDb ||
+                targetDb === currentDatabase ||
+                loading
+              }
+            >
+              Move Selected
             </button>
           </div>
         </>

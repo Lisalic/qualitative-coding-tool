@@ -659,6 +659,98 @@ def rename_project(request: Request, schema_name: str = Form(...), display_name:
     return JSONResponse({"message": "Project renamed", "id": str(proj.id), "display_name": proj.display_name})
 
 
+@router.post("/move-rows/")
+async def move_rows(request: Request, db: Session = Depends(get_db)):
+    """Move rows from one project schema to another. Expects JSON body:
+    {"source_schema": "proj_x", "target_schema": "proj_y", "table": "submissions", "row_ids": [..]}
+    Requires authentication and ownership of both projects.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+
+    source = (body.get("source_schema") or "").strip()
+    target = (body.get("target_schema") or "").strip()
+    table = body.get("table")
+    row_ids = body.get("row_ids") or []
+
+    if source.endswith('.db'):
+        source = source[:-3]
+    if target.endswith('.db'):
+        target = target[:-3]
+
+    if not source or not source.startswith('proj_') or not target or not target.startswith('proj_'):
+        return JSONResponse({"error": "Invalid project schema"}, status_code=400)
+    if table not in ("submissions", "comments"):
+        return JSONResponse({"error": "Invalid table"}, status_code=400)
+    if not isinstance(row_ids, list) or len(row_ids) == 0:
+        return JSONResponse({"error": "row_ids must be a non-empty list"}, status_code=400)
+
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    try:
+        proj_src = db.query(Project).filter(Project.schema_name == source, Project.user_id == user_id).first()
+        proj_tgt = db.query(Project).filter(Project.schema_name == target, Project.user_id == user_id).first()
+        if not proj_src or not proj_tgt:
+            return JSONResponse({"error": "Source or target project not found or not owned by user"}, status_code=403)
+
+        moved = 0
+        with engine.begin() as conn:
+            # Fetch rows from source
+            rows = conn.execute(text(f'SELECT * FROM "{source}"."{table}" WHERE id = ANY(:ids)'), {"ids": row_ids}).fetchall()
+            if not rows:
+                return JSONResponse({"moved": 0, "message": "No matching rows found"})
+
+            cols = list(rows[0]._mapping.keys())
+            col_list = ", ".join([f'"{c}"' for c in cols])
+
+            # Insert each row into target
+            for r in rows:
+                mapping = dict(r._mapping)
+                # build paramized insert
+                params = {f"p_{i}": mapping[c] for i, c in enumerate(cols)}
+                placeholders = ", ".join([f":p_{i}" for i in range(len(cols))])
+                conn.execute(text(f'INSERT INTO "{target}"."{table}" ({col_list}) VALUES ({placeholders})'), params)
+                moved += 1
+
+            # Delete from source
+            conn.execute(text(f'DELETE FROM "{source}"."{table}" WHERE id = ANY(:ids)'), {"ids": row_ids})
+
+        # Update metadata counts for both projects (best-effort)
+        try:
+            with engine.connect() as conn:
+                src_cnt = conn.execute(text(f'SELECT COUNT(*) FROM "{source}"."{table}"')).scalar() or 0
+                tgt_cnt = conn.execute(text(f'SELECT COUNT(*) FROM "{target}"."{table}"')).scalar() or 0
+
+            # update project_tables rows
+            pt_src = db.query(ProjectTable).filter(ProjectTable.project_id == proj_src.id, ProjectTable.table_name == table).first()
+            if pt_src:
+                pt_src.row_count = int(src_cnt)
+            else:
+                db.add(ProjectTable(project_id=proj_src.id, table_name=table, row_count=int(src_cnt)))
+
+            pt_tgt = db.query(ProjectTable).filter(ProjectTable.project_id == proj_tgt.id, ProjectTable.table_name == table).first()
+            if pt_tgt:
+                pt_tgt.row_count = int(tgt_cnt)
+            else:
+                db.add(ProjectTable(project_id=proj_tgt.id, table_name=table, row_count=int(tgt_cnt)))
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
+        except Exception:
+            pass
+
+        return JSONResponse({"moved": moved})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @router.post("/logout/")
 def logout():
     resp = JSONResponse({"message": "Logged out"})
