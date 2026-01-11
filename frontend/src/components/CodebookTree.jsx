@@ -2,7 +2,10 @@ import React, { useEffect, useState } from "react";
 import { apiFetch } from "../api";
 import "../styles/CodebookTree.css";
 
-export default function CodebookTree({ codebookId = null }) {
+export default function CodebookTree({
+  codebookId = null,
+  codebookName = null,
+}) {
   const [tree, setTree] = useState([]);
   const [expanded, setExpanded] = useState({});
   const [loading, setLoading] = useState(false);
@@ -17,7 +20,9 @@ export default function CodebookTree({ codebookId = null }) {
     setLoading(true);
     setError(null);
     try {
-      const q = codebookId ? `?codebook_id=${encodeURIComponent(codebookId)}` : "";
+      const q = codebookId
+        ? `?codebook_id=${encodeURIComponent(codebookId)}`
+        : "";
       const resp = await apiFetch(`/api/parse-codebook${q}`);
       if (!resp.ok) throw new Error("Failed to fetch parsed codebook");
       const j = await resp.json();
@@ -41,13 +46,19 @@ export default function CodebookTree({ codebookId = null }) {
   return (
     <div className="codebook-tree">
       <div className="codebook-tree-header">
-        <h3>Codebook</h3>
+        <h3>{codebookName || "Codebook"}</h3>
         <div className="codebook-tree-actions">
-          <button onClick={() => setExpanded((s) => {
-            const all = {};
-            tree.forEach((_, i) => (all[i] = true));
-            return all;
-          })}>Expand All</button>
+          <button
+            onClick={() =>
+              setExpanded((s) => {
+                const all = {};
+                tree.forEach((_, i) => (all[i] = true));
+                return all;
+              })
+            }
+          >
+            Expand All
+          </button>
           <button onClick={() => setExpanded({})}>Collapse All</button>
         </div>
       </div>
@@ -57,7 +68,9 @@ export default function CodebookTree({ codebookId = null }) {
 
       {!loading && !error && (
         <div className="cb-list">
-          {tree.length === 0 && <div className="cb-empty">No codebook content found.</div>}
+          {tree.length === 0 && (
+            <div className="cb-empty">No codebook content found.</div>
+          )}
           {tree.map((family, fi) => (
             <div className="cb-family" key={fi}>
               <div className="cb-family-title" onClick={() => toggleFamily(fi)}>
@@ -68,8 +81,12 @@ export default function CodebookTree({ codebookId = null }) {
                 <ul className="cb-codes">
                   {(family.codes || []).map((code, ci) => (
                     <li className="cb-code" key={ci}>
-                      <div className="cb-code-name">{code.code_name || `Code ${ci + 1}`}</div>
-                      <div className="cb-code-def">{code.definition || "(no definition)"}</div>
+                      <div className="cb-code-name">
+                        {code.code_name || `Code ${ci + 1}`}
+                      </div>
+                      <div className="cb-code-def">
+                        {code.definition || "(no definition)"}
+                      </div>
                     </li>
                   ))}
                 </ul>

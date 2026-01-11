@@ -15,6 +15,7 @@ export default function ViewCodebook() {
   const [selectedCodebookName, setSelectedCodebookName] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [viewMode, setViewMode] = useState("markdown");
 
   const fetchAvailableCodebooks = async () => {
     try {
@@ -104,50 +105,84 @@ export default function ViewCodebook() {
             backgroundColor: "#000000",
           }}
         >
-          {(() => {
-            const selObj = availableCodebooks.find(
-              (cb) => cb.id === selectedCodebook
-            );
-            const isProject = selObj?.source === "project";
-            const projectSchema =
-              selObj?.metadata?.schema ||
-              selObj?.schema_name ||
-              selObj?.id ||
-              null;
-            return (
-              <MarkdownView
-                selectedId={selectedCodebook}
-                title={selectedCodebookName}
-                fetchStyle="query"
-                fetchBase="/api/codebook"
-                queryParamName="codebook_id"
-                saveUrl={"/api/save-project-codebook/"}
-                saveIdFieldName={"schema_name"}
-                saveAsProject={true}
-                projectSchema={projectSchema}
-                onSaved={(resp) => {
-                  if (typeof resp === "string") {
-                    if (resp !== selectedCodebook) {
-                      setSelectedCodebook(resp);
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "flex-end",
+              gap: 8,
+              marginBottom: 12,
+            }}
+          >
+            <button
+              onClick={() => setViewMode("markdown")}
+              disabled={viewMode === "markdown"}
+              style={{
+                padding: "8px 12px",
+                cursor: viewMode === "markdown" ? "default" : "pointer",
+              }}
+            >
+              Show Text
+            </button>
+            <button
+              onClick={() => setViewMode("tree")}
+              disabled={viewMode === "tree"}
+              style={{
+                padding: "8px 12px",
+                cursor: viewMode === "tree" ? "default" : "pointer",
+              }}
+            >
+              Show Tree
+            </button>
+          </div>
+
+          {viewMode === "markdown" ? (
+            (() => {
+              const selObj = availableCodebooks.find(
+                (cb) => cb.id === selectedCodebook
+              );
+              const isProject = selObj?.source === "project";
+              const projectSchema =
+                selObj?.metadata?.schema ||
+                selObj?.schema_name ||
+                selObj?.id ||
+                null;
+              return (
+                <MarkdownView
+                  selectedId={selectedCodebook}
+                  title={selectedCodebookName}
+                  fetchStyle="query"
+                  fetchBase="/api/codebook"
+                  queryParamName="codebook_id"
+                  saveUrl={"/api/save-project-codebook/"}
+                  saveIdFieldName={"schema_name"}
+                  saveAsProject={true}
+                  projectSchema={projectSchema}
+                  onSaved={(resp) => {
+                    if (typeof resp === "string") {
+                      if (resp !== selectedCodebook) {
+                        setSelectedCodebook(resp);
+                        fetchAvailableCodebooks();
+                      }
+                    } else if (resp && resp.display_name) {
+                      // update UI with new display name and refresh list
+                      setSelectedCodebookName(resp.display_name);
                       fetchAvailableCodebooks();
                     }
-                  } else if (resp && resp.display_name) {
-                    // update UI with new display name and refresh list
-                    setSelectedCodebookName(resp.display_name);
-                    fetchAvailableCodebooks();
-                  }
-                }}
-                emptyLabel="View Codebook"
-              />
-            );
-          })()}
-            {!codebookContent && !loading && !error && (
-              <p>No codebook selected or found. Generate a codebook first.</p>
-            )}
-            {/* Codebook tree view (parsed) shown beneath the markdown/text */}
-            <div style={{ marginTop: 18 }}>
-              <CodebookTree codebookId={selectedCodebook} />
-            </div>
+                  }}
+                  emptyLabel="View Codebook"
+                />
+              );
+            })()
+          ) : (
+            <CodebookTree
+              codebookId={selectedCodebook}
+              codebookName={selectedCodebookName}
+            />
+          )}
+          {!codebookContent && !loading && !error && (
+            <p>No codebook selected or found. Generate a codebook first.</p>
+          )}
+          {/* (Tree is shown when 'Show Tree' is selected above) */}
         </div>
       </div>
     </>
