@@ -7,6 +7,8 @@ export default function ManageDatabase({
   onMergeNameChange,
   mergeDescription,
   onMergeDescriptionChange,
+  newDescription,
+  onNewDescriptionChange,
   loading,
   successMessage,
   errorMessage,
@@ -40,18 +42,49 @@ export default function ManageDatabase({
               <div key={dbName} className="database-item">
                 {renamingDb === dbName ? (
                   <div className="rename-controls">
-                    <input
-                      type="text"
-                      value={newName}
-                      onChange={(e) => onNewNameChange(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") onRename(dbName);
-                        if (e.key === "Escape") onCancelRename();
-                      }}
-                      autoFocus
-                    />
-                    <button onClick={() => onRename(dbName)}>Save</button>
-                    <button onClick={onCancelRename}>Cancel</button>
+                    <div style={{ width: "100%", marginBottom: "8px" }}>
+                      <input
+                        type="text"
+                        value={newName}
+                        onChange={(e) => onNewNameChange(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") onRename(dbName);
+                          if (e.key === "Escape") onCancelRename();
+                        }}
+                        autoFocus
+                        style={{ width: "100%" }}
+                      />
+                    </div>
+
+                    <div style={{ width: "100%", marginBottom: "8px" }}>
+                      <textarea
+                        placeholder="Optional description..."
+                        value={newDescription || ""}
+                        onChange={(e) =>
+                          onNewDescriptionChange?.(e.target.value)
+                        }
+                        rows={3}
+                        style={{
+                          width: "100%",
+                          padding: "8px",
+                          backgroundColor: "#000",
+                          color: "#fff",
+                          border: "1px solid #fff",
+                          borderRadius: "4px",
+                          fontSize: "14px",
+                        }}
+                      />
+                    </div>
+
+                    <div style={{ width: "100%" }}>
+                      <button
+                        onClick={() => onRename(dbName)}
+                        style={{ marginRight: "8px" }}
+                      >
+                        Save
+                      </button>
+                      <button onClick={onCancelRename}>Cancel</button>
+                    </div>
                   </div>
                 ) : (
                   <>
@@ -188,7 +221,7 @@ export default function ManageDatabase({
                           e.target.style.color = "#ffffff";
                         }}
                       >
-                        Rename
+                        Edit
                       </button>
                       <button
                         onClick={() => onDelete(dbName)}

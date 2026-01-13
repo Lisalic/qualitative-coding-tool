@@ -5,6 +5,7 @@ export default function CodebookManager({ onViewCodebook }) {
   const [codebooks, setCodebooks] = useState([]);
   const [renamingCb, setRenamingCb] = useState(null);
   const [newName, setNewName] = useState("");
+  const [newDescription, setNewDescription] = useState("");
   const [error, setError] = useState(null);
 
   useEffect(() => {
@@ -72,6 +73,9 @@ export default function CodebookManager({ onViewCodebook }) {
           throw new Error("Project schema name not found for rename");
         formData.append("schema_name", schema);
         formData.append("display_name", newName.trim());
+        if (newDescription && newDescription.trim()) {
+          formData.append("description", newDescription.trim());
+        }
 
         const response = await apiFetch("/api/rename-project/", {
           method: "POST",
@@ -130,11 +134,13 @@ export default function CodebookManager({ onViewCodebook }) {
       (c) => c.id === cbId || String(c.id) === String(cbId)
     );
     setNewName(cb?.name || cb?.display_name || String(cbId));
+    setNewDescription(cb?.description || cb?.metadata?.description || "");
   };
 
   const cancelRename = () => {
     setRenamingCb(null);
     setNewName("");
+    setNewDescription("");
   };
 
   const formatMetaText = (cb) => {
@@ -217,6 +223,23 @@ export default function CodebookManager({ onViewCodebook }) {
                         }}
                         placeholder="New ID (number)"
                         autoFocus
+                      />
+                      <textarea
+                        placeholder="Optional description..."
+                        value={newDescription}
+                        onChange={(e) => setNewDescription(e.target.value)}
+                        rows={3}
+                        style={{
+                          width: "100%",
+                          marginTop: "8px",
+                          padding: "8px",
+                          backgroundColor: "#000",
+                          color: "#fff",
+                          border: "1px solid #fff",
+                          borderRadius: "4px",
+                          fontSize: "14px",
+                          resize: "vertical",
+                        }}
                       />
                       <button onClick={() => handleRenameCodebook(cb.id)}>
                         Save

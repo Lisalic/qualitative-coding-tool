@@ -18,6 +18,7 @@ export default function Import() {
   const [successMessage, setSuccessMessage] = useState("");
   const [renamingDb, setRenamingDb] = useState(null);
   const [newName, setNewName] = useState("");
+  const [newDescription, setNewDescription] = useState("");
   const [mergeName, setMergeName] = useState("");
   const [mergeDescription, setMergeDescription] = useState("");
 
@@ -197,6 +198,9 @@ export default function Import() {
         // send schema_name and display_name to rename project display name
         formData.append("schema_name", oldName);
         formData.append("display_name", newName.trim());
+        if (newDescription && newDescription.trim()) {
+          formData.append("description", newDescription.trim());
+        }
 
         const response = await apiFetch("/api/rename-project/", {
           method: "POST",
@@ -210,6 +214,7 @@ export default function Import() {
       }
       setRenamingDb(null);
       setNewName("");
+      setNewDescription("");
       fetchDatabases();
     } catch (err) {
       console.error("Rename error:", err);
@@ -226,6 +231,7 @@ export default function Import() {
     );
     if (proj && proj.display_name) {
       setNewName(proj.display_name);
+      setNewDescription(proj.description || "");
     } else {
       setNewName(dbName.replace(".db", ""));
     }
@@ -234,6 +240,7 @@ export default function Import() {
   const cancelRename = () => {
     setRenamingDb(null);
     setNewName("");
+    setNewDescription("");
   };
 
   const handleUploadSuccess = (data) => {
@@ -277,6 +284,8 @@ export default function Import() {
               onMergeNameChange={setMergeName}
               mergeDescription={mergeDescription}
               onMergeDescriptionChange={setMergeDescription}
+              newDescription={newDescription}
+              onNewDescriptionChange={setNewDescription}
               loading={loading}
               successMessage={successMessage}
               errorMessage={error}

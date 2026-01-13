@@ -825,7 +825,7 @@ async def delete_row(request: Request, schema: str = Form(...), table: str = For
 
 
 @router.post("/rename-project/")
-def rename_project(request: Request, schema_name: str = Form(...), display_name: str = Form(...), db: Session = Depends(get_db)):
+def rename_project(request: Request, schema_name: str = Form(...), display_name: str = Form(...), description: str = Form(None), db: Session = Depends(get_db)):
     """Rename a project's display_name. Requires authentication and ownership."""
     # Resolve authenticated user from token
     user_id = get_user_id_from_request(request)
@@ -840,6 +840,8 @@ def rename_project(request: Request, schema_name: str = Form(...), display_name:
         raise HTTPException(status_code=404, detail="Project not found or you do not have permission")
 
     proj.display_name = display_name
+    if description is not None:
+        proj.description = description
     try:
         db.commit()
         db.refresh(proj)
@@ -847,7 +849,7 @@ def rename_project(request: Request, schema_name: str = Form(...), display_name:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to rename project: {exc}")
 
-    return JSONResponse({"message": "Project renamed", "id": str(proj.id), "display_name": proj.display_name})
+    return JSONResponse({"message": "Project renamed", "id": str(proj.id), "display_name": proj.display_name, "description": proj.description})
 
 
 @router.post("/move-rows/")
