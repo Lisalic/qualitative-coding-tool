@@ -11,6 +11,7 @@ export default function FileUpload({ onUploadSuccess, onView }) {
   const [subredditTags, setSubredditTags] = useState([]);
   const [dataType, setDataType] = useState("posts");
   const [customName, setCustomName] = useState("");
+  const [description, setDescription] = useState("");
 
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0];
@@ -73,6 +74,9 @@ export default function FileUpload({ onUploadSuccess, onView }) {
 
       formData.append("data_type", dataType);
       formData.append("name", customName.trim());
+      if (description && description.trim()) {
+        formData.append("description", description.trim());
+      }
 
       const response = await apiFetch("/api/upload-zst/", {
         method: "POST",
@@ -112,6 +116,7 @@ export default function FileUpload({ onUploadSuccess, onView }) {
       setSubredditInput("");
       setDataType("posts");
       setCustomName("");
+      setDescription("");
       setLoading(false);
 
       onUploadSuccess(data);
@@ -238,6 +243,18 @@ export default function FileUpload({ onUploadSuccess, onView }) {
               value={customName}
               onChange={(e) => setCustomName(e.target.value)}
               disabled={loading}
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="db-description">Description (optional)</label>
+            <textarea
+              id="db-description"
+              placeholder="Optional description for this dataset..."
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              disabled={loading}
+              rows={3}
             />
           </div>
 

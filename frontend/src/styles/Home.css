@@ -156,6 +156,12 @@
   color: #666;
 }
 
+.database-description {
+  color: #cccccc;
+  font-size: 13px;
+  margin-top: 6px;
+}
+
 .form-input:disabled {
   background-color: #0a0a0a;
   opacity: 0.6;

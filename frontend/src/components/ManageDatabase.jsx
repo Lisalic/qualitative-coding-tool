@@ -5,6 +5,8 @@ export default function ManageDatabase({
   onMergeDatabases,
   mergeName,
   onMergeNameChange,
+  mergeDescription,
+  onMergeDescriptionChange,
   loading,
   successMessage,
   errorMessage,
@@ -65,6 +67,9 @@ export default function ManageDatabase({
                             ? db.display_name
                             : dbName.replace(".db", "")}
                         </strong>
+                        <div className="database-description">
+                          {db.description ?? metadata?.description ?? "null"}
+                        </div>
                       </label>
                       {metadata && (
                         <div className="database-metadata">
@@ -232,6 +237,25 @@ export default function ManageDatabase({
               backgroundColor: "#000000",
               color: "#ffffff",
               fontSize: "16px",
+            }}
+          />
+
+          <textarea
+            placeholder="Optional merge description..."
+            value={mergeDescription || ""}
+            onChange={(e) => onMergeDescriptionChange?.(e.target.value)}
+            disabled={loading}
+            rows={3}
+            style={{
+              width: "100%",
+              padding: "12px",
+              marginBottom: "10px",
+              border: "1px solid #ffffff",
+              borderRadius: "4px",
+              backgroundColor: "#000000",
+              color: "#ffffff",
+              fontSize: "14px",
+              resize: "vertical",
             }}
           />
 

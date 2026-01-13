@@ -227,6 +227,9 @@ export default function CodebookManager({ onViewCodebook }) {
                     <>
                       <div className="database-info">
                         <strong>{cb.name || cb.display_name || cb.id}</strong>
+                        <div className="database-description">
+                          {cb.description ?? cb.metadata?.description ?? "null"}
+                        </div>
                         <div className="database-metadata">
                           <div className="metadata-row">
                             <span>{getCharText(cb)}</span>
@@ -283,7 +286,7 @@ export default function CodebookManager({ onViewCodebook }) {
                             e.target.style.color = "#ffffff";
                           }}
                         >
-                          Rename
+                          Edit
                         </button>
                         <button
                           onClick={() => {

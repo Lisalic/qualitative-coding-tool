@@ -17,6 +17,7 @@ export default function ApplyCodebook() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  const [description, setDescription] = useState("");
   const [codebooks, setCodebooks] = useState([]);
   const [databases, setDatabases] = useState([]);
   const [filteredDatabases, setFilteredDatabases] = useState([]);
@@ -134,6 +135,8 @@ export default function ApplyCodebook() {
       requestData.append("report_name", formData.report_name);
       requestData.append("codebook", formData.codebook);
       requestData.append("methodology", formData.methodology);
+      if (formData.description)
+        requestData.append("description", formData.description);
 
       const response = await apiFetch("/api/apply-codebook/", {
         method: "POST",
@@ -292,6 +295,15 @@ export default function ApplyCodebook() {
       type: "text",
       value: reportName,
       placeholder: "Enter report name... ",
+    },
+    {
+      id: "description",
+      label: "Description (optional)",
+      type: "textarea",
+      value: description,
+      placeholder: "Optional description for the report",
+      rows: 2,
+      onChange: (v) => setDescription(v),
     },
   ];
 

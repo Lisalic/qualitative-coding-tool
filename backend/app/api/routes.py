@@ -84,7 +84,8 @@ async def upload_zst_file(
     file: UploadFile = File(...), 
     subreddits: str = Form(None),
     data_type: str = Form(...),
-    name: str = Form(None)
+    name: str = Form(None),
+    description: str = Form(None)
 ):
 
     if not file.filename.endswith('.zst'):
@@ -141,6 +142,7 @@ async def upload_zst_file(
                 display_name=base_name,
                 schema_name=schema_name,
                 project_type="raw_data",
+                description=(description or None),
             )
             # create schema and tables
             with engine.begin() as conn:
@@ -189,6 +191,7 @@ async def upload_zst_file(
             response_data.update({
                 'status': 'completed',
                 'display_name': base_name,
+                'description': (description or None),
                 'schema_name': schema_name,
                 'inserted_counts': inserted_counts,
             })
@@ -237,7 +240,7 @@ def get_database_metadata(db_path):
 
 
 @router.post("/merge-databases/")
-async def merge_databases(request: Request, databases: str = Form(...), name: str = Form(...)):
+async def merge_databases(request: Request, databases: str = Form(...), name: str = Form(...), description: str = Form(None)):
     try:
         db_list = json.loads(databases)
         print(f"Merging databases: {db_list} into {name}")
@@ -411,11 +414,15 @@ async def merge_databases(request: Request, databases: str = Form(...), name: st
 
         # Create project record and table metadata using the final counts
         with DatabaseManager() as dm:
-            proj = dm.projects.create(user_id=uuid.UUID(user_id), display_name=name, schema_name=schema_name, project_type='raw_data')
+            proj = dm.projects.create(user_id=uuid.UUID(user_id), display_name=name, schema_name=schema_name, project_type='raw_data', description=(description or None))
             for tbl, cnt in final_table_counts.items():
                 dm.project_tables.add_table_metadata(project_id=proj.id, table_name=tbl, row_count=cnt)
 
-        return JSONResponse({"message": f"Merged into project schema '{schema_name}'", "project": {"id": str(proj.id), "schema_name": schema_name, "display_name": name}, "project_migrated": True})
+        return JSONResponse({
+            "message": f"Merged into project schema '{schema_name}'",
+            "project": {"id": str(proj.id), "schema_name": schema_name, "display_name": name, "description": (description or None)},
+            "project_migrated": True,
+        })
 
     except HTTPException:
         raise
@@ -537,6 +544,7 @@ def my_projects(request: Request, project_type: str = Query("raw_data"), db: Ses
         result.append({
             "id": str(p.id),
             "display_name": p.display_name,
+            "description": p.description,
             "schema_name": p.schema_name,
             "project_type": p.project_type,
             "created_at": p.created_at.isoformat() if p.created_at else None,

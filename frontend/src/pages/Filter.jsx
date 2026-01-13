@@ -17,6 +17,7 @@ export default function Filter() {
   const [databases, setDatabases] = useState([]); // raw data projects for selection
   const [filteredDatabases, setFilteredDatabases] = useState([]); // filtered projects for ManageDatabase
   const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
   const [rightView, setRightView] = useState("prompts"); // 'prompts' or 'database'
   const [renamingDb, setRenamingDb] = useState(null);
   const [newName, setNewName] = useState("");
@@ -159,6 +160,9 @@ export default function Filter() {
     if (fieldId === "name") {
       setName(value);
     }
+    if (fieldId === "description") {
+      setDescription(value);
+    }
   };
 
   const handleSubmit = async (formData) => {
@@ -186,6 +190,9 @@ export default function Filter() {
       // include desired output name if provided
       if (formData.name) {
         requestData.append("name", formData.name);
+      }
+      if (formData.description) {
+        requestData.append("description", formData.description);
       }
       // include selected database if provided
       if (formData.database) {
@@ -313,6 +320,16 @@ export default function Filter() {
     placeholder: "my-filtered-db",
   };
 
+  const descriptionField = {
+    id: "description",
+    label: "Description (optional)",
+    type: "textarea",
+    value: description,
+    placeholder: "Optional description for the filtered database",
+    rows: 3,
+    onChange: (v) => setDescription(v),
+  };
+
   const databaseFields = [
     {
       id: "database",
@@ -351,7 +368,12 @@ export default function Filter() {
                 </button>
               </div>
               <ActionForm
-                fields={[...databaseFields, nameField, ...fields]}
+                fields={[
+                  ...databaseFields,
+                  nameField,
+                  descriptionField,
+                  ...fields,
+                ]}
                 submitButton={{
                   text: "Filter",
                   loadingText: "Processing...",

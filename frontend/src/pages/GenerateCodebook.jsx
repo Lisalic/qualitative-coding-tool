@@ -19,6 +19,7 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  const [description, setDescription] = useState("");
   const [saveMessage, setSaveMessage] = useState("");
   const [saveMessageType, setSaveMessageType] = useState("success");
   const [rightView, setRightView] = useState("codebooks"); // 'codebooks' or 'prompts'
@@ -135,6 +136,8 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
         throw new Error("Please provide a name for the generated codebook");
       }
       requestData.append("name", formData.name.trim());
+      if (formData.description)
+        requestData.append("description", formData.description);
 
       const response = await apiFetch("/api/generate-codebook/", {
         method: "POST",
@@ -270,6 +273,15 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
       type: "text",
       value: "",
       placeholder: "my-codebook",
+    },
+    {
+      id: "description",
+      label: "Description (optional)",
+      type: "textarea",
+      value: description,
+      placeholder: "Optional description for the codebook",
+      rows: 2,
+      onChange: (v) => setDescription(v),
     },
   ];
 

@@ -19,6 +19,7 @@ export default function Import() {
   const [renamingDb, setRenamingDb] = useState(null);
   const [newName, setNewName] = useState("");
   const [mergeName, setMergeName] = useState("");
+  const [mergeDescription, setMergeDescription] = useState("");
 
   useEffect(() => {
     fetchDatabases();
@@ -45,6 +46,7 @@ export default function Import() {
           return {
             name: p.schema_name,
             display_name: p.display_name,
+            description: p.description ?? null,
             metadata: {
               // Include created_at from projects table (ISO string)
               created_at: p.created_at || null,
@@ -75,6 +77,7 @@ export default function Import() {
           return {
             name: p.schema_name,
             display_name: p.display_name,
+            description: p.description ?? null,
             metadata: {
               created_at: p.created_at || null,
               tables: tables,
@@ -119,6 +122,9 @@ export default function Import() {
       const formData = new FormData();
       formData.append("databases", JSON.stringify(selectedDatabases));
       formData.append("name", mergeName.trim());
+      if (mergeDescription && mergeDescription.trim()) {
+        formData.append("description", mergeDescription.trim());
+      }
 
       const response = await apiFetch("/api/merge-databases/", {
         method: "POST",
@@ -141,6 +147,7 @@ export default function Import() {
       setSuccessMessage("Databases merged successfully!");
       setSelectedDatabases([]);
       setMergeName("");
+      setMergeDescription("");
       fetchDatabases();
     } catch (err) {
       console.error("Merge error:", err);
@@ -268,6 +275,8 @@ export default function Import() {
               onMergeDatabases={handleMergeDatabases}
               mergeName={mergeName}
               onMergeNameChange={setMergeName}
+              mergeDescription={mergeDescription}
+              onMergeDescriptionChange={setMergeDescription}
               loading={loading}
               successMessage={successMessage}
               errorMessage={error}
