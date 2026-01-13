@@ -56,6 +56,7 @@ export default function Data() {
           return {
             name: p.schema_name,
             display_name: p.display_name,
+            description: p.description ?? null,
             metadata: {
               created_at: p.created_at || null,
               tables: tables,
@@ -162,6 +163,14 @@ export default function Data() {
                 (d.name === selectedDatabase ||
                   d.name === String(selectedDatabase).replace(".db", ""))
             )?.metadata
+          }
+          description={
+            (databases || []).find(
+              (d) =>
+                d &&
+                (d.name === selectedDatabase ||
+                  d.name === String(selectedDatabase).replace(".db", ""))
+            )?.description
           }
         />
       </div>

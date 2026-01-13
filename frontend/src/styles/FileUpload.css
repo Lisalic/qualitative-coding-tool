@@ -59,6 +59,25 @@
   font-size: 1rem;
 }
 
+.form-group textarea {
+  color: #ffffff;
+  padding: 0.75rem;
+  border: 1px solid #ffffff;
+  border-radius: 4px;
+  background-color: #1a1a1a;
+  font-size: 1rem;
+  resize: vertical;
+}
+
+.form-group textarea::placeholder {
+  color: #666;
+}
+
+.form-group textarea:disabled {
+  background-color: #0a0a0a;
+  opacity: 0.6;
+}
+
 .form-group input[type="text"]::placeholder {
   color: #666;
 }

@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 export default function MarkdownView({
   selectedId,
   title,
+  description,
   // If true, this save targets a Postgres project and will send schema_name instead
   saveAsProject = false,
   projectSchema = null,
@@ -174,9 +175,23 @@ export default function MarkdownView({
           </div>
         ) : (
           <>
-            <h1 style={{ color: "#ffffff", margin: 0 }}>
-              {title || (selectedId ? `${selectedId}` : emptyLabel)}
-            </h1>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "flex-start",
+                gap: 8,
+              }}
+            >
+              <h1 style={{ color: "#ffffff", margin: 0 }}>
+                {title || (selectedId ? `${selectedId}` : emptyLabel)}
+              </h1>
+              {description ? (
+                <div style={{ color: "#cccccc", fontSize: "0.95rem" }}>
+                  {description}
+                </div>
+              ) : null}
+            </div>
             {selectedId && (
               <button
                 onClick={() => {

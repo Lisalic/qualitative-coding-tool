@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { apiFetch } from "../api";
-import { useNavigate } from "react-router-dom";
 import "../styles/Data.css";
 import "../styles/DataTable.css";
 import MarkdownView from "../components/MarkdownView";
@@ -8,7 +7,7 @@ import CodebookTree from "../components/CodebookTree";
 import SelectionList from "../components/SelectionList";
 
 export default function ViewCodebook() {
-  const navigate = useNavigate();
+  // `navigate` not used here; removed to avoid unused-variable errors
   const [availableCodebooks, setAvailableCodebooks] = useState([]);
   const [selectedCodebook, setSelectedCodebook] = useState(null);
   const [codebookContent, setCodebookContent] = useState("");
@@ -84,7 +83,7 @@ export default function ViewCodebook() {
       const sel = availableCodebooks.find((cb) => cb.id === selectedCodebook);
       setSelectedCodebookName(sel?.display_name || sel?.name || sel?.id || "");
     }
-  }, [selectedCodebook]);
+  }, [selectedCodebook, availableCodebooks]);
 
   return (
     <>
@@ -140,7 +139,6 @@ export default function ViewCodebook() {
               const selObj = availableCodebooks.find(
                 (cb) => cb.id === selectedCodebook
               );
-              const isProject = selObj?.source === "project";
               const projectSchema =
                 selObj?.metadata?.schema ||
                 selObj?.schema_name ||
@@ -150,6 +148,7 @@ export default function ViewCodebook() {
                 <MarkdownView
                   selectedId={selectedCodebook}
                   title={selectedCodebookName}
+                  description={selObj?.description}
                   fetchStyle="query"
                   fetchBase="/api/codebook"
                   queryParamName="codebook_id"
@@ -164,7 +163,6 @@ export default function ViewCodebook() {
                         fetchAvailableCodebooks();
                       }
                     } else if (resp && resp.display_name) {
-                      // update UI with new display name and refresh list
                       setSelectedCodebookName(resp.display_name);
                       fetchAvailableCodebooks();
                     }

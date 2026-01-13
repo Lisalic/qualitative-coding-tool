@@ -23,6 +23,7 @@ export default function ViewCoding() {
           id: p.schema_name || p.id,
           name: p.display_name || p.schema_name || p.id,
           display_name: p.display_name,
+          description: p.description || null,
           metadata: { schema: p.schema_name },
           source: "project",
         }));
@@ -86,6 +87,10 @@ export default function ViewCoding() {
             }
             selectedId={selectedCodedData}
             title={selectedCodedDataName}
+            description={
+              availableCodedData.find((cd) => cd.id === selectedCodedData)
+                ?.description
+            }
             fetchStyle="query"
             fetchBase="/api/coded-data"
             queryParamName="coded_id"

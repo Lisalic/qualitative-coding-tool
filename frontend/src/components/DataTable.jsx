@@ -9,6 +9,7 @@ export default function DataTable({
   isFilteredView = false,
   displayName = null,
   metadata = null,
+  description = null,
 }) {
   const [dbEntries, setDbEntries] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -349,6 +350,7 @@ export default function DataTable({
         className="table-header"
         style={{
           display: "flex",
+          flexDirection: "column",
           justifyContent: "center",
           alignItems: "center",
         }}
@@ -358,6 +360,18 @@ export default function DataTable({
             ? `Database: ${displayDbName}`
             : title}
         </h1>
+        {description ? (
+          <div
+            style={{
+              width: "100%",
+              textAlign: "center",
+              color: "#cccccc",
+              marginTop: 6,
+            }}
+          >
+            {description}
+          </div>
+        ) : null}
       </div>
 
       {error && <p className="error-message">{error}</p>}
