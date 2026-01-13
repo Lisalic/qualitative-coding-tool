@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi import Request
 
 try:
-    from app.database import get_db, AuthUser, Project, ProjectTable, engine, SessionLocal
+    from app.database import get_db, AuthUser, Project, ProjectTable, Prompt, engine, SessionLocal
     from app.databasemanager import DatabaseManager
     from app.auth import create_access_token, decode_access_token
     from app.config import settings
@@ -34,7 +34,7 @@ try:
     from app.services import migrate_sqlite_file
 except:
     try:
-        from backend.app.database import get_db, AuthUser, Project, ProjectTable, engine, SessionLocal
+        from backend.app.database import get_db, AuthUser, Project, ProjectTable, Prompt, engine, SessionLocal
         from backend.app.databasemanager import DatabaseManager
         from backend.app.auth import create_access_token, decode_access_token
         from backend.app.config import settings
@@ -544,6 +544,187 @@ def my_projects(request: Request, project_type: str = Query("raw_data"), db: Ses
         })
 
     return JSONResponse({"projects": result})
+
+
+@router.get("/prompts/")
+def list_prompts(request: Request, prompt_type: str = Query(None), db: Session = Depends(get_db)):
+    """List prompts belonging to the authenticated user. Optional `prompt_type` filters by `type`."""
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        q = db.query(Prompt).filter(Prompt.uuid == uuid.UUID(user_id))
+    except Exception:
+        q = db.query(Prompt).filter(Prompt.uuid == user_id)
+
+    if prompt_type:
+        q = q.filter(Prompt.type == prompt_type)
+
+    rows = q.all()
+    result = []
+    for r in rows:
+        result.append({
+            "rowid": int(r.rowid),
+            "uuid": str(r.uuid),
+            "display_name": r.display_name,
+            "prompt": r.prompt,
+            "type": r.type,
+        })
+
+    return JSONResponse({"prompts": result})
+
+
+@router.post("/prompts/")
+async def create_prompt(request: Request, db: Session = Depends(get_db)):
+    """Create a new prompt for the authenticated user.
+
+    This endpoint accepts either multipart/form-data or application/json. It
+    validates required fields and returns clear 400 responses instead of the
+    default 422 when the client sends an unexpected payload shape.
+    """
+    # Read raw body for debugging and parse payload (form or json)
+    try:
+        raw_body = await request.body()
+    except Exception:
+        raw_body = b""
+
+    content_type = (request.headers.get("content-type") or "").lower()
+    data = {}
+    try:
+        if "application/json" in content_type:
+            data = await request.json()
+        else:
+            form = await request.form()
+            # convert FormData to a simple dict
+            data = {k: form.get(k) for k in form.keys()}
+    except Exception:
+        data = {}
+
+    display_name = data.get("display_name")
+    prompt_val = data.get("prompt")
+    ptype = data.get("type")
+    user_id = data.get("user_id")
+
+    # Validate required fields and provide a helpful error message
+    missing = [k for k, v in [("display_name", display_name), ("prompt", prompt_val), ("type", ptype)] if not (v or (isinstance(v, str) and v == "")) and v is None]
+    if not display_name or not prompt_val or not ptype:
+        # Log helpful debug info to server stdout for diagnosis
+        try:
+            _ct = request.headers.get("content-type")
+            _auth = request.headers.get("authorization")
+            _cookie = request.headers.get("cookie")
+            print("[create_prompt] Missing fields. content-type:", _ct)
+            print("[create_prompt] Parsed data:", data)
+            snippet = raw_body[:4000]
+            try:
+                print("[create_prompt] Raw body snippet:", snippet.decode(errors="replace"))
+            except Exception:
+                print("[create_prompt] Raw body (bytes):", repr(snippet))
+            print("[create_prompt] Authorization present:", bool(_auth), " Cookie present:", bool(_cookie))
+        except Exception:
+            pass
+        raise HTTPException(status_code=400, detail="Missing required fields: display_name, prompt, type")
+
+    # If `user_id` was not provided, resolve via the authenticated token
+    if not user_id:
+        try:
+            user_resp = me(request, db)
+        except HTTPException as he:
+            raise he
+        except Exception:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+
+        try:
+            import json as _json
+
+            if isinstance(user_resp, JSONResponse):
+                payload = _json.loads(user_resp.body)
+            else:
+                payload = dict(user_resp)
+            user_id = payload.get("id") or payload.get("sub")
+        except Exception:
+            raise HTTPException(status_code=500, detail="Failed to resolve user identity")
+
+    try:
+        uid = uuid.UUID(user_id)
+    except Exception:
+        uid = user_id
+
+    new = Prompt(uuid=uid, display_name=display_name, prompt=prompt_val, type=ptype)
+    db.add(new)
+    try:
+        db.commit()
+        db.refresh(new)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return JSONResponse({"rowid": int(new.rowid), "uuid": str(new.uuid), "display_name": new.display_name, "prompt": new.prompt, "type": new.type})
+
+
+@router.post("/prompts/{rowid}/update")
+def update_prompt(rowid: int, request: Request, display_name: str = Form(None), prompt: str = Form(None), type: str = Form(None), db: Session = Depends(get_db)):
+    """Update a prompt owned by the authenticated user."""
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    p = db.query(Prompt).filter(Prompt.rowid == rowid).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+
+    # ensure ownership
+    try:
+        owner_id = str(p.uuid)
+    except Exception:
+        owner_id = p.uuid
+    if owner_id != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    if display_name is not None:
+        p.display_name = display_name
+    if prompt is not None:
+        p.prompt = prompt
+    if type is not None:
+        p.type = type
+
+    try:
+        db.commit()
+        db.refresh(p)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return JSONResponse({"rowid": int(p.rowid), "uuid": str(p.uuid), "display_name": p.display_name, "prompt": p.prompt, "type": p.type})
+
+
+@router.delete("/prompts/{rowid}")
+def delete_prompt(rowid: int, request: Request, db: Session = Depends(get_db)):
+    """Delete a prompt owned by the authenticated user."""
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    p = db.query(Prompt).filter(Prompt.rowid == rowid).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+
+    try:
+        owner_id = str(p.uuid)
+    except Exception:
+        owner_id = p.uuid
+    if owner_id != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    try:
+        db.delete(p)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return JSONResponse({"deleted": True})
 
 
 @router.delete("/delete-database/{db_name}")

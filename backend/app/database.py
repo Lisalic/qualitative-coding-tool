@@ -80,7 +80,7 @@ class AuthUser(Base):
     email = Column(String, unique=True, nullable=False)
     hashed_password = Column("password_hash", String, nullable=False)
     date_created = Column("created_at", DateTime(timezone=True), server_default=func.now())
-    projects = relationship("Project", back_populates="user")
+    # Do not define `projects` relationship here to avoid mapper/back_populates conflicts
 
 
 class ProjectTable(Base):
@@ -92,6 +92,21 @@ class ProjectTable(Base):
     row_count = Column(Integer, default=0)
 
     project = relationship("Project", back_populates="tables")
+
+
+class Prompt(Base):
+    __tablename__ = "prompts"
+
+    # Integer primary key (rowid) as requested
+    rowid = Column(Integer, primary_key=True, autoincrement=True)
+    # Link to users table
+    uuid = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    display_name = Column(String, nullable=False)
+    prompt = Column(String, nullable=False)
+    type = Column(String, nullable=False)
+
+    # Relationship to User for convenience
+    user = relationship("User", backref="prompts")
 
 
 # Ensure tables exist in the target database. Wrap in try/except so

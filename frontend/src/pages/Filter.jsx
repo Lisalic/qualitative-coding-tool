@@ -10,6 +10,8 @@ export default function Filter() {
   const navigate = useNavigate();
   const [filterPrompt, setFilterPrompt] = useState("");
   const [message, setMessage] = useState("");
+  const [saveMessage, setSaveMessage] = useState("");
+  const [saveMessageType, setSaveMessageType] = useState("success");
   const [loading, setLoading] = useState(false);
   const [database, setDatabase] = useState("");
   const [databases, setDatabases] = useState([]); // raw data projects for selection
@@ -225,13 +227,81 @@ export default function Filter() {
       label: "Enter prompt",
       type: "textarea",
       value: filterPrompt,
+      onChange: (v) => setFilterPrompt(v),
       placeholder: "Enter your filter prompt...",
       rows: 5,
-      extraButton: {
-        label: "Load example prompt",
-        onClick: () => setFilterPrompt(EXAMPLE_PROMPT),
-        className: "load-prompt-btn",
-      },
+      extraButtons: [
+        {
+          label: "Load example prompt",
+          onClick: () => setFilterPrompt(EXAMPLE_PROMPT),
+          className: "load-prompt-btn",
+        },
+        {
+          label: "Save prompt",
+          onClick: async () => {
+            try {
+              const { api } = await import("../api");
+
+              if (!filterPrompt || !filterPrompt.trim()) {
+                alert("Please enter a prompt before saving");
+                return;
+              }
+
+              // Match PromptManager behavior: attempt to fetch /api/me (non-fatal), then post FormData
+              let fetchedUserId = null;
+              try {
+                const me = await api.get("/api/me");
+                fetchedUserId = me?.data?.id || me?.data?.sub || null;
+              } catch (e) {
+                console.warn("Could not fetch /api/me", e);
+              }
+
+              let promptName = `Prompt ${Date.now()}`;
+              try {
+                const listRes = await api.get(
+                  `/api/prompts/?prompt_type=${encodeURIComponent("filter")}`
+                );
+                const prompts = (listRes.data && listRes.data.prompts) || [];
+                promptName = `Prompt ${prompts.length + 1}`;
+              } catch (e) {
+                // fallback to timestamp-based name
+              }
+              const form = new FormData();
+              form.append("display_name", promptName);
+              form.append("prompt", filterPrompt.trim());
+              form.append("type", "filter");
+              if (fetchedUserId) form.append("user_id", fetchedUserId);
+
+              const res = await api.post("/api/prompts/", form);
+              console.log("Saved prompt response:", res);
+              const saved = res && res.data ? res.data : null;
+              const label =
+                (saved && (saved.display_name || saved.prompt)) ||
+                "Prompt saved";
+              setSaveMessage(`Saved: ${label}`);
+              setSaveMessageType("success");
+              // ensure the right-hand manager switches to prompts and reloads
+              try {
+                setRightView("prompts");
+              } catch (e) {}
+              try {
+                window.dispatchEvent(new Event("promptSaved"));
+              } catch (e) {}
+              setTimeout(() => setSaveMessage(""), 3000);
+            } catch (err) {
+              console.error("Failed to save prompt:", err);
+              const msg =
+                err?.response?.data?.detail ||
+                err?.message ||
+                "Failed to save prompt";
+              setSaveMessage(String(msg));
+              setSaveMessageType("error");
+              setTimeout(() => setSaveMessage(""), 4000);
+            }
+          },
+          className: "load-prompt-btn",
+        },
+      ],
     },
   ];
 
@@ -292,6 +362,17 @@ export default function Filter() {
                 result={message && message.startsWith("✓") ? message : null}
                 resultTitle="Filter Result"
               />
+              {saveMessage && (
+                <div
+                  className={
+                    saveMessageType === "success"
+                      ? "success-message"
+                      : "error-message"
+                  }
+                >
+                  {saveMessage}
+                </div>
+              )}
             </div>
           </div>
           <div className="prompt-manager-section">
@@ -301,7 +382,7 @@ export default function Filter() {
                   className={rightView === "prompts" ? "active" : ""}
                   onClick={() => setRightView("prompts")}
                 >
-                  Manage Prompts
+                  Saved Prompts
                 </button>
               </div>
               <div className="right-group">
@@ -318,6 +399,7 @@ export default function Filter() {
               <PromptManager
                 onLoadPrompt={handleLoadPrompt}
                 currentPrompt={filterPrompt}
+                promptType="filter"
               />
             ) : (
               <ManageDatabase

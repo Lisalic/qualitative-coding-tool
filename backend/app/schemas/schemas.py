@@ -34,3 +34,21 @@ class Document(DocumentBase):
     
     class Config:
         from_attributes = True
+
+
+class PromptBase(BaseModel):
+    display_name: str
+    prompt: str
+    type: str
+
+
+class PromptCreate(PromptBase):
+    uuid: str
+
+
+class Prompt(PromptBase):
+    rowid: int
+    uuid: str
+
+    class Config:
+        from_attributes = True

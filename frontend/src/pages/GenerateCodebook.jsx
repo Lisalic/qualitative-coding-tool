@@ -19,6 +19,8 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  const [saveMessage, setSaveMessage] = useState("");
+  const [saveMessageType, setSaveMessageType] = useState("success");
   const [rightView, setRightView] = useState("codebooks"); // 'codebooks' or 'prompts'
 
   useEffect(() => {
@@ -187,14 +189,80 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
       label: "Enter Prompt",
       type: "textarea",
       value: prompt,
+      onChange: (v) => setPrompt(v),
       placeholder:
         "Enter a custom prompt to guide the codebook generation. Leave empty for default behavior.",
       rows: 4,
-      extraButton: {
-        label: "Load example prompt",
-        onClick: () => setPrompt(EXAMPLE_PROMPT),
-        className: "load-prompt-btn",
-      },
+      extraButtons: [
+        {
+          label: "Load example prompt",
+          onClick: () => setPrompt(EXAMPLE_PROMPT),
+          className: "load-prompt-btn",
+        },
+        {
+          label: "Save prompt",
+          onClick: async () => {
+            try {
+              const { api } = await import("../api");
+
+              if (!prompt || !prompt.trim()) {
+                alert("Please enter a prompt before saving");
+                return;
+              }
+
+              let fetchedUserId = null;
+              try {
+                const me = await api.get("/api/me");
+                fetchedUserId = me?.data?.id || me?.data?.sub || null;
+              } catch (e) {
+                console.warn("Could not fetch /api/me", e);
+              }
+
+              let promptName = `Prompt ${Date.now()}`;
+              try {
+                const listRes = await api.get(
+                  `/api/prompts/?prompt_type=${encodeURIComponent("generate")}`
+                );
+                const prompts = (listRes.data && listRes.data.prompts) || [];
+                promptName = `Prompt ${prompts.length + 1}`;
+              } catch (e) {
+                // fallback to timestamp-based name
+              }
+              const form = new FormData();
+              form.append("display_name", promptName);
+              form.append("prompt", prompt.trim());
+              form.append("type", "generate");
+              if (fetchedUserId) form.append("user_id", fetchedUserId);
+
+              const res = await api.post("/api/prompts/", form);
+              console.log("Saved prompt response:", res);
+              const saved = res && res.data ? res.data : null;
+              const label =
+                (saved && (saved.display_name || saved.prompt)) ||
+                "Prompt saved";
+              setSaveMessage(`Saved: ${label}`);
+              setSaveMessageType("success");
+              try {
+                setRightView("prompts");
+              } catch (e) {}
+              try {
+                window.dispatchEvent(new Event("promptSaved"));
+              } catch (e) {}
+              setTimeout(() => setSaveMessage(""), 3000);
+            } catch (err) {
+              console.error("Failed to save prompt:", err);
+              const msg =
+                err?.response?.data?.detail ||
+                err?.message ||
+                "Failed to save prompt";
+              setSaveMessage(String(msg));
+              setSaveMessageType("error");
+              setTimeout(() => setSaveMessage(""), 4000);
+            }
+          },
+          className: "load-prompt-btn",
+        },
+      ],
     },
     {
       id: "name",
@@ -240,6 +308,17 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
                 result={result}
                 resultTitle="Generated Codebook"
               />
+              {saveMessage && (
+                <div
+                  className={
+                    saveMessageType === "success"
+                      ? "success-message"
+                      : "error-message"
+                  }
+                >
+                  {saveMessage}
+                </div>
+              )}
             </div>
           </div>
           <div className="manager-section">
@@ -249,7 +328,7 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
                   className={rightView === "prompts" ? "active" : ""}
                   onClick={() => setRightView("prompts")}
                 >
-                  Manage Prompts
+                  Saved Prompts
                 </button>
               </div>
               <div className="right-group">
@@ -266,6 +345,7 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
               <PromptManager
                 onLoadPrompt={(p) => setPrompt(p)}
                 currentPrompt={prompt}
+                promptType="generate"
               />
             ) : (
               <CodebookManager

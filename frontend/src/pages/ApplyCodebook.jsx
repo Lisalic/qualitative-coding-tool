@@ -21,6 +21,8 @@ export default function ApplyCodebook() {
   const [databases, setDatabases] = useState([]);
   const [filteredDatabases, setFilteredDatabases] = useState([]);
   const [rightView, setRightView] = useState("codebooks"); // 'codebooks' or 'prompts'
+  const [saveMessage, setSaveMessage] = useState("");
+  const [saveMessageType, setSaveMessageType] = useState("success");
 
   useEffect(() => {
     fetchCodebooks();
@@ -210,11 +212,77 @@ export default function ApplyCodebook() {
       label: "Enter Prompt",
       type: "textarea",
       value: methodology,
-      extraButton: {
-        label: "Load example prompt",
-        onClick: () => setMethodology(EXAMPLE_PROMPT),
-        className: "load-prompt-btn",
-      },
+      onChange: (v) => setMethodology(v),
+      extraButtons: [
+        {
+          label: "Load example prompt",
+          onClick: () => setMethodology(EXAMPLE_PROMPT),
+          className: "load-prompt-btn",
+        },
+        {
+          label: "Save prompt",
+          onClick: async () => {
+            try {
+              const { api } = await import("../api");
+
+              if (!methodology || !methodology.trim()) {
+                alert("Please enter a prompt before saving");
+                return;
+              }
+
+              let fetchedUserId = null;
+              try {
+                const me = await api.get("/api/me");
+                fetchedUserId = me?.data?.id || me?.data?.sub || null;
+              } catch (e) {
+                console.warn("Could not fetch /api/me", e);
+              }
+
+              let promptName = `Prompt ${Date.now()}`;
+              try {
+                const listRes = await api.get(
+                  `/api/prompts/?prompt_type=${encodeURIComponent("apply")}`
+                );
+                const prompts = (listRes.data && listRes.data.prompts) || [];
+                promptName = `Prompt ${prompts.length + 1}`;
+              } catch (e) {
+                // fallback to timestamp-based name
+              }
+              const form = new FormData();
+              form.append("display_name", promptName);
+              form.append("prompt", methodology.trim());
+              form.append("type", "apply");
+              if (fetchedUserId) form.append("user_id", fetchedUserId);
+
+              const res = await api.post("/api/prompts/", form);
+              console.log("Saved prompt response:", res);
+              const saved = res && res.data ? res.data : null;
+              const label =
+                (saved && (saved.display_name || saved.prompt)) ||
+                "Prompt saved";
+              setSaveMessage(`Saved: ${label}`);
+              setSaveMessageType("success");
+              try {
+                setRightView("prompts");
+              } catch (e) {}
+              try {
+                window.dispatchEvent(new Event("promptSaved"));
+              } catch (e) {}
+              setTimeout(() => setSaveMessage(""), 3000);
+            } catch (err) {
+              console.error("Failed to save prompt:", err);
+              const msg =
+                err?.response?.data?.detail ||
+                err?.message ||
+                "Failed to save prompt";
+              setSaveMessage(String(msg));
+              setSaveMessageType("error");
+              setTimeout(() => setSaveMessage(""), 4000);
+            }
+          },
+          className: "load-prompt-btn",
+        },
+      ],
       placeholder: "Enter your coding methodology or leave blank...",
       rows: 4,
     },
@@ -253,6 +321,17 @@ export default function ApplyCodebook() {
                 result={result && result.classification_report}
                 resultTitle="Classification Report"
               />
+              {saveMessage && (
+                <div
+                  className={
+                    saveMessageType === "success"
+                      ? "success-message"
+                      : "error-message"
+                  }
+                >
+                  {saveMessage}
+                </div>
+              )}
             </div>
           </div>
           <div className="manager-section">
@@ -262,7 +341,7 @@ export default function ApplyCodebook() {
                   className={rightView === "prompts" ? "active" : ""}
                   onClick={() => setRightView("prompts")}
                 >
-                  Manage Prompts
+                  Saved Prompts
                 </button>
               </div>
               <div className="right-group">
@@ -279,6 +358,7 @@ export default function ApplyCodebook() {
               <PromptManager
                 onLoadPrompt={(p) => setMethodology(p)}
                 currentPrompt={methodology}
+                promptType="apply"
               />
             ) : (
               <CodebookManager

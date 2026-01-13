@@ -134,16 +134,30 @@ export default function ActionForm({
                 }}
               >
                 <label htmlFor={field.id}>{field.label}</label>
-                {field.extraButton && (
-                  <button
-                    type="button"
-                    onClick={field.extraButton.onClick}
-                    className={field.extraButton.className || "load-prompt-btn"}
-                    disabled={submitButton?.disabled}
-                  >
-                    {field.extraButton.label}
-                  </button>
-                )}
+                {field.extraButtons && Array.isArray(field.extraButtons)
+                  ? field.extraButtons.map((b, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={b.onClick}
+                        className={b.className || "load-prompt-btn"}
+                        disabled={submitButton?.disabled}
+                      >
+                        {b.label}
+                      </button>
+                    ))
+                  : field.extraButton && (
+                      <button
+                        type="button"
+                        onClick={field.extraButton.onClick}
+                        className={
+                          field.extraButton.className || "load-prompt-btn"
+                        }
+                        disabled={submitButton?.disabled}
+                      >
+                        {field.extraButton.label}
+                      </button>
+                    )}
               </div>
               {renderField(field)}
             </div>

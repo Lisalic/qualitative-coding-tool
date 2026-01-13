@@ -1,7 +1,12 @@
 import { useState, useEffect } from "react";
 import "../styles/Home.css";
+import { api } from "../api";
 
-export default function PromptManager({ onLoadPrompt, currentPrompt }) {
+export default function PromptManager({
+  onLoadPrompt,
+  currentPrompt,
+  promptType = "filter",
+}) {
   const [savedPrompts, setSavedPrompts] = useState([]);
   const [newPromptContent, setNewPromptContent] = useState("");
   const [editingId, setEditingId] = useState(null);
@@ -11,6 +16,20 @@ export default function PromptManager({ onLoadPrompt, currentPrompt }) {
   const [messageType, setMessageType] = useState("");
   useEffect(() => {
     loadSavedPrompts();
+  }, []);
+
+  useEffect(() => {
+    const handler = () => {
+      loadSavedPrompts();
+    };
+    try {
+      window.addEventListener("promptSaved", handler);
+    } catch (e) {}
+    return () => {
+      try {
+        window.removeEventListener("promptSaved", handler);
+      } catch (e) {}
+    };
   }, []);
 
   const showMessage = (text, type = "success") => {
@@ -24,10 +43,28 @@ export default function PromptManager({ onLoadPrompt, currentPrompt }) {
   };
 
   const loadSavedPrompts = () => {
-    const prompts = JSON.parse(
-      localStorage.getItem("savedFilterPrompts") || "[]"
-    );
-    setSavedPrompts(prompts);
+    api
+      .get(`/api/prompts/?prompt_type=${encodeURIComponent(promptType)}`)
+      .then((res) => {
+        const prompts = (res.data && res.data.prompts) || [];
+        const mapped = prompts.map((p) => ({
+          id: p.rowid,
+          name: p.display_name,
+          prompt: p.prompt,
+          createdAt: new Date().toISOString(),
+        }));
+        setSavedPrompts(mapped);
+      })
+      .catch((err) => {
+        setSavedPrompts([]);
+        const msg =
+          err?.response?.data?.detail ||
+          err?.response?.data ||
+          err?.message ||
+          "Failed to load prompts";
+        // do not show error as a blocking message on load, but log for debugging
+        console.warn("Failed to load prompts:", msg);
+      });
   };
 
   const savePrompt = () => {
@@ -35,23 +72,58 @@ export default function PromptManager({ onLoadPrompt, currentPrompt }) {
       showMessage("Please enter prompt content", "error");
       return;
     }
-
     const nextNumber = savedPrompts.length + 1;
     const promptName = `Prompt ${nextNumber}`;
 
-    const newPrompt = {
-      id: Date.now(),
-      name: promptName,
+    // Log the row that will be created for debugging and fetch user id
+    const debugRow = {
+      display_name: promptName,
       prompt: newPromptContent.trim(),
-      createdAt: new Date().toISOString(),
+      type: "filter",
     };
+    // Attempt to get authenticated user id for debugging and include it in POST
+    let fetchedUserId = null;
+    api
+      .get("/api/me")
+      .then((meRes) => {
+        const userId = meRes?.data?.id || meRes?.data?.sub || null;
+        fetchedUserId = userId;
+        console.log("Creating prompt row (with user):", {
+          ...debugRow,
+          userId,
+        });
+      })
+      .catch((meErr) => {
+        const uidMsg =
+          meErr?.response?.data?.detail || meErr?.message || "unauthenticated";
+        console.warn("Could not fetch /api/me:", uidMsg);
+        console.log("Creating prompt row:", debugRow);
+      })
+      .finally(() => {
+        const form = new FormData();
+        form.append("display_name", promptName);
+        form.append("prompt", newPromptContent.trim());
+        form.append("type", promptType);
+        if (fetchedUserId) form.append("user_id", fetchedUserId);
 
-    const updatedPrompts = [...savedPrompts, newPrompt];
-    setSavedPrompts(updatedPrompts);
-    localStorage.setItem("savedFilterPrompts", JSON.stringify(updatedPrompts));
-
-    setNewPromptContent("");
-    showMessage("Prompt saved successfully!");
+        api
+          .post("/api/prompts/", form)
+          .then((res) => {
+            const p = res.data || {};
+            // reload prompts for current page type
+            loadSavedPrompts();
+            setNewPromptContent("");
+            showMessage("Prompt saved successfully!");
+          })
+          .catch((err) => {
+            const msg =
+              err?.response?.data?.detail ||
+              err?.response?.data ||
+              err?.message ||
+              "Failed to save prompt";
+            showMessage(String(msg), "error");
+          });
+      });
   };
 
   const startEdit = (prompt) => {
@@ -72,22 +144,29 @@ export default function PromptManager({ onLoadPrompt, currentPrompt }) {
       showMessage("Please enter prompt content", "error");
       return;
     }
-    const updated = savedPrompts.map((p) => {
-      if (p.id === id) {
-        return {
-          ...p,
-          name: editName || p.name,
-          prompt: editContent.trim(),
-        };
-      }
-      return p;
-    });
-    setSavedPrompts(updated);
-    localStorage.setItem("savedFilterPrompts", JSON.stringify(updated));
-    setEditingId(null);
-    setEditName("");
-    setEditContent("");
-    showMessage("Prompt updated successfully!");
+    const form = new FormData();
+    if (editName !== null) form.append("display_name", editName);
+    form.append("prompt", editContent.trim());
+    form.append("type", promptType);
+
+    api
+      .post(`/api/prompts/${id}/update`, form)
+      .then((res) => {
+        // refresh list after update
+        loadSavedPrompts();
+        setEditingId(null);
+        setEditName("");
+        setEditContent("");
+        showMessage("Prompt updated successfully!");
+      })
+      .catch((err) => {
+        const msg =
+          err?.response?.data?.detail ||
+          err?.response?.data ||
+          err?.message ||
+          "Failed to update prompt";
+        showMessage(String(msg), "error");
+      });
   };
 
   const loadPrompt = (prompt) => {
@@ -95,46 +174,26 @@ export default function PromptManager({ onLoadPrompt, currentPrompt }) {
   };
 
   const deletePrompt = (id) => {
-    const updatedPrompts = savedPrompts.filter((p) => p.id !== id);
-    setSavedPrompts(updatedPrompts);
-    localStorage.setItem("savedFilterPrompts", JSON.stringify(updatedPrompts));
-    showMessage("Prompt deleted successfully!");
+    api
+      .delete(`/api/prompts/${id}`)
+      .then(() => {
+        // refresh list after delete
+        loadSavedPrompts();
+        showMessage("Prompt deleted successfully!");
+      })
+      .catch((err) => {
+        const msg =
+          err?.response?.data?.detail ||
+          err?.response?.data ||
+          err?.message ||
+          "Failed to delete prompt";
+        showMessage(String(msg), "error");
+      });
   };
 
   return (
     <div className="prompt-manager">
-      <h1
-        style={{
-          textAlign: "center",
-          fontSize: "28px",
-          fontWeight: "600",
-          margin: "0 0 30px 0",
-        }}
-      >
-        Manage Prompts
-      </h1>
       <div className="prompt-manager-content">
-        <div className="save-prompt-section">
-          <h3>Save New Prompt</h3>
-          <div className="form-group">
-            <textarea
-              value={newPromptContent}
-              onChange={(e) => setNewPromptContent(e.target.value)}
-              placeholder="Enter your prompt content here..."
-              className="form-input"
-              rows={4}
-            />
-            <button
-              type="button"
-              onClick={savePrompt}
-              className="save-prompt-btn"
-              disabled={!newPromptContent.trim()}
-            >
-              Save Prompt
-            </button>
-          </div>
-        </div>
-
         {message && (
           <div className={`prompt-message ${messageType}`}>
             <span>{message}</span>
