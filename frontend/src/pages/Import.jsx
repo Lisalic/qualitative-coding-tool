@@ -198,9 +198,11 @@ export default function Import() {
         // send schema_name and display_name to rename project display name
         formData.append("schema_name", oldName);
         formData.append("display_name", newName.trim());
-        if (newDescription && newDescription.trim()) {
-          formData.append("description", newDescription.trim());
-        }
+        // Always send description (allow clearing by sending empty string)
+        formData.append(
+          "description",
+          newDescription == null ? "" : newDescription
+        );
 
         const response = await apiFetch("/api/rename-project/", {
           method: "POST",

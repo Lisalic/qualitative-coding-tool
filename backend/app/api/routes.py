@@ -1045,6 +1045,7 @@ async def list_codebooks(db: Session = Depends(get_db)):
                 "id": str(p.id),
                 "name": p.display_name,
                 "metadata": {"schema": p.schema_name, "created_at": p.created_at.isoformat() if p.created_at else None},
+                "description": p.description,
                 "source": "project",
             })
     except Exception:

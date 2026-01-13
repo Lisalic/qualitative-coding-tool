@@ -73,9 +73,11 @@ export default function CodebookManager({ onViewCodebook }) {
           throw new Error("Project schema name not found for rename");
         formData.append("schema_name", schema);
         formData.append("display_name", newName.trim());
-        if (newDescription && newDescription.trim()) {
-          formData.append("description", newDescription.trim());
-        }
+        // Always send description (allow clearing by sending empty string)
+        formData.append(
+          "description",
+          newDescription == null ? "" : newDescription
+        );
 
         const response = await apiFetch("/api/rename-project/", {
           method: "POST",
