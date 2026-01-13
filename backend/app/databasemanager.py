@@ -65,9 +65,9 @@ class ProjectRepository(BaseRepository):
             return True
         return False
 
-    def create(self, user_id: int, display_name: str, schema_name: str, project_type: str = "raw_data") -> Project:
+    def create(self, user_id: int, display_name: str, schema_name: str, project_type: str = "raw_data", description: str = None) -> Project:
         # default project_type to raw_data so DB non-null constraint is satisfied
-        proj = Project(user_id=user_id, display_name=display_name, schema_name=schema_name, project_type=project_type)
+        proj = Project(user_id=user_id, display_name=display_name, schema_name=schema_name, project_type=project_type, description=description)
         self.session.add(proj)
         self.session.flush()
         return proj
