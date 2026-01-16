@@ -1,14 +1,18 @@
 import os
-import uuid
 from pathlib import Path
 
-from sqlalchemy import Column, String, Integer, ForeignKey, DateTime, text
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy import (
+    Column,
+    String,
+    Integer,
+    ForeignKey,
+    DateTime,
+    Table,
+    create_engine,
+)
+from sqlalchemy.orm import relationship, sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
 
 # Load .env from backend/ if present so running scripts picks up DATABASE_URL
@@ -19,7 +23,6 @@ if env_path.exists():
 # Build database URL from env
 DATABASE_URL = os.environ.get("DATABASE_URL") or os.environ.get("AUTH_DATABASE_URL")
 if not DATABASE_URL:
-    # Fallback to individual PG vars if provided
     pg_user = os.environ.get("PGUSER") or os.environ.get("DB_USER") or "postgres"
     pg_pass = os.environ.get("PGPASSWORD") or os.environ.get("DB_PASSWORD") or ""
     pg_host = os.environ.get("PGHOST") or "localhost"
@@ -29,6 +32,7 @@ if not DATABASE_URL:
         DATABASE_URL = f"postgresql://{pg_user}:{pg_pass}@{pg_host}:{pg_port}/{pg_db}"
     else:
         DATABASE_URL = f"postgresql://{pg_user}@{pg_host}:{pg_port}/{pg_db}"
+
 # Create SQLAlchemy engine and session factory
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
@@ -45,77 +49,82 @@ def get_db():
         db.close()
 
 
+# Association table for many-to-many between projects and files
+project_files_table = Table(
+    "project_files",
+    Base.metadata,
+    Column("project_id", Integer, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True),
+    Column("file_id", Integer, ForeignKey("files.id", ondelete="CASCADE"), primary_key=True),
+)
+
+
 class User(Base):
     __tablename__ = "users"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
     email = Column(String, unique=True, nullable=False)
-    password_hash = Column(String, nullable=False)
+    hashed_password = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    # Relationship to Projects
-    projects = relationship("Project", back_populates="user")
-    
-    
+    projects = relationship("Project", back_populates="user", cascade="all, delete-orphan")
+    files = relationship("File", back_populates="user", cascade="all, delete-orphan")
+    prompts = relationship("Prompt", back_populates="user", cascade="all, delete-orphan")
+
+
 class Project(Base):
     __tablename__ = "projects"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    display_name = Column(String, nullable=False)  # Editable frontend name
-    description = Column(String, nullable=True)
-    schema_name = Column(String, unique=True, nullable=False) # Fixed backend schema name
-    project_type = Column(String, nullable=False)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    projectname = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    # Relationships
     user = relationship("User", back_populates="projects")
-    tables = relationship("ProjectTable", back_populates="project", cascade="all, delete-orphan")
+    files = relationship("File", secondary=project_files_table, back_populates="projects")
 
 
-class AuthUser(Base):
-    __tablename__ = "users"
-    __table_args__ = {"extend_existing": True}
+class File(Base):
+    __tablename__ = "files"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    email = Column(String, unique=True, nullable=False)
-    hashed_password = Column("password_hash", String, nullable=False)
-    date_created = Column("created_at", DateTime(timezone=True), server_default=func.now())
-    # Do not define `projects` relationship here to avoid mapper/back_populates conflicts
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    filename = Column(String, nullable=False)
+    schemaname = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    file_type = Column(String)
+    description = Column(String)
+
+    user = relationship("User", back_populates="files")
+    projects = relationship("Project", secondary=project_files_table, back_populates="files")
+    tables = relationship("FileTable", back_populates="file", cascade="all, delete-orphan")
 
 
-class ProjectTable(Base):
-    __tablename__ = "project_tables"
+class FileTable(Base):
+    __tablename__ = "file_tables"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
-    table_name = Column(String, nullable=False) # Table name inside the schema
+    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), primary_key=True)
+    tablename = Column(String, primary_key=True)
     row_count = Column(Integer, default=0)
 
-    project = relationship("Project", back_populates="tables")
+    file = relationship("File", back_populates="tables")
 
 
 class Prompt(Base):
     __tablename__ = "prompts"
 
-    # Integer primary key (rowid) as requested
-    rowid = Column(Integer, primary_key=True, autoincrement=True)
-    # Link to users table
-    uuid = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    display_name = Column(String, nullable=False)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    promptname = Column(String, nullable=False)
     prompt = Column(String, nullable=False)
-    type = Column(String, nullable=False)
+    type = Column(String)
 
-    # Relationship to User for convenience
-    user = relationship("User", backref="prompts")
+    user = relationship("User", back_populates="prompts")
 
 
 # Ensure tables exist in the target database. Wrap in try/except so
 # failures (e.g., DB not available during local dev) don't crash imports.
-try: 
+try:
     Base.metadata.create_all(bind=engine)
 except Exception as _err:
-    # Defer detailed error handling to startup logs; printing helps
-    # debugging when running scripts interactively.
     print("Warning: could not create DB tables:", _err)
  
