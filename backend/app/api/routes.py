@@ -558,15 +558,15 @@ def me(request: Request, db: Session = Depends(get_db)):
     return JSONResponse({"id": str(user.id), "email": user.email})
 
 
-@router.get("/my-projects/")
-def my_projects(request: Request, project_type: str = Query("raw_data"), db: Session = Depends(get_db)):
+@router.get("/my-files/")
+def my_projects(request: Request, file_type: str = Query("raw_data"), db: Session = Depends(get_db)):
     # Resolve authenticated user from token
     user_id = get_user_id_from_request(request)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    # Use File table instead of Project; `project_type` maps to `file_type` on File
-    files = db.query(File).filter(File.user_id == int(user_id), File.file_type == project_type).all()
+    # Use File table instead of Project; `file_type` query param maps to `file_type` on File
+    files = db.query(File).filter(File.user_id == int(user_id), File.file_type == file_type).all()
     result = []
     for p in files:
         tables = []
@@ -588,7 +588,9 @@ def my_projects(request: Request, project_type: str = Query("raw_data"), db: Ses
             "tables": tables,
         })
 
-    return JSONResponse({"files": result})
+    # Return under the legacy "projects" key so frontend code expecting
+    # `data.projects` continues to work.
+    return JSONResponse({"projects": result})
 
 
 @router.get("/prompts/")
@@ -881,7 +883,7 @@ async def delete_row(request: Request, schema: str = Form(...), table: str = For
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@router.post("/rename-project/")
+@router.post("/rename-file/")
 def rename_project(request: Request, schema_name: str = Form(...), display_name: str = Form(...), description: str = Form(None), db: Session = Depends(get_db)):
     """Rename a file's display_name. Requires authentication and ownership."""
     # Resolve authenticated user from token
@@ -1111,7 +1113,7 @@ async def list_codebooks(db: Session = Depends(get_db)):
     return JSONResponse({"codebooks": codebooks})
 
 
-@router.post("/save-project-codebook/")
+@router.post("/save-file-codebook/")
 async def save_project_codebook(request: Request, schema_name: str = Form(...), content: str = Form(...), db: Session = Depends(get_db)):
     """Save codebook content into a Postgres file schema's content_store table.
     Requires authentication and file ownership.
@@ -1212,7 +1214,7 @@ async def get_coded_data_query(coded_id: str = Query(None), db: Session = Depend
     return JSONResponse({"error": "No coded data file found"}, status_code=404)
 
 
-@router.post("/save-project-coded-data/")
+@router.post("/save-file-coded-data/")
 async def save_project_coded_data(request: Request, schema_name: str = Form(None), content: str = Form(None), db: Session = Depends(get_db)):
     """Save coded content into a Postgres file-backed schema's content_store table for file_type 'coding'.
     Requires authentication and ownership.
@@ -1269,7 +1271,7 @@ async def save_project_coded_data(request: Request, schema_name: str = Form(None
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@router.get("/project-entries/")
+@router.get("/file-entries/")
 def project_entries(schema: str = Query(..., description="File schema name"), limit: int = 10, offset: int = 0):
     # Allow optional .db suffix (frontend may supply schema.db); validate and strip it.
     import re

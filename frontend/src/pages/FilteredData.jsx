@@ -39,7 +39,7 @@ export default function FilteredData() {
       const meResp = await apiFetch("/api/me/");
       if (meResp.ok) {
         const projResp = await apiFetch(
-          "/api/my-projects/?project_type=filtered_data"
+          "/api/my-files/?file_type=filtered_data"
         );
         if (!projResp.ok) throw new Error("Failed to fetch user projects");
         const projData = await projResp.json();

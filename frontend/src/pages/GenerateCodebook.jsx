@@ -32,9 +32,7 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
   const fetchDatabases = async () => {
     try {
       // Prefer Postgres projects; list-databases removed in favor of my-projects
-      const response = await apiFetch(
-        "/api/my-projects/?project_type=raw_data"
-      );
+      const response = await apiFetch("/api/my-files/?file_type=raw_data");
       if (!response.ok) throw new Error("Failed to fetch projects");
       const data = await response.json();
 
@@ -57,9 +55,7 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
 
   const fetchFilteredDatabases = async () => {
     try {
-      const projResp = await apiFetch(
-        "/api/my-projects/?project_type=filtered_data"
-      );
+      const projResp = await apiFetch("/api/my-files/?file_type=filtered_data");
       if (projResp.ok) {
         const projData = await projResp.json();
         const projects = projData.projects || [];

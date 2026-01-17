@@ -79,7 +79,7 @@ export default function CodebookManager({ onViewCodebook }) {
           newDescription == null ? "" : newDescription
         );
 
-        const response = await apiFetch("/api/rename-project/", {
+        const response = await apiFetch("/api/rename-file/", {
           method: "POST",
           body: formData,
         });

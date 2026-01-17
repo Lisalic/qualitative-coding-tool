@@ -31,9 +31,7 @@ export default function Import() {
       // Check authentication and fetch user projects if logged in
       const meResp = await apiFetch("/api/me/");
       if (meResp.ok) {
-        const projResp = await apiFetch(
-          "/api/my-projects/?project_type=raw_data"
-        );
+        const projResp = await apiFetch("/api/my-files/?file_type=raw_data");
         if (!projResp.ok) throw new Error("Failed to fetch user projects");
         const projData = await projResp.json();
         setUserProjects(projData.projects || []);
@@ -64,9 +62,7 @@ export default function Import() {
       }
 
       // If not authenticated, still try to use my-projects for raw_data (may be empty)
-      const response = await apiFetch(
-        "/api/my-projects/?project_type=raw_data"
-      );
+      const response = await apiFetch("/api/my-files/?file_type=raw_data");
       if (response.ok) {
         const data = await response.json();
         const normalized = (data.projects || []).map((p) => {
@@ -204,7 +200,7 @@ export default function Import() {
           newDescription == null ? "" : newDescription
         );
 
-        const response = await apiFetch("/api/rename-project/", {
+        const response = await apiFetch("/api/rename-file/", {
           method: "POST",
           body: formData,
         });

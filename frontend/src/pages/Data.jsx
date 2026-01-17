@@ -40,9 +40,7 @@ export default function Data() {
       const meResp = await apiFetch("/api/me/");
       if (meResp.ok) {
         // user is authenticated; fetch their raw_data projects
-        const projResp = await apiFetch(
-          "/api/my-projects/?project_type=raw_data"
-        );
+        const projResp = await apiFetch("/api/my-files/?file_type=raw_data");
         if (!projResp.ok) throw new Error("Failed to fetch user projects");
         const projData = await projResp.json();
         const projects = projData.projects || [];
@@ -72,9 +70,7 @@ export default function Data() {
       }
 
       // Not authenticated — try my-projects for raw_data (may return empty)
-      const response = await apiFetch(
-        "/api/my-projects/?project_type=raw_data"
-      );
+      const response = await apiFetch("/api/my-files/?file_type=raw_data");
       if (response.ok) {
         const projData = await response.json();
         const projects = projData.projects || [];

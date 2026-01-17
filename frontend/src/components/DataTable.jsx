@@ -46,7 +46,7 @@ export default function DataTable({
       );
       if (currentDatabase && isProjectSchema) {
         response = await apiFetch(
-          `/api/project-entries/?limit=${fetchLimit}&offset=${offsetParam}&schema=${encodeURIComponent(
+          `/api/file-entries/?limit=${fetchLimit}&offset=${offsetParam}&schema=${encodeURIComponent(
             String(currentDatabase)
           )}`
         );
@@ -86,7 +86,7 @@ export default function DataTable({
   useEffect(() => {
     (async () => {
       try {
-        const resp = await apiFetch(`/api/my-projects/?project_type=raw_data`);
+        const resp = await apiFetch(`/api/my-files/?file_type=raw_data`);
         if (resp.ok) {
           const data = await resp.json();
           setProjects(data.projects || []);

@@ -152,7 +152,7 @@ export default function ViewCodebook() {
                   fetchStyle="query"
                   fetchBase="/api/codebook"
                   queryParamName="codebook_id"
-                  saveUrl={"/api/save-project-codebook/"}
+                  saveUrl={"/api/save-file-codebook/"}
                   saveIdFieldName={"schema_name"}
                   saveAsProject={true}
                   projectSchema={projectSchema}

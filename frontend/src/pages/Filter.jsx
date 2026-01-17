@@ -45,7 +45,7 @@ export default function Filter() {
   const fetchDatabases = async () => {
     try {
       // Fetch raw_data projects for the database select
-      const respRaw = await apiFetch("/api/my-projects/?project_type=raw_data");
+      const respRaw = await apiFetch("/api/my-files/?file_type=raw_data");
       if (!respRaw.ok) throw new Error("Failed to fetch raw projects");
       const rawData = await respRaw.json();
       const rawOptions = (rawData.projects || []).map((p) => ({
@@ -56,7 +56,7 @@ export default function Filter() {
 
       // Fetch filtered_data projects for ManageDatabase view
       const respFiltered = await apiFetch(
-        "/api/my-projects/?project_type=filtered_data"
+        "/api/my-files/?file_type=filtered_data"
       );
       if (!respFiltered.ok)
         throw new Error("Failed to fetch filtered projects");
@@ -98,7 +98,7 @@ export default function Filter() {
       formData.append("schema_name", oldName);
       formData.append("display_name", newName.trim());
 
-      const response = await apiFetch("/api/rename-project/", {
+      const response = await apiFetch("/api/rename-file/", {
         method: "POST",
         body: formData,
       });

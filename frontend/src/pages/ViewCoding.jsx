@@ -14,7 +14,7 @@ export default function ViewCoding() {
   const fetchAvailableCodedData = async () => {
     try {
       // Prefer user-owned coded projects from Postgres
-      const resp = await apiFetch("/api/my-projects/?project_type=coding");
+      const resp = await apiFetch("/api/my-files/?file_type=coding");
       if (resp.ok) {
         const json = await resp.json();
         const projects = json.projects || [];
@@ -94,7 +94,7 @@ export default function ViewCoding() {
             fetchStyle="query"
             fetchBase="/api/coded-data"
             queryParamName="coded_id"
-            saveUrl={"/api/save-project-coded-data/"}
+            saveUrl={"/api/save-file-coded-data/"}
             saveIdFieldName={"schema_name"}
             saveAsProject={true}
             projectSchema={selectedCodedData}

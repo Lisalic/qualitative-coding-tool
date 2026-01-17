@@ -48,9 +48,7 @@ export default function ApplyCodebook() {
   const fetchDatabases = async () => {
     try {
       // Prefer server-side Postgres projects for authenticated users
-      const projResp = await apiFetch(
-        "/api/my-projects/?project_type=raw_data"
-      );
+      const projResp = await apiFetch("/api/my-files/?file_type=raw_data");
       if (projResp.ok) {
         const projData = await projResp.json();
         const projects = projData.projects || [];
@@ -65,9 +63,7 @@ export default function ApplyCodebook() {
       }
 
       // Fallback: prefer Postgres projects instead of filesystem list
-      const response = await apiFetch(
-        "/api/my-projects/?project_type=raw_data"
-      );
+      const response = await apiFetch("/api/my-files/?file_type=raw_data");
       if (!response.ok) throw new Error("Failed to fetch projects");
       const data = await response.json();
       const normalized = (data.projects || []).map((p) => ({
@@ -87,9 +83,7 @@ export default function ApplyCodebook() {
   const fetchFilteredDatabases = async () => {
     try {
       // Prefer server-side Postgres projects for authenticated users
-      const projResp = await apiFetch(
-        "/api/my-projects/?project_type=filtered_data"
-      );
+      const projResp = await apiFetch("/api/my-files/?file_type=filtered_data");
       if (projResp.ok) {
         const projData = await projResp.json();
         const projects = projData.projects || [];
