@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi import Request
 
 try:
-    from app.database import get_db, User, Project, ProjectTable, Prompt, File, FileTable, engine, SessionLocal
+    from app.database import get_db, User, Prompt, File, FileTable, engine, SessionLocal
     from app.databasemanager import DatabaseManager
     from app.auth import create_access_token, decode_access_token
     from app.config import settings
@@ -34,7 +34,7 @@ try:
     from app.services import migrate_sqlite_file
 except:
     try:
-        from backend.app.database import get_db, User, Project, ProjectTable, Prompt, File, FileTable, engine, SessionLocal
+        from backend.app.database import get_db, User, Prompt, File, FileTable, engine, SessionLocal
         from backend.app.databasemanager import DatabaseManager
         from backend.app.auth import create_access_token, decode_access_token
         from backend.app.config import settings
@@ -177,13 +177,13 @@ async def upload_zst_file(
 
             # add file_tables metadata
             if inserted_counts.get('submissions', 0) > 0:
-                dm.project_tables.add_table_metadata(
+                dm.file_tables.add_table_metadata(
                     file_id=file_rec.id,
                     table_name='submissions',
                     row_count=inserted_counts.get('submissions', 0)
                 )
             if inserted_counts.get('comments', 0) > 0:
-                dm.project_tables.add_table_metadata(
+                dm.file_tables.add_table_metadata(
                     file_id=file_rec.id,
                     table_name='comments',
                     row_count=inserted_counts.get('comments', 0)
@@ -279,16 +279,16 @@ async def merge_databases(request: Request):
     if not user_id:
         raise HTTPException(status_code=401, detail="Authentication required to merge databases")
 
-    # ensure user doesn't already have a project with same display/schema
+    # ensure user doesn't already have a file with same filename/schemaname
     db_check = SessionLocal()
     try:
-        existing = db_check.query(Project).filter(
-            Project.user_id == int(user_id),
+        existing = db_check.query(File).filter(
+            File.user_id == int(user_id),
         ).filter(
-            (Project.display_name == name) | (Project.schema_name == name)
+            (File.filename == name) | (File.schemaname == name)
         ).first()
         if existing:
-            raise HTTPException(status_code=400, detail=f"A project with name '{name}' already exists")
+            raise HTTPException(status_code=400, detail=f"A file with name '{name}' already exists")
     finally:
         try:
             db_check.close()
@@ -308,7 +308,7 @@ async def merge_databases(request: Request):
         database_dir = Path(settings.database_dir)
 
         for db_name in db_list:
-            # Only support Postgres project schema sources (proj_...)
+            # Only support Postgres file schema sources (proj_...)
             if isinstance(db_name, str) and db_name.startswith("proj_"):
                 schema_src = db_name
                 try:
@@ -434,7 +434,7 @@ async def merge_databases(request: Request):
                     conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE'))
             except Exception:
                 pass
-            return JSONResponse({"message": "No rows found in selected databases; nothing migrated", "database": name, "total_submissions": 0, "total_comments": 0, "project_migrated": False})
+            return JSONResponse({"message": "No rows found in selected databases; nothing migrated", "database": name, "total_submissions": 0, "total_comments": 0, "file_migrated": False})
 
         # Create file record and file_tables metadata using the final counts
         with DatabaseManager() as dm:
@@ -446,12 +446,12 @@ async def merge_databases(request: Request):
                 dm.session.rollback()
                 raise
             for tbl, cnt in final_table_counts.items():
-                dm.project_tables.add_table_metadata(file_id=file_rec.id, table_name=tbl, row_count=cnt)
+                dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name=tbl, row_count=cnt)
 
         return JSONResponse({
-            "message": f"Merged into project schema '{schema_name}'",
-            "project": {"id": str(file_rec.id), "schema_name": schema_name, "display_name": name, "description": (description or None)},
-            "project_migrated": True,
+                "message": f"Merged into file schema '{schema_name}'",
+                "file": {"id": str(file_rec.id), "schema_name": schema_name, "display_name": name, "description": (description or None)},
+                "file_migrated": True,
         })
 
     except HTTPException:
@@ -566,9 +566,9 @@ def my_projects(request: Request, project_type: str = Query("raw_data"), db: Ses
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     # Use File table instead of Project; `project_type` maps to `file_type` on File
-    projects = db.query(File).filter(File.user_id == int(user_id), File.file_type == project_type).all()
+    files = db.query(File).filter(File.user_id == int(user_id), File.file_type == project_type).all()
     result = []
-    for p in projects:
+    for p in files:
         tables = []
         try:
             # Query file-backed table metadata
@@ -583,12 +583,12 @@ def my_projects(request: Request, project_type: str = Query("raw_data"), db: Ses
             "display_name": p.filename,
             "description": p.description,
             "schema_name": p.schemaname,
-            "project_type": p.file_type,
+            "file_type": p.file_type,
             "created_at": p.created_at.isoformat() if p.created_at else None,
             "tables": tables,
         })
 
-    return JSONResponse({"projects": result})
+    return JSONResponse({"files": result})
 
 
 @router.get("/prompts/")
@@ -797,7 +797,7 @@ async def delete_database(db_name: str, request: Request, db: Session = Depends(
     schema = db_name.strip()
 
     if not schema.startswith('proj_'):
-        raise HTTPException(status_code=400, detail="Invalid project schema identifier")
+        raise HTTPException(status_code=400, detail="Invalid file schema identifier")
 
     # Resolve authenticated user from token
     user_id = get_user_id_from_request(request)
@@ -806,7 +806,7 @@ async def delete_database(db_name: str, request: Request, db: Session = Depends(
 
     file_rec = db.query(File).filter(File.schemaname == schema, File.user_id == int(user_id)).first()
     if not file_rec:
-        raise HTTPException(status_code=404, detail="File/project not found or you do not have permission")
+        raise HTTPException(status_code=404, detail="File not found or you do not have permission")
 
     try:
         with engine.begin() as conn:
@@ -814,24 +814,24 @@ async def delete_database(db_name: str, request: Request, db: Session = Depends(
 
         db.delete(file_rec)
         db.commit()
-        return JSONResponse({"message": f"File/project '{file_rec.filename}' and schema '{schema}' deleted"})
+        return JSONResponse({"message": f"File '{file_rec.filename}' and schema '{schema}' deleted"})
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to delete project/schema: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete file/schema: {str(e)}")
 
 
 @router.post("/delete-row/")
 async def delete_row(request: Request, schema: str = Form(...), table: str = Form(...), row_id: str = Form(...), db: Session = Depends(get_db)):
-    """Delete a single row (by id) from a project's table (submissions or comments).
+    """Delete a single row (by id) from a file's table (submissions or comments).
 
-    Requires authentication and project ownership.
+    Requires authentication and file ownership.
     """
     schema = (schema or "").strip()
     if schema.endswith('.db'):
         schema = schema[:-3]
 
     if not schema or not schema.startswith('proj_'):
-        return JSONResponse({"error": "Invalid project schema"}, status_code=400)
+        return JSONResponse({"error": "Invalid file schema"}, status_code=400)
 
     if table not in ("submissions", "comments"):
         return JSONResponse({"error": "Invalid table"}, status_code=400)
@@ -843,7 +843,7 @@ async def delete_row(request: Request, schema: str = Form(...), table: str = For
     try:
         file_rec = db.query(File).filter(File.schemaname == schema, File.user_id == int(user_id)).first()
         if not file_rec:
-            return JSONResponse({"error": "Project/file not found or not owned by user"}, status_code=403)
+            return JSONResponse({"error": "File not found or not owned by user"}, status_code=403)
 
         with engine.begin() as conn:
             res = conn.execute(text(f'DELETE FROM "{schema}"."{table}" WHERE id = :id'), {"id": row_id})
@@ -852,12 +852,12 @@ async def delete_row(request: Request, schema: str = Form(...), table: str = For
             except Exception:
                 deleted = 0
 
-        # Update project_tables metadata: recount rows and persist
+        # Update file_tables metadata: recount rows and persist
         try:
             with engine.connect() as conn:
                 cnt = conn.execute(text(f'SELECT COUNT(*) FROM "{schema}"."{table}"')).scalar() or 0
 
-            # update or insert project_tables row using ORM session `db`
+            # update or insert file_tables row using ORM session `db`
             pt = db.query(FileTable).filter(FileTable.file_id == file_rec.id, FileTable.tablename == table).first()
             if pt:
                 pt.row_count = int(cnt)
@@ -883,7 +883,7 @@ async def delete_row(request: Request, schema: str = Form(...), table: str = For
 
 @router.post("/rename-project/")
 def rename_project(request: Request, schema_name: str = Form(...), display_name: str = Form(...), description: str = Form(None), db: Session = Depends(get_db)):
-    """Rename a project's display_name. Requires authentication and ownership."""
+    """Rename a file's display_name. Requires authentication and ownership."""
     # Resolve authenticated user from token
     user_id = get_user_id_from_request(request)
     if not user_id:
@@ -894,7 +894,7 @@ def rename_project(request: Request, schema_name: str = Form(...), display_name:
 
     file_rec = db.query(File).filter(File.schemaname == schema, File.user_id == int(user_id)).first()
     if not file_rec:
-        raise HTTPException(status_code=404, detail="File/project not found or you do not have permission")
+        raise HTTPException(status_code=404, detail="File not found or you do not have permission")
 
     file_rec.filename = display_name
     if description is not None:
@@ -904,16 +904,16 @@ def rename_project(request: Request, schema_name: str = Form(...), display_name:
         db.refresh(file_rec)
     except Exception as exc:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to rename file/project: {exc}")
+        raise HTTPException(status_code=500, detail=f"Failed to rename file: {exc}")
 
-    return JSONResponse({"message": "Project renamed", "id": str(file_rec.id), "display_name": file_rec.filename, "description": file_rec.description})
+    return JSONResponse({"message": "File renamed", "id": str(file_rec.id), "display_name": file_rec.filename, "description": file_rec.description})
 
 
 @router.post("/move-rows/")
 async def move_rows(request: Request, db: Session = Depends(get_db)):
-    """Move rows from one project schema to another. Expects JSON body:
+    """Move rows from one file schema to another. Expects JSON body:
     {"source_schema": "proj_x", "target_schema": "proj_y", "table": "submissions", "row_ids": [..]}
-    Requires authentication and ownership of both projects.
+    Requires authentication and ownership of both files.
     """
     try:
         body = await request.json()
@@ -931,7 +931,7 @@ async def move_rows(request: Request, db: Session = Depends(get_db)):
         target = target[:-3]
 
     if not source or not source.startswith('proj_') or not target or not target.startswith('proj_'):
-        return JSONResponse({"error": "Invalid project schema"}, status_code=400)
+        return JSONResponse({"error": "Invalid file schema"}, status_code=400)
     if table not in ("submissions", "comments"):
         return JSONResponse({"error": "Invalid table"}, status_code=400)
     if not isinstance(row_ids, list) or len(row_ids) == 0:
@@ -945,7 +945,7 @@ async def move_rows(request: Request, db: Session = Depends(get_db)):
         file_src = db.query(File).filter(File.schemaname == source, File.user_id == int(user_id)).first()
         file_tgt = db.query(File).filter(File.schemaname == target, File.user_id == int(user_id)).first()
         if not file_src or not file_tgt:
-            return JSONResponse({"error": "Source or target file/project not found or not owned by user"}, status_code=403)
+            return JSONResponse({"error": "Source or target file not found or not owned by user"}, status_code=403)
 
         moved = 0
         with engine.begin() as conn:
@@ -1011,30 +1011,29 @@ def logout():
 
 @router.get("/codebook")
 async def get_codebook(codebook_id: str = Query(None), db: Session = Depends(get_db)):
-    """Return a codebook stored in a Postgres project with project_type='codebook'.
+    """Return a codebook stored in a File record with file_type='codebook'.
     """
-    # First try to find a matching project (by schema_name or display_name or id)
-    project = None
+    # First try to find a matching file (by schemaname or filename or id)
+    file_rec = None
     if codebook_id:
-        # try schema_name match
-        project = db.query(Project).filter(Project.project_type == 'codebook', Project.schema_name == codebook_id).first()
-        if not project:
-            # try display_name match
-            project = db.query(Project).filter(Project.project_type == 'codebook', Project.display_name == codebook_id).first()
-        if not project:
+        # try schemaname match
+        file_rec = db.query(File).filter(File.file_type == 'codebook', File.schemaname == codebook_id).first()
+        if not file_rec:
+            # try filename match
+            file_rec = db.query(File).filter(File.file_type == 'codebook', File.filename == codebook_id).first()
+        if not file_rec:
             # try id match (integer)
             try:
-                pid = int(codebook_id)
-                project = db.query(Project).filter(Project.project_type == 'codebook', Project.id == pid).first()
+                fid = int(codebook_id)
+                file_rec = db.query(File).filter(File.file_type == 'codebook', File.id == fid).first()
             except Exception:
-                project = None
-
+                file_rec = None
     else:
-        # No id supplied: pick latest codebook project if any
-        project = db.query(Project).filter(Project.project_type == 'codebook').order_by(Project.created_at.desc()).first()
+        # No id supplied: pick latest codebook file if any
+        file_rec = db.query(File).filter(File.file_type == 'codebook').order_by(File.created_at.desc()).first()
 
-    if project:
-        schema = project.schema_name
+    if file_rec:
+        schema = file_rec.schemaname
         try:
             with engine.connect() as conn:
                 res = conn.execute(text(f'SELECT file_text FROM "{schema}".content_store LIMIT 1'))
@@ -1042,43 +1041,43 @@ async def get_codebook(codebook_id: str = Query(None), db: Session = Depends(get
                 if row:
                     return JSONResponse({"codebook": row[0]})
                 else:
-                    return JSONResponse({"error": "Codebook content not found in project"}, status_code=404)
+                    return JSONResponse({"error": "Codebook content not found in file"}, status_code=404)
         except Exception as e:
             print(f"Error reading codebook from schema {schema}: {e}")
             return JSONResponse({"error": f"Error reading codebook: {e}"}, status_code=500)
 
-    return JSONResponse({"error": "No codebook project found"}, status_code=404)
+    return JSONResponse({"error": "No codebook file found"}, status_code=404)
 
 
 @router.get("/parse-codebook")
 async def parse_codebook(codebook_id: str = Query(None), db: Session = Depends(get_db)):
-    """Return a parsed JSON structure for a codebook project using the display_codebook helper.
+    """Return a parsed JSON structure for a codebook file using the display_codebook helper.
     The response will be { "parsed": [ ... ] } where parsed is an array of families with codes.
     """
-    project = None
+    file_rec = None
     if codebook_id:
-        project = db.query(Project).filter(Project.project_type == 'codebook', Project.schema_name == codebook_id).first()
-        if not project:
-            project = db.query(Project).filter(Project.project_type == 'codebook', Project.display_name == codebook_id).first()
-        if not project:
+        file_rec = db.query(File).filter(File.file_type == 'codebook', File.schemaname == codebook_id).first()
+        if not file_rec:
+            file_rec = db.query(File).filter(File.file_type == 'codebook', File.filename == codebook_id).first()
+        if not file_rec:
             try:
-                pid = int(codebook_id)
-                project = db.query(Project).filter(Project.project_type == 'codebook', Project.id == pid).first()
+                fid = int(codebook_id)
+                file_rec = db.query(File).filter(File.file_type == 'codebook', File.id == fid).first()
             except Exception:
-                project = None
+                file_rec = None
     else:
-        project = db.query(Project).filter(Project.project_type == 'codebook').order_by(Project.created_at.desc()).first()
+        file_rec = db.query(File).filter(File.file_type == 'codebook').order_by(File.created_at.desc()).first()
 
-    if not project:
-        return JSONResponse({"error": "No codebook project found"}, status_code=404)
+    if not file_rec:
+        return JSONResponse({"error": "No codebook file found"}, status_code=404)
 
-    schema = project.schema_name
+    schema = file_rec.schemaname
     try:
         with engine.connect() as conn:
             res = conn.execute(text(f'SELECT file_text FROM "{schema}".content_store LIMIT 1'))
             row = res.fetchone()
             if not row:
-                return JSONResponse({"error": "Codebook content not found in project"}, status_code=404)
+                return JSONResponse({"error": "Codebook content not found in file"}, status_code=404)
             raw = row[0] or ""
             try:
                 parsed_text = parse_codebook_to_json(raw)
@@ -1093,17 +1092,17 @@ async def parse_codebook(codebook_id: str = Query(None), db: Session = Depends(g
 
 @router.get("/list-codebooks")
 async def list_codebooks(db: Session = Depends(get_db)):
-    # Only return DB-backed codebook projects
+    # Only return DB-backed codebook files
     codebooks = []
     try:
-        projects = db.query(Project).filter(Project.project_type == 'codebook').all()
-        for p in projects:
+        files = db.query(File).filter(File.file_type == 'codebook').all()
+        for p in files:
             codebooks.append({
                 "id": str(p.id),
-                "name": p.display_name,
-                "metadata": {"schema": p.schema_name, "created_at": p.created_at.isoformat() if p.created_at else None},
+                "name": p.filename,
+                "metadata": {"schema": p.schemaname, "created_at": p.created_at.isoformat() if p.created_at else None},
                 "description": p.description,
-                "source": "project",
+                "source": "file",
             })
     except Exception:
         return JSONResponse({"codebooks": []})
@@ -1114,8 +1113,8 @@ async def list_codebooks(db: Session = Depends(get_db)):
 
 @router.post("/save-project-codebook/")
 async def save_project_codebook(request: Request, schema_name: str = Form(...), content: str = Form(...), db: Session = Depends(get_db)):
-    """Save codebook content into a Postgres project schema's content_store table.
-    Requires authentication and project ownership.
+    """Save codebook content into a Postgres file schema's content_store table.
+    Requires authentication and file ownership.
     """
     # Resolve authenticated user from token
     user_id = get_user_id_from_request(request)
@@ -1124,9 +1123,9 @@ async def save_project_codebook(request: Request, schema_name: str = Form(...), 
 
     schema = schema_name.strip()
 
-    proj = db.query(Project).filter(Project.schema_name == schema, Project.user_id == int(user_id)).first()
-    if not proj:
-        raise HTTPException(status_code=404, detail="Project not found or you do not have permission")
+    file_rec = db.query(File).filter(File.schemaname == schema, File.user_id == int(user_id)).first()
+    if not file_rec:
+        raise HTTPException(status_code=404, detail="File/project not found or you do not have permission")
 
     # Ensure content_store table exists and upsert the single row
     display_name = None
@@ -1159,124 +1158,119 @@ async def save_project_codebook(request: Request, schema_name: str = Form(...), 
             conn.execute(text(f'TRUNCATE TABLE "{schema}".content_store'))
             conn.execute(text(f'INSERT INTO "{schema}".content_store (file_text) VALUES (:file_text)'), {"file_text": content})
 
-        # If a display_name was provided, update the projects table
+        # If a display_name was provided, update the file record
         if display_name:
-            proj.display_name = display_name
+            file_rec.filename = display_name
             try:
                 db.commit()
-                db.refresh(proj)
+                db.refresh(file_rec)
             except Exception as exc:
                 db.rollback()
-                print(f"Failed to update project display_name for {schema}: {exc}")
+                print(f"Failed to update file filename for {schema}: {exc}")
 
-        return JSONResponse({"message": "Project codebook saved", "id": str(proj.id), "display_name": proj.display_name})
+        return JSONResponse({"message": "File codebook saved", "id": str(file_rec.id), "display_name": file_rec.filename})
     except Exception as e:
-        print(f"Error saving project codebook to schema {schema}: {e}")
+        print(f"Error saving file codebook to schema {schema}: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@router.get("/coded-data") 
+@router.get("/coded-data")
 async def get_coded_data_query(coded_id: str = Query(None), db: Session = Depends(get_db)):
-    """Return coded data stored in a Postgres project with project_type='coding'.
+    """Return coded data stored in a File record with file_type='coding'.
     """
-    project = None
+    file_rec = None
     if coded_id:
-        # try schema_name match
-        project = db.query(Project).filter(Project.project_type == 'coding', Project.schema_name == coded_id).first()
-        if not project:
-            project = db.query(Project).filter(Project.project_type == 'coding', Project.display_name == coded_id).first()
-        if not project:
+        file_rec = db.query(File).filter(File.file_type == 'coding', File.schemaname == coded_id).first()
+        if not file_rec:
+            file_rec = db.query(File).filter(File.file_type == 'coding', File.filename == coded_id).first()
+        if not file_rec:
             try:
-                pid = int(coded_id)
-                project = db.query(Project).filter(Project.project_type == 'coding', Project.id == pid).first()
+                fid = int(coded_id)
+                file_rec = db.query(File).filter(File.file_type == 'coding', File.id == fid).first()
             except Exception:
-                project = None
+                file_rec = None
     else:
-        project = db.query(Project).filter(Project.project_type == 'coding').order_by(Project.created_at.desc()).first()
+        file_rec = db.query(File).filter(File.file_type == 'coding').order_by(File.created_at.desc()).first()
 
-    if project:
-        schema = project.schema_name
+    if file_rec:
+        schema = file_rec.schemaname
         try:
-            print(f"[DEBUG] get_coded_data -> selected project id={project.id} schema={schema} user_project_type={project.project_type}")
             with engine.connect() as conn:
-                # Check if content_store table exists in the target schema
                 tbl_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": f"{schema}.content_store"}).scalar()
                 if not tbl_exists:
-                    print(f"[DEBUG] get_coded_data -> content_store not found in schema {schema}")
                     return JSONResponse({"error": f"content_store table not found in schema {schema}"}, status_code=404)
-
-                # Check for file_text column
-                cols = conn.execute(text("SELECT column_name FROM information_schema.columns WHERE table_schema = :schema AND table_name = :table"), {"schema": schema, "table": "content_store"}).fetchall()
-                col_names = [c[0] for c in cols]
-                if 'file_text' not in col_names:
-                    print(f"[DEBUG] get_coded_data -> file_text column missing in {schema}.content_store; cols={col_names}")
-                    return JSONResponse({"error": f"file_text column missing in {schema}.content_store"}, status_code=404)
-
-                # Fetch the single row
                 res = conn.execute(text(f'SELECT file_text FROM "{schema}".content_store LIMIT 1'))
                 row = res.fetchone()
                 if row:
                     return JSONResponse({"coded_data": row[0]})
                 else:
-                    print(f"[DEBUG] get_coded_data -> no rows in {schema}.content_store")
-                    return JSONResponse({"error": "Coded data content not found in project"}, status_code=404)
+                    return JSONResponse({"error": "Coded data content not found in file"}, status_code=404)
         except Exception as e:
             print(f"Error reading coded data from schema {schema}: {e}")
-            import traceback
-            traceback.print_exc()
             return JSONResponse({"error": f"Error reading coded data: {e}"}, status_code=500)
 
-    return JSONResponse({"error": "No coded data project found"}, status_code=404)
+    return JSONResponse({"error": "No coded data file found"}, status_code=404)
 
 
 @router.post("/save-project-coded-data/")
-async def save_project_coded_data(request: Request, schema_name: str = Form(...), content: str = Form(...), db: Session = Depends(get_db)):
-    """Save coded content into a Postgres project schema's content_store table for project_type 'coding'.
-    Requires authentication and project ownership.
+async def save_project_coded_data(request: Request, schema_name: str = Form(None), content: str = Form(None), db: Session = Depends(get_db)):
+    """Save coded content into a Postgres file-backed schema's content_store table for file_type 'coding'.
+    Requires authentication and ownership.
+    Accepts JSON or form-data with `schema_name` and `content`.
     """
-    # Resolve authenticated user from token
     user_id = get_user_id_from_request(request)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    schema = schema_name.strip()
-
-    proj = db.query(Project).filter(Project.schema_name == schema, Project.user_id == int(user_id), Project.project_type == 'coding').first()
-    if not proj:
-        raise HTTPException(status_code=404, detail="Project not found or you do not have permission")
-
-    display_name = None
+    # Support JSON body as well as form-data
     try:
-        form = await request.form()
-        if "display_name" in form:
-            display_name = str(form.get("display_name"))
+        ctype = (request.headers.get("content-type") or "").lower()
+        if "application/json" in ctype:
+            body = await request.json()
+            schema_name = body.get("schema_name")
+            content = body.get("content")
+            display_name = body.get("display_name")
+        else:
+            form = await request.form()
+            if schema_name is None:
+                schema_name = form.get("schema_name")
+            if content is None:
+                content = form.get("content")
+            display_name = form.get("display_name") if "display_name" in form else None
     except Exception:
-        display_name = None
+        raise HTTPException(status_code=400, detail="Invalid request body")
+
+    if not schema_name or not content:
+        raise HTTPException(status_code=400, detail="schema_name and content are required")
+
+    schema = schema_name.strip()
+    file_rec = db.query(File).filter(File.schemaname == schema, File.user_id == int(user_id), File.file_type == 'coding').first()
+    if not file_rec:
+        raise HTTPException(status_code=404, detail="File/project not found or you do not have permission")
 
     try:
         with engine.begin() as conn:
-            # Ensure the project's Postgres schema exists before creating tables
             conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
             conn.execute(text(f'CREATE TABLE IF NOT EXISTS "{schema}".content_store (file_text text)'))
             conn.execute(text(f'TRUNCATE TABLE "{schema}".content_store'))
             conn.execute(text(f'INSERT INTO "{schema}".content_store (file_text) VALUES (:file_text)'), {"file_text": content})
 
         if display_name:
-            proj.display_name = display_name
+            file_rec.filename = display_name
             try:
                 db.commit()
-                db.refresh(proj)
+                db.refresh(file_rec)
             except Exception:
                 db.rollback()
 
-        return JSONResponse({"message": "Project coded data saved", "id": str(proj.id), "display_name": proj.display_name})
+        return JSONResponse({"message": "File coded data saved", "id": str(file_rec.id), "filename": file_rec.filename})
     except Exception as e:
-        print(f"Error saving project coded data to schema {schema}: {e}")
+        print(f"Error saving file coded data to schema {schema}: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @router.get("/project-entries/")
-def project_entries(schema: str = Query(..., description="Project schema name"), limit: int = 10, offset: int = 0):
+def project_entries(schema: str = Query(..., description="File schema name"), limit: int = 10, offset: int = 0):
     # Allow optional .db suffix (frontend may supply schema.db); validate and strip it.
     import re
     if not schema:
@@ -1321,7 +1315,7 @@ def project_entries(schema: str = Query(..., description="Project schema name"),
             "comments": [],
             "total_submissions": 0,
             "total_comments": 0,
-            "message": f"Error reading project schema: {exc}"
+            "message": f"Error reading file schema: {exc}"
         }, status_code=500)
 
     return JSONResponse({
@@ -1336,7 +1330,7 @@ def project_entries(schema: str = Query(..., description="Project schema name"),
 
 @router.post("/filter-data/")
 async def filter_data(request: Request, api_key: str = Form(...), prompt: str = Form(...), database: str = Form(None), name: str = Form(...)):
-    """Read a Postgres project schema (provided in `database`), assemble submissions and comments,
+    """Read a Postgres file schema (provided in `database`), assemble submissions and comments,
     merge into a single string and print it to the server stdout.
     """
     schema = (database or "").strip()
@@ -1472,7 +1466,7 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
         user_id = get_user_id_from_request(request)
 
         new_schema = None
-        proj = None
+        file_rec = None
         try:
             unique_id = secrets.token_hex(6)
             new_schema = f"proj_{unique_id}"
@@ -1539,7 +1533,7 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
 
                 print(f"[filter-data] Inserted {inserted_comments}/{total_comments} comments")
 
-            # create project row and metadata if user authenticated
+            # create file row and metadata if user authenticated
             if user_id:
                 try:
                     print(f"[filter-data] Creating file metadata for schema {new_schema} (user={user_id})")
@@ -1548,12 +1542,12 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
                         dm.session.add(file_rec)
                         dm.session.flush()
                         try:
-                            dm.project_tables.add_table_metadata(file_id=file_rec.id, table_name='submissions', row_count=len(posts_list))
+                            dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name='submissions', row_count=len(posts_list))
                             print(f"[filter-data] Added file_tables entry for submissions (rows={len(posts_list)})")
                         except Exception as e:
                             print(f"[filter-data] Failed to add submissions table metadata: {e}")
                         try:
-                            dm.project_tables.add_table_metadata(file_id=file_rec.id, table_name='comments', row_count=len(comments_list))
+                            dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name='comments', row_count=len(comments_list))
                             print(f"[filter-data] Added file_tables entry for comments (rows={len(comments_list)})")
                         except Exception as e:
                             print(f"[filter-data] Failed to add comments table metadata: {e}")
@@ -1570,7 +1564,7 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
             "comments_length": len(comments_text),
             "posts_filtered_count": len(posts_list),
             "comments_filtered_count": len(comments_list),
-            "project": {"id": str(proj.id), "schema_name": new_schema, "display_name": proj.display_name} if proj else None,
+            "file": {"id": str(file_rec.id), "schema_name": new_schema, "filename": file_rec.filename} if file_rec else None,
         })
     except Exception as exc:
         print(f"[filter-data] Error reading schema {schema}: {exc}")
@@ -1580,7 +1574,7 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
 
 @router.post("/generate-codebook/")
 async def generate_codebook(request: Request, database: str = Form("original"), api_key: str = Form(...), prompt: str = Form(""), name: str = Form(...)):
-    # Read a Postgres project schema, assemble submissions/comments into text, log it.
+    # Read a Postgres file schema, assemble submissions/comments into text, log it.
     schema = (database or "").strip()
 
     if not schema.startswith('proj_'):
@@ -1650,12 +1644,12 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
         codebook_text = str(codebook1 or "")
         agreement_percent = str(percent or "")
 
-        # Persist into a new Postgres project schema and create metadata
+        # Persist into a new Postgres file schema and create metadata
         try:
-            # Require authentication to create the codebook project
+            # Require authentication to create the codebook file
             user_id = get_user_id_from_request(request)
             if not user_id:
-                return JSONResponse({"error": "Authentication required to create project"}, status_code=401)
+                return JSONResponse({"error": "Authentication required to create file"}, status_code=401)
 
             # generate a unique schema name
             unique_id = secrets.token_hex(6)
@@ -1672,14 +1666,14 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
                 file_rec = File(user_id=int(user_id), filename=name, schemaname=new_schema, file_type='codebook')
                 dm.session.add(file_rec)
                 dm.session.flush()
-                dm.project_tables.add_table_metadata(file_id=file_rec.id, table_name='content_store', row_count=1)
+                dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name='content_store', row_count=1)
 
             # Return a plain-text concatenation: <agreement_percent> + <model_1 output>
             final_text = f"{agreement_percent}\n{codebook_text}"
             return PlainTextResponse(content=final_text)
 
         except Exception as exc:
-            print(f"Error creating project/schema for generated codebook: {exc}")
+            print(f"Error creating file/schema for generated codebook: {exc}")
             traceback.print_exc()
             return JSONResponse({"error": str(exc)}, status_code=500)
     except Exception as exc:
@@ -1746,14 +1740,14 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
             if cb_schema_raw and cb_schema_raw.startswith('proj_'):
                 resolved_schema = cb_schema_raw
             else:
-                # Try to interpret the provided value as a Project.id (integer) and resolve schema_name
+                # Try to interpret the provided value as a File.id (integer) and resolve schemaname
                 try:
-                    pid = int(cb_schema_raw)
+                    fid = int(cb_schema_raw)
                     db_sess = SessionLocal()
                     try:
-                        proj = db_sess.query(Project).filter(Project.id == pid).first()
-                        if proj:
-                            resolved_schema = proj.schema_name
+                        f = db_sess.query(File).filter(File.id == fid).first()
+                        if f:
+                            resolved_schema = f.schemaname
                     finally:
                         try:
                             db_sess.close()
@@ -1802,12 +1796,12 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
                     conn.execute(text(f'TRUNCATE TABLE "{new_schema}".content_store'))
                     conn.execute(text(f'INSERT INTO "{new_schema}".content_store (file_text) VALUES (:file_text)'), {"file_text": classification_output})
 
-                    # create project row and table metadata
+                    # create file row and table metadata
                     with DatabaseManager() as dm:
                         file_rec = File(user_id=int(user_id), filename=display_name, schemaname=new_schema, file_type='coding')
                         dm.session.add(file_rec)
                         dm.session.flush()
-                        dm.project_tables.add_table_metadata(file_id=file_rec.id, table_name='content_store', row_count=1)
+                        dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name='content_store', row_count=1)
             except Exception as e:
                     print(f"Failed to persist classification project/schema: {e}")
         
@@ -1821,9 +1815,9 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
 
 @router.get("/comments/{submission_id}") 
 async def get_comments_for_submission(submission_id: str, database: str = Query("original")):
-    """Fetch all comments for a specific submission from a Postgres project schema.
+    """Fetch all comments for a specific submission from a Postgres file schema.
 
-    The `database` parameter should provide a Postgres project schema name (e.g. proj_xxx).
+    The `database` parameter should provide a Postgres file schema name (e.g. proj_xxx).
     A trailing `.db` is tolerated and will be stripped. Returns 404 if the schema or
     comments table is not present.
     """

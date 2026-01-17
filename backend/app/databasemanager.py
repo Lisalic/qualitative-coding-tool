@@ -15,6 +15,9 @@ class DatabaseManager:
         self.projects = ProjectRepository(self.session)
         self.users = UserRepository(self.session)
         self.project_tables = ProjectTableRepository(self.session)
+        # Provide a `file_tables` alias for clarity in newer code that
+        # prefers file-based naming (routes now expect `dm.file_tables`).
+        self.file_tables = self.project_tables
 
     def __enter__(self):
         return self
