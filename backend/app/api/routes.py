@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi import Request
 
 try:
-    from app.database import get_db, User, Prompt, File, FileTable, engine, SessionLocal
+    from app.database import get_db, User, Prompt, Project, File, FileTable, engine, SessionLocal
     from app.databasemanager import DatabaseManager
     from app.auth import create_access_token, decode_access_token
     from app.config import settings
@@ -34,7 +34,7 @@ try:
     from app.services import migrate_sqlite_file
 except:
     try:
-        from backend.app.database import get_db, User, Prompt, File, FileTable, engine, SessionLocal
+        from backend.app.database import get_db, User, Prompt, Project, File, FileTable, engine, SessionLocal
         from backend.app.databasemanager import DatabaseManager
         from backend.app.auth import create_access_token, decode_access_token
         from backend.app.config import settings
@@ -591,6 +591,37 @@ def my_projects(request: Request, file_type: str = Query("raw_data"), db: Sessio
     # Return under the legacy "projects" key so frontend code expecting
     # `data.projects` continues to work.
     return JSONResponse({"projects": result})
+
+
+@router.post("/create-project/")
+def create_project(request: Request, name: str = Form(...), description: str = Form(None), db: Session = Depends(get_db)):
+    """Create a new Project owned by the authenticated user.
+
+    Returns the created project object.
+    """
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        uid = int(user_id)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid user id in token")
+
+    if not name or not name.strip():
+        raise HTTPException(status_code=400, detail="Project name is required")
+
+    # create project record (no schema_name column in DB)
+    proj = Project(user_id=uid, projectname=name.strip(), description=(description or None))
+    db.add(proj)
+    try:
+        db.commit()
+        db.refresh(proj)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return JSONResponse({"project": {"id": str(proj.id), "projectname": proj.projectname, "description": proj.description, "created_at": proj.created_at.isoformat() if proj.created_at else None}})
 
 
 @router.get("/prompts/")

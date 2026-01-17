@@ -23,8 +23,7 @@ def migrate_sqlite_file(user_id: int, file_path: str, display_name: str, project
     with DatabaseManager() as db:
         project = db.projects.create(
             user_id=user_id,
-            display_name=display_name,
-            schema_name=schema_name,
+            projectname=display_name,
             project_type=project_type,
         )
 
@@ -91,8 +90,7 @@ def migrate_text_file(user_id: int, file_path: str, display_name: str, project_t
     with DatabaseManager() as db:
         project = db.projects.create(
             user_id=user_id,
-            display_name=display_name,
-            schema_name=schema_name,
+            projectname=display_name,
             project_type=project_type # 'codebook' or 'coding'
         )
         

@@ -58,19 +58,24 @@ class ProjectRepository(BaseRepository):
 
     def get_schema_name(self, project_id: int) -> Optional[str]:
         proj = self.session.get(Project, project_id)
-        return proj.schema_name if proj else None
+        # `schema_name` column may be removed from `projects`; return None
+        # Keep method for compatibility but avoid attribute access errors.
+        try:
+            return getattr(proj, 'schema_name', None) if proj else None
+        except Exception:
+            return None
 
     def rename_project(self, project_id: int, new_name: str) -> bool:
         proj = self.session.get(Project, project_id)
         if proj:
-            proj.display_name = new_name
+            proj.projectname = new_name
             self.session.flush()
             return True
         return False
 
-    def create(self, user_id: int, display_name: str, schema_name: str, project_type: str = "raw_data", description: str = None) -> Project:
-        # default project_type to raw_data so DB non-null constraint is satisfied
-        proj = Project(user_id=user_id, display_name=display_name, schema_name=schema_name, project_type=project_type, description=description)
+    def create(self, user_id: int, projectname: str, description: str = None) -> Project:
+        # Create a Project record without `project_type` or `schema_name` fields.
+        proj = Project(user_id=user_id, projectname=projectname, description=description)
         self.session.add(proj)
         self.session.flush()
         return proj
@@ -83,10 +88,9 @@ class ProjectTableRepository(BaseRepository):
         One of `project_id` or `file_id` must be provided. Returns the created metadata object.
         """
         if project_id is not None:
-            pt = ProjectTable(project_id=project_id, table_name=table_name, row_count=row_count)
-            self.session.add(pt)
-            self.session.flush()
-            return pt
+            # Projects are no longer tracked via ProjectTable rows in the DB schema.
+            # For compatibility, do nothing when asked to add project-level metadata.
+            return None
         if file_id is not None:
             # Use FileTable for file-backed metadata
             ft = FileTable(file_id=file_id, tablename=table_name, row_count=row_count)

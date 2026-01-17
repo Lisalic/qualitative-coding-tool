@@ -76,15 +76,13 @@ class Project(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    display_name = Column(String, nullable=False)
-    schema_name = Column(String, nullable=False, unique=True)
-    project_type = Column(String, nullable=False, default="raw_data")
+    projectname = Column(String, nullable=False)
     description = Column(String)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     user = relationship("User", back_populates="projects")
     files = relationship("File", secondary=project_files_table, back_populates="projects")
-    project_tables = relationship("ProjectTable", back_populates="project", cascade="all, delete-orphan")
+
 
 
 class File(Base):
@@ -121,7 +119,7 @@ class ProjectTable(Base):
     table_name = Column(String, nullable=False)
     row_count = Column(Integer, default=0)
 
-    project = relationship("Project", back_populates="project_tables")
+    # project relationship removed; ProjectTable is no longer associated with Project
 
 
 class Prompt(Base):
