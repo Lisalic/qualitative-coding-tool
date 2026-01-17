@@ -21,12 +21,12 @@ export default function Home() {
     setMessage("");
   };
 
-  // Fetch user's projects (legacy `my-files` endpoint returns under `projects` key)
+  // Fetch user's projects (includes associated files)
   useState(() => {
     let mounted = true;
     setLoading(true);
     setError(null);
-    apiFetch(`/api/my-files/?file_type=raw_data`)
+    apiFetch(`/api/projects/`)
       .then(async (resp) => {
         if (!mounted) return;
         if (!resp.ok) {
@@ -114,11 +114,44 @@ export default function Home() {
                   key={p.id}
                   style={{ padding: "6px 0", borderBottom: "1px solid #eee" }}
                 >
-                  <strong>
-                    {p.projectname || p.display_name || p.filename}
-                  </strong>
-                  <div style={{ fontSize: "0.9em", color: "#666" }}>
-                    {p.description}
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "flex-start",
+                    }}
+                  >
+                    <div>
+                      <strong>{p.projectname}</strong>
+                      <div style={{ fontSize: "0.9em", color: "#666" }}>
+                        {p.description}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* show count of files and a View Project button */}
+                  <div
+                    style={{
+                      marginTop: "8px",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <div style={{ color: "#666" }}>
+                      {Array.isArray(p.files)
+                        ? `${p.files.length} file${p.files.length === 1 ? "" : "s"}`
+                        : "0 files"}
+                    </div>
+                    <div>
+                      <button
+                        className="main-button"
+                        onClick={() => navigate(`/project/${p.id}`)}
+                        aria-label={`View project ${p.projectname}`}
+                      >
+                        View Project
+                      </button>
+                    </div>
                   </div>
                 </li>
               ))}

@@ -87,11 +87,38 @@
 .main-button:hover {
   background-color: #ffffff;
   color: #000000;
-  transform: translateY(-2px);
 }
 
 .main-button:active {
-  transform: translateY(0);
+  background-color: #ffffff;
+  color: #000000;
+}
+
+/* Tab buttons used on the Project page: same base styling as .main-button
+   but smaller padding and single-line layout. The selected state only
+   inverts background and text color via the .selected class. */
+.project-tab {
+  background-color: #000000;
+  color: #ffffff;
+  border: 2px solid #ffffff;
+  padding: 10px 14px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background-color 0.12s, color 0.12s;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.project-tab.selected {
+  background-color: #ffffff;
+  color: #000000;
+}
+
+.project-tab:focus {
+  outline: none;
 }
 
 .action-form {

@@ -9,6 +9,7 @@ import GenerateCodebook from "./pages/GenerateCodebook";
 import ViewCodebook from "./pages/ViewCodebook";
 import ApplyCodebook from "./pages/ApplyCodebook";
 import ViewCoding from "./pages/ViewCoding";
+import Project from "./pages/Project";
 import Landing from "./pages/Landing";
 import { apiFetch } from "./api";
 import Login from "./pages/Login";
@@ -75,6 +76,14 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <Data />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/project/:projectId"
+                element={
+                  <ProtectedRoute>
+                    <Project />
                   </ProtectedRoute>
                 }
               />

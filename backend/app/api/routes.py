@@ -684,11 +684,26 @@ def list_projects(request: Request):
         rows = dm.projects.get_all_for_user(uid)
         result = []
         for r in rows:
+            # Include associated files (databases) for each project
+            files = []
+            try:
+                for f in getattr(r, "files", []) or []:
+                    files.append({
+                        "id": str(f.id),
+                        "display_name": f.filename,
+                        "schema_name": f.schemaname,
+                        "description": f.description,
+                        "created_at": f.created_at.isoformat() if f.created_at else None,
+                    })
+            except Exception:
+                files = []
+
             result.append({
                 "id": str(r.id),
                 "projectname": r.projectname,
                 "description": r.description,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
+                "files": files,
             })
 
     return JSONResponse({"projects": result})
