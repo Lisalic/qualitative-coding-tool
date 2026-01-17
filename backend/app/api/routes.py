@@ -6,7 +6,7 @@ import traceback
 import asyncio
 import inspect
 from pathlib import Path
-from fastapi import APIRouter, File, HTTPException, UploadFile, Form, Query, Depends, Request
+from fastapi import APIRouter, File as FastAPIFile, HTTPException, UploadFile, Form, Query, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi import Request
 
 try:
-    from app.database import get_db, User, Project, ProjectTable, Prompt, engine, SessionLocal
+    from app.database import get_db, User, Project, ProjectTable, Prompt, File, FileTable, engine, SessionLocal
     from app.databasemanager import DatabaseManager
     from app.auth import create_access_token, decode_access_token
     from app.config import settings
@@ -34,7 +34,7 @@ try:
     from app.services import migrate_sqlite_file
 except:
     try:
-        from backend.app.database import get_db, User, Project, ProjectTable, Prompt, engine, SessionLocal
+        from backend.app.database import get_db, User, Project, ProjectTable, Prompt, File, FileTable, engine, SessionLocal
         from backend.app.databasemanager import DatabaseManager
         from backend.app.auth import create_access_token, decode_access_token
         from backend.app.config import settings
@@ -81,7 +81,7 @@ def get_user_id_from_request(request: Request):
 @router.post("/upload-zst/")
 async def upload_zst_file(
     request: Request,
-    file: UploadFile = File(...), 
+    file: UploadFile = FastAPIFile(...), 
     subreddits: str = Form(None),
     data_type: str = Form(...),
     name: str = Form(None),
@@ -137,13 +137,14 @@ async def upload_zst_file(
 
     try:
         with DatabaseManager() as dm:
-            project = dm.projects.create(
-                user_id=int(user_id),
-                display_name=base_name,
-                schema_name=schema_name,
-                project_type="raw_data",
-                description=(description or None),
-            )
+            # Create a File record instead of a Project; files back a Postgres schema
+            file_rec = File(user_id=int(user_id), filename=base_name, schemaname=schema_name, file_type="raw_data", description=(description or None))
+            dm.session.add(file_rec)
+            try:
+                dm.session.flush()
+            except Exception:
+                dm.session.rollback()
+                raise
             # create schema and tables
             with engine.begin() as conn:
                 conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
@@ -174,16 +175,16 @@ async def upload_zst_file(
 
             inserted_counts = stream_zst_to_postgres(tmp_path, schema_name, import_data_type, subreddit_filter=subreddit_list, batch_size=1000)
 
-            # add project_tables metadata
+            # add file_tables metadata
             if inserted_counts.get('submissions', 0) > 0:
                 dm.project_tables.add_table_metadata(
-                    project_id=project.id,
+                    file_id=file_rec.id,
                     table_name='submissions',
                     row_count=inserted_counts.get('submissions', 0)
                 )
             if inserted_counts.get('comments', 0) > 0:
                 dm.project_tables.add_table_metadata(
-                    project_id=project.id,
+                    file_id=file_rec.id,
                     table_name='comments',
                     row_count=inserted_counts.get('comments', 0)
                 )
@@ -240,12 +241,35 @@ def get_database_metadata(db_path):
 
 
 @router.post("/merge-databases/")
-async def merge_databases(request: Request, databases: str = Form(...), name: str = Form(...), description: str = Form(None)):
+async def merge_databases(request: Request):
+    # Accept either form-data (`databases` as JSON string) or application/json
     try:
-        db_list = json.loads(databases)
+        ctype = (request.headers.get("content-type") or "").lower()
+        if "application/json" in ctype:
+            body = await request.json()
+            databases = body.get("databases")
+            name = body.get("name")
+            description = body.get("description")
+        else:
+            form = await request.form()
+            databases = form.get("databases")
+            name = form.get("name")
+            description = form.get("description")
+
+        # Normalize databases into a list
+        if isinstance(databases, str):
+            db_list = json.loads(databases)
+        elif isinstance(databases, list):
+            db_list = databases
+        else:
+            raise HTTPException(status_code=400, detail="Invalid databases format")
         print(f"Merging databases: {db_list} into {name}")
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid databases format")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid request body: {exc}")
 
     if not name or not name.strip():
         raise HTTPException(status_code=400, detail="Database name is required")
@@ -259,7 +283,7 @@ async def merge_databases(request: Request, databases: str = Form(...), name: st
     db_check = SessionLocal()
     try:
         existing = db_check.query(Project).filter(
-            Project.user_id == user_id,
+            Project.user_id == int(user_id),
         ).filter(
             (Project.display_name == name) | (Project.schema_name == name)
         ).first()
@@ -271,7 +295,7 @@ async def merge_databases(request: Request, databases: str = Form(...), name: st
         except Exception:
             pass
 
-    unique_id = str(uuid.uuid4()).replace('-', '')[:12]
+    unique_id = secrets.token_hex(6)
     schema_name = f"proj_{unique_id}"
 
     try:
@@ -412,15 +436,21 @@ async def merge_databases(request: Request, databases: str = Form(...), name: st
                 pass
             return JSONResponse({"message": "No rows found in selected databases; nothing migrated", "database": name, "total_submissions": 0, "total_comments": 0, "project_migrated": False})
 
-        # Create project record and table metadata using the final counts
+        # Create file record and file_tables metadata using the final counts
         with DatabaseManager() as dm:
-            proj = dm.projects.create(user_id=int(user_id), display_name=name, schema_name=schema_name, project_type='raw_data', description=(description or None))
+            file_rec = File(user_id=int(user_id), filename=name, schemaname=schema_name, file_type='raw_data', description=(description or None))
+            dm.session.add(file_rec)
+            try:
+                dm.session.flush()
+            except Exception:
+                dm.session.rollback()
+                raise
             for tbl, cnt in final_table_counts.items():
-                dm.project_tables.add_table_metadata(project_id=proj.id, table_name=tbl, row_count=cnt)
+                dm.project_tables.add_table_metadata(file_id=file_rec.id, table_name=tbl, row_count=cnt)
 
         return JSONResponse({
             "message": f"Merged into project schema '{schema_name}'",
-            "project": {"id": str(proj.id), "schema_name": schema_name, "display_name": name, "description": (description or None)},
+            "project": {"id": str(file_rec.id), "schema_name": schema_name, "display_name": name, "description": (description or None)},
             "project_migrated": True,
         })
 
@@ -535,23 +565,25 @@ def my_projects(request: Request, project_type: str = Query("raw_data"), db: Ses
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    projects = db.query(Project).filter(Project.user_id == user_id, Project.project_type == project_type).all()
+    # Use File table instead of Project; `project_type` maps to `file_type` on File
+    projects = db.query(File).filter(File.user_id == int(user_id), File.file_type == project_type).all()
     result = []
     for p in projects:
         tables = []
         try:
-            rows = db.query(ProjectTable).filter(ProjectTable.project_id == p.id).all()
+            # Query file-backed table metadata
+            rows = db.query(FileTable).filter(FileTable.file_id == p.id).all()
             for r in rows:
-                tables.append({"table_name": r.table_name, "row_count": r.row_count})
+                tables.append({"table_name": r.tablename, "row_count": r.row_count})
         except Exception:
             tables = []
 
         result.append({
             "id": str(p.id),
-            "display_name": p.display_name,
+            "display_name": p.filename,
             "description": p.description,
-            "schema_name": p.schema_name,
-            "project_type": p.project_type,
+            "schema_name": p.schemaname,
+            "project_type": p.file_type,
             "created_at": p.created_at.isoformat() if p.created_at else None,
             "tables": tables,
         })
@@ -772,17 +804,17 @@ async def delete_database(db_name: str, request: Request, db: Session = Depends(
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    proj = db.query(Project).filter(Project.schema_name == schema, Project.user_id == user_id).first()
-    if not proj:
-        raise HTTPException(status_code=404, detail="Project not found or you do not have permission")
+    file_rec = db.query(File).filter(File.schemaname == schema, File.user_id == int(user_id)).first()
+    if not file_rec:
+        raise HTTPException(status_code=404, detail="File/project not found or you do not have permission")
 
     try:
         with engine.begin() as conn:
             conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
 
-        db.delete(proj)
+        db.delete(file_rec)
         db.commit()
-        return JSONResponse({"message": f"Project '{proj.display_name}' and schema '{schema}' deleted"})
+        return JSONResponse({"message": f"File/project '{file_rec.filename}' and schema '{schema}' deleted"})
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to delete project/schema: {str(e)}")
@@ -809,9 +841,9 @@ async def delete_row(request: Request, schema: str = Form(...), table: str = For
         return JSONResponse({"error": "Not authenticated"}, status_code=401)
 
     try:
-        proj = db.query(Project).filter(Project.schema_name == schema, Project.user_id == user_id).first()
-        if not proj:
-            return JSONResponse({"error": "Project not found or not owned by user"}, status_code=403)
+        file_rec = db.query(File).filter(File.schemaname == schema, File.user_id == int(user_id)).first()
+        if not file_rec:
+            return JSONResponse({"error": "Project/file not found or not owned by user"}, status_code=403)
 
         with engine.begin() as conn:
             res = conn.execute(text(f'DELETE FROM "{schema}"."{table}" WHERE id = :id'), {"id": row_id})
@@ -826,12 +858,12 @@ async def delete_row(request: Request, schema: str = Form(...), table: str = For
                 cnt = conn.execute(text(f'SELECT COUNT(*) FROM "{schema}"."{table}"')).scalar() or 0
 
             # update or insert project_tables row using ORM session `db`
-            pt = db.query(ProjectTable).filter(ProjectTable.project_id == proj.id, ProjectTable.table_name == table).first()
+            pt = db.query(FileTable).filter(FileTable.file_id == file_rec.id, FileTable.tablename == table).first()
             if pt:
                 pt.row_count = int(cnt)
             else:
-                # create new metadata row
-                new_pt = ProjectTable(project_id=proj.id, table_name=table, row_count=int(cnt))
+                # create new metadata row for file
+                new_pt = FileTable(file_id=file_rec.id, tablename=table, row_count=int(cnt))
                 db.add(new_pt)
             try:
                 db.commit()
@@ -860,21 +892,21 @@ def rename_project(request: Request, schema_name: str = Form(...), display_name:
     # normalize schema name
     schema = schema_name.strip()
 
-    proj = db.query(Project).filter(Project.schema_name == schema, Project.user_id == user_id).first()
-    if not proj:
-        raise HTTPException(status_code=404, detail="Project not found or you do not have permission")
+    file_rec = db.query(File).filter(File.schemaname == schema, File.user_id == int(user_id)).first()
+    if not file_rec:
+        raise HTTPException(status_code=404, detail="File/project not found or you do not have permission")
 
-    proj.display_name = display_name
+    file_rec.filename = display_name
     if description is not None:
-        proj.description = description
+        file_rec.description = description
     try:
         db.commit()
-        db.refresh(proj)
+        db.refresh(file_rec)
     except Exception as exc:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to rename project: {exc}")
+        raise HTTPException(status_code=500, detail=f"Failed to rename file/project: {exc}")
 
-    return JSONResponse({"message": "Project renamed", "id": str(proj.id), "display_name": proj.display_name, "description": proj.description})
+    return JSONResponse({"message": "Project renamed", "id": str(file_rec.id), "display_name": file_rec.filename, "description": file_rec.description})
 
 
 @router.post("/move-rows/")
@@ -910,10 +942,10 @@ async def move_rows(request: Request, db: Session = Depends(get_db)):
         return JSONResponse({"error": "Not authenticated"}, status_code=401)
 
     try:
-        proj_src = db.query(Project).filter(Project.schema_name == source, Project.user_id == user_id).first()
-        proj_tgt = db.query(Project).filter(Project.schema_name == target, Project.user_id == user_id).first()
-        if not proj_src or not proj_tgt:
-            return JSONResponse({"error": "Source or target project not found or not owned by user"}, status_code=403)
+        file_src = db.query(File).filter(File.schemaname == source, File.user_id == int(user_id)).first()
+        file_tgt = db.query(File).filter(File.schemaname == target, File.user_id == int(user_id)).first()
+        if not file_src or not file_tgt:
+            return JSONResponse({"error": "Source or target file/project not found or not owned by user"}, status_code=403)
 
         moved = 0
         with engine.begin() as conn:
@@ -943,18 +975,18 @@ async def move_rows(request: Request, db: Session = Depends(get_db)):
                 src_cnt = conn.execute(text(f'SELECT COUNT(*) FROM "{source}"."{table}"')).scalar() or 0
                 tgt_cnt = conn.execute(text(f'SELECT COUNT(*) FROM "{target}"."{table}"')).scalar() or 0
 
-            # update project_tables rows
-            pt_src = db.query(ProjectTable).filter(ProjectTable.project_id == proj_src.id, ProjectTable.table_name == table).first()
+            # update file_tables rows
+            pt_src = db.query(FileTable).filter(FileTable.file_id == file_src.id, FileTable.tablename == table).first()
             if pt_src:
                 pt_src.row_count = int(src_cnt)
             else:
-                db.add(ProjectTable(project_id=proj_src.id, table_name=table, row_count=int(src_cnt)))
+                db.add(FileTable(file_id=file_src.id, tablename=table, row_count=int(src_cnt)))
 
-            pt_tgt = db.query(ProjectTable).filter(ProjectTable.project_id == proj_tgt.id, ProjectTable.table_name == table).first()
+            pt_tgt = db.query(FileTable).filter(FileTable.file_id == file_tgt.id, FileTable.tablename == table).first()
             if pt_tgt:
                 pt_tgt.row_count = int(tgt_cnt)
             else:
-                db.add(ProjectTable(project_id=proj_tgt.id, table_name=table, row_count=int(tgt_cnt)))
+                db.add(FileTable(file_id=file_tgt.id, tablename=table, row_count=int(tgt_cnt)))
             try:
                 db.commit()
             except Exception:
@@ -1092,7 +1124,7 @@ async def save_project_codebook(request: Request, schema_name: str = Form(...), 
 
     schema = schema_name.strip()
 
-    proj = db.query(Project).filter(Project.schema_name == schema, Project.user_id == user_id).first()
+    proj = db.query(Project).filter(Project.schema_name == schema, Project.user_id == int(user_id)).first()
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found or you do not have permission")
 
@@ -1120,6 +1152,8 @@ async def save_project_codebook(request: Request, schema_name: str = Form(...), 
 
     try:
         with engine.begin() as conn:
+            # Ensure the project's Postgres schema exists before creating tables
+            conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
             conn.execute(text(f'CREATE TABLE IF NOT EXISTS "{schema}".content_store (file_text text)'))
             # Remove existing rows and insert the new content (single-row store)
             conn.execute(text(f'TRUNCATE TABLE "{schema}".content_store'))
@@ -1207,7 +1241,7 @@ async def save_project_coded_data(request: Request, schema_name: str = Form(...)
 
     schema = schema_name.strip()
 
-    proj = db.query(Project).filter(Project.schema_name == schema, Project.user_id == user_id, Project.project_type == 'coding').first()
+    proj = db.query(Project).filter(Project.schema_name == schema, Project.user_id == int(user_id), Project.project_type == 'coding').first()
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found or you do not have permission")
 
@@ -1221,6 +1255,8 @@ async def save_project_coded_data(request: Request, schema_name: str = Form(...)
 
     try:
         with engine.begin() as conn:
+            # Ensure the project's Postgres schema exists before creating tables
+            conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
             conn.execute(text(f'CREATE TABLE IF NOT EXISTS "{schema}".content_store (file_text text)'))
             conn.execute(text(f'TRUNCATE TABLE "{schema}".content_store'))
             conn.execute(text(f'INSERT INTO "{schema}".content_store (file_text) VALUES (:file_text)'), {"file_text": content})
@@ -1506,22 +1542,23 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
             # create project row and metadata if user authenticated
             if user_id:
                 try:
-                    print(f"[filter-data] Creating project metadata for schema {new_schema} (user={user_id})")
+                    print(f"[filter-data] Creating file metadata for schema {new_schema} (user={user_id})")
                     with DatabaseManager() as dm:
-                        proj = dm.projects.create(user_id=int(user_id), display_name=name or new_schema, schema_name=new_schema, project_type='filtered_data')
-                        print(f"[filter-data] Created project id={proj.id} schema={proj.schema_name}")
+                        file_rec = File(user_id=int(user_id), filename=name or new_schema, schemaname=new_schema, file_type='filtered_data')
+                        dm.session.add(file_rec)
+                        dm.session.flush()
                         try:
-                            dm.project_tables.add_table_metadata(project_id=proj.id, table_name='submissions', row_count=len(posts_list))
-                            print(f"[filter-data] Added project_tables entry for submissions (rows={len(posts_list)})")
+                            dm.project_tables.add_table_metadata(file_id=file_rec.id, table_name='submissions', row_count=len(posts_list))
+                            print(f"[filter-data] Added file_tables entry for submissions (rows={len(posts_list)})")
                         except Exception as e:
                             print(f"[filter-data] Failed to add submissions table metadata: {e}")
                         try:
-                            dm.project_tables.add_table_metadata(project_id=proj.id, table_name='comments', row_count=len(comments_list))
-                            print(f"[filter-data] Added project_tables entry for comments (rows={len(comments_list)})")
+                            dm.project_tables.add_table_metadata(file_id=file_rec.id, table_name='comments', row_count=len(comments_list))
+                            print(f"[filter-data] Added file_tables entry for comments (rows={len(comments_list)})")
                         except Exception as e:
                             print(f"[filter-data] Failed to add comments table metadata: {e}")
                 except Exception as e:
-                    print(f"[filter-data] Failed to create project metadata: {e}")
+                    print(f"[filter-data] Failed to create file metadata: {e}")
 
         except Exception as e:
             print(f"[filter-data] Failed to persist filtered results to Postgres: {e}")
@@ -1630,10 +1667,12 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
                 conn.execute(text(f'TRUNCATE TABLE "{new_schema}".content_store'))
                 conn.execute(text(f'INSERT INTO "{new_schema}".content_store (file_text) VALUES (:file_text)'), {"file_text": codebook_text})
 
-            # create project row and table metadata
+            # create file record and file_tables metadata
             with DatabaseManager() as dm:
-                proj = dm.projects.create(user_id=int(user_id), display_name=name, schema_name=new_schema, project_type='codebook')
-                dm.project_tables.add_table_metadata(project_id=proj.id, table_name='content_store', row_count=1)
+                file_rec = File(user_id=int(user_id), filename=name, schemaname=new_schema, file_type='codebook')
+                dm.session.add(file_rec)
+                dm.session.flush()
+                dm.project_tables.add_table_metadata(file_id=file_rec.id, table_name='content_store', row_count=1)
 
             # Return a plain-text concatenation: <agreement_percent> + <model_1 output>
             final_text = f"{agreement_percent}\n{codebook_text}"
@@ -1765,8 +1804,10 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
 
                     # create project row and table metadata
                     with DatabaseManager() as dm:
-                        proj = dm.projects.create(user_id=int(user_id), display_name=display_name, schema_name=new_schema, project_type='coding')
-                        dm.project_tables.add_table_metadata(project_id=proj.id, table_name='content_store', row_count=1)
+                        file_rec = File(user_id=int(user_id), filename=display_name, schemaname=new_schema, file_type='coding')
+                        dm.session.add(file_rec)
+                        dm.session.flush()
+                        dm.project_tables.add_table_metadata(file_id=file_rec.id, table_name='content_store', row_count=1)
             except Exception as e:
                     print(f"Failed to persist classification project/schema: {e}")
         
@@ -1810,3 +1851,43 @@ async def get_comments_for_submission(submission_id: str, database: str = Query(
         print(f"Error reading comments from schema {schema}: {exc}")
         traceback.print_exc()
         return JSONResponse({"error": str(exc)}, status_code=500)
+
+# Defensive route re-registration:
+# If, for any reason, some route decorators did not register onto `router`,
+# scan this source file for `@router.<method>("/path")` patterns and add
+# any missing routes programmatically. This helps recover from prior
+# import-time manipulations during the migration.
+try:
+    import re
+    from pathlib import Path as _Path
+
+    _existing_paths = {getattr(r, "path", None) for r in router.routes}
+    _src = _Path(__file__).read_text()
+    _pat = re.compile(r"@router\.(get|post|put|delete)\(\s*(['\"])\\s*(/[^'\"]*?)\\s*\2\s*\)")
+    for _m in _pat.finditer(_src):
+        _method = _m.group(1).upper()
+        _path = _m.group(3)
+        if _path in _existing_paths:
+            continue
+
+        # find the following function name
+        _after = _src[_m.end():]
+        _fn = None
+        _fn_m = re.search(r"def\s+([A-Za-z0-9_]+)\s*\(", _after)
+        if _fn_m:
+            _fn = _fn_m.group(1)
+        if not _fn:
+            continue
+
+        _callable = globals().get(_fn)
+        if not callable(_callable):
+            continue
+
+        try:
+            router.add_api_route(_path, _callable, methods=[_method])
+            _existing_paths.add(_path)
+        except Exception:
+            # best-effort only
+            pass
+except Exception:
+    pass

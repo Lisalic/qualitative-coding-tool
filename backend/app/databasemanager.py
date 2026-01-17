@@ -1,9 +1,9 @@
 from typing import Optional
 try:
-    from app.database import SessionLocal, Project, ProjectTable, User
+    from app.database import SessionLocal, Project, ProjectTable, User, FileTable, File
 except Exception as exc:
     try:
-        from backend.app.database import SessionLocal, Project, ProjectTable, User
+        from backend.app.database import SessionLocal, Project, ProjectTable, User, FileTable, File
     except Exception:
         print("Failed to import app.database in databasemanager.py:", exc)
         raise exc
@@ -74,8 +74,20 @@ class ProjectRepository(BaseRepository):
 
 
 class ProjectTableRepository(BaseRepository):
-    def add_table_metadata(self, project_id, table_name: str, row_count: int):
-        pt = ProjectTable(project_id=project_id, table_name=table_name, row_count=row_count)
-        self.session.add(pt)
-        self.session.flush()
-        return pt
+    def add_table_metadata(self, project_id=None, file_id=None, table_name: str = None, row_count: int = 0):
+        """Add metadata for either a Project (project_id) or a File (file_id).
+
+        One of `project_id` or `file_id` must be provided. Returns the created metadata object.
+        """
+        if project_id is not None:
+            pt = ProjectTable(project_id=project_id, table_name=table_name, row_count=row_count)
+            self.session.add(pt)
+            self.session.flush()
+            return pt
+        if file_id is not None:
+            # Use FileTable for file-backed metadata
+            ft = FileTable(file_id=file_id, tablename=table_name, row_count=row_count)
+            self.session.add(ft)
+            self.session.flush()
+            return ft
+        raise ValueError("Either project_id or file_id must be provided")
