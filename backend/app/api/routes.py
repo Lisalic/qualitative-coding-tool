@@ -85,7 +85,8 @@ async def upload_zst_file(
     subreddits: str = Form(None),
     data_type: str = Form(...),
     name: str = Form(None),
-    description: str = Form(None)
+    description: str = Form(None),
+    project_id: int = Form(None),
 ):
 
     if not file.filename.endswith('.zst'):
@@ -145,6 +146,27 @@ async def upload_zst_file(
             except Exception:
                 dm.session.rollback()
                 raise
+            # If a project_id was provided, ensure ownership and link the file to the project
+            if project_id is not None:
+                try:
+                    proj = dm.session.query(Project).filter(Project.id == int(project_id)).first()
+                    if proj is None:
+                        raise HTTPException(status_code=404, detail="Project not found")
+                    # ensure the project belongs to the authenticated user
+                    try:
+                        uid = int(user_id)
+                    except Exception:
+                        uid = None
+                    if proj.user_id != uid:
+                        raise HTTPException(status_code=403, detail="Forbidden: project does not belong to user")
+                    # create association
+                    file_rec.projects.append(proj)
+                    dm.session.flush()
+                except HTTPException:
+                    raise
+                except Exception:
+                    # If anything goes wrong with linking, roll back and continue without linking
+                    dm.session.rollback()
             # create schema and tables
             with engine.begin() as conn:
                 conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
@@ -250,11 +272,13 @@ async def merge_databases(request: Request):
             databases = body.get("databases")
             name = body.get("name")
             description = body.get("description")
+            project_id = body.get("project_id")
         else:
             form = await request.form()
             databases = form.get("databases")
             name = form.get("name")
             description = form.get("description")
+            project_id = form.get("project_id")
 
         # Normalize databases into a list
         if isinstance(databases, str):
@@ -447,6 +471,26 @@ async def merge_databases(request: Request):
                 raise
             for tbl, cnt in final_table_counts.items():
                 dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name=tbl, row_count=cnt)
+            # If a project_id was provided, attempt to link the created file to the project
+            if project_id is not None:
+                try:
+                    # project_id may be a string when coming from form-data
+                    pid = int(project_id)
+                    proj = dm.session.query(Project).filter(Project.id == pid).first()
+                    if proj is None:
+                        raise HTTPException(status_code=404, detail="Project not found")
+                    try:
+                        uid = int(user_id)
+                    except Exception:
+                        uid = None
+                    if proj.user_id != uid:
+                        raise HTTPException(status_code=403, detail="Forbidden: project does not belong to user")
+                    file_rec.projects.append(proj)
+                    dm.session.flush()
+                except HTTPException:
+                    raise
+                except Exception:
+                    dm.session.rollback()
 
         return JSONResponse({
                 "message": f"Merged into file schema '{schema_name}'",
@@ -622,6 +666,32 @@ def create_project(request: Request, name: str = Form(...), description: str = F
         raise HTTPException(status_code=500, detail=str(exc))
 
     return JSONResponse({"project": {"id": str(proj.id), "projectname": proj.projectname, "description": proj.description, "created_at": proj.created_at.isoformat() if proj.created_at else None}})
+
+
+@router.get("/projects/")
+def list_projects(request: Request):
+    """List projects owned by the authenticated user."""
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        uid = int(user_id)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid user id in token")
+
+    with DatabaseManager() as dm:
+        rows = dm.projects.get_all_for_user(uid)
+        result = []
+        for r in rows:
+            result.append({
+                "id": str(r.id),
+                "projectname": r.projectname,
+                "description": r.description,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            })
+
+    return JSONResponse({"projects": result})
 
 
 @router.get("/prompts/")

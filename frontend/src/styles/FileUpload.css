@@ -69,6 +69,20 @@
   resize: vertical;
 }
 
+.form-group select {
+  color: #ffffff;
+  padding: 0.75rem;
+  border: 1px solid #ffffff;
+  border-radius: 4px;
+  background-color: #1a1a1a;
+  font-size: 1rem;
+}
+
+.form-group select:disabled {
+  background-color: #0a0a0a;
+  opacity: 0.6;
+}
+
 .form-group textarea::placeholder {
   color: #666;
 }

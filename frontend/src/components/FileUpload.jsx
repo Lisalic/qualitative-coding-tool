@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import "../styles/FileUpload.css";
 import { apiFetch } from "../api";
 
@@ -12,6 +12,8 @@ export default function FileUpload({ onUploadSuccess, onView }) {
   const [dataType, setDataType] = useState("posts");
   const [customName, setCustomName] = useState("");
   const [description, setDescription] = useState("");
+  const [projects, setProjects] = useState([]);
+  const [selectedProject, setSelectedProject] = useState("");
 
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0];
@@ -60,6 +62,11 @@ export default function FileUpload({ onUploadSuccess, onView }) {
       return;
     }
 
+    if (!selectedProject) {
+      setError("Please select a project");
+      return;
+    }
+
     setLoading(true);
     setMessage("");
     setError("");
@@ -76,6 +83,9 @@ export default function FileUpload({ onUploadSuccess, onView }) {
       formData.append("name", customName.trim());
       if (description && description.trim()) {
         formData.append("description", description.trim());
+      }
+      if (selectedProject) {
+        formData.append("project_id", selectedProject);
       }
 
       const response = await apiFetch("/api/upload-zst/", {
@@ -117,6 +127,7 @@ export default function FileUpload({ onUploadSuccess, onView }) {
       setDataType("posts");
       setCustomName("");
       setDescription("");
+      setSelectedProject("");
       setLoading(false);
 
       onUploadSuccess(data);
@@ -125,6 +136,28 @@ export default function FileUpload({ onUploadSuccess, onView }) {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    let mounted = true;
+    async function loadProjects() {
+      try {
+        const resp = await apiFetch("/api/projects/");
+        if (!resp.ok) return;
+        const text = await resp.text();
+        if (!text) return;
+        const data = JSON.parse(text);
+        if (mounted) {
+          setProjects(data.projects || []);
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+    loadProjects();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   return (
     <div className="file-upload">
@@ -232,6 +265,26 @@ export default function FileUpload({ onUploadSuccess, onView }) {
                 </label>
               </div>
             </div>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="project-select">Select Project</label>
+            <select
+              id="project-select"
+              value={selectedProject}
+              onChange={(e) => setSelectedProject(e.target.value)}
+              disabled={loading || projects.length === 0}
+              required
+            >
+              <option value="" disabled>
+                Select a project...
+              </option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.projectname}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="form-group">
