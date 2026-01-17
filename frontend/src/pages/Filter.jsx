@@ -274,7 +274,7 @@ export default function Filter() {
                 // fallback to timestamp-based name
               }
               const form = new FormData();
-              form.append("display_name", promptName);
+              form.append("promptname", promptName);
               form.append("prompt", filterPrompt.trim());
               form.append("type", "filter");
               if (fetchedUserId) form.append("user_id", fetchedUserId);
@@ -283,7 +283,8 @@ export default function Filter() {
               console.log("Saved prompt response:", res);
               const saved = res && res.data ? res.data : null;
               const label =
-                (saved && (saved.display_name || saved.prompt)) ||
+                (saved &&
+                  (saved.promptname || saved.display_name || saved.prompt)) ||
                 "Prompt saved";
               setSaveMessage(`Saved: ${label}`);
               setSaveMessageType("success");

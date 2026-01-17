@@ -1,4 +1,4 @@
-import uuid
+import secrets
 import sqlite3
 import pandas as pd
 from sqlalchemy import text
@@ -14,8 +14,8 @@ except Exception as exc:
         raise exc
 
 
-def migrate_sqlite_file(user_id: uuid.UUID, file_path: str, display_name: str, project_type: str = "raw_data"):
-    unique_id = str(uuid.uuid4()).replace("-", "")[:12]
+def migrate_sqlite_file(user_id: int, file_path: str, display_name: str, project_type: str = "raw_data"):
+    unique_id = secrets.token_hex(6)
     schema_name = f"proj_{unique_id}"
 
     print(f"--> Starting migration for '{display_name}' into schema '{schema_name}'...")
@@ -73,7 +73,7 @@ def migrate_sqlite_file(user_id: uuid.UUID, file_path: str, display_name: str, p
         sqlite_conn.close()
         print(f"--> Successfully migrated '{display_name}'!")
 
-def migrate_text_file(user_id: uuid.UUID, file_path: str, display_name: str, project_type: str):
+def migrate_text_file(user_id: int, file_path: str, display_name: str, project_type: str):
     """
     Migrates a .txt file into a Postgres Schema.
     Structure: 1 Schema -> 1 Table ('content_store') -> 1 Column ('file_text')
@@ -83,7 +83,7 @@ def migrate_text_file(user_id: uuid.UUID, file_path: str, display_name: str, pro
     if project_type not in valid_types:
         raise ValueError(f"Invalid Type. Must be one of: {valid_types}")
 
-    unique_id = str(uuid.uuid4()).replace("-", "")[:12]
+    unique_id = secrets.token_hex(6)
     schema_name = f"proj_{unique_id}"
     
     print(f"--> Importing text '{display_name}' as type '{project_type}'...")

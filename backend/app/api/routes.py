@@ -13,7 +13,7 @@ from sqlalchemy import text
 
 import hashlib
 import binascii
-import uuid
+import secrets
 from datetime import datetime
 
 import pandas as pd
@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi import Request
 
 try:
-    from app.database import get_db, AuthUser, Project, ProjectTable, Prompt, engine, SessionLocal
+    from app.database import get_db, User, Project, ProjectTable, Prompt, engine, SessionLocal
     from app.databasemanager import DatabaseManager
     from app.auth import create_access_token, decode_access_token
     from app.config import settings
@@ -34,7 +34,7 @@ try:
     from app.services import migrate_sqlite_file
 except:
     try:
-        from backend.app.database import get_db, AuthUser, Project, ProjectTable, Prompt, engine, SessionLocal
+        from backend.app.database import get_db, User, Project, ProjectTable, Prompt, engine, SessionLocal
         from backend.app.databasemanager import DatabaseManager
         from backend.app.auth import create_access_token, decode_access_token
         from backend.app.config import settings
@@ -131,14 +131,14 @@ async def upload_zst_file(
 
     # Authenticated path: create Postgres schema, tables and stream-insert rows
     base_name = name if name is not None else file.filename.replace('.zst', '')
-    unique_id = str(uuid.uuid4()).replace('-', '')[:12]
+    unique_id = secrets.token_hex(6)
     schema_name = f"proj_{unique_id}"
     inserted_counts = {"submissions": 0, "comments": 0}
 
     try:
         with DatabaseManager() as dm:
             project = dm.projects.create(
-                user_id=uuid.UUID(user_id),
+                user_id=int(user_id),
                 display_name=base_name,
                 schema_name=schema_name,
                 project_type="raw_data",
@@ -328,7 +328,7 @@ async def merge_databases(request: Request, databases: str = Form(...), name: st
                             continue
                     else:
                         # Target exists: insert only rows not already present using a temporary table + EXCEPT
-                        tmp_name = f"tmp_merge_{uuid.uuid4().hex[:8]}"
+                        tmp_name = f"tmp_merge_{secrets.token_hex(4)}"
 
                         # determine common columns between df and target
                         try:
@@ -414,7 +414,7 @@ async def merge_databases(request: Request, databases: str = Form(...), name: st
 
         # Create project record and table metadata using the final counts
         with DatabaseManager() as dm:
-            proj = dm.projects.create(user_id=uuid.UUID(user_id), display_name=name, schema_name=schema_name, project_type='raw_data', description=(description or None))
+            proj = dm.projects.create(user_id=int(user_id), display_name=name, schema_name=schema_name, project_type='raw_data', description=(description or None))
             for tbl, cnt in final_table_counts.items():
                 dm.project_tables.add_table_metadata(project_id=proj.id, table_name=tbl, row_count=cnt)
 
@@ -469,7 +469,7 @@ class LoginRequest(BaseModel):
 
 @router.post("/login/")
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
-    user = db.query(AuthUser).filter(AuthUser.email == payload.email).first()
+    user = db.query(User).filter(User.email == payload.email).first()
     if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
@@ -486,14 +486,14 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
 @router.post("/register/")
 def register(payload: RegisterRequest, db: Session = Depends(get_db)):
     # Check if email already exists
-    existing = db.query(AuthUser).filter(AuthUser.email == payload.email).first()
+    existing = db.query(User).filter(User.email == payload.email).first()
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    new_id = uuid.uuid4()
     hashed = _hash_password(payload.password)
 
-    user = AuthUser(id=new_id, email=payload.email, hashed_password=hashed, date_created=datetime.utcnow())
+    # let DB assign integer primary key
+    user = User(email=payload.email, hashed_password=hashed)
     db.add(user)
     try:
         db.commit()
@@ -516,7 +516,12 @@ def me(request: Request, db: Session = Depends(get_db)):
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    user = db.query(AuthUser).filter(AuthUser.id == user_id).first()
+    try:
+        uid = int(user_id)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid user id in token")
+
+    user = db.query(User).filter(User.id == uid).first()
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
 
@@ -562,9 +567,17 @@ def list_prompts(request: Request, prompt_type: str = Query(None), db: Session =
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     try:
-        q = db.query(Prompt).filter(Prompt.uuid == uuid.UUID(user_id))
+        try:
+            uid = int(user_id)
+        except Exception:
+            uid = None
+        q = db.query(Prompt).filter(Prompt.user_id == uid)
     except Exception:
-        q = db.query(Prompt).filter(Prompt.uuid == user_id)
+        try:
+            uid = int(user_id)
+        except Exception:
+            uid = None
+        q = db.query(Prompt).filter(Prompt.user_id == uid)
 
     if prompt_type:
         q = q.filter(Prompt.type == prompt_type)
@@ -573,9 +586,9 @@ def list_prompts(request: Request, prompt_type: str = Query(None), db: Session =
     result = []
     for r in rows:
         result.append({
-            "rowid": int(r.rowid),
-            "uuid": str(r.uuid),
-            "display_name": r.display_name,
+            "id": int(r.id),
+            "user_id": int(r.user_id) if r.user_id is not None else None,
+            "promptname": r.promptname,
             "prompt": r.prompt,
             "type": r.type,
         })
@@ -609,7 +622,7 @@ async def create_prompt(request: Request, db: Session = Depends(get_db)):
     except Exception:
         data = {}
 
-    display_name = data.get("display_name")
+    display_name = data.get("display_name") or data.get("promptname")
     prompt_val = data.get("prompt")
     ptype = data.get("type")
     user_id = data.get("user_id")
@@ -655,11 +668,11 @@ async def create_prompt(request: Request, db: Session = Depends(get_db)):
             raise HTTPException(status_code=500, detail="Failed to resolve user identity")
 
     try:
-        uid = uuid.UUID(user_id)
+        uid = int(user_id)
     except Exception:
-        uid = user_id
+        raise HTTPException(status_code=401, detail="Invalid user id in token")
 
-    new = Prompt(uuid=uid, display_name=display_name, prompt=prompt_val, type=ptype)
+    new = Prompt(user_id=uid, promptname=display_name, prompt=prompt_val, type=ptype)
     db.add(new)
     try:
         db.commit()
@@ -668,30 +681,37 @@ async def create_prompt(request: Request, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=500, detail=str(exc))
 
-    return JSONResponse({"rowid": int(new.rowid), "uuid": str(new.uuid), "display_name": new.display_name, "prompt": new.prompt, "type": new.type})
+    return JSONResponse({"id": int(new.id), "user_id": int(new.user_id), "promptname": new.promptname, "prompt": new.prompt, "type": new.type})
 
 
-@router.post("/prompts/{rowid}/update")
-def update_prompt(rowid: int, request: Request, display_name: str = Form(None), prompt: str = Form(None), type: str = Form(None), db: Session = Depends(get_db)):
+@router.post("/prompts/{prompt_id}/update")
+def update_prompt(prompt_id: int, request: Request, display_name: str = Form(None), promptname: str = Form(None), prompt: str = Form(None), type: str = Form(None), db: Session = Depends(get_db)):
     """Update a prompt owned by the authenticated user."""
     user_id = get_user_id_from_request(request)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    p = db.query(Prompt).filter(Prompt.rowid == rowid).first()
+    p = db.query(Prompt).filter(Prompt.id == prompt_id).first()
     if not p:
         raise HTTPException(status_code=404, detail="Prompt not found")
 
     # ensure ownership
     try:
-        owner_id = str(p.uuid)
+        owner_id = int(p.user_id)
     except Exception:
-        owner_id = p.uuid
-    if owner_id != user_id:
+        owner_id = p.user_id
+    try:
+        uid = int(user_id)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid user id in token")
+
+    if owner_id != uid:
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    if display_name is not None:
-        p.display_name = display_name
+    # accept either `display_name` (legacy) or `promptname` (canonical)
+    new_name = promptname if (promptname is not None) else display_name
+    if new_name is not None:
+        p.promptname = new_name
     if prompt is not None:
         p.prompt = prompt
     if type is not None:
@@ -704,25 +724,30 @@ def update_prompt(rowid: int, request: Request, display_name: str = Form(None), 
         db.rollback()
         raise HTTPException(status_code=500, detail=str(exc))
 
-    return JSONResponse({"rowid": int(p.rowid), "uuid": str(p.uuid), "display_name": p.display_name, "prompt": p.prompt, "type": p.type})
+    return JSONResponse({"id": int(p.id), "user_id": int(p.user_id), "promptname": p.promptname, "prompt": p.prompt, "type": p.type})
 
 
-@router.delete("/prompts/{rowid}")
-def delete_prompt(rowid: int, request: Request, db: Session = Depends(get_db)):
+@router.delete("/prompts/{prompt_id}")
+def delete_prompt(prompt_id: int, request: Request, db: Session = Depends(get_db)):
     """Delete a prompt owned by the authenticated user."""
     user_id = get_user_id_from_request(request)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    p = db.query(Prompt).filter(Prompt.rowid == rowid).first()
+    p = db.query(Prompt).filter(Prompt.id == prompt_id).first()
     if not p:
         raise HTTPException(status_code=404, detail="Prompt not found")
-
+    # ensure ownership: Prompt.user_id should be integer referencing User.id
     try:
-        owner_id = str(p.uuid)
+        owner_id = int(p.user_id) if p.user_id is not None else None
     except Exception:
-        owner_id = p.uuid
-    if owner_id != user_id:
+        owner_id = p.user_id
+    try:
+        uid = int(user_id)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid user id in token")
+
+    if owner_id != uid:
         raise HTTPException(status_code=403, detail="Forbidden")
 
     try:
@@ -732,7 +757,7 @@ def delete_prompt(rowid: int, request: Request, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=500, detail=str(exc))
 
-    return JSONResponse({"deleted": True})
+    return JSONResponse({"deleted": True, "id": int(p.id)})
 
 
 @router.delete("/delete-database/{db_name}")
@@ -965,9 +990,9 @@ async def get_codebook(codebook_id: str = Query(None), db: Session = Depends(get
             # try display_name match
             project = db.query(Project).filter(Project.project_type == 'codebook', Project.display_name == codebook_id).first()
         if not project:
-            # try id match
+            # try id match (integer)
             try:
-                pid = uuid.UUID(codebook_id)
+                pid = int(codebook_id)
                 project = db.query(Project).filter(Project.project_type == 'codebook', Project.id == pid).first()
             except Exception:
                 project = None
@@ -1005,7 +1030,7 @@ async def parse_codebook(codebook_id: str = Query(None), db: Session = Depends(g
             project = db.query(Project).filter(Project.project_type == 'codebook', Project.display_name == codebook_id).first()
         if not project:
             try:
-                pid = uuid.UUID(codebook_id)
+                pid = int(codebook_id)
                 project = db.query(Project).filter(Project.project_type == 'codebook', Project.id == pid).first()
             except Exception:
                 project = None
@@ -1128,7 +1153,7 @@ async def get_coded_data_query(coded_id: str = Query(None), db: Session = Depend
             project = db.query(Project).filter(Project.project_type == 'coding', Project.display_name == coded_id).first()
         if not project:
             try:
-                pid = uuid.UUID(coded_id)
+                pid = int(coded_id)
                 project = db.query(Project).filter(Project.project_type == 'coding', Project.id == pid).first()
             except Exception:
                 project = None
@@ -1413,7 +1438,7 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
         new_schema = None
         proj = None
         try:
-            unique_id = str(uuid.uuid4()).replace('-', '')[:12]
+            unique_id = secrets.token_hex(6)
             new_schema = f"proj_{unique_id}"
             with engine.begin() as conn:
                 print(f"[filter-data] Creating schema {new_schema}")
@@ -1483,7 +1508,7 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
                 try:
                     print(f"[filter-data] Creating project metadata for schema {new_schema} (user={user_id})")
                     with DatabaseManager() as dm:
-                        proj = dm.projects.create(user_id=uuid.UUID(user_id), display_name=name or new_schema, schema_name=new_schema, project_type='filtered_data')
+                        proj = dm.projects.create(user_id=int(user_id), display_name=name or new_schema, schema_name=new_schema, project_type='filtered_data')
                         print(f"[filter-data] Created project id={proj.id} schema={proj.schema_name}")
                         try:
                             dm.project_tables.add_table_metadata(project_id=proj.id, table_name='submissions', row_count=len(posts_list))
@@ -1596,7 +1621,7 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
                 return JSONResponse({"error": "Authentication required to create project"}, status_code=401)
 
             # generate a unique schema name
-            unique_id = str(uuid.uuid4()).replace('-', '')[:12]
+            unique_id = secrets.token_hex(6)
             new_schema = f"proj_{unique_id}"
 
             with engine.begin() as conn:
@@ -1607,7 +1632,7 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
 
             # create project row and table metadata
             with DatabaseManager() as dm:
-                proj = dm.projects.create(user_id=uuid.UUID(user_id), display_name=name, schema_name=new_schema, project_type='codebook')
+                proj = dm.projects.create(user_id=int(user_id), display_name=name, schema_name=new_schema, project_type='codebook')
                 dm.project_tables.add_table_metadata(project_id=proj.id, table_name='content_store', row_count=1)
 
             # Return a plain-text concatenation: <agreement_percent> + <model_1 output>
@@ -1682,9 +1707,9 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
             if cb_schema_raw and cb_schema_raw.startswith('proj_'):
                 resolved_schema = cb_schema_raw
             else:
-                # Try to interpret the provided value as a Project.id (UUID) and resolve schema_name
+                # Try to interpret the provided value as a Project.id (integer) and resolve schema_name
                 try:
-                    pid = uuid.UUID(cb_schema_raw)
+                    pid = int(cb_schema_raw)
                     db_sess = SessionLocal()
                     try:
                         proj = db_sess.query(Project).filter(Project.id == pid).first()
@@ -1696,7 +1721,7 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
                         except Exception:
                             pass
                 except Exception:
-                    # not a UUID / could not resolve
+                    # not an integer / could not resolve
                     resolved_schema = None
 
             if resolved_schema:
@@ -1729,7 +1754,7 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
             provided_name = (report_name or "").strip()
             display_name = provided_name if provided_name else 'coding'
 
-            unique_id = str(uuid.uuid4()).replace('-', '')[:12]
+            unique_id = secrets.token_hex(6)
             new_schema = f"proj_{unique_id}"
             try:
                 with engine.begin() as conn:
@@ -1740,7 +1765,7 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
 
                     # create project row and table metadata
                     with DatabaseManager() as dm:
-                        proj = dm.projects.create(user_id=uuid.UUID(user_id), display_name=display_name, schema_name=new_schema, project_type='coding')
+                        proj = dm.projects.create(user_id=int(user_id), display_name=display_name, schema_name=new_schema, project_type='coding')
                         dm.project_tables.add_table_metadata(project_id=proj.id, table_name='content_store', row_count=1)
             except Exception as e:
                     print(f"Failed to persist classification project/schema: {e}")

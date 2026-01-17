@@ -48,8 +48,11 @@ export default function PromptManager({
       .then((res) => {
         const prompts = (res.data && res.data.prompts) || [];
         const mapped = prompts.map((p) => ({
-          id: p.rowid,
-          name: p.display_name,
+          id: p.id,
+          name:
+            p.promptname ||
+            p.display_name ||
+            `Prompt ${Math.random().toString(36).slice(2, 6)}`,
           prompt: p.prompt,
           createdAt: new Date().toISOString(),
         }));
@@ -77,7 +80,7 @@ export default function PromptManager({
 
     // Log the row that will be created for debugging and fetch user id
     const debugRow = {
-      display_name: promptName,
+      promptname: promptName,
       prompt: newPromptContent.trim(),
       type: "filter",
     };
@@ -101,7 +104,7 @@ export default function PromptManager({
       })
       .finally(() => {
         const form = new FormData();
-        form.append("display_name", promptName);
+        form.append("promptname", promptName);
         form.append("prompt", newPromptContent.trim());
         form.append("type", promptType);
         if (fetchedUserId) form.append("user_id", fetchedUserId);
@@ -145,7 +148,7 @@ export default function PromptManager({
       return;
     }
     const form = new FormData();
-    if (editName !== null) form.append("display_name", editName);
+    if (editName !== null) form.append("promptname", editName);
     form.append("prompt", editContent.trim());
     form.append("type", promptType);
 

@@ -39,8 +39,8 @@ class BaseRepository:
 
 
 class UserRepository(BaseRepository):
-    def create(self, email: str, password_hash: str) -> User:
-        user = User(email=email, password_hash=password_hash)
+    def create(self, email: str, hashed_password: str) -> User:
+        user = User(email=email, hashed_password=hashed_password)
         self.session.add(user)
         self.session.flush()
         return user
