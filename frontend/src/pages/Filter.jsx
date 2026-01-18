@@ -16,6 +16,8 @@ export default function Filter() {
   const [database, setDatabase] = useState("");
   const [databases, setDatabases] = useState([]); // raw data projects for selection
   const [filteredDatabases, setFilteredDatabases] = useState([]); // filtered projects for ManageDatabase
+  const [projects, setProjects] = useState([]);
+  const [selectedProject, setSelectedProject] = useState("");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [rightView, setRightView] = useState("prompts"); // 'prompts' or 'database'
@@ -34,6 +36,21 @@ export default function Filter() {
 
   useEffect(() => {
     fetchDatabases();
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    apiFetch("/api/projects/")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!mounted || !data) return;
+        setProjects(data.projects || []);
+        if (!selectedProject && data.projects && data.projects.length > 0) {
+          setSelectedProject(String(data.projects[0].id));
+        }
+      })
+      .catch(() => {});
+    return () => (mounted = false);
   }, []);
 
   useEffect(() => {
@@ -198,6 +215,9 @@ export default function Filter() {
       if (formData.database) {
         requestData.append("database", formData.database);
       }
+      if (selectedProject) {
+        requestData.append("project_id", selectedProject);
+      }
 
       const response = await apiFetch("/api/filter-data/", {
         method: "POST",
@@ -342,6 +362,14 @@ export default function Filter() {
         label: d.label,
       })),
     },
+    {
+      id: "project_id",
+      label: "Select Project",
+      type: "select",
+      value: selectedProject,
+      onChange: (v) => setSelectedProject(v),
+      options: projects.map((p) => ({ value: String(p.id), label: p.projectname })),
+    },
   ];
 
   return (
@@ -368,6 +396,7 @@ export default function Filter() {
                   View Filtered Data
                 </button>
               </div>
+              {/* project select moved into ActionForm fields */}
               <ActionForm
                 fields={[
                   ...databaseFields,

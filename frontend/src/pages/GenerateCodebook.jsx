@@ -16,6 +16,8 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
   const [databaseType, setDatabaseType] = useState("unfiltered");
   const [databases, setDatabases] = useState([]);
   const [filteredDatabases, setFilteredDatabases] = useState([]);
+  const [projects, setProjects] = useState([]);
+  const [selectedProject, setSelectedProject] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
@@ -27,6 +29,18 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
   useEffect(() => {
     fetchDatabases();
     fetchFilteredDatabases();
+    let mounted = true;
+    apiFetch("/api/projects/")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!mounted || !data) return;
+        setProjects(data.projects || []);
+        if (!selectedProject && data.projects && data.projects.length > 0) {
+          setSelectedProject(String(data.projects[0].id));
+        }
+      })
+      .catch(() => {});
+    return () => (mounted = false);
   }, []);
 
   const fetchDatabases = async () => {
@@ -128,6 +142,10 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
       requestData.append("database", formData.database || database);
       if (formData.prompt) requestData.append("prompt", formData.prompt);
 
+      if (selectedProject) {
+        requestData.append("project_id", selectedProject);
+      }
+
       if (!formData.name || !formData.name.trim()) {
         throw new Error("Please provide a name for the generated codebook");
       }
@@ -182,6 +200,14 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
         value: item.value || item,
         label: item.label || getDisplayName(item),
       })),
+    },
+    {
+      id: "project_id",
+      label: "Select Project",
+      type: "select",
+      value: selectedProject,
+      onChange: (v) => setSelectedProject(v),
+      options: (projects || []).map((p) => ({ value: String(p.id), label: p.projectname })),
     },
     {
       id: "prompt",

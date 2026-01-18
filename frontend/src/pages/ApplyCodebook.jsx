@@ -21,6 +21,8 @@ export default function ApplyCodebook() {
   const [codebooks, setCodebooks] = useState([]);
   const [databases, setDatabases] = useState([]);
   const [filteredDatabases, setFilteredDatabases] = useState([]);
+  const [projects, setProjects] = useState([]);
+  const [selectedProject, setSelectedProject] = useState("");
   const [rightView, setRightView] = useState("codebooks"); // 'codebooks' or 'prompts'
   const [saveMessage, setSaveMessage] = useState("");
   const [saveMessageType, setSaveMessageType] = useState("success");
@@ -29,7 +31,23 @@ export default function ApplyCodebook() {
     fetchCodebooks();
     fetchDatabases();
     fetchFilteredDatabases();
+    fetchProjects();
   }, []);
+
+  const fetchProjects = async () => {
+    try {
+      const resp = await apiFetch("/api/projects/");
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const list = data.projects || [];
+      setProjects(list);
+      if (!selectedProject && list.length > 0) {
+        setSelectedProject(String(list[0].id));
+      }
+    } catch (err) {
+      console.error("Error fetching projects:", err);
+    }
+  };
 
   const fetchCodebooks = async () => {
     try {
@@ -72,8 +90,8 @@ export default function ApplyCodebook() {
         metadata: p,
       }));
       setDatabases(normalized);
-      if (!database && dbNames.length > 0) {
-        setDatabase(dbNames[0]);
+      if (!database && normalized.length > 0) {
+        setDatabase(normalized[0].name);
       }
     } catch (err) {
       console.error("Error fetching databases:", err);
@@ -131,6 +149,9 @@ export default function ApplyCodebook() {
       requestData.append("methodology", formData.methodology);
       if (formData.description)
         requestData.append("description", formData.description);
+      if (selectedProject) {
+        requestData.append("project_id", selectedProject);
+      }
 
       const response = await apiFetch("/api/apply-codebook/", {
         method: "POST",
@@ -168,7 +189,8 @@ export default function ApplyCodebook() {
     setDatabaseType(type);
     const available = getAvailableDatabases();
     if (available.length > 0) {
-      setDatabase(available[0]);
+      const val = typeof available[0] === "object" ? available[0].name : available[0];
+      setDatabase(val);
     }
   };
 
@@ -193,6 +215,14 @@ export default function ApplyCodebook() {
         value: typeof item === "string" ? item : item.name,
         label: getDisplayName(item),
       })),
+    },
+    {
+      id: "project_id",
+      label: "Select Project",
+      type: "select",
+      value: selectedProject,
+      onChange: (v) => setSelectedProject(v),
+      options: (projects || []).map((p) => ({ value: String(p.id), label: p.projectname || p.display_name || p.name || String(p.id) })),
     },
     {
       id: "codebook",
