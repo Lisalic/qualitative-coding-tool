@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useLocation } from "react-router-dom";
 import { apiFetch } from "../api";
 import SelectionList from "../components/SelectionList";
 import "../styles/Data.css";
@@ -6,6 +7,7 @@ import "../styles/DataTable.css";
 import MarkdownView from "../components/MarkdownView";
 
 export default function ViewCoding() {
+  const location = useLocation();
   const [availableCodedData, setAvailableCodedData] = useState([]);
   const [selectedCodedData, setSelectedCodedData] = useState(null);
   const [selectedCodedDataName, setSelectedCodedDataName] = useState("");
@@ -29,11 +31,14 @@ export default function ViewCoding() {
         }));
         setAvailableCodedData(items);
         if (items.length > 0) {
-          const defaultId = items[0].id;
+          // If caller provided a preselected coded data via location.state, use it
+          const pre = location?.state?.selectedCodedData;
+          const match = pre ? items.find((it) => it.id === pre) : null;
+          const defaultId = match ? match.id : items[0].id;
           setSelectedCodedData(defaultId);
           const sel = items.find((cd) => cd.id === defaultId);
           setSelectedCodedDataName(
-            sel?.display_name || sel?.name || sel?.id || ""
+            sel?.display_name || sel?.name || sel?.id || "",
           );
         }
         return;

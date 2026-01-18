@@ -692,6 +692,7 @@ def list_projects(request: Request):
                         "id": str(f.id),
                         "display_name": f.filename,
                         "schema_name": f.schemaname,
+                        "file_type": f.file_type,
                         "description": f.description,
                         "created_at": f.created_at.isoformat() if f.created_at else None,
                     })
