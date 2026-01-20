@@ -72,18 +72,26 @@ export default function Data() {
 
   // When selected project changes, ensure selectedDatabase defaults to first file in project
   useEffect(() => {
-    if (!selectedProject || !userProjects) return;
-    const projectObj = userProjects.find(
-      (p) =>
-        String(p.schema_name) === String(selectedProject) ||
-        String(p.id) === String(selectedProject),
+    if (
+      !selectedProject ||
+      ((!projectsList || projectsList.length === 0) && !userProjects)
+    )
+      return;
+    const source =
+      projectsList && projectsList.length > 0
+        ? projectsList
+        : userProjects || [];
+    const projectObj = source.find(
+      (p) => String(p.id) === String(selectedProject),
     );
     const files = (projectObj && projectObj.files) || [];
-    if (files.length > 0) {
-      const firstFile = files[0].schema_name || files[0].id || "";
+    const rawFiles = files.filter((f) => f.file_type === "raw_data");
+    const pick = rawFiles.length > 0 ? rawFiles[0] : files[0] || null;
+    if (pick) {
+      const firstFile = pick.schema_name || pick.id || "";
       setSelectedDatabase((cur) => (cur ? cur : firstFile));
     }
-  }, [selectedProject, userProjects]);
+  }, [selectedProject, userProjects, projectsList]);
 
   const fetchDatabases = async () => {
     try {
@@ -219,7 +227,9 @@ export default function Data() {
             const projectObj = source.find(
               (p) => String(p.id) === String(selectedProject),
             );
-            const files = (projectObj && projectObj.files) || [];
+            const files = ((projectObj && projectObj.files) || []).filter(
+              (f) => f.file_type === "raw_data",
+            );
             return (
               <SelectionList
                 items={files.map((f) => ({
@@ -230,7 +240,9 @@ export default function Data() {
                 onSelect={(id) => setSelectedDatabase(id)}
                 className="database-selector"
                 buttonClass="db-button"
-                emptyMessage={files.length ? "No files" : "No files in project"}
+                emptyMessage={
+                  files.length ? "No files" : "No raw files in project"
+                }
               />
             );
           })()
