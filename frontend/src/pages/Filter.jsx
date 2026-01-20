@@ -73,7 +73,7 @@ export default function Filter() {
 
       // Fetch filtered_data projects for ManageDatabase view
       const respFiltered = await apiFetch(
-        "/api/my-files/?file_type=filtered_data"
+        "/api/my-files/?file_type=filtered_data",
       );
       if (!respFiltered.ok)
         throw new Error("Failed to fetch filtered projects");
@@ -286,7 +286,7 @@ export default function Filter() {
               let promptName = `Prompt ${Date.now()}`;
               try {
                 const listRes = await api.get(
-                  `/api/prompts/?prompt_type=${encodeURIComponent("filter")}`
+                  `/api/prompts/?prompt_type=${encodeURIComponent("filter")}`,
                 );
                 const prompts = (listRes.data && listRes.data.prompts) || [];
                 promptName = `Prompt ${prompts.length + 1}`;
@@ -368,7 +368,10 @@ export default function Filter() {
       type: "select",
       value: selectedProject,
       onChange: (v) => setSelectedProject(v),
-      options: projects.map((p) => ({ value: String(p.id), label: p.projectname })),
+      options: projects.map((p) => ({
+        value: String(p.id),
+        label: p.projectname,
+      })),
     },
   ];
 

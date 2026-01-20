@@ -171,7 +171,7 @@ export default function FileUpload({ onUploadSuccess, onView }) {
       >
         Import Data
       </h1>
-      
+
       <div className="action-buttons">
         <button onClick={onView} className="view-button">
           View Imported Data
@@ -180,40 +180,40 @@ export default function FileUpload({ onUploadSuccess, onView }) {
       <div className="form-wrapper">
         <h2>Upload Data</h2>
         <form onSubmit={handleSubmit}>
-            <div className="form-group">
-              <label htmlFor="zst-file">Upload .zst File</label>
-              <input
-                id="zst-file"
-                type="file"
-                accept=".zst"
-                onChange={handleFileChange}
-                disabled={loading}
-              />
-              {file && <p className="file-name">Selected: {file.name}</p>}
-            </div>
+          <div className="form-group">
+            <label htmlFor="zst-file">Upload .zst File</label>
+            <input
+              id="zst-file"
+              type="file"
+              accept=".zst"
+              onChange={handleFileChange}
+              disabled={loading}
+            />
+            {file && <p className="file-name">Selected: {file.name}</p>}
+          </div>
 
-            <div className="form-group">
-              <label htmlFor="project-select">Select Project</label>
-              <select
-                id="project-select"
-                value={selectedProject}
-                onChange={(e) => setSelectedProject(e.target.value)}
-                disabled={loading || projects.length === 0}
-                required
-              >
-                <option value="" disabled>
-                  Select a project...
+          <div className="form-group">
+            <label htmlFor="project-select">Select Project</label>
+            <select
+              id="project-select"
+              value={selectedProject}
+              onChange={(e) => setSelectedProject(e.target.value)}
+              disabled={loading || projects.length === 0}
+              required
+            >
+              <option value="" disabled>
+                Select a project...
+              </option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.projectname}
                 </option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.projectname}
-                  </option>
-                ))}
-              </select>
-            </div>
+              ))}
+            </select>
+          </div>
 
-            <div className="form-group">
-              <label htmlFor="subreddits">Filter by Subreddits</label>
+          <div className="form-group">
+            <label htmlFor="subreddits">Filter by Subreddits</label>
             <div className="subreddit-input-wrapper">
               <div className="subreddit-input-group">
                 <input

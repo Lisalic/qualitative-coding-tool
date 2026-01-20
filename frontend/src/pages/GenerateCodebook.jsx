@@ -207,7 +207,10 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
       type: "select",
       value: selectedProject,
       onChange: (v) => setSelectedProject(v),
-      options: (projects || []).map((p) => ({ value: String(p.id), label: p.projectname })),
+      options: (projects || []).map((p) => ({
+        value: String(p.id),
+        label: p.projectname,
+      })),
     },
     {
       id: "prompt",
@@ -246,7 +249,7 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
               let promptName = `Prompt ${Date.now()}`;
               try {
                 const listRes = await api.get(
-                  `/api/prompts/?prompt_type=${encodeURIComponent("generate")}`
+                  `/api/prompts/?prompt_type=${encodeURIComponent("generate")}`,
                 );
                 const prompts = (listRes.data && listRes.data.prompts) || [];
                 promptName = `Prompt ${prompts.length + 1}`;

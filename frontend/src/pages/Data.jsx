@@ -11,6 +11,30 @@ export default function Data() {
   const [databases, setDatabases] = useState([]);
   const [selectedDatabase, setSelectedDatabase] = useState("");
   const [userProjects, setUserProjects] = useState(null);
+  const [selectedProject, setSelectedProject] = useState("");
+
+  // prefer projects endpoint which includes files; fall back to my-files
+  useEffect(() => {
+    fetchProjects();
+  }, []);
+
+  const fetchProjects = async () => {
+    try {
+      const resp = await apiFetch("/api/projects/");
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const projects = data.projects || [];
+      if (projects.length > 0) {
+        setUserProjects(projects);
+        // set default selected project if none
+        if (!selectedProject) {
+          setSelectedProject(String(projects[0].id || ""));
+        }
+      }
+    } catch (err) {
+      console.error("Error fetching projects:", err);
+    }
+  };
 
   useEffect(() => {
     fetchDatabases();
@@ -34,6 +58,28 @@ export default function Data() {
     }
   }, [databases, selectedDatabase]);
 
+  useEffect(() => {
+    // When projects load, set a default selected project
+    if (!selectedProject && userProjects && userProjects.length > 0) {
+      setSelectedProject(String(userProjects[0].id || ""));
+    }
+  }, [userProjects, selectedProject]);
+
+  // When selected project changes, ensure selectedDatabase defaults to first file in project
+  useEffect(() => {
+    if (!selectedProject || !userProjects) return;
+    const projectObj = userProjects.find(
+      (p) =>
+        String(p.schema_name) === String(selectedProject) ||
+        String(p.id) === String(selectedProject),
+    );
+    const files = (projectObj && projectObj.files) || [];
+    if (files.length > 0) {
+      const firstFile = files[0].schema_name || files[0].id || "";
+      setSelectedDatabase((cur) => (cur ? cur : firstFile));
+    }
+  }, [selectedProject, userProjects]);
+
   const fetchDatabases = async () => {
     try {
       // Check if user is logged in
@@ -44,11 +90,10 @@ export default function Data() {
         if (!projResp.ok) throw new Error("Failed to fetch user projects");
         const projData = await projResp.json();
         const projects = projData.projects || [];
-        setUserProjects(projects);
         const normalized = projects.map((p) => {
           const tables = p.tables || [];
           const submissionsTable = tables.find(
-            (t) => t.table_name === "submissions"
+            (t) => t.table_name === "submissions",
           );
           const commentsTable = tables.find((t) => t.table_name === "comments");
           return {
@@ -74,11 +119,10 @@ export default function Data() {
       if (response.ok) {
         const projData = await response.json();
         const projects = projData.projects || [];
-        setUserProjects(projects);
         const normalized = projects.map((p) => {
           const tables = p.tables || [];
           const submissionsTable = tables.find(
-            (t) => t.table_name === "submissions"
+            (t) => t.table_name === "submissions",
           );
           const commentsTable = tables.find((t) => t.table_name === "comments");
           return {
@@ -107,7 +151,7 @@ export default function Data() {
     const baseName = String(selectedDatabase).replace(".db", "");
     // attempt to find a normalized database object in `databases`
     const projObj = (databases || []).find(
-      (d) => d && (d.name === selectedDatabase || d.name === baseName)
+      (d) => d && (d.name === selectedDatabase || d.name === baseName),
     );
     if (projObj) return `Database: ${projObj.display_name || baseName}`;
     return `Database: ${baseName}`;
@@ -117,37 +161,88 @@ export default function Data() {
     if (!selectedDatabase) return null;
     const baseName = String(selectedDatabase).replace(".db", "");
     const projObj = (databases || []).find(
-      (d) => d && (d.name === selectedDatabase || d.name === baseName)
+      (d) => d && (d.name === selectedDatabase || d.name === baseName),
     );
     return projObj ? projObj.display_name : null;
   };
 
-  const databaseItems = databases;
+  const databaseItems = databases.filter((d) => {
+    // If a project is selected and we have project files, show those files
+    if (selectedProject && userProjects && userProjects.length > 0) {
+      const projectObj = userProjects.find(
+        (p) => String(p.id) === String(selectedProject),
+      );
+      if (projectObj && projectObj.files && projectObj.files.length > 0) {
+        return false; // we won't use this filtered list; SelectionList will use projectObj.files
+      }
+    }
+    if (!selectedProject) return true;
+    const id = d.name || d.id || "";
+    return String(id) === String(selectedProject);
+  });
 
   return (
     <>
       <div className="data-container">
-        <SelectionList
-          items={(databases || []).map((d) => {
-            const id = typeof d === "string" ? d : d.name || "";
-            const display = userProjects
-              ? userProjects.find((p) => p.schema_name === id)?.display_name ||
-                (typeof d === "string"
+        <div style={{ marginBottom: 12 }}>
+          <label style={{ color: "#fff", marginRight: 8 }}>Project:</label>
+          <select
+            value={selectedProject}
+            onChange={(e) => setSelectedProject(e.target.value)}
+            style={{ padding: "6px 8px", borderRadius: 6 }}
+          >
+            <option value="">All Projects</option>
+            {(userProjects || []).map((p) => (
+              <option key={p.id} value={String(p.id)}>
+                {p.projectname || p.display_name || p.schema_name || p.id}
+              </option>
+            ))}
+          </select>
+        </div>
+        {selectedProject && userProjects && userProjects.length > 0 ? (
+          (() => {
+            const projectObj = userProjects.find(
+              (p) => String(p.id) === String(selectedProject),
+            );
+            const files = (projectObj && projectObj.files) || [];
+            return (
+              <SelectionList
+                items={files.map((f) => ({
+                  id: f.schema_name || f.id,
+                  name: f.display_name || f.schema_name || f.id,
+                }))}
+                selectedId={selectedDatabase}
+                onSelect={(id) => setSelectedDatabase(id)}
+                className="database-selector"
+                buttonClass="db-button"
+                emptyMessage={files.length ? "No files" : "No files in project"}
+              />
+            );
+          })()
+        ) : (
+          <SelectionList
+            items={(databaseItems || []).map((d) => {
+              const id = typeof d === "string" ? d : d.name || "";
+              const display = userProjects
+                ? userProjects.find((p) => p.schema_name === id)
+                    ?.display_name ||
+                  (typeof d === "string"
+                    ? id.replace(".db", "")
+                    : d.display_name || id.replace(".db", ""))
+                : typeof d === "string"
                   ? id.replace(".db", "")
-                  : d.display_name || id.replace(".db", ""))
-              : typeof d === "string"
-              ? id.replace(".db", "")
-              : d.display_name || id.replace(".db", "");
-            return { id, name: display };
-          })}
-          selectedId={selectedDatabase}
-          onSelect={(id) => setSelectedDatabase(id)}
-          className="database-selector"
-          buttonClass="db-button"
-          emptyMessage={
-            userProjects ? "No projects available" : "No databases available"
-          }
-        />
+                  : d.display_name || id.replace(".db", "");
+              return { id, name: display };
+            })}
+            selectedId={selectedDatabase}
+            onSelect={(id) => setSelectedDatabase(id)}
+            className="database-selector"
+            buttonClass="db-button"
+            emptyMessage={
+              userProjects ? "No projects available" : "No databases available"
+            }
+          />
+        )}
         <DataTable
           title={getTitle()}
           database={selectedDatabase}
@@ -157,7 +252,7 @@ export default function Data() {
               (d) =>
                 d &&
                 (d.name === selectedDatabase ||
-                  d.name === String(selectedDatabase).replace(".db", ""))
+                  d.name === String(selectedDatabase).replace(".db", "")),
             )?.metadata
           }
           description={
@@ -165,7 +260,7 @@ export default function Data() {
               (d) =>
                 d &&
                 (d.name === selectedDatabase ||
-                  d.name === String(selectedDatabase).replace(".db", ""))
+                  d.name === String(selectedDatabase).replace(".db", "")),
             )?.description
           }
         />

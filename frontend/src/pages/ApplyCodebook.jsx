@@ -132,7 +132,7 @@ export default function ApplyCodebook() {
     }
     if (!formData.report_name || !formData.report_name.trim()) {
       setError(
-        "Please provide an output display name (report name) before applying the codebook."
+        "Please provide an output display name (report name) before applying the codebook.",
       );
       return;
     }
@@ -189,7 +189,8 @@ export default function ApplyCodebook() {
     setDatabaseType(type);
     const available = getAvailableDatabases();
     if (available.length > 0) {
-      const val = typeof available[0] === "object" ? available[0].name : available[0];
+      const val =
+        typeof available[0] === "object" ? available[0].name : available[0];
       setDatabase(val);
     }
   };
@@ -222,7 +223,10 @@ export default function ApplyCodebook() {
       type: "select",
       value: selectedProject,
       onChange: (v) => setSelectedProject(v),
-      options: (projects || []).map((p) => ({ value: String(p.id), label: p.projectname || p.display_name || p.name || String(p.id) })),
+      options: (projects || []).map((p) => ({
+        value: String(p.id),
+        label: p.projectname || p.display_name || p.name || String(p.id),
+      })),
     },
     {
       id: "codebook",
@@ -268,7 +272,7 @@ export default function ApplyCodebook() {
               let promptName = `Prompt ${Date.now()}`;
               try {
                 const listRes = await api.get(
-                  `/api/prompts/?prompt_type=${encodeURIComponent("apply")}`
+                  `/api/prompts/?prompt_type=${encodeURIComponent("apply")}`,
                 );
                 const prompts = (listRes.data && listRes.data.prompts) || [];
                 promptName = `Prompt ${prompts.length + 1}`;
