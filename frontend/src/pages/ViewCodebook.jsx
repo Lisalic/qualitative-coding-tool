@@ -10,6 +10,8 @@ export default function ViewCodebook() {
   // `navigate` not used here; removed to avoid unused-variable errors
   const [availableCodebooks, setAvailableCodebooks] = useState([]);
   const [selectedCodebook, setSelectedCodebook] = useState(null);
+  const [projectsList, setProjectsList] = useState([]);
+  const [selectedProject, setSelectedProject] = useState("");
   const [codebookContent, setCodebookContent] = useState("");
   const [selectedCodebookName, setSelectedCodebookName] = useState("");
   const [loading, setLoading] = useState(true);
@@ -18,6 +20,28 @@ export default function ViewCodebook() {
 
   const fetchAvailableCodebooks = async () => {
     try {
+      // Prefer project-backed files when a project is selected
+      if (projectsList && projectsList.length > 0 && selectedProject) {
+        const projectObj = projectsList.find(
+          (p) => String(p.id) === String(selectedProject),
+        );
+        const files = (projectObj && projectObj.files) || [];
+        const codebookFiles = files
+          .filter((f) => f.file_type === "codebook")
+          .map((f) => ({
+            id: String(f.id),
+            display_name: f.display_name || f.schema_name || String(f.id),
+            description: f.description || null,
+            metadata: { schema: f.schema_name, file: f },
+          }));
+        setAvailableCodebooks(codebookFiles);
+        if (codebookFiles.length > 0) {
+          setSelectedCodebook(String(codebookFiles[0].id));
+          setSelectedCodebookName(codebookFiles[0].display_name || "");
+        }
+        return;
+      }
+
       const response = await apiFetch("/api/list-codebooks");
       if (!response.ok) {
         throw new Error("Failed to fetch codebooks list");
@@ -29,7 +53,7 @@ export default function ViewCodebook() {
         const selectedFromUrl = urlParams.get("selected");
         if (
           selectedFromUrl &&
-          data.codebooks.some((cb) => cb.id === selectedFromUrl)
+          data.codebooks.some((cb) => String(cb.id) === String(selectedFromUrl))
         ) {
           setSelectedCodebook(selectedFromUrl);
         } else {
@@ -38,10 +62,10 @@ export default function ViewCodebook() {
         const sel = data.codebooks.find(
           (cb) =>
             cb.id ===
-            (selectedFromUrl || data.codebooks[data.codebooks.length - 1].id)
+            (selectedFromUrl || data.codebooks[data.codebooks.length - 1].id),
         );
         setSelectedCodebookName(
-          sel?.display_name || sel?.name || sel?.id || ""
+          sel?.display_name || sel?.name || sel?.id || "",
         );
       }
     } catch (err) {
@@ -55,7 +79,7 @@ export default function ViewCodebook() {
       setError(null);
 
       const response = await apiFetch(
-        `/api/codebook?codebook_id=${codebookId}`
+        `/api/codebook?codebook_id=${codebookId}`,
       );
       if (!response.ok) {
         throw new Error("Failed to fetch codebook");
@@ -75,19 +99,57 @@ export default function ViewCodebook() {
 
   useEffect(() => {
     fetchAvailableCodebooks();
+    fetchProjects();
   }, []);
+
+  const fetchProjects = async () => {
+    try {
+      const resp = await apiFetch("/api/projects/");
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const projects = data.projects || [];
+      setProjectsList(projects);
+      if (!selectedProject && projects.length > 0)
+        setSelectedProject(String(projects[0].id));
+    } catch (e) {
+      console.error("Error fetching projects:", e);
+    }
+  };
 
   useEffect(() => {
     if (selectedCodebook) {
       fetchCodebook(selectedCodebook);
-      const sel = availableCodebooks.find((cb) => cb.id === selectedCodebook);
+      const sel = availableCodebooks.find(
+        (cb) => String(cb.id) === String(selectedCodebook),
+      );
       setSelectedCodebookName(sel?.display_name || sel?.name || sel?.id || "");
     }
   }, [selectedCodebook, availableCodebooks]);
 
+  useEffect(() => {
+    // when project selection changes, refresh available codebooks
+    fetchAvailableCodebooks();
+  }, [selectedProject, projectsList]);
+
   return (
     <>
       <div className="data-container">
+        <div style={{ marginBottom: 12 }}>
+          <label style={{ color: "#fff", marginRight: 8 }}>Project:</label>
+          <select
+            value={selectedProject}
+            onChange={(e) => setSelectedProject(e.target.value)}
+            style={{ padding: "6px 8px", borderRadius: 6 }}
+          >
+            <option value="">All Projects</option>
+            {(projectsList || []).map((p) => (
+              <option key={p.id} value={String(p.id)}>
+                {p.projectname || p.display_name || p.id}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <SelectionList
           items={availableCodebooks}
           selectedId={selectedCodebook}
@@ -137,7 +199,7 @@ export default function ViewCodebook() {
           {viewMode === "markdown" ? (
             (() => {
               const selObj = availableCodebooks.find(
-                (cb) => cb.id === selectedCodebook
+                (cb) => cb.id === selectedCodebook,
               );
               const projectSchema =
                 selObj?.metadata?.schema ||

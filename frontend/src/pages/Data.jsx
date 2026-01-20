@@ -12,6 +12,7 @@ export default function Data() {
   const [selectedDatabase, setSelectedDatabase] = useState("");
   const [userProjects, setUserProjects] = useState(null);
   const [selectedProject, setSelectedProject] = useState("");
+  const [projectsList, setProjectsList] = useState([]);
 
   // prefer projects endpoint which includes files; fall back to my-files
   useEffect(() => {
@@ -25,7 +26,7 @@ export default function Data() {
       const data = await resp.json();
       const projects = data.projects || [];
       if (projects.length > 0) {
-        setUserProjects(projects);
+        setProjectsList(projects);
         // set default selected project if none
         if (!selectedProject) {
           setSelectedProject(String(projects[0].id || ""));
@@ -59,11 +60,15 @@ export default function Data() {
   }, [databases, selectedDatabase]);
 
   useEffect(() => {
-    // When projects load, set a default selected project
-    if (!selectedProject && userProjects && userProjects.length > 0) {
-      setSelectedProject(String(userProjects[0].id || ""));
+    // When projects load, set a default selected project (prefer projectsList)
+    if (!selectedProject) {
+      if (projectsList && projectsList.length > 0) {
+        setSelectedProject(String(projectsList[0].id || ""));
+      } else if (userProjects && userProjects.length > 0) {
+        setSelectedProject(String(userProjects[0].id || ""));
+      }
     }
-  }, [userProjects, selectedProject]);
+  }, [projectsList, userProjects, selectedProject]);
 
   // When selected project changes, ensure selectedDatabase defaults to first file in project
   useEffect(() => {
@@ -168,8 +173,12 @@ export default function Data() {
 
   const databaseItems = databases.filter((d) => {
     // If a project is selected and we have project files, show those files
-    if (selectedProject && userProjects && userProjects.length > 0) {
-      const projectObj = userProjects.find(
+    const source =
+      projectsList && projectsList.length > 0
+        ? projectsList
+        : userProjects || [];
+    if (selectedProject && source && source.length > 0) {
+      const projectObj = source.find(
         (p) => String(p.id) === String(selectedProject),
       );
       if (projectObj && projectObj.files && projectObj.files.length > 0) {
@@ -192,16 +201,22 @@ export default function Data() {
             style={{ padding: "6px 8px", borderRadius: 6 }}
           >
             <option value="">All Projects</option>
-            {(userProjects || []).map((p) => (
-              <option key={p.id} value={String(p.id)}>
-                {p.projectname || p.display_name || p.schema_name || p.id}
-              </option>
-            ))}
+            {(projectsList.length > 0 ? projectsList : userProjects || []).map(
+              (p) => (
+                <option key={p.id} value={String(p.id)}>
+                  {p.projectname || p.display_name || p.schema_name || p.id}
+                </option>
+              ),
+            )}
           </select>
         </div>
-        {selectedProject && userProjects && userProjects.length > 0 ? (
+        {selectedProject &&
+        (projectsList.length > 0 ||
+          (userProjects && userProjects.length > 0)) ? (
           (() => {
-            const projectObj = userProjects.find(
+            const source =
+              projectsList.length > 0 ? projectsList : userProjects || [];
+            const projectObj = source.find(
               (p) => String(p.id) === String(selectedProject),
             );
             const files = (projectObj && projectObj.files) || [];

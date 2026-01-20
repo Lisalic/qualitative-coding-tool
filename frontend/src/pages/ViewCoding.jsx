@@ -12,9 +12,41 @@ export default function ViewCoding() {
   const [selectedCodedData, setSelectedCodedData] = useState(null);
   const [selectedCodedDataName, setSelectedCodedDataName] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [projectsList, setProjectsList] = useState([]);
+  const [selectedProject, setSelectedProject] = useState("");
 
   const fetchAvailableCodedData = async () => {
     try {
+      // Prefer project-backed files when a project is selected
+      if (projectsList && projectsList.length > 0 && selectedProject) {
+        const projectObj = projectsList.find(
+          (p) => String(p.id) === String(selectedProject),
+        );
+        const files = (projectObj && projectObj.files) || [];
+        const codingFiles = files
+          .filter((f) => f.file_type === "coding")
+          .map((f) => ({
+            id: String(f.id),
+            name: f.display_name || f.schema_name || String(f.id),
+            display_name: f.display_name,
+            description: f.description || null,
+            metadata: { schema: f.schema_name, file: f },
+            source: "project",
+          }));
+        setAvailableCodedData(codingFiles);
+        if (codingFiles.length > 0) {
+          const pre = location?.state?.selectedCodedData;
+          const match = pre ? codingFiles.find((it) => it.id === pre) : null;
+          const defaultId = match ? match.id : codingFiles[0].id;
+          setSelectedCodedData(defaultId);
+          const sel = codingFiles.find((cd) => cd.id === defaultId);
+          setSelectedCodedDataName(
+            sel?.display_name || sel?.name || sel?.id || "",
+          );
+        }
+        return;
+      }
+
       // Prefer user-owned coded projects from Postgres
       const resp = await apiFetch("/api/my-files/?file_type=coding");
       if (resp.ok) {
@@ -56,7 +88,22 @@ export default function ViewCoding() {
 
   useEffect(() => {
     fetchAvailableCodedData();
+    fetchProjects();
   }, []);
+
+  const fetchProjects = async () => {
+    try {
+      const resp = await apiFetch("/api/projects/");
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const projects = data.projects || [];
+      setProjectsList(projects);
+      if (!selectedProject && projects.length > 0)
+        setSelectedProject(String(projects[0].id));
+    } catch (e) {
+      console.error("Error fetching projects:", e);
+    }
+  };
 
   const handleCodedDataChange = (codedDataId) => {
     setSelectedCodedData(codedDataId);
@@ -67,6 +114,21 @@ export default function ViewCoding() {
   return (
     <>
       <div className="data-container">
+        <div style={{ marginBottom: 12 }}>
+          <label style={{ color: "#fff", marginRight: 8 }}>Project:</label>
+          <select
+            value={selectedProject}
+            onChange={(e) => setSelectedProject(e.target.value)}
+            style={{ padding: "6px 8px", borderRadius: 6 }}
+          >
+            <option value="">All Projects</option>
+            {(projectsList || []).map((p) => (
+              <option key={p.id} value={String(p.id)}>
+                {p.projectname || p.display_name || p.id}
+              </option>
+            ))}
+          </select>
+        </div>
         <SelectionList
           items={availableCodedData}
           selectedId={selectedCodedData}
