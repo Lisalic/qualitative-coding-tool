@@ -9,6 +9,10 @@ export default function Project() {
   const [project, setProject] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("database");
+  const [editing, setEditing] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -43,6 +47,51 @@ export default function Project() {
   const codingFile =
     (project.files || []).find((f) => f.file_type === "coding") || null;
 
+  const startEdit = () => {
+    setEditName(project.projectname || "");
+    setEditDescription(project.description || "");
+    setEditing(true);
+  };
+
+  const cancelEdit = () => {
+    setEditing(false);
+    setEditName("");
+    setEditDescription("");
+  };
+
+  const saveEdit = async (e) => {
+    e?.preventDefault();
+    setSaving(true);
+    try {
+      const form = new FormData();
+      form.append("project_id", String(project.id));
+      form.append("name", editName || "");
+      if (editDescription != null) form.append("description", editDescription);
+
+      const resp = await apiFetch("/api/update-project/", {
+        method: "POST",
+        body: form,
+      });
+      if (!resp.ok) {
+        const d = await resp.json().catch(() => ({}));
+        throw new Error(d.detail || `HTTP ${resp.status}`);
+      }
+      const d = await resp.json();
+      const updated = d.project;
+      setProject((p) => ({
+        ...p,
+        projectname: updated.projectname,
+        description: updated.description,
+      }));
+      setEditing(false);
+    } catch (err) {
+      console.error("Failed to update project:", err);
+      // keep editing state so user can retry
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="home-container">
       <div className="form-wrapper">
@@ -54,8 +103,70 @@ export default function Project() {
           }}
         >
           <div>
-            <h1>{project.projectname}</h1>
-            <div style={{ color: "#666" }}>{project.description}</div>
+            {!editing ? (
+              <>
+                <h1 style={{ display: "inline-block", marginRight: 12 }}>
+                  {project.projectname}
+                </h1>
+                <button
+                  className="project-tab"
+                  onClick={startEdit}
+                  style={{ marginLeft: 8, padding: "8px 10px", fontSize: 14 }}
+                >
+                  Edit
+                </button>
+                <div style={{ color: "#666", marginTop: 6 }}>
+                  {project.description}
+                </div>
+                {project.created_at && (
+                  <div
+                    style={{ color: "#999", marginTop: 6, fontSize: "0.9em" }}
+                  >
+                    Created: {new Date(project.created_at).toLocaleString()}
+                  </div>
+                )}
+              </>
+            ) : (
+              <form onSubmit={saveEdit} style={{ marginTop: 6 }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <input
+                    className="form-input"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    style={{ fontSize: "1.2em" }}
+                  />
+                  <button
+                    type="submit"
+                    className="project-tab"
+                    disabled={saving}
+                    style={{ padding: "8px 12px", fontSize: 14 }}
+                  >
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    className="project-tab"
+                    onClick={cancelEdit}
+                    style={{ marginLeft: 8, padding: "8px 12px", fontSize: 14 }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+                <div style={{ marginTop: 8 }}>
+                  <label
+                    style={{ display: "block", marginBottom: 6, color: "#ccc" }}
+                  >
+                    Description
+                  </label>
+                  <textarea
+                    className="form-input"
+                    value={editDescription}
+                    onChange={(e) => setEditDescription(e.target.value)}
+                    style={{ width: "100%", minHeight: 60 }}
+                  />
+                </div>
+              </form>
+            )}
           </div>
           <div />
         </div>
@@ -116,9 +227,16 @@ export default function Project() {
                   }}
                 >
                   <div>
-                    {dbFile
-                      ? dbFile.display_name || dbFile.schema_name
-                      : "No database"}
+                    <div>
+                      {dbFile
+                        ? dbFile.display_name || dbFile.schema_name
+                        : "No database"}
+                    </div>
+                    {dbFile && dbFile.description && (
+                      <div style={{ color: "#888", marginTop: 6 }}>
+                        {dbFile.description}
+                      </div>
+                    )}
                   </div>
                   {dbFile && (
                     <button
@@ -148,9 +266,16 @@ export default function Project() {
                   }}
                 >
                   <div>
-                    {filteredFile
-                      ? filteredFile.display_name || filteredFile.schema_name
-                      : "No filtered database"}
+                    <div>
+                      {filteredFile
+                        ? filteredFile.display_name || filteredFile.schema_name
+                        : "No filtered database"}
+                    </div>
+                    {filteredFile && filteredFile.description && (
+                      <div style={{ color: "#888", marginTop: 6 }}>
+                        {filteredFile.description}
+                      </div>
+                    )}
                   </div>
                   {filteredFile && (
                     <button
@@ -180,9 +305,16 @@ export default function Project() {
                   }}
                 >
                   <div>
-                    {codebookFile
-                      ? codebookFile.display_name || codebookFile.schema_name
-                      : "No codebook"}
+                    <div>
+                      {codebookFile
+                        ? codebookFile.display_name || codebookFile.schema_name
+                        : "No codebook"}
+                    </div>
+                    {codebookFile && codebookFile.description && (
+                      <div style={{ color: "#888", marginTop: 6 }}>
+                        {codebookFile.description}
+                      </div>
+                    )}
                   </div>
                   {codebookFile && (
                     <button
@@ -212,9 +344,16 @@ export default function Project() {
                   }}
                 >
                   <div>
-                    {codingFile
-                      ? codingFile.display_name || codingFile.schema_name
-                      : "No coding"}
+                    <div>
+                      {codingFile
+                        ? codingFile.display_name || codingFile.schema_name
+                        : "No coding"}
+                    </div>
+                    {codingFile && codingFile.description && (
+                      <div style={{ color: "#888", marginTop: 6 }}>
+                        {codingFile.description}
+                      </div>
+                    )}
                   </div>
                   {codingFile && (
                     <button

@@ -668,6 +668,41 @@ def create_project(request: Request, name: str = Form(...), description: str = F
     return JSONResponse({"project": {"id": str(proj.id), "projectname": proj.projectname, "description": proj.description, "created_at": proj.created_at.isoformat() if proj.created_at else None}})
 
 
+@router.post("/update-project/")
+def update_project(request: Request, project_id: int = Form(...), name: str = Form(...), description: str = Form(None), db: Session = Depends(get_db)):
+    """Update an existing project owned by the authenticated user."""
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        uid = int(user_id)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid user id in token")
+
+    # load project
+    proj = db.query(Project).filter(Project.id == int(project_id)).first()
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if proj.user_id != uid:
+        raise HTTPException(status_code=403, detail="Forbidden: project does not belong to user")
+
+    if not name or not name.strip():
+        raise HTTPException(status_code=400, detail="Project name is required")
+
+    proj.projectname = name.strip()
+    proj.description = description or None
+    try:
+        db.add(proj)
+        db.commit()
+        db.refresh(proj)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return JSONResponse({"project": {"id": str(proj.id), "projectname": proj.projectname, "description": proj.description, "created_at": proj.created_at.isoformat() if proj.created_at else None}})
+
+
 @router.get("/projects/")
 def list_projects(request: Request):
     """List projects owned by the authenticated user."""

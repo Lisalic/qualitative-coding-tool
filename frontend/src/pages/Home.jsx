@@ -41,7 +41,14 @@ export default function Home() {
         }
         try {
           const d = await resp.json();
-          setProjects(Array.isArray(d.projects) ? d.projects : []);
+          const list = Array.isArray(d.projects) ? d.projects : [];
+          // Sort by creation date ascending: oldest first
+          list.sort((a, b) => {
+            const ta = a && a.created_at ? Date.parse(a.created_at) : 0;
+            const tb = b && b.created_at ? Date.parse(b.created_at) : 0;
+            return ta - tb;
+          });
+          setProjects(list);
         } catch (e) {
           setError("Failed to parse projects response");
         }
@@ -126,6 +133,17 @@ export default function Home() {
                       <div style={{ fontSize: "0.9em", color: "#666" }}>
                         {p.description}
                       </div>
+                      {p.created_at && (
+                        <div
+                          style={{
+                            fontSize: "0.8em",
+                            color: "#999",
+                            marginTop: 6,
+                          }}
+                        >
+                          Created: {new Date(p.created_at).toLocaleString()}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -145,9 +163,10 @@ export default function Home() {
                     </div>
                     <div>
                       <button
-                        className="main-button"
+                        className="project-tab"
                         onClick={() => navigate(`/project/${p.id}`)}
                         aria-label={`View project ${p.projectname}`}
+                        style={{ padding: "6px 10px", fontSize: 14 }}
                       >
                         View Project
                       </button>
@@ -160,9 +179,10 @@ export default function Home() {
 
           {!showForm && (
             <button
-              className="main-button"
+              className="project-tab"
               onClick={handleCreateClick}
               aria-label="Create New Project"
+              style={{ padding: "10px 16px", fontSize: 16 }}
             >
               + Create New Project
             </button>
