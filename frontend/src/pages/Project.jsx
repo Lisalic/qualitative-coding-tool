@@ -38,14 +38,18 @@ export default function Project() {
   if (!project) return <div style={{ padding: 20 }}>Project not found</div>;
 
   // determine files for categories
-  const dbFile =
-    (project.files || []).find((f) => f.file_type === "raw_data") || null;
-  const filteredFile =
-    (project.files || []).find((f) => f.file_type === "filtered_data") || null;
-  const codebookFile =
-    (project.files || []).find((f) => f.file_type === "codebook") || null;
-  const codingFile =
-    (project.files || []).find((f) => f.file_type === "coding") || null;
+  const dbFiles = (project.files || []).filter(
+    (f) => f.file_type === "raw_data",
+  );
+  const filteredFiles = (project.files || []).filter(
+    (f) => f.file_type === "filtered_data",
+  );
+  const codebookFiles = (project.files || []).filter(
+    (f) => f.file_type === "codebook",
+  );
+  const codingFiles = (project.files || []).filter(
+    (f) => f.file_type === "coding",
+  );
 
   const startEdit = () => {
     setEditName(project.projectname || "");
@@ -219,38 +223,52 @@ export default function Project() {
             {activeTab === "database" && (
               <div>
                 <h2>Database</h2>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                  }}
-                >
-                  <div>
-                    <div>
-                      {dbFile
-                        ? dbFile.display_name || dbFile.schema_name
-                        : "No database"}
-                    </div>
-                    {dbFile && dbFile.description && (
-                      <div style={{ color: "#888", marginTop: 6 }}>
-                        {dbFile.description}
-                      </div>
-                    )}
-                  </div>
-                  {dbFile && (
-                    <button
-                      className="main-button"
-                      onClick={() =>
-                        navigate("/data", {
-                          state: { selectedDatabase: dbFile.schema_name },
-                        })
-                      }
-                      type="button"
+                {dbFiles.length === 0 ? (
+                  <div>No database</div>
+                ) : (
+                  dbFiles.map((f) => (
+                    <div
+                      key={f.id}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        padding: "8px 0",
+                        borderBottom: "1px solid #111",
+                      }}
                     >
-                      View
-                    </button>
-                  )}
+                      <div>
+                        <div>{f.display_name || f.schema_name}</div>
+                        {f.description && (
+                          <div style={{ color: "#888", marginTop: 6 }}>
+                            {f.description}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        className="project-tab"
+                        onClick={() =>
+                          navigate("/data", {
+                            state: { selectedDatabase: f.schema_name },
+                          })
+                        }
+                        style={{ padding: "8px 12px", fontSize: 14 }}
+                      >
+                        View
+                      </button>
+                    </div>
+                  ))
+                )}
+                <div style={{ marginTop: 8 }}>
+                  <button
+                    className="project-tab"
+                    onClick={() =>
+                      navigate("/import", { state: { projectId: project.id } })
+                    }
+                    style={{ padding: "8px 12px", fontSize: 14 }}
+                  >
+                    Add Database
+                  </button>
                 </div>
               </div>
             )}
@@ -258,38 +276,52 @@ export default function Project() {
             {activeTab === "filtered" && (
               <div>
                 <h2>Filtered Database</h2>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                  }}
-                >
-                  <div>
-                    <div>
-                      {filteredFile
-                        ? filteredFile.display_name || filteredFile.schema_name
-                        : "No filtered database"}
-                    </div>
-                    {filteredFile && filteredFile.description && (
-                      <div style={{ color: "#888", marginTop: 6 }}>
-                        {filteredFile.description}
-                      </div>
-                    )}
-                  </div>
-                  {filteredFile && (
-                    <button
-                      className="main-button"
-                      onClick={() =>
-                        navigate("/filtered-data", {
-                          state: { selectedDatabase: filteredFile.schema_name },
-                        })
-                      }
-                      type="button"
+                {filteredFiles.length === 0 ? (
+                  <div>No filtered database</div>
+                ) : (
+                  filteredFiles.map((f) => (
+                    <div
+                      key={f.id}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        padding: "8px 0",
+                        borderBottom: "1px solid #111",
+                      }}
                     >
-                      View
-                    </button>
-                  )}
+                      <div>
+                        <div>{f.display_name || f.schema_name}</div>
+                        {f.description && (
+                          <div style={{ color: "#888", marginTop: 6 }}>
+                            {f.description}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        className="project-tab"
+                        onClick={() =>
+                          navigate("/filtered-data", {
+                            state: { selectedDatabase: f.schema_name },
+                          })
+                        }
+                        style={{ padding: "8px 12px", fontSize: 14 }}
+                      >
+                        View
+                      </button>
+                    </div>
+                  ))
+                )}
+                <div style={{ marginTop: 8 }}>
+                  <button
+                    className="project-tab"
+                    onClick={() =>
+                      navigate("/filter", { state: { projectId: project.id } })
+                    }
+                    style={{ padding: "8px 12px", fontSize: 14 }}
+                  >
+                    Add Filtered Database
+                  </button>
                 </div>
               </div>
             )}
@@ -297,38 +329,54 @@ export default function Project() {
             {activeTab === "codebook" && (
               <div>
                 <h2>Codebook</h2>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                  }}
-                >
-                  <div>
-                    <div>
-                      {codebookFile
-                        ? codebookFile.display_name || codebookFile.schema_name
-                        : "No codebook"}
-                    </div>
-                    {codebookFile && codebookFile.description && (
-                      <div style={{ color: "#888", marginTop: 6 }}>
-                        {codebookFile.description}
-                      </div>
-                    )}
-                  </div>
-                  {codebookFile && (
-                    <button
-                      className="main-button"
-                      onClick={() =>
-                        navigate(
-                          `/codebook-view?selected=${encodeURIComponent(codebookFile.schema_name || codebookFile.display_name || codebookFile.id)}`,
-                        )
-                      }
-                      type="button"
+                {codebookFiles.length === 0 ? (
+                  <div>No codebook</div>
+                ) : (
+                  codebookFiles.map((f) => (
+                    <div
+                      key={f.id}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        padding: "8px 0",
+                        borderBottom: "1px solid #111",
+                      }}
                     >
-                      View
-                    </button>
-                  )}
+                      <div>
+                        <div>{f.display_name || f.schema_name}</div>
+                        {f.description && (
+                          <div style={{ color: "#888", marginTop: 6 }}>
+                            {f.description}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        className="project-tab"
+                        onClick={() =>
+                          navigate(
+                            `/codebook-view?selected=${encodeURIComponent(f.schema_name || f.display_name || f.id)}`,
+                          )
+                        }
+                        style={{ padding: "8px 12px", fontSize: 14 }}
+                      >
+                        View
+                      </button>
+                    </div>
+                  ))
+                )}
+                <div style={{ marginTop: 8 }}>
+                  <button
+                    className="project-tab"
+                    onClick={() =>
+                      navigate("/codebook-generate", {
+                        state: { projectId: project.id },
+                      })
+                    }
+                    style={{ padding: "8px 12px", fontSize: 14 }}
+                  >
+                    Add Codebook
+                  </button>
                 </div>
               </div>
             )}
@@ -336,38 +384,54 @@ export default function Project() {
             {activeTab === "coding" && (
               <div>
                 <h2>Coding</h2>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                  }}
-                >
-                  <div>
-                    <div>
-                      {codingFile
-                        ? codingFile.display_name || codingFile.schema_name
-                        : "No coding"}
-                    </div>
-                    {codingFile && codingFile.description && (
-                      <div style={{ color: "#888", marginTop: 6 }}>
-                        {codingFile.description}
-                      </div>
-                    )}
-                  </div>
-                  {codingFile && (
-                    <button
-                      className="main-button"
-                      onClick={() =>
-                        navigate("/coding-view", {
-                          state: { selectedCodedData: codingFile.schema_name },
-                        })
-                      }
-                      type="button"
+                {codingFiles.length === 0 ? (
+                  <div>No coding</div>
+                ) : (
+                  codingFiles.map((f) => (
+                    <div
+                      key={f.id}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        padding: "8px 0",
+                        borderBottom: "1px solid #111",
+                      }}
                     >
-                      View
-                    </button>
-                  )}
+                      <div>
+                        <div>{f.display_name || f.schema_name}</div>
+                        {f.description && (
+                          <div style={{ color: "#888", marginTop: 6 }}>
+                            {f.description}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        className="project-tab"
+                        onClick={() =>
+                          navigate("/coding-view", {
+                            state: { selectedCodedData: f.schema_name },
+                          })
+                        }
+                        style={{ padding: "8px 12px", fontSize: 14 }}
+                      >
+                        View
+                      </button>
+                    </div>
+                  ))
+                )}
+                <div style={{ marginTop: 8 }}>
+                  <button
+                    className="project-tab"
+                    onClick={() =>
+                      navigate("/codebook-apply", {
+                        state: { projectId: project.id },
+                      })
+                    }
+                    style={{ padding: "8px 12px", fontSize: 14 }}
+                  >
+                    Add Coding
+                  </button>
                 </div>
               </div>
             )}

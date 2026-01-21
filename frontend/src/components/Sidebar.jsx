@@ -49,7 +49,6 @@ export default function Sidebar() {
 
   const authButtons = [
     ["Home", "/"],
-    ["View Projects", "/"],
     ["Import Data", "/import"],
     ["View Data", "/data"],
     ["Filter Data", "/filter"],

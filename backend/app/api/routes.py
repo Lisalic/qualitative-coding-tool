@@ -1727,7 +1727,7 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
 
 
 @router.post("/generate-codebook/")
-async def generate_codebook(request: Request, database: str = Form("original"), api_key: str = Form(...), prompt: str = Form(""), name: str = Form(...)):
+async def generate_codebook(request: Request, database: str = Form("original"), api_key: str = Form(...), prompt: str = Form(""), name: str = Form(...), description: str = Form(None), project_id: int = Form(None)):
     # Read a Postgres file schema, assemble submissions/comments into text, log it.
     schema = (database or "").strip()
 
@@ -1771,24 +1771,15 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
         try:
             print("[INFO] generate_codebook: calling generate_codebook function for MODEL_1")
             raw_out1 = generate_codebook_function(assembled, api_key, "", "", prompt, MODEL=MODEL_1)
-            if asyncio.iscoroutine(raw_out1) or inspect.isawaitable(raw_out1):
-                codebook1 = await raw_out1
-            else:
-                codebook1 = raw_out1
+            codebook1 = await raw_out1 if asyncio.iscoroutine(raw_out1) or inspect.isawaitable(raw_out1) else raw_out1
 
             print("[INFO] generate_codebook: calling generate_codebook function for MODEL_2")
             raw_out2 = generate_codebook_function(assembled, api_key, "", "", prompt, MODEL=MODEL_2)
-            if asyncio.iscoroutine(raw_out2) or inspect.isawaitable(raw_out2):
-                codebook2 = await raw_out2
-            else:
-                codebook2 = raw_out2
+            codebook2 = await raw_out2 if asyncio.iscoroutine(raw_out2) or inspect.isawaitable(raw_out2) else raw_out2
 
             print("[INFO] generate_codebook: calling compare_agreement function")
             raw_pct = compare_agreement_function(str(codebook1 or ""), str(codebook2 or ""), api_key)
-            if asyncio.iscoroutine(raw_pct) or inspect.isawaitable(raw_pct):
-                percent = await raw_pct
-            else:
-                percent = raw_pct
+            percent = await raw_pct if asyncio.iscoroutine(raw_pct) or inspect.isawaitable(raw_pct) else raw_pct
 
         except Exception as e:
             print(f"Error generating or comparing codebooks for schema {schema}: {e}")
@@ -1797,6 +1788,9 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
 
         codebook_text = str(codebook1 or "")
         agreement_percent = str(percent or "")
+
+        # Log the percent to server terminal
+        print(f"[INFO] generate_codebook: agreement_percent={agreement_percent}")
 
         # Persist into a new Postgres file schema and create metadata
         try:
@@ -1815,16 +1809,51 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
                 conn.execute(text(f'TRUNCATE TABLE "{new_schema}".content_store'))
                 conn.execute(text(f'INSERT INTO "{new_schema}".content_store (file_text) VALUES (:file_text)'), {"file_text": codebook_text})
 
+            # Append agreement percent to the persisted file description (if provided)
+            final_description = (description or "").strip() if description is not None else None
+            if agreement_percent:
+                if final_description:
+                    final_description = f"{final_description}\nAgreement: {agreement_percent}"
+                else:
+                    final_description = f"Agreement: {agreement_percent}"
+            if final_description == "":
+                final_description = None
+
             # create file record and file_tables metadata
             with DatabaseManager() as dm:
-                file_rec = File(user_id=int(user_id), filename=name, schemaname=new_schema, file_type='codebook')
+                file_rec = File(user_id=int(user_id), filename=name, schemaname=new_schema, file_type='codebook', description=final_description)
                 dm.session.add(file_rec)
                 dm.session.flush()
                 dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name='content_store', row_count=1)
 
-            # Return a plain-text concatenation: <agreement_percent> + <model_1 output>
-            final_text = f"{agreement_percent}\n{codebook_text}"
-            return PlainTextResponse(content=final_text)
+                # If a project_id was provided, ensure ownership and link the file to the project
+                if project_id is not None:
+                    try:
+                        proj = dm.session.query(Project).filter(Project.id == int(project_id)).first()
+                        if proj is None:
+                            raise HTTPException(status_code=404, detail="Project not found")
+                        # ensure the project belongs to the authenticated user
+                        try:
+                            uid = int(user_id)
+                        except Exception:
+                            uid = None
+                        if proj.user_id != uid:
+                            raise HTTPException(status_code=403, detail="Forbidden: project does not belong to user")
+                        # create association
+                        file_rec.projects.append(proj)
+                        dm.session.flush()
+                    except HTTPException:
+                        raise
+                    except Exception:
+                        # If anything goes wrong with linking, roll back and continue without linking
+                        dm.session.rollback()
+
+            resp_payload = {
+                "codebook": codebook_text,
+                "agreement_percent": agreement_percent,
+                "file": {"id": str(file_rec.id), "schema_name": new_schema, "filename": file_rec.filename, "description": file_rec.description},
+            }
+            return JSONResponse(resp_payload)
 
         except Exception as exc:
             print(f"Error creating file/schema for generated codebook: {exc}")

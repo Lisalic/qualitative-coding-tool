@@ -28,7 +28,31 @@ def get_client(system_prompt: str, user_prompt: str, api_key: str, MODEL: str) -
                 timeout=300, 
                 extra_body={"transforms": ["middle-out"]}
             )
-            return response.choices[0].message.content
+            # Validate response and extract text robustly
+            if not response:
+                raise ValueError("Empty response from model")
+
+            # Try common attribute patterns for SDK responses
+            try:
+                # openai-like object: response.choices[0].message.content
+                return response.choices[0].message.content
+            except Exception:
+                pass
+
+            try:
+                # dict-like: response['choices'][0]['message']['content']
+                return response["choices"][0]["message"]["content"]
+            except Exception:
+                pass
+
+            try:
+                # older-style: response.choices[0].text
+                return response.choices[0].text
+            except Exception:
+                pass
+
+            # Fallback: stringify response to aid debugging
+            raise ValueError(f"Unexpected model response format: {repr(response)}")
         except KeyboardInterrupt:
             print("\nkeyboard interrupt")
             raise
@@ -92,7 +116,6 @@ def generate_codebook(posts_content: str, api_key: str, previous_codebook: str =
 
     return get_client(system_prompt, user_prompt, api_key, MODEL)
 
-
 def compare_agreement(codebook_a: str, codebook_b: str, api_key: str, MODEL: str = MODEL_3) -> str:
     system_prompt = (
         "You are an assistant that compares two codebooks and returns ONLY a single numeric percentage "
@@ -126,4 +149,3 @@ def compare_agreement(codebook_a: str, codebook_b: str, api_key: str, MODEL: str
         return f"{val}%"
     except Exception:
         return m.group(1)
-

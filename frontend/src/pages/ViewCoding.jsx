@@ -91,6 +91,11 @@ export default function ViewCoding() {
     fetchProjects();
   }, []);
 
+  // Refresh available coded data when project selection or projects list changes
+  useEffect(() => {
+    fetchAvailableCodedData();
+  }, [selectedProject, projectsList]);
+
   const fetchProjects = async () => {
     try {
       const resp = await apiFetch("/api/projects/");
@@ -98,8 +103,8 @@ export default function ViewCoding() {
       const data = await resp.json();
       const projects = data.projects || [];
       setProjectsList(projects);
-      if (!selectedProject && projects.length > 0)
-        setSelectedProject(String(projects[0].id));
+      // Default to 'All Projects' (no project selected)
+      if (!selectedProject) setSelectedProject("");
     } catch (e) {
       console.error("Error fetching projects:", e);
     }
