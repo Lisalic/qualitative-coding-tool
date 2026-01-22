@@ -111,17 +111,6 @@ class FileTable(Base):
     file = relationship("File", back_populates="tables")
 
 
-class ProjectTable(Base):
-    __tablename__ = "project_tables"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
-    table_name = Column(String, nullable=False)
-    row_count = Column(Integer, default=0)
-
-    # project relationship removed; ProjectTable is no longer associated with Project
-
-
 class Prompt(Base):
     __tablename__ = "prompts"
 
@@ -134,8 +123,6 @@ class Prompt(Base):
     user = relationship("User", back_populates="prompts")
 
 
-# Ensure tables exist in the target database. Wrap in try/except so
-# failures (e.g., DB not available during local dev) don't crash imports.
 try:
     Base.metadata.create_all(bind=engine)
 except Exception as _err:

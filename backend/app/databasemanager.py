@@ -1,9 +1,9 @@
 from typing import Optional
 try:
-    from app.database import SessionLocal, Project, ProjectTable, User, FileTable, File
+    from app.database import SessionLocal, Project, User, FileTable, File
 except Exception as exc:
     try:
-        from backend.app.database import SessionLocal, Project, ProjectTable, User, FileTable, File
+        from backend.app.database import SessionLocal, Project, User, FileTable, File
     except Exception:
         print("Failed to import app.database in databasemanager.py:", exc)
         raise exc

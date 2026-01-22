@@ -66,11 +66,9 @@ def get_client(system_prompt: str, user_prompt: str, api_key: str, MODEL: str) -
 
 def generate_codebook(posts_content: str, api_key: str, previous_codebook: str = "", feedback_text: str = "", custom_prompt: str = "", MODEL: str = MODEL_1) -> str:
     base_system_prompt = """
-    Act as a qualitative researcher analyzing the following Reddit posts. Your task is to develop or refine a **Codebook** based on an open coding process.
-    
-    Your analysis must maintain the focus on:
-    1. **Adult Retrospection:** The lasting effects and consequences of past bullying.
-    2. **Current Student Perception:** The immediate feelings, and perception of the bullying situation.
+    Act as a qualitative researcher analyzing the provided data. Your task is to develop or refine a concise and usable **Codebook** based on an open coding process applicable to general qualitative research topics.
+
+    Focus on identifying meaningful themes, writing clear code definitions, specifying inclusion criteria, suggesting representative keywords, and providing example excerpts that illustrate each code.
     """
     
     # Add custom prompt if provided

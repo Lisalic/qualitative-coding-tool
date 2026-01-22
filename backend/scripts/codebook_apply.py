@@ -40,29 +40,25 @@ def get_client(system_prompt: str, user_prompt: str, api_key: str) -> str:
 def classify_posts(codebook: str, posts_content: str, methodology: str, api_key: str) -> str:
     
     system_prompt = f"""
-    You are a highly meticulous qualitative data coder. Your task is to process the raw POSTS CONTENT by applying the codes defined in the CODEBOOK. 
-    
-    Your analysis must maintain the focus on:
-    1. **Adult Retrospection:** The lasting effects and consequences of past bullying.
-    2. **Current Student Perception:** The immediate feelings, and perception of the bullying situation.
-    3. **Methodology:** The approach and criteria used for coding and analysis should align with the provided METHODOLOGY document.
-    
-    **STRICT OUTPUT INSTRUCTION:** You must output a single, raw text report that iterates through **EVERY SINGLE POST** in the provided content.
+    You are a highly meticulous qualitative data coder. Your task is to process the raw POSTS CONTENT by applying the codes defined in the CODEBOOK.
 
-    
-    Then, for every post, you must use the following format. If a post is not relevant, you must still output the 'post url:' line and simply state 'No codes applied.' below it.
+    Operate in a general qualitative research mode: apply the codebook consistently, provide concise justifications for each applied code, include representative quotations where helpful, and follow any instructions in the provided METHODOLOGY text.
+
+    **STRICT OUTPUT INSTRUCTION:** Output a single raw text report that iterates through EVERY post in the provided content. If a post is not relevant, still include the post URL line and state 'No codes applied.' beneath it.
+
+    Then, for every post, use the following format exactly.
 
     **REQUIRED POST FORMAT:**
-    
+
     Post URL: [The URL for the post]
     Code applied: [Exact Specific Code Name from the Codebook]
     Reason: [A concise, specific justification for applying the code as well as a quotation from the post]
     Code applied: [Another Exact Specific Code Name if applicable]
     Reason: [A concise, specific justification for applying the code as well as a quotation from the post]
     ...
-    
+
     Ensure you use the exact CODE NAMES from the CODEBOOK.
-    
+
     """
     
     user_prompt = f"""
