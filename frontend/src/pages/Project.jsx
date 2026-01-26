@@ -244,6 +244,17 @@ export default function Project() {
                             {f.description}
                           </div>
                         )}
+                        {f.created_at && (
+                          <div
+                            style={{
+                              color: "#999",
+                              marginTop: 6,
+                              fontSize: "0.9em",
+                            }}
+                          >
+                            Created: {new Date(f.created_at).toLocaleString()}
+                          </div>
+                        )}
                       </div>
                       <button
                         className="project-tab"
@@ -295,6 +306,17 @@ export default function Project() {
                         {f.description && (
                           <div style={{ color: "#888", marginTop: 6 }}>
                             {f.description}
+                          </div>
+                        )}
+                        {f.created_at && (
+                          <div
+                            style={{
+                              color: "#999",
+                              marginTop: 6,
+                              fontSize: "0.9em",
+                            }}
+                          >
+                            Created: {new Date(f.created_at).toLocaleString()}
                           </div>
                         )}
                       </div>
@@ -350,6 +372,17 @@ export default function Project() {
                             {f.description}
                           </div>
                         )}
+                        {f.created_at && (
+                          <div
+                            style={{
+                              color: "#999",
+                              marginTop: 6,
+                              fontSize: "0.9em",
+                            }}
+                          >
+                            Created: {new Date(f.created_at).toLocaleString()}
+                          </div>
+                        )}
                       </div>
                       <button
                         className="project-tab"
@@ -403,6 +436,17 @@ export default function Project() {
                         {f.description && (
                           <div style={{ color: "#888", marginTop: 6 }}>
                             {f.description}
+                          </div>
+                        )}
+                        {f.created_at && (
+                          <div
+                            style={{
+                              color: "#999",
+                              marginTop: 6,
+                              fontSize: "0.9em",
+                            }}
+                          >
+                            Created: {new Date(f.created_at).toLocaleString()}
                           </div>
                         )}
                       </div>

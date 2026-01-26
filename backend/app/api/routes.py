@@ -28,7 +28,14 @@ try:
 
     from scripts.import_db import stream_zst_to_postgres
     from scripts.filter_db import filter_posts_with_ai, filter_comments_with_ai
-    from scripts.codebook_generator import generate_codebook as generate_codebook_function, compare_agreement as compare_agreement_function, MODEL_1, MODEL_2
+    from scripts.codebook_generator import (
+        generate_codebook as generate_codebook_function,
+        compare_agreement as compare_agreement_function,
+        get_client as codebook_get_client,
+        MODEL_1,
+        MODEL_2,
+        MODEL_3,
+    )
     from scripts.codebook_apply import classify_posts
     from scripts.display_codebook import parse_codebook_to_json
     from app.services import migrate_sqlite_file
@@ -41,7 +48,14 @@ except:
 
         from backend.scripts.import_db import stream_zst_to_postgres
         from backend.scripts.filter_db import filter_posts_with_ai, filter_comments_with_ai
-        from backend.scripts.codebook_generator import generate_codebook as generate_codebook_function, compare_agreement as compare_agreement_function, MODEL_1, MODEL_2
+        from backend.scripts.codebook_generator import (
+            generate_codebook as generate_codebook_function,
+            compare_agreement as compare_agreement_function,
+            get_client as codebook_get_client,
+            MODEL_1,
+            MODEL_2,
+            MODEL_3,
+        )
         from backend.scripts.codebook_apply import classify_posts
         from backend.scripts.display_codebook import parse_codebook_to_json
         from backend.app.services import migrate_sqlite_file
@@ -1770,27 +1784,14 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
 
         try:
             print("[INFO] generate_codebook: calling generate_codebook function for MODEL_1")
-            raw_out1 = generate_codebook_function(assembled, api_key, "", "", prompt, MODEL=MODEL_1)
-            codebook1 = await raw_out1 if asyncio.iscoroutine(raw_out1) or inspect.isawaitable(raw_out1) else raw_out1
-
-            print("[INFO] generate_codebook: calling generate_codebook function for MODEL_2")
-            raw_out2 = generate_codebook_function(assembled, api_key, "", "", prompt, MODEL=MODEL_2)
-            codebook2 = await raw_out2 if asyncio.iscoroutine(raw_out2) or inspect.isawaitable(raw_out2) else raw_out2
-
-            print("[INFO] generate_codebook: calling compare_agreement function")
-            raw_pct = compare_agreement_function(str(codebook1 or ""), str(codebook2 or ""), api_key)
-            percent = await raw_pct if asyncio.iscoroutine(raw_pct) or inspect.isawaitable(raw_pct) else raw_pct
-
+            raw_out = generate_codebook_function(assembled, api_key, "", "", prompt, MODEL=MODEL_1)
+            codebook_text = await raw_out if asyncio.iscoroutine(raw_out) or inspect.isawaitable(raw_out) else raw_out
         except Exception as e:
-            print(f"Error generating or comparing codebooks for schema {schema}: {e}")
+            print(f"Error generating codebook for schema {schema}: {e}")
             traceback.print_exc()
             return JSONResponse({"error": f"Generator failed: {e}"}, status_code=500)
 
-        codebook_text = str(codebook1 or "")
-        agreement_percent = str(percent or "")
-
-        # Log the percent to server terminal
-        print(f"[INFO] generate_codebook: agreement_percent={agreement_percent}")
+        codebook_text = str(codebook_text or "")
 
         # Persist into a new Postgres file schema and create metadata
         try:
@@ -1809,13 +1810,8 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
                 conn.execute(text(f'TRUNCATE TABLE "{new_schema}".content_store'))
                 conn.execute(text(f'INSERT INTO "{new_schema}".content_store (file_text) VALUES (:file_text)'), {"file_text": codebook_text})
 
-            # Append agreement percent to the persisted file description (if provided)
+            # Persist provided description (do not append agreement percent)
             final_description = (description or "").strip() if description is not None else None
-            if agreement_percent:
-                if final_description:
-                    final_description = f"{final_description}\nAgreement: {agreement_percent}"
-                else:
-                    final_description = f"Agreement: {agreement_percent}"
             if final_description == "":
                 final_description = None
 
@@ -1850,7 +1846,6 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
 
             resp_payload = {
                 "codebook": codebook_text,
-                "agreement_percent": agreement_percent,
                 "file": {"id": str(file_rec.id), "schema_name": new_schema, "filename": file_rec.filename, "description": file_rec.description},
             }
             return JSONResponse(resp_payload)
@@ -1861,6 +1856,98 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
             return JSONResponse({"error": str(exc)}, status_code=500)
     except Exception as exc:
         print(f"Error reading Postgres schema {schema}: {exc}")
+        traceback.print_exc()
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+
+@router.post("/compare-codebooks/")
+async def compare_codebooks(request: Request, codebook_a: str = Form(...), codebook_b: str = Form(...), api_key: str = Form(...), model: str = Form(None)):
+    """Compare two codebooks stored in Postgres schemas by calling the LLM and return the full message."""
+    schema_a = (codebook_a or "").strip()
+    schema_b = (codebook_b or "").strip()
+
+    if not schema_a.startswith("proj_") or not schema_b.startswith("proj_"):
+        return JSONResponse({"error": "schema names must be proj_<id>"}, status_code=400)
+
+    if not api_key:
+        return JSONResponse({"error": "api_key is required"}, status_code=400)
+
+    try:
+        with engine.connect() as conn:
+            a_row = conn.execute(text(f'SELECT file_text FROM "{schema_a}".content_store LIMIT 1')).fetchone()
+            b_row = conn.execute(text(f'SELECT file_text FROM "{schema_b}".content_store LIMIT 1')).fetchone()
+
+        text_a = (a_row[0] if a_row else "") or ""
+        text_b = (b_row[0] if b_row else "") or ""
+
+        if not text_a and not text_b:
+            return JSONResponse({"error": "No content found in either codebook"}, status_code=400)
+
+        # Compose prompts
+        system_prompt = (
+            "You are an expert qualitative researcher. Compare the two provided codebooks.\n"
+            "Provide a clear, structured comparison including:\n"
+            "- Major similarities and differences\n"
+            "- Conflicting or duplicate codes\n"
+            "- Suggestions for merging or refining codes\n"
+            "- An overall recommendation and confidence level.\n"
+            "Return the full comparison as text (no extra JSON or metadata)."
+        )
+
+        user_prompt = f"Codebook A:\n{text_a}\n\n---\n\nCodebook B:\n{text_b}\n\nPlease compare them in detail."
+
+        # choose model if provided, otherwise use MODEL_3 if available
+        chosen_model = model or MODEL_3
+
+        resp = codebook_get_client(system_prompt, user_prompt, api_key, chosen_model)
+        return JSONResponse({"comparison": resp})
+    except Exception as exc:
+        traceback.print_exc()
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+
+@router.post("/compare-codings/")
+async def compare_codings(request: Request, coding_a: str = Form(...), coding_b: str = Form(...), api_key: str = Form(...), model: str = Form(None)):
+    """Compare two coding outputs stored in Postgres schemas by calling the LLM and return the full message."""
+    schema_a = (coding_a or "").strip()
+    schema_b = (coding_b or "").strip()
+
+    if not schema_a.startswith("proj_") or not schema_b.startswith("proj_"):
+        return JSONResponse({"error": "schema names must be proj_<id>"}, status_code=400)
+
+    if not api_key:
+        return JSONResponse({"error": "api_key is required"}, status_code=400)
+
+    try:
+        with engine.connect() as conn:
+            a_row = conn.execute(text(f'SELECT file_text FROM "{schema_a}".content_store LIMIT 1')).fetchone()
+            b_row = conn.execute(text(f'SELECT file_text FROM "{schema_b}".content_store LIMIT 1')).fetchone()
+
+        text_a = (a_row[0] if a_row else "") or ""
+        text_b = (b_row[0] if b_row else "") or ""
+
+        if not text_a and not text_b:
+            return JSONResponse({"error": "No content found in either coding"}, status_code=400)
+
+        system_prompt = (
+            "You are an expert qualitative researcher. Compare the two provided coded datasets.\n"
+            "Provide a clear, structured comparison including:\n"
+            "- Major overlaps and divergences in coding decisions\n"
+            "- Instances where codes appear inconsistent or misapplied\n"
+            "- Suggestions for reconciliation or re-labeling\n"
+            "- An overall recommendation and confidence level.\n"
+            "Return the full comparison as text (no extra JSON or metadata)."
+        )
+
+        user_prompt = f"Coding A:\n{text_a}\n\n---\n\nCoding B:\n{text_b}\n\nPlease compare them in detail."
+
+        chosen_model = model or MODEL_3
+
+        resp = codebook_get_client(system_prompt, user_prompt, api_key, chosen_model)
+        return JSONResponse({"comparison": resp})
+    except Exception as exc:
         traceback.print_exc()
         return JSONResponse({"error": str(exc)}, status_code=500)
 

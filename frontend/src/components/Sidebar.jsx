@@ -56,6 +56,8 @@ export default function Sidebar() {
     ["Generate Codebook", "/codebook-generate"],
     ["View Codebook", "/codebook-view"],
     ["Apply Codebook", "/codebook-apply"],
+    ["Compare Codebook", "/compare-codebook"],
+    ["Compare Coding", "/compare-coding"],
     ["View Coding", "/coding-view"],
   ];
 

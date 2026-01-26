@@ -10,6 +10,8 @@ import ViewCodebook from "./pages/ViewCodebook";
 import ApplyCodebook from "./pages/ApplyCodebook";
 import ViewCoding from "./pages/ViewCoding";
 import Project from "./pages/Project";
+import CompareCodebook from "./pages/CompareCodebook";
+import CompareCoding from "./pages/CompareCoding";
 import Landing from "./pages/Landing";
 import { apiFetch } from "./api";
 import Login from "./pages/Login";
@@ -124,6 +126,22 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <ApplyCodebook />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/compare-codebook"
+                element={
+                  <ProtectedRoute>
+                    <CompareCodebook />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/compare-coding"
+                element={
+                  <ProtectedRoute>
+                    <CompareCoding />
                   </ProtectedRoute>
                 }
               />
