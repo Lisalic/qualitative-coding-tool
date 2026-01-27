@@ -97,130 +97,293 @@ export default function Home() {
   return (
     <div className="home-container">
       <div className="form-wrapper">
+        {/* Header Section */}
         <div
           style={{
-            display: "flex",
-            alignItems: "flex-start",
-            gap: "12px",
-            flexDirection: "column",
+            backgroundColor: "#111",
+            border: "2px solid #ffffff",
+            borderRadius: "12px",
+            padding: "24px",
+            marginBottom: "24px",
           }}
         >
-          <h1>Projects</h1>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: "20px",
+            }}
+          >
+            <h1 style={{ margin: 0, color: "#ffffff", fontSize: "2em" }}>
+              My Projects
+            </h1>
+            {!showForm && (
+              <button
+                className="project-tab"
+                onClick={handleCreateClick}
+                aria-label="Create New Project"
+                style={{
+                  padding: "12px 20px",
+                  fontSize: 16,
+                  fontWeight: "bold",
+                  textAlign: "center",
+                }}
+              >
+                Create New Project
+              </button>
+            )}
+          </div>
+        </div>
 
-          {loading && <div>Loading projects...</div>}
-          {error && <div style={{ color: "red" }}>Error: {error}</div>}
+        {/* Create Project Form */}
+        {showForm && (
+          <div
+            style={{
+              backgroundColor: "#111",
+              border: "2px solid #ffffff",
+              borderRadius: "12px",
+              padding: "24px",
+              marginBottom: "24px",
+            }}
+          >
+            <h2 style={{ margin: "0 0 20px 0", color: "#ffffff" }}>
+              Create New Project
+            </h2>
+            <form onSubmit={handleSubmit}>
+              <div style={{ marginBottom: "16px" }}>
+                <label
+                  style={{
+                    display: "block",
+                    marginBottom: "8px",
+                    color: "#cccccc",
+                    fontWeight: "bold",
+                  }}
+                >
+                  Project Name *
+                </label>
+                <input
+                  className="form-input"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Enter project name"
+                  style={{
+                    width: "100%",
+                    padding: "12px",
+                    fontSize: "16px",
+                  }}
+                />
+              </div>
+              <div style={{ marginBottom: "20px" }}>
+                <label
+                  style={{
+                    display: "block",
+                    marginBottom: "8px",
+                    color: "#cccccc",
+                    fontWeight: "bold",
+                  }}
+                >
+                  Description
+                </label>
+                <textarea
+                  className="form-input"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Enter project description (optional)"
+                  style={{
+                    width: "100%",
+                    minHeight: "80px",
+                    resize: "vertical",
+                    padding: "12px",
+                    fontSize: "16px",
+                  }}
+                />
+              </div>
+              <div
+                style={{ display: "flex", gap: "12px", alignItems: "center" }}
+              >
+                <button
+                  type="submit"
+                  className="project-tab"
+                  style={{ padding: "12px 24px", fontSize: 16 }}
+                >
+                  Create Project
+                </button>
+                <button
+                  type="button"
+                  className="project-tab"
+                  onClick={handleCancel}
+                  style={{ padding: "12px 24px", fontSize: 16 }}
+                >
+                  Cancel
+                </button>
+              </div>
+              {message && (
+                <div
+                  style={{
+                    marginTop: "16px",
+                    padding: "12px",
+                    borderRadius: "6px",
+                    backgroundColor: message.includes("Error")
+                      ? "#330000"
+                      : "#003300",
+                    border: `1px solid ${message.includes("Error") ? "#ff6666" : "#66ff66"}`,
+                    color: message.includes("Error") ? "#ffcccc" : "#ccffcc",
+                  }}
+                >
+                  {message}
+                </div>
+              )}
+            </form>
+          </div>
+        )}
+
+        {/* Projects List */}
+        <div
+          style={{
+            backgroundColor: "#111",
+            border: "2px solid #ffffff",
+            borderRadius: "12px",
+            padding: "24px",
+          }}
+        >
+          <h2 style={{ margin: "0 0 20px 0", color: "#ffffff" }}>
+            Your Projects
+          </h2>
+
+          {loading && (
+            <div
+              style={{ textAlign: "center", color: "#cccccc", padding: "40px" }}
+            >
+              Loading projects...
+            </div>
+          )}
+
+          {error && (
+            <div
+              style={{
+                textAlign: "center",
+                color: "#ff6666",
+                padding: "20px",
+                backgroundColor: "#220000",
+                border: "1px solid #ff6666",
+                borderRadius: "6px",
+                marginBottom: "20px",
+              }}
+            >
+              Error: {error}
+            </div>
+          )}
 
           {!loading && !error && projects.length === 0 && (
-            <div>No projects yet.</div>
+            <div
+              style={{
+                textAlign: "center",
+                color: "#888",
+                padding: "40px",
+                fontSize: "1.1em",
+              }}
+            >
+              No projects yet. Create your first project to get started!
+            </div>
           )}
 
           {!loading && projects.length > 0 && (
-            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+            <div
+              style={{ display: "flex", flexDirection: "column", gap: "16px" }}
+            >
               {projects.map((p) => (
-                <li
+                <div
                   key={p.id}
-                  style={{ padding: "6px 0", borderBottom: "1px solid #eee" }}
+                  style={{
+                    backgroundColor: "#000",
+                    border: "1px solid #ffffff",
+                    borderRadius: "8px",
+                    padding: "20px",
+                    transition: "all 0.2s ease",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.borderColor = "#cccccc";
+                    e.currentTarget.style.boxShadow =
+                      "0 4px 12px rgba(255, 255, 255, 0.1)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.borderColor = "#ffffff";
+                    e.currentTarget.style.boxShadow = "none";
+                  }}
                 >
                   <div
                     style={{
                       display: "flex",
                       justifyContent: "space-between",
                       alignItems: "flex-start",
+                      gap: "20px",
                     }}
                   >
-                    <div>
-                      <strong>{p.projectname}</strong>
-                      <div style={{ fontSize: "0.9em", color: "#666" }}>
-                        {p.description}
-                      </div>
-                      {p.created_at && (
+                    <div style={{ flex: 1 }}>
+                      <h3
+                        style={{
+                          margin: "0 0 8px 0",
+                          color: "#ffffff",
+                          fontSize: "1.3em",
+                        }}
+                      >
+                        {p.projectname}
+                      </h3>
+                      {p.description && (
                         <div
                           style={{
-                            fontSize: "0.8em",
-                            color: "#999",
-                            marginTop: 6,
+                            color: "#cccccc",
+                            fontSize: "1em",
+                            lineHeight: 1.4,
+                            marginBottom: "12px",
                           }}
                         >
-                          Created: {new Date(p.created_at).toLocaleString()}
+                          {p.description}
                         </div>
                       )}
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "16px",
+                          alignItems: "center",
+                          fontSize: "0.9em",
+                          color: "#888",
+                        }}
+                      >
+                        {p.created_at && (
+                          <div>
+                            Created: {new Date(p.created_at).toLocaleString()}
+                          </div>
+                        )}
+                        <div>
+                          {Array.isArray(p.files)
+                            ? `${p.files.length} file${p.files.length === 1 ? "" : "s"}`
+                            : "0 files"}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-
-                  {/* show count of files and a View Project button */}
-                  <div
-                    style={{
-                      marginTop: "8px",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                    }}
-                  >
-                    <div style={{ color: "#666" }}>
-                      {Array.isArray(p.files)
-                        ? `${p.files.length} file${p.files.length === 1 ? "" : "s"}`
-                        : "0 files"}
-                    </div>
-                    <div>
+                    <div style={{ display: "flex", alignItems: "center" }}>
                       <button
                         className="project-tab"
                         onClick={() => navigate(`/project/${p.id}`)}
                         aria-label={`View project ${p.projectname}`}
-                        style={{ padding: "6px 10px", fontSize: 14 }}
+                        style={{
+                          padding: "12px 20px",
+                          fontSize: 14,
+                          fontWeight: "bold",
+                          textAlign: "center",
+                        }}
                       >
                         View Project
                       </button>
                     </div>
                   </div>
-                </li>
+                </div>
               ))}
-            </ul>
-          )}
-
-          {!showForm && (
-            <button
-              className="project-tab"
-              onClick={handleCreateClick}
-              aria-label="Create New Project"
-              style={{ padding: "10px 16px", fontSize: 16 }}
-            >
-              + Create New Project
-            </button>
+            </div>
           )}
         </div>
-
-        {showForm && (
-          <form onSubmit={handleSubmit} style={{ marginTop: "12px" }}>
-            <div>
-              <label style={{ display: "block", marginBottom: "6px" }}>
-                Name
-              </label>
-              <input value={name} onChange={(e) => setName(e.target.value)} />
-            </div>
-            <div style={{ marginTop: "8px" }}>
-              <label style={{ display: "block", marginBottom: "6px" }}>
-                Description
-              </label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-              />
-            </div>
-            <div style={{ marginTop: "8px" }}>
-              <button type="submit" className="main-button">
-                Save
-              </button>
-              <button
-                type="button"
-                onClick={handleCancel}
-                style={{ marginLeft: "8px" }}
-              >
-                Cancel
-              </button>
-            </div>
-            {message && <div style={{ marginTop: "8px" }}>{message}</div>}
-          </form>
-        )}
       </div>
     </div>
   );

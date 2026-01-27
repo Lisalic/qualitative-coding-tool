@@ -125,90 +125,178 @@ export default function Project() {
   return (
     <div className="home-container">
       <div className="form-wrapper">
+        {/* Project Header */}
         <div
           style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
+            backgroundColor: "#111",
+            border: "2px solid #ffffff",
+            borderRadius: "12px",
+            padding: "24px",
+            marginBottom: "24px",
           }}
         >
-          <div>
-            {!editing ? (
-              <>
-                <h1 style={{ display: "inline-block", marginRight: 12 }}>
-                  {project.projectname}
-                </h1>
-                <button
-                  className="project-tab"
-                  onClick={startEdit}
-                  style={{ marginLeft: 8, padding: "8px 10px", fontSize: 14 }}
-                >
-                  Edit
-                </button>
-                <div style={{ color: "#666", marginTop: 6 }}>
-                  {project.description}
-                </div>
-                {project.created_at && (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "flex-start",
+              gap: "20px",
+            }}
+          >
+            <div style={{ flex: 1 }}>
+              {!editing ? (
+                <>
                   <div
-                    style={{ color: "#999", marginTop: 6, fontSize: "0.9em" }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "12px",
+                      marginBottom: "12px",
+                    }}
                   >
-                    Created: {new Date(project.created_at).toLocaleString()}
+                    <h1 style={{ margin: 0, color: "#ffffff" }}>
+                      {project.projectname}
+                    </h1>
+                    <button
+                      className="project-tab"
+                      onClick={startEdit}
+                      style={{ padding: "6px 12px", fontSize: 13 }}
+                    >
+                      Edit
+                    </button>
                   </div>
-                )}
-              </>
-            ) : (
-              <form onSubmit={saveEdit} style={{ marginTop: 6 }}>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <input
-                    className="form-input"
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    style={{ fontSize: "1.2em" }}
-                  />
-                  <button
-                    type="submit"
-                    className="project-tab"
-                    disabled={saving}
-                    style={{ padding: "8px 12px", fontSize: 14 }}
+                  {project.description && (
+                    <div
+                      style={{
+                        color: "#cccccc",
+                        fontSize: "1.1em",
+                        lineHeight: 1.4,
+                        marginBottom: "12px",
+                      }}
+                    >
+                      {project.description}
+                    </div>
+                  )}
+                  {project.created_at && (
+                    <div
+                      style={{
+                        color: "#888",
+                        fontSize: "0.9em",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "4px",
+                      }}
+                    >
+                      Created: {new Date(project.created_at).toLocaleString()}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <form onSubmit={saveEdit}>
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 12,
+                      alignItems: "center",
+                      marginBottom: "16px",
+                    }}
                   >
-                    Save
-                  </button>
-                  <button
-                    type="button"
-                    className="project-tab"
-                    onClick={cancelEdit}
-                    style={{ marginLeft: 8, padding: "8px 12px", fontSize: 14 }}
-                  >
-                    Cancel
-                  </button>
-                </div>
-                <div style={{ marginTop: 8 }}>
-                  <label
-                    style={{ display: "block", marginBottom: 6, color: "#ccc" }}
-                  >
-                    Description
-                  </label>
-                  <textarea
-                    className="form-input"
-                    value={editDescription}
-                    onChange={(e) => setEditDescription(e.target.value)}
-                    style={{ width: "100%", minHeight: 60 }}
-                  />
-                </div>
-              </form>
-            )}
+                    <input
+                      className="form-input"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      style={{
+                        fontSize: "1.4em",
+                        fontWeight: "bold",
+                        padding: "8px 12px",
+                      }}
+                      placeholder="Project name"
+                    />
+                    <button
+                      type="submit"
+                      className="project-tab"
+                      disabled={saving}
+                      style={{ padding: "8px 16px", fontSize: 14 }}
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      className="project-tab"
+                      onClick={cancelEdit}
+                      style={{ padding: "8px 16px", fontSize: 14 }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  <div>
+                    <label
+                      style={{
+                        display: "block",
+                        marginBottom: 8,
+                        color: "#cccccc",
+                        fontWeight: "bold",
+                      }}
+                    >
+                      Description
+                    </label>
+                    <textarea
+                      className="form-input"
+                      value={editDescription}
+                      onChange={(e) => setEditDescription(e.target.value)}
+                      style={{
+                        width: "100%",
+                        minHeight: 80,
+                        resize: "vertical",
+                      }}
+                      placeholder="Project description..."
+                    />
+                  </div>
+                </form>
+              )}
+            </div>
           </div>
-          <div />
         </div>
 
-        <div style={{ marginTop: 16 }}>
-          <div style={{ display: "flex", gap: 8 }}>
+        {/* Tab Navigation */}
+        <div
+          style={{
+            backgroundColor: "#000",
+            border: "2px solid #ffffff",
+            borderRadius: "12px",
+            padding: "20px",
+            marginBottom: "24px",
+          }}
+        >
+          <h2
+            style={{
+              margin: "0 0 16px 0",
+              color: "#ffffff",
+              fontSize: "1.2em",
+            }}
+          >
+            Project Files
+          </h2>
+          <div
+            style={{
+              display: "flex",
+              gap: 12,
+              flexWrap: "wrap",
+            }}
+          >
             <button
               type="button"
               className={`project-tab ${activeTab === "database" ? "selected" : ""}`}
               onClick={(e) => {
                 e.stopPropagation();
                 setActiveTab("database");
+              }}
+              style={{
+                padding: "12px 20px",
+                fontSize: 15,
+                fontWeight: "bold",
+                minWidth: "140px",
+                textAlign: "center",
               }}
             >
               Database
@@ -220,8 +308,15 @@ export default function Project() {
                 e.stopPropagation();
                 setActiveTab("filtered");
               }}
+              style={{
+                padding: "12px 20px",
+                fontSize: 15,
+                fontWeight: "bold",
+                minWidth: "140px",
+                textAlign: "center",
+              }}
             >
-              Filtered Database
+              Filtered
             </button>
             <button
               type="button"
@@ -229,6 +324,13 @@ export default function Project() {
               onClick={(e) => {
                 e.stopPropagation();
                 setActiveTab("codebook");
+              }}
+              style={{
+                padding: "12px 20px",
+                fontSize: 15,
+                fontWeight: "bold",
+                minWidth: "140px",
+                textAlign: "center",
               }}
             >
               Codebook
@@ -240,45 +342,127 @@ export default function Project() {
                 e.stopPropagation();
                 setActiveTab("coding");
               }}
+              style={{
+                padding: "12px 20px",
+                fontSize: 15,
+                fontWeight: "bold",
+                minWidth: "140px",
+                textAlign: "center",
+              }}
             >
               Coding
             </button>
           </div>
+        </div>
 
-          <div style={{ marginTop: 16 }}>
-            {activeTab === "database" && (
-              <div>
-                <h2>Database</h2>
-                {dbFiles.length === 0 ? (
-                  <div>No database</div>
-                ) : (
-                  dbFiles.map((f) => (
+        {/* Tab Content */}
+        <div>
+          {activeTab === "database" && (
+            <div
+              style={{
+                backgroundColor: "#111",
+                border: "2px solid #ffffff",
+                borderRadius: "12px",
+                padding: "24px",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: "20px",
+                }}
+              >
+                <h2 style={{ margin: 0, color: "#ffffff", fontSize: "1.3em" }}>
+                  Database Files
+                </h2>
+                <button
+                  className="project-tab"
+                  onClick={() =>
+                    navigate("/import", { state: { projectId: project.id } })
+                  }
+                  style={{
+                    padding: "10px 16px",
+                    fontSize: 14,
+                    fontWeight: "bold",
+                  }}
+                >
+                  Add Database
+                </button>
+              </div>
+              {dbFiles.length === 0 ? (
+                <div
+                  style={{
+                    textAlign: "center",
+                    color: "#888",
+                    padding: "40px",
+                    fontSize: "1.1em",
+                  }}
+                >
+                  No database files yet
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "12px",
+                  }}
+                >
+                  {dbFiles.map((f) => (
                     <div
                       key={f.id}
                       style={{
+                        backgroundColor: "#000",
+                        border: "1px solid #333",
+                        borderRadius: "8px",
+                        padding: "16px",
                         display: "flex",
                         justifyContent: "space-between",
                         alignItems: "center",
-                        padding: "8px 0",
-                        borderBottom: "1px solid #111",
+                        transition: "border-color 0.2s",
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.borderColor = "#ffffff";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.borderColor = "#333";
                       }}
                     >
-                      <div>
-                        <div>{f.display_name || f.schema_name}</div>
+                      <div style={{ flex: 1 }}>
+                        <div
+                          style={{
+                            fontSize: "1.1em",
+                            fontWeight: "bold",
+                            color: "#ffffff",
+                            marginBottom: "4px",
+                          }}
+                        >
+                          {f.display_name || f.schema_name}
+                        </div>
                         {f.description && (
-                          <div style={{ color: "#888", marginTop: 6 }}>
+                          <div
+                            style={{
+                              color: "#cccccc",
+                              marginBottom: "8px",
+                              fontSize: "0.95em",
+                            }}
+                          >
                             {f.description}
                           </div>
                         )}
                         {f.created_at && (
                           <div
                             style={{
-                              color: "#999",
-                              marginTop: 6,
-                              fontSize: "0.9em",
+                              color: "#888",
+                              fontSize: "0.85em",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "4px",
                             }}
                           >
-                            Created: {new Date(f.created_at).toLocaleString()}
+                            {new Date(f.created_at).toLocaleString()}
                           </div>
                         )}
                       </div>
@@ -290,7 +474,11 @@ export default function Project() {
                               state: { selectedDatabase: f.schema_name },
                             })
                           }
-                          style={{ padding: "8px 12px", fontSize: 14 }}
+                          style={{
+                            padding: "8px 14px",
+                            fontSize: 13,
+                            fontWeight: "bold",
+                          }}
                         >
                           View
                         </button>
@@ -300,63 +488,127 @@ export default function Project() {
                             handleDeleteFile(f.schema_name, "database")
                           }
                           style={{
-                            padding: "8px 12px",
-                            fontSize: 14,
+                            padding: "8px 14px",
+                            fontSize: 13,
+                            fontWeight: "bold",
                           }}
                         >
                           Delete
                         </button>
                       </div>
                     </div>
-                  ))
-                )}
-                <div style={{ marginTop: 8 }}>
-                  <button
-                    className="project-tab"
-                    onClick={() =>
-                      navigate("/import", { state: { projectId: project.id } })
-                    }
-                    style={{ padding: "8px 12px", fontSize: 14 }}
-                  >
-                    Add Database
-                  </button>
+                  ))}
                 </div>
-              </div>
-            )}
+              )}
+            </div>
+          )}
 
-            {activeTab === "filtered" && (
-              <div>
-                <h2>Filtered Database</h2>
-                {filteredFiles.length === 0 ? (
-                  <div>No filtered database</div>
-                ) : (
-                  filteredFiles.map((f) => (
+          {activeTab === "filtered" && (
+            <div
+              style={{
+                backgroundColor: "#111",
+                border: "2px solid #ffffff",
+                borderRadius: "12px",
+                padding: "24px",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: "20px",
+                }}
+              >
+                <h2 style={{ margin: 0, color: "#ffffff", fontSize: "1.3em" }}>
+                  Filtered Database Files
+                </h2>
+                <button
+                  className="project-tab"
+                  onClick={() =>
+                    navigate("/filter", { state: { projectId: project.id } })
+                  }
+                  style={{
+                    padding: "10px 16px",
+                    fontSize: 14,
+                    fontWeight: "bold",
+                  }}
+                >
+                  Add Filtered
+                </button>
+              </div>
+              {filteredFiles.length === 0 ? (
+                <div
+                  style={{
+                    textAlign: "center",
+                    color: "#888",
+                    padding: "40px",
+                    fontSize: "1.1em",
+                  }}
+                >
+                  No filtered database files yet
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "12px",
+                  }}
+                >
+                  {filteredFiles.map((f) => (
                     <div
                       key={f.id}
                       style={{
+                        backgroundColor: "#000",
+                        border: "1px solid #333",
+                        borderRadius: "8px",
+                        padding: "16px",
                         display: "flex",
                         justifyContent: "space-between",
                         alignItems: "center",
-                        padding: "8px 0",
-                        borderBottom: "1px solid #111",
+                        transition: "border-color 0.2s",
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.borderColor = "#ffffff";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.borderColor = "#333";
                       }}
                     >
-                      <div>
-                        <div>{f.display_name || f.schema_name}</div>
+                      <div style={{ flex: 1 }}>
+                        <div
+                          style={{
+                            fontSize: "1.1em",
+                            fontWeight: "bold",
+                            color: "#ffffff",
+                            marginBottom: "4px",
+                          }}
+                        >
+                          {f.display_name || f.schema_name}
+                        </div>
                         {f.description && (
-                          <div style={{ color: "#888", marginTop: 6 }}>
+                          <div
+                            style={{
+                              color: "#cccccc",
+                              marginBottom: "8px",
+                              fontSize: "0.95em",
+                            }}
+                          >
                             {f.description}
                           </div>
                         )}
                         {f.created_at && (
                           <div
                             style={{
-                              color: "#999",
-                              marginTop: 6,
-                              fontSize: "0.9em",
+                              color: "#888",
+                              fontSize: "0.85em",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "4px",
                             }}
                           >
-                            Created: {new Date(f.created_at).toLocaleString()}
+                            {new Date(f.created_at).toLocaleString()}
                           </div>
                         )}
                       </div>
@@ -368,7 +620,11 @@ export default function Project() {
                               state: { selectedDatabase: f.schema_name },
                             })
                           }
-                          style={{ padding: "8px 12px", fontSize: 14 }}
+                          style={{
+                            padding: "8px 14px",
+                            fontSize: 13,
+                            fontWeight: "bold",
+                          }}
                         >
                           View
                         </button>
@@ -378,63 +634,129 @@ export default function Project() {
                             handleDeleteFile(f.schema_name, "filtered")
                           }
                           style={{
-                            padding: "8px 12px",
-                            fontSize: 14,
+                            padding: "8px 14px",
+                            fontSize: 13,
+                            fontWeight: "bold",
                           }}
                         >
                           Delete
                         </button>
                       </div>
                     </div>
-                  ))
-                )}
-                <div style={{ marginTop: 8 }}>
-                  <button
-                    className="project-tab"
-                    onClick={() =>
-                      navigate("/filter", { state: { projectId: project.id } })
-                    }
-                    style={{ padding: "8px 12px", fontSize: 14 }}
-                  >
-                    Add Filtered Database
-                  </button>
+                  ))}
                 </div>
-              </div>
-            )}
+              )}
+            </div>
+          )}
 
-            {activeTab === "codebook" && (
-              <div>
-                <h2>Codebook</h2>
-                {codebookFiles.length === 0 ? (
-                  <div>No codebook</div>
-                ) : (
-                  codebookFiles.map((f) => (
+          {activeTab === "codebook" && (
+            <div
+              style={{
+                backgroundColor: "#111",
+                border: "2px solid #ffffff",
+                borderRadius: "12px",
+                padding: "24px",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: "20px",
+                }}
+              >
+                <h2 style={{ margin: 0, color: "#ffffff", fontSize: "1.3em" }}>
+                  Codebook Files
+                </h2>
+                <button
+                  className="project-tab"
+                  onClick={() =>
+                    navigate("/codebook-generate", {
+                      state: { projectId: project.id },
+                    })
+                  }
+                  style={{
+                    padding: "10px 16px",
+                    fontSize: 14,
+                    fontWeight: "bold",
+                  }}
+                >
+                  Add Codebook
+                </button>
+              </div>
+              {codebookFiles.length === 0 ? (
+                <div
+                  style={{
+                    textAlign: "center",
+                    color: "#888",
+                    padding: "40px",
+                    fontSize: "1.1em",
+                  }}
+                >
+                  No codebook files yet
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "12px",
+                  }}
+                >
+                  {codebookFiles.map((f) => (
                     <div
                       key={f.id}
                       style={{
+                        backgroundColor: "#000",
+                        border: "1px solid #333",
+                        borderRadius: "8px",
+                        padding: "16px",
                         display: "flex",
                         justifyContent: "space-between",
                         alignItems: "center",
-                        padding: "8px 0",
-                        borderBottom: "1px solid #111",
+                        transition: "border-color 0.2s",
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.borderColor = "#ffffff";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.borderColor = "#333";
                       }}
                     >
-                      <div>
-                        <div>{f.display_name || f.schema_name}</div>
+                      <div style={{ flex: 1 }}>
+                        <div
+                          style={{
+                            fontSize: "1.1em",
+                            fontWeight: "bold",
+                            color: "#ffffff",
+                            marginBottom: "4px",
+                          }}
+                        >
+                          {f.display_name || f.schema_name}
+                        </div>
                         {f.description && (
-                          <div style={{ color: "#888", marginTop: 6 }}>
+                          <div
+                            style={{
+                              color: "#cccccc",
+                              marginBottom: "8px",
+                              fontSize: "0.95em",
+                            }}
+                          >
                             {f.description}
                           </div>
                         )}
                         {f.created_at && (
                           <div
                             style={{
-                              color: "#999",
-                              marginTop: 6,
-                              fontSize: "0.9em",
+                              color: "#888",
+                              fontSize: "0.85em",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "4px",
                             }}
                           >
-                            Created: {new Date(f.created_at).toLocaleString()}
+                            {new Date(f.created_at).toLocaleString()}
                           </div>
                         )}
                       </div>
@@ -446,7 +768,11 @@ export default function Project() {
                               `/codebook-view?selected=${encodeURIComponent(f.schema_name || f.display_name || f.id)}`,
                             )
                           }
-                          style={{ padding: "8px 12px", fontSize: 14 }}
+                          style={{
+                            padding: "8px 14px",
+                            fontSize: 13,
+                            fontWeight: "bold",
+                          }}
                         >
                           View
                         </button>
@@ -459,65 +785,129 @@ export default function Project() {
                             )
                           }
                           style={{
-                            padding: "8px 12px",
-                            fontSize: 14,
+                            padding: "8px 14px",
+                            fontSize: 13,
+                            fontWeight: "bold",
                           }}
                         >
                           Delete
                         </button>
                       </div>
                     </div>
-                  ))
-                )}
-                <div style={{ marginTop: 8 }}>
-                  <button
-                    className="project-tab"
-                    onClick={() =>
-                      navigate("/codebook-generate", {
-                        state: { projectId: project.id },
-                      })
-                    }
-                    style={{ padding: "8px 12px", fontSize: 14 }}
-                  >
-                    Add Codebook
-                  </button>
+                  ))}
                 </div>
-              </div>
-            )}
+              )}
+            </div>
+          )}
 
-            {activeTab === "coding" && (
-              <div>
-                <h2>Coding</h2>
-                {codingFiles.length === 0 ? (
-                  <div>No coding</div>
-                ) : (
-                  codingFiles.map((f) => (
+          {activeTab === "coding" && (
+            <div
+              style={{
+                backgroundColor: "#111",
+                border: "2px solid #ffffff",
+                borderRadius: "12px",
+                padding: "24px",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: "20px",
+                }}
+              >
+                <h2 style={{ margin: 0, color: "#ffffff", fontSize: "1.3em" }}>
+                  Coding Files
+                </h2>
+                <button
+                  className="project-tab"
+                  onClick={() =>
+                    navigate("/codebook-apply", {
+                      state: { projectId: project.id },
+                    })
+                  }
+                  style={{
+                    padding: "10px 16px",
+                    fontSize: 14,
+                    fontWeight: "bold",
+                  }}
+                >
+                  Add Coding
+                </button>
+              </div>
+              {codingFiles.length === 0 ? (
+                <div
+                  style={{
+                    textAlign: "center",
+                    color: "#888",
+                    padding: "40px",
+                    fontSize: "1.1em",
+                  }}
+                >
+                  No coding files yet
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "12px",
+                  }}
+                >
+                  {codingFiles.map((f) => (
                     <div
                       key={f.id}
                       style={{
+                        backgroundColor: "#000",
+                        border: "1px solid #333",
+                        borderRadius: "8px",
+                        padding: "16px",
                         display: "flex",
                         justifyContent: "space-between",
                         alignItems: "center",
-                        padding: "8px 0",
-                        borderBottom: "1px solid #111",
+                        transition: "border-color 0.2s",
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.borderColor = "#ffffff";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.borderColor = "#333";
                       }}
                     >
-                      <div>
-                        <div>{f.display_name || f.schema_name}</div>
+                      <div style={{ flex: 1 }}>
+                        <div
+                          style={{
+                            fontSize: "1.1em",
+                            fontWeight: "bold",
+                            color: "#ffffff",
+                            marginBottom: "4px",
+                          }}
+                        >
+                          {f.display_name || f.schema_name}
+                        </div>
                         {f.description && (
-                          <div style={{ color: "#888", marginTop: 6 }}>
+                          <div
+                            style={{
+                              color: "#cccccc",
+                              marginBottom: "8px",
+                              fontSize: "0.95em",
+                            }}
+                          >
                             {f.description}
                           </div>
                         )}
                         {f.created_at && (
                           <div
                             style={{
-                              color: "#999",
-                              marginTop: 6,
-                              fontSize: "0.9em",
+                              color: "#888",
+                              fontSize: "0.85em",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "4px",
                             }}
                           >
-                            Created: {new Date(f.created_at).toLocaleString()}
+                            {new Date(f.created_at).toLocaleString()}
                           </div>
                         )}
                       </div>
@@ -529,7 +919,11 @@ export default function Project() {
                               state: { selectedCodedData: f.schema_name },
                             })
                           }
-                          style={{ padding: "8px 12px", fontSize: 14 }}
+                          style={{
+                            padding: "8px 14px",
+                            fontSize: 13,
+                            fontWeight: "bold",
+                          }}
                         >
                           View
                         </button>
@@ -539,32 +933,20 @@ export default function Project() {
                             handleDeleteFile(f.schema_name, "coding")
                           }
                           style={{
-                            padding: "8px 12px",
-                            fontSize: 14,
+                            padding: "8px 14px",
+                            fontSize: 13,
+                            fontWeight: "bold",
                           }}
                         >
                           Delete
                         </button>
                       </div>
                     </div>
-                  ))
-                )}
-                <div style={{ marginTop: 8 }}>
-                  <button
-                    className="project-tab"
-                    onClick={() =>
-                      navigate("/codebook-apply", {
-                        state: { projectId: project.id },
-                      })
-                    }
-                    style={{ padding: "8px 12px", fontSize: 14 }}
-                  >
-                    Add Coding
-                  </button>
+                  ))}
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
