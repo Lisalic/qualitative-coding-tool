@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../api";
 import ReactMarkdown from "react-markdown";
 
@@ -23,6 +24,7 @@ export default function MarkdownView({
   const [isEditing, setIsEditing] = useState(false);
   const [editedContent, setEditedContent] = useState("");
   const [newName, setNewName] = useState("");
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!selectedId) {
@@ -41,7 +43,7 @@ export default function MarkdownView({
         if (fetchStyle === "query") {
           const sep = fetchBase.includes("?") ? "&" : "?";
           url = `${fetchBase}${sep}${queryParamName}=${encodeURIComponent(
-            selectedId
+            selectedId,
           )}`;
         } else {
           url = `${fetchBase}/${encodeURIComponent(selectedId)}`;
@@ -178,33 +180,66 @@ export default function MarkdownView({
             <div
               style={{
                 display: "flex",
-                flexDirection: "column",
                 alignItems: "flex-start",
                 gap: 8,
+                width: "100%",
               }}
             >
-              <h1 style={{ color: "#ffffff", margin: 0 }}>
-                {title || (selectedId ? `${selectedId}` : emptyLabel)}
-              </h1>
-              {description ? (
-                <div style={{ color: "#cccccc", fontSize: "0.95rem" }}>
-                  {description}
-                </div>
-              ) : null}
-            </div>
-            {selectedId && (
-              <button
-                onClick={() => {
-                  setIsEditing(true);
-                  setEditedContent(content);
-                  setNewName(title || selectedId);
+              <div style={{ flex: 1 }}></div>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: 8,
+                  textAlign: "center",
                 }}
-                className="view-button"
-                style={{ fontSize: "14px", padding: "8px 16px" }}
               >
-                Edit
-              </button>
-            )}
+                <h1 style={{ color: "#ffffff", margin: 0 }}>
+                  {title || (selectedId ? `${selectedId}` : emptyLabel)}
+                </h1>
+                {description ? (
+                  <div style={{ color: "#cccccc", fontSize: "0.95rem" }}>
+                    {description}
+                  </div>
+                ) : null}
+              </div>
+              <div
+                style={{
+                  flex: 1,
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  gap: "8px",
+                }}
+              >
+                {selectedId && (
+                  <>
+                    <button
+                      onClick={() => {
+                        navigate("/compare-coding", {
+                          state: { codingA: selectedId },
+                        });
+                      }}
+                      className="view-button"
+                      style={{ fontSize: "14px", padding: "8px 16px" }}
+                    >
+                      Compare
+                    </button>
+                    <button
+                      onClick={() => {
+                        setIsEditing(true);
+                        setEditedContent(content);
+                        setNewName(title || selectedId);
+                      }}
+                      className="view-button"
+                      style={{ fontSize: "14px", padding: "8px 16px" }}
+                    >
+                      Edit
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
           </>
         )}
       </div>

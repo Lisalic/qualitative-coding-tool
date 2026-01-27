@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../api";
 import "../styles/Data.css";
 import "../styles/DataTable.css";
@@ -7,7 +8,7 @@ import CodebookTree from "../components/CodebookTree";
 import SelectionList from "../components/SelectionList";
 
 export default function ViewCodebook() {
-  // `navigate` not used here; removed to avoid unused-variable errors
+  const navigate = useNavigate();
   const [availableCodebooks, setAvailableCodebooks] = useState([]);
   const [selectedCodebook, setSelectedCodebook] = useState(null);
   const [projectsList, setProjectsList] = useState([]);
@@ -193,6 +194,24 @@ export default function ViewCodebook() {
               }}
             >
               Show Tree
+            </button>
+            <button
+              onClick={() => {
+                const selObj = availableCodebooks.find(
+                  (cb) => cb.id === selectedCodebook,
+                );
+                const codebookName =
+                  selObj?.metadata?.schema || selObj?.schema_name || selObj?.id;
+                navigate("/compare-codebook", {
+                  state: { codebookA: codebookName },
+                });
+              }}
+              style={{
+                padding: "8px 12px",
+                cursor: "pointer",
+              }}
+            >
+              Compare
             </button>
           </div>
 

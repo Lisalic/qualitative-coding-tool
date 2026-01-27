@@ -96,6 +96,32 @@ export default function Project() {
     }
   };
 
+  const handleDeleteFile = async (fileName, fileType) => {
+    if (
+      !confirm(
+        `Are you sure you want to delete "${fileName}"? This action cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+
+    try {
+      const response = await apiFetch(`/api/delete-database/${fileName}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to delete file");
+      }
+
+      // Refresh the page to update the file list
+      window.location.reload();
+    } catch (err) {
+      console.error("Delete error:", err);
+      alert("Failed to delete file. Please try again.");
+    }
+  };
+
   return (
     <div className="home-container">
       <div className="form-wrapper">
@@ -256,17 +282,31 @@ export default function Project() {
                           </div>
                         )}
                       </div>
-                      <button
-                        className="project-tab"
-                        onClick={() =>
-                          navigate("/data", {
-                            state: { selectedDatabase: f.schema_name },
-                          })
-                        }
-                        style={{ padding: "8px 12px", fontSize: 14 }}
-                      >
-                        View
-                      </button>
+                      <div style={{ display: "flex", gap: "8px" }}>
+                        <button
+                          className="project-tab"
+                          onClick={() =>
+                            navigate("/data", {
+                              state: { selectedDatabase: f.schema_name },
+                            })
+                          }
+                          style={{ padding: "8px 12px", fontSize: 14 }}
+                        >
+                          View
+                        </button>
+                        <button
+                          className="project-tab"
+                          onClick={() =>
+                            handleDeleteFile(f.schema_name, "database")
+                          }
+                          style={{
+                            padding: "8px 12px",
+                            fontSize: 14,
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </div>
                   ))
                 )}
@@ -320,17 +360,31 @@ export default function Project() {
                           </div>
                         )}
                       </div>
-                      <button
-                        className="project-tab"
-                        onClick={() =>
-                          navigate("/filtered-data", {
-                            state: { selectedDatabase: f.schema_name },
-                          })
-                        }
-                        style={{ padding: "8px 12px", fontSize: 14 }}
-                      >
-                        View
-                      </button>
+                      <div style={{ display: "flex", gap: "8px" }}>
+                        <button
+                          className="project-tab"
+                          onClick={() =>
+                            navigate("/filtered-data", {
+                              state: { selectedDatabase: f.schema_name },
+                            })
+                          }
+                          style={{ padding: "8px 12px", fontSize: 14 }}
+                        >
+                          View
+                        </button>
+                        <button
+                          className="project-tab"
+                          onClick={() =>
+                            handleDeleteFile(f.schema_name, "filtered")
+                          }
+                          style={{
+                            padding: "8px 12px",
+                            fontSize: 14,
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </div>
                   ))
                 )}
@@ -384,17 +438,34 @@ export default function Project() {
                           </div>
                         )}
                       </div>
-                      <button
-                        className="project-tab"
-                        onClick={() =>
-                          navigate(
-                            `/codebook-view?selected=${encodeURIComponent(f.schema_name || f.display_name || f.id)}`,
-                          )
-                        }
-                        style={{ padding: "8px 12px", fontSize: 14 }}
-                      >
-                        View
-                      </button>
+                      <div style={{ display: "flex", gap: "8px" }}>
+                        <button
+                          className="project-tab"
+                          onClick={() =>
+                            navigate(
+                              `/codebook-view?selected=${encodeURIComponent(f.schema_name || f.display_name || f.id)}`,
+                            )
+                          }
+                          style={{ padding: "8px 12px", fontSize: 14 }}
+                        >
+                          View
+                        </button>
+                        <button
+                          className="project-tab"
+                          onClick={() =>
+                            handleDeleteFile(
+                              f.schema_name || f.display_name || f.id,
+                              "codebook",
+                            )
+                          }
+                          style={{
+                            padding: "8px 12px",
+                            fontSize: 14,
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </div>
                   ))
                 )}
@@ -450,17 +521,31 @@ export default function Project() {
                           </div>
                         )}
                       </div>
-                      <button
-                        className="project-tab"
-                        onClick={() =>
-                          navigate("/coding-view", {
-                            state: { selectedCodedData: f.schema_name },
-                          })
-                        }
-                        style={{ padding: "8px 12px", fontSize: 14 }}
-                      >
-                        View
-                      </button>
+                      <div style={{ display: "flex", gap: "8px" }}>
+                        <button
+                          className="project-tab"
+                          onClick={() =>
+                            navigate("/coding-view", {
+                              state: { selectedCodedData: f.schema_name },
+                            })
+                          }
+                          style={{ padding: "8px 12px", fontSize: 14 }}
+                        >
+                          View
+                        </button>
+                        <button
+                          className="project-tab"
+                          onClick={() =>
+                            handleDeleteFile(f.schema_name, "coding")
+                          }
+                          style={{
+                            padding: "8px 12px",
+                            fontSize: 14,
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </div>
                   ))
                 )}

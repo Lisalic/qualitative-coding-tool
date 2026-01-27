@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { apiFetch } from "../api";
 import "../styles/Home.css";
 
 export default function CompareCodebook() {
+  const location = useLocation();
   const [codebooks, setCodebooks] = useState([]);
-  const [a, setA] = useState("");
+  const [a, setA] = useState(location.state?.codebookA || "");
   const [b, setB] = useState("");
   const [loading, setLoading] = useState(false);
   const [comparison, setComparison] = useState("");
@@ -22,7 +24,13 @@ export default function CompareCodebook() {
           label: p.display_name || p.schema_name,
         }));
         setCodebooks(list);
-        if (list.length >= 2) {
+        if (a) {
+          // If codebook A is pre-selected, set B to the first available codebook that's different
+          const availableForB = list.filter((item) => item.value !== a);
+          if (availableForB.length > 0) {
+            setB(availableForB[0].value);
+          }
+        } else if (list.length >= 2) {
           setA(list[0].value);
           setB(list[1].value);
         } else if (list.length === 1) {
