@@ -3,9 +3,15 @@ import re
 from openai import OpenAI
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
-MODEL_1 = "google/gemini-2.0-flash-exp:free"
-MODEL_2 = "xiaomi/mimo-v2-flash:free"
-MODEL_3 = "mistralai/devstral-2512:free"
+MODEL_1 = "tngtech/deepseek-r1t2-chimera:free"
+MODEL_2 = "google/gemini-2.0-flash-exp:free"
+MODEL_3 = "tngtech/deepseek-r1t-chimera:free"
+MODEL_4 = "z-ai/glm-4.5-air:free"
+MODEL_5 = "deepseek/deepseek-r1-0528:free"
+MODEL_6 = "tngtech/tng-r1t-chimera:free"
+MODEL_7 = "nvidia/nemotron-3-nano-30b-a3b:free"
+MODEL_8 = "meta-llama/llama-3.3-70b-instruct:free"
+MODEL_9 = "google/gemma-3-27b-it:free"
 MAX_RETRIES = 3
 INITIAL_RETRY_DELAY = 2  
 

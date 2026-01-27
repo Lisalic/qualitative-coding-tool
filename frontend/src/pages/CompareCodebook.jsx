@@ -12,6 +12,10 @@ export default function CompareCodebook() {
   const [comparison, setComparison] = useState("");
   const [error, setError] = useState("");
   const [model, setModel] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+  const [projects, setProjects] = useState([]);
+  const [selectedProject, setSelectedProject] = useState("");
 
   useEffect(() => {
     let mounted = true;
@@ -36,6 +40,20 @@ export default function CompareCodebook() {
         } else if (list.length === 1) {
           setA(list[0].value);
         }
+      })
+      .catch(() => {});
+    return () => (mounted = false);
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    apiFetch("/api/projects/")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!mounted || !data) return;
+        const list = Array.isArray(data.projects) ? data.projects : [];
+        setProjects(list);
+        if (list.length > 0) setSelectedProject(list[0].id || "");
       })
       .catch(() => {});
     return () => (mounted = false);
@@ -151,10 +169,33 @@ export default function CompareCodebook() {
                   value={model}
                   onChange={(e) => setModel(e.target.value)}
                 >
-                  <option value="">Default</option>
-                  <option value="MODEL_1">MODEL_1</option>
-                  <option value="MODEL_2">MODEL_2</option>
-                  <option value="MODEL_3">MODEL_3</option>
+                  <option value="tngtech/deepseek-r1t2-chimera:free">
+                    tngtech/deepseek-r1t2-chimera:free
+                  </option>
+                  <option value="google/gemini-2.0-flash-exp:free">
+                    google/gemini-2.0-flash-exp:free
+                  </option>
+                  <option value="tngtech/deepseek-r1t-chimera:free">
+                    tngtech/deepseek-r1t-chimera:free
+                  </option>
+                  <option value="z-ai/glm-4.5-air:free">
+                    z-ai/glm-4.5-air:free
+                  </option>
+                  <option value="deepseek/deepseek-r1-0528:free">
+                    deepseek/deepseek-r1-0528:free
+                  </option>
+                  <option value="tngtech/tng-r1t-chimera:free">
+                    tngtech/tng-r1t-chimera:free
+                  </option>
+                  <option value="nvidia/nemotron-3-nano-30b-a3b:free">
+                    nvidia/nemotron-3-nano-30b-a3b:free
+                  </option>
+                  <option value="meta-llama/llama-3.3-70b-instruct:free">
+                    meta-llama/llama-3.3-70b-instruct:free
+                  </option>
+                  <option value="google/gemma-3-27b-it:free">
+                    google/gemma-3-27b-it:free
+                  </option>
                 </select>
               </div>
 
@@ -193,17 +234,81 @@ export default function CompareCodebook() {
               }}
             >
               <h3 style={{ margin: 0 }}>Comparison Result</h3>
-              <button
-                className="project-tab"
-                onClick={() => {
-                  if (navigator.clipboard && comparison) {
-                    navigator.clipboard.writeText(comparison).catch(() => {});
-                  }
-                }}
-              >
-                Copy
-              </button>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <button
+                  className="project-tab"
+                  onClick={() => {
+                    if (navigator.clipboard && comparison) {
+                      navigator.clipboard.writeText(comparison).catch(() => {});
+                    }
+                  }}
+                >
+                  Copy
+                </button>
+                <button
+                  className="project-tab"
+                  onClick={async () => {
+                    // Save comparison
+                    setSaveMessage("");
+                    const labelA =
+                      (codebooks.find((it) => it.value === a) || {}).label || a;
+                    const labelB =
+                      (codebooks.find((it) => it.value === b) || {}).label || b;
+                    const title = `Comparison: ${labelA} vs ${labelB}`;
+                    const description = `Compared ${labelA} and ${labelB}`;
+                    const form = new FormData();
+                    form.append("content", comparison);
+                    form.append("title", title);
+                    form.append("description", description);
+                    form.append("file_type", "codebook_comparison");
+                    if (selectedProject)
+                      form.append("project_id", String(selectedProject));
+                    try {
+                      setSaving(true);
+                      const resp = await apiFetch("/api/save-comparison/", {
+                        method: "POST",
+                        body: form,
+                      });
+                      if (!resp.ok) {
+                        const d = await resp.json().catch(() => ({}));
+                        throw new Error(d.detail || `HTTP ${resp.status}`);
+                      }
+                      const d = await resp.json();
+                      setSaveMessage(d.message || "Saved");
+                    } catch (err) {
+                      setSaveMessage(String(err));
+                    } finally {
+                      setSaving(false);
+                    }
+                  }}
+                  disabled={saving}
+                >
+                  {saving ? "Saving..." : "Save"}
+                </button>
+              </div>
             </div>
+            {projects.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <label style={{ color: "#ccc", marginRight: 8 }}>
+                  Save to project:
+                </label>
+                <select
+                  value={selectedProject}
+                  onChange={(e) => setSelectedProject(e.target.value)}
+                >
+                  {projects.map((pr) => (
+                    <option key={pr.id} value={pr.id}>
+                      {pr.projectname}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {saveMessage && (
+              <div style={{ marginTop: 8, color: "#ccffcc" }}>
+                {saveMessage}
+              </div>
+            )}
             <div className="comparison-output" style={{ marginTop: 8 }}>
               {comparison}
             </div>

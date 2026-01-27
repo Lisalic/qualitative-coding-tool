@@ -296,7 +296,7 @@ export default function Project() {
                 fontSize: 15,
                 fontWeight: "bold",
                 minWidth: "140px",
-                textAlign: "center",
+                justifyContent: "center",
               }}
             >
               Database
@@ -313,7 +313,7 @@ export default function Project() {
                 fontSize: 15,
                 fontWeight: "bold",
                 minWidth: "140px",
-                textAlign: "center",
+                justifyContent: "center",
               }}
             >
               Filtered
@@ -330,7 +330,7 @@ export default function Project() {
                 fontSize: 15,
                 fontWeight: "bold",
                 minWidth: "140px",
-                textAlign: "center",
+                justifyContent: "center",
               }}
             >
               Codebook
@@ -347,7 +347,7 @@ export default function Project() {
                 fontSize: 15,
                 fontWeight: "bold",
                 minWidth: "140px",
-                textAlign: "center",
+                justifyContent: "center",
               }}
             >
               Coding

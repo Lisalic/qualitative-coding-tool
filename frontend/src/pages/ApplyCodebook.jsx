@@ -23,7 +23,7 @@ export default function ApplyCodebook() {
   const [filteredDatabases, setFilteredDatabases] = useState([]);
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
-  const [rightView, setRightView] = useState("codebooks"); // 'codebooks' or 'prompts'
+  const [rightView, setRightView] = useState("codebooks");
   const [saveMessage, setSaveMessage] = useState("");
   const [saveMessageType, setSaveMessageType] = useState("success");
 

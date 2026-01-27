@@ -365,6 +365,9 @@ async def merge_databases(request: Request):
                         print(f"Failed to read table {schema_src}.{table_name} from Postgres: {e}")
                         continue
 
+
+
+
                     # skip empty dataframes
                     if df is None or df.shape[0] == 0:
                         tables_written[table_name] = 0
@@ -521,6 +524,75 @@ async def merge_databases(request: Request):
                 conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE'))
         except Exception:
             pass
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/save-comparison/")
+async def save_comparison(
+    request: Request,
+    content: str = Form(...),
+    title: str = Form(...),
+    description: str = Form(None),
+    file_type: str = Form(None),
+    project_id: int = Form(None),
+):
+    # Resolve authenticated user
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required to save comparison")
+
+    base_name = title if title and title.strip() else "comparison"
+    unique_id = secrets.token_hex(6)
+    schema_name = f"cmp_{unique_id}"
+
+    try:
+        with DatabaseManager() as dm:
+            # create File record representing this saved comparison (backed by a schema)
+            file_rec = File(user_id=int(user_id), filename=base_name, schemaname=schema_name, file_type=(file_type or "comparison"), description=(description or None))
+            dm.session.add(file_rec)
+            try:
+                dm.session.flush()
+            except Exception:
+                dm.session.rollback()
+                raise
+
+            # If project_id provided, verify ownership and link
+            if project_id is not None:
+                try:
+                    proj = dm.session.query(Project).filter(Project.id == int(project_id)).first()
+                    if proj is None:
+                        raise HTTPException(status_code=404, detail="Project not found")
+                    try:
+                        uid = int(user_id)
+                    except Exception:
+                        uid = None
+                    if proj.user_id != uid:
+                        raise HTTPException(status_code=403, detail="Forbidden: project does not belong to user")
+                    file_rec.projects.append(proj)
+                    dm.session.flush()
+                except HTTPException:
+                    raise
+                except Exception:
+                    dm.session.rollback()
+
+            # create schema and content_store table, then insert the content
+            with engine.begin() as conn:
+                conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
+                conn.execute(text(f'''
+                    CREATE TABLE IF NOT EXISTS "{schema_name}"."content_store" (
+                        id SERIAL PRIMARY KEY,
+                        content TEXT,
+                        created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+                    )
+                '''))
+                conn.execute(text(f'INSERT INTO "{schema_name}"."content_store" (content) VALUES (:content)'), {"content": content})
+
+            return JSONResponse({"message": "Saved", "file_id": file_rec.id, "schema_name": schema_name})
+    except HTTPException:
+        raise
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(exc))
 
 
