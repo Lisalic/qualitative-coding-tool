@@ -13,16 +13,22 @@ export default function ActionForm({
     fields.reduce((acc, field) => {
       acc[field.id] = field.value || "";
       return acc;
-    }, {})
+    }, {}),
   );
 
   useEffect(() => {
-    setFormData(
-      fields.reduce((acc, field) => {
-        acc[field.id] = field.value || "";
-        return acc;
-      }, {})
-    );
+    // Merge incoming field defaults into existing form data instead of
+    // replacing it outright. This avoids losing user edits when the parent
+    // recreates the `fields` array on every render.
+    setFormData((prev) => {
+      const merged = { ...prev };
+      fields.forEach((field) => {
+        if (merged[field.id] === undefined) {
+          merged[field.id] = field.value || "";
+        }
+      });
+      return merged;
+    });
   }, [fields]);
 
   const handleInputChange = (fieldId, value) => {
