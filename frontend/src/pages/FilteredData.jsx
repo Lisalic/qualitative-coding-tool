@@ -30,7 +30,6 @@ export default function FilteredData() {
       const projects = data.projects || [];
       if (projects.length > 0) {
         setProjectsList(projects);
-        if (!selectedProject) setSelectedProject(String(projects[0].id));
       }
     } catch (err) {
       console.error("Error fetching projects:", err);
@@ -45,14 +44,7 @@ export default function FilteredData() {
     }
   }, [location.state]);
 
-  useEffect(() => {
-    if (!selectedDatabase && databases.length > 0) {
-      const first = databases[0];
-      const id =
-        typeof first === "string" ? first : first.name || first.id || "";
-      setSelectedDatabase(id);
-    }
-  }, [databases, selectedDatabase]);
+  // Do not auto-select a filtered database; wait for explicit user selection
 
   const fetchFilteredDatabases = async () => {
     try {
@@ -122,27 +114,7 @@ export default function FilteredData() {
 
   const databaseItems = databases;
 
-  // When selectedProject changes, default selectedDatabase to first filtered file if present
-  useEffect(() => {
-    if (
-      !selectedProject ||
-      (!(projectsList && projectsList.length > 0) && !userProjects)
-    )
-      return;
-    const source =
-      projectsList && projectsList.length > 0
-        ? projectsList
-        : userProjects || [];
-    const projectObj = source.find(
-      (p) => String(p.id) === String(selectedProject),
-    );
-    const files = (projectObj && projectObj.files) || [];
-    const filteredFiles = files.filter((f) => f.file_type === "filtered_data");
-    if (filteredFiles.length > 0) {
-      const first = filteredFiles[0].schema_name || filteredFiles[0].id || "";
-      setSelectedDatabase((cur) => (cur ? cur : first));
-    }
-  }, [selectedProject, userProjects]);
+  // Do not auto-select a file when project changes; require explicit selection
 
   return (
     <>
@@ -217,28 +189,34 @@ export default function FilteredData() {
             emptyMessage="No filtered databases available"
           />
         )}
-        <DataTable
-          title={getTitle()}
-          database={selectedDatabase}
-          isFilteredView={true}
-          displayName={getDisplayName()}
-          metadata={
-            (databases || []).find(
-              (d) =>
-                d &&
-                (d.name === selectedDatabase ||
-                  d.name === String(selectedDatabase).replace(".db", "")),
-            )?.metadata
-          }
-          description={
-            (databases || []).find(
-              (d) =>
-                d &&
-                (d.name === selectedDatabase ||
-                  d.name === String(selectedDatabase).replace(".db", "")),
-            )?.description
-          }
-        />
+        {selectedDatabase ? (
+          <DataTable
+            title={getTitle()}
+            database={selectedDatabase}
+            isFilteredView={true}
+            displayName={getDisplayName()}
+            metadata={
+              (databases || []).find(
+                (d) =>
+                  d &&
+                  (d.name === selectedDatabase ||
+                    d.name === String(selectedDatabase).replace(".db", "")),
+              )?.metadata
+            }
+            description={
+              (databases || []).find(
+                (d) =>
+                  d &&
+                  (d.name === selectedDatabase ||
+                    d.name === String(selectedDatabase).replace(".db", "")),
+              )?.description
+            }
+          />
+        ) : (
+          <div style={{ color: "#888", padding: 20 }}>
+            Select a project file to view filtered data
+          </div>
+        )}
       </div>
     </>
   );

@@ -576,16 +576,17 @@ async def save_comparison(
                     dm.session.rollback()
 
             # create schema and content_store table, then insert the content
+            # Use column name `file_text` to match other save/read endpoints
             with engine.begin() as conn:
                 conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
                 conn.execute(text(f'''
                     CREATE TABLE IF NOT EXISTS "{schema_name}"."content_store" (
                         id SERIAL PRIMARY KEY,
-                        content TEXT,
+                        file_text TEXT,
                         created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
                     )
                 '''))
-                conn.execute(text(f'INSERT INTO "{schema_name}"."content_store" (content) VALUES (:content)'), {"content": content})
+                conn.execute(text(f'INSERT INTO "{schema_name}"."content_store" (file_text) VALUES (:file_text)'), {"file_text": content})
 
             return JSONResponse({"message": "Saved", "file_id": file_rec.id, "schema_name": schema_name})
     except HTTPException:
@@ -696,7 +697,13 @@ def my_projects(request: Request, file_type: str = Query("raw_data"), db: Sessio
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     # Use File table instead of Project; `file_type` query param maps to `file_type` on File
-    files = db.query(File).filter(File.user_id == int(user_id), File.file_type == file_type).all()
+    # Allow callers requesting 'codebook' or 'coding' to also receive saved comparison files
+    if file_type == 'codebook':
+        files = db.query(File).filter(File.user_id == int(user_id), File.file_type.in_(['codebook', 'codebook_comparison'])).all()
+    elif file_type == 'coding':
+        files = db.query(File).filter(File.user_id == int(user_id), File.file_type.in_(['coding', 'coding_comparison'])).all()
+    else:
+        files = db.query(File).filter(File.user_id == int(user_id), File.file_type == file_type).all()
     result = []
     for p in files:
         tables = []
@@ -1036,7 +1043,8 @@ def delete_prompt(prompt_id: int, request: Request, db: Session = Depends(get_db
 async def delete_database(db_name: str, request: Request, db: Session = Depends(get_db)):
     schema = db_name.strip()
 
-    if not schema.startswith('proj_'):
+    # Allow project-backed schemas (proj_) and comparison schemas (cmp_)
+    if not (schema.startswith('proj_') or schema.startswith('cmp_')):
         raise HTTPException(status_code=400, detail="Invalid file schema identifier")
 
     # Resolve authenticated user from token
@@ -1256,21 +1264,21 @@ async def get_codebook(codebook_id: str = Query(None), db: Session = Depends(get
     # First try to find a matching file (by schemaname or filename or id)
     file_rec = None
     if codebook_id:
-        # try schemaname match
-        file_rec = db.query(File).filter(File.file_type == 'codebook', File.schemaname == codebook_id).first()
+        # try schemaname match (include comparisons)
+        file_rec = db.query(File).filter(File.file_type.in_(['codebook', 'codebook_comparison']), File.schemaname == codebook_id).first()
         if not file_rec:
             # try filename match
-            file_rec = db.query(File).filter(File.file_type == 'codebook', File.filename == codebook_id).first()
+            file_rec = db.query(File).filter(File.file_type.in_(['codebook', 'codebook_comparison']), File.filename == codebook_id).first()
         if not file_rec:
             # try id match (integer)
             try:
                 fid = int(codebook_id)
-                file_rec = db.query(File).filter(File.file_type == 'codebook', File.id == fid).first()
+                file_rec = db.query(File).filter(File.file_type.in_(['codebook', 'codebook_comparison']), File.id == fid).first()
             except Exception:
                 file_rec = None
     else:
-        # No id supplied: pick latest codebook file if any
-        file_rec = db.query(File).filter(File.file_type == 'codebook').order_by(File.created_at.desc()).first()
+        # No id supplied: pick latest codebook or codebook_comparison file if any
+        file_rec = db.query(File).filter(File.file_type.in_(['codebook', 'codebook_comparison'])).order_by(File.created_at.desc()).first()
 
     if file_rec:
         schema = file_rec.schemaname
@@ -1332,15 +1340,15 @@ async def parse_codebook(codebook_id: str = Query(None), db: Session = Depends(g
 
 @router.get("/list-codebooks")
 async def list_codebooks(db: Session = Depends(get_db)):
-    # Only return DB-backed codebook files
+    # Return DB-backed codebook files including saved comparisons
     codebooks = []
     try:
-        files = db.query(File).filter(File.file_type == 'codebook').all()
+        files = db.query(File).filter(File.file_type.in_(['codebook', 'codebook_comparison'])).all()
         for p in files:
             codebooks.append({
                 "id": str(p.id),
                 "name": p.filename,
-                "metadata": {"schema": p.schemaname, "created_at": p.created_at.isoformat() if p.created_at else None},
+                "metadata": {"schema": p.schemaname, "created_at": p.created_at.isoformat() if p.created_at else None, "file_type": p.file_type},
                 "description": p.description,
                 "source": "file",
             })
@@ -1416,21 +1424,21 @@ async def save_project_codebook(request: Request, schema_name: str = Form(...), 
 
 @router.get("/coded-data")
 async def get_coded_data_query(coded_id: str = Query(None), db: Session = Depends(get_db)):
-    """Return coded data stored in a File record with file_type='coding'.
+    """Return coded data stored in a File record with file_type='coding' or 'coding_comparison'.
     """
     file_rec = None
     if coded_id:
-        file_rec = db.query(File).filter(File.file_type == 'coding', File.schemaname == coded_id).first()
+        file_rec = db.query(File).filter(File.file_type.in_(['coding', 'coding_comparison']), File.schemaname == coded_id).first()
         if not file_rec:
-            file_rec = db.query(File).filter(File.file_type == 'coding', File.filename == coded_id).first()
+            file_rec = db.query(File).filter(File.file_type.in_(['coding', 'coding_comparison']), File.filename == coded_id).first()
         if not file_rec:
             try:
                 fid = int(coded_id)
-                file_rec = db.query(File).filter(File.file_type == 'coding', File.id == fid).first()
+                file_rec = db.query(File).filter(File.file_type.in_(['coding', 'coding_comparison']), File.id == fid).first()
             except Exception:
                 file_rec = None
     else:
-        file_rec = db.query(File).filter(File.file_type == 'coding').order_by(File.created_at.desc()).first()
+        file_rec = db.query(File).filter(File.file_type.in_(['coding', 'coding_comparison'])).order_by(File.created_at.desc()).first()
 
     if file_rec:
         schema = file_rec.schemaname

@@ -25,13 +25,7 @@ export default function Data() {
       if (!resp.ok) return;
       const data = await resp.json();
       const projects = data.projects || [];
-      if (projects.length > 0) {
-        setProjectsList(projects);
-        // set default selected project if none
-        if (!selectedProject) {
-          setSelectedProject(String(projects[0].id || ""));
-        }
-      }
+      if (projects.length > 0) setProjectsList(projects);
     } catch (err) {
       console.error("Error fetching projects:", err);
     }
@@ -49,49 +43,11 @@ export default function Data() {
     }
   }, [location.state]);
 
-  useEffect(() => {
-    // Set default database if none selected and we have databases loaded
-    if (!selectedDatabase && databases.length > 0) {
-      const first = databases[0];
-      const id =
-        typeof first === "string" ? first : first.name || first.id || "";
-      setSelectedDatabase(id);
-    }
-  }, [databases, selectedDatabase]);
+  // do not auto-select a database; require user to select from the project or list
 
-  useEffect(() => {
-    // When projects load, set a default selected project (prefer projectsList)
-    if (!selectedProject) {
-      if (projectsList && projectsList.length > 0) {
-        setSelectedProject(String(projectsList[0].id || ""));
-      } else if (userProjects && userProjects.length > 0) {
-        setSelectedProject(String(userProjects[0].id || ""));
-      }
-    }
-  }, [projectsList, userProjects, selectedProject]);
+  // do not auto-select a project; require explicit user selection
 
-  // When selected project changes, ensure selectedDatabase defaults to first file in project
-  useEffect(() => {
-    if (
-      !selectedProject ||
-      ((!projectsList || projectsList.length === 0) && !userProjects)
-    )
-      return;
-    const source =
-      projectsList && projectsList.length > 0
-        ? projectsList
-        : userProjects || [];
-    const projectObj = source.find(
-      (p) => String(p.id) === String(selectedProject),
-    );
-    const files = (projectObj && projectObj.files) || [];
-    const rawFiles = files.filter((f) => f.file_type === "raw_data");
-    const pick = rawFiles.length > 0 ? rawFiles[0] : files[0] || null;
-    if (pick) {
-      const firstFile = pick.schema_name || pick.id || "";
-      setSelectedDatabase((cur) => (cur ? cur : firstFile));
-    }
-  }, [selectedProject, userProjects, projectsList]);
+  // do not auto-select a file when project changes
 
   const fetchDatabases = async () => {
     try {

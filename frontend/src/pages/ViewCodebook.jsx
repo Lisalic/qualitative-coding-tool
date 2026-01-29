@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { apiFetch } from "../api";
 import "../styles/Data.css";
 import "../styles/DataTable.css";
@@ -9,6 +9,7 @@ import SelectionList from "../components/SelectionList";
 
 export default function ViewCodebook() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [availableCodebooks, setAvailableCodebooks] = useState([]);
   const [selectedCodebook, setSelectedCodebook] = useState(null);
   const [projectsList, setProjectsList] = useState([]);
@@ -28,7 +29,11 @@ export default function ViewCodebook() {
         );
         const files = (projectObj && projectObj.files) || [];
         const codebookFiles = files
-          .filter((f) => f.file_type === "codebook")
+          .filter(
+            (f) =>
+              f.file_type === "codebook" ||
+              f.file_type === "codebook_comparison",
+          )
           .map((f) => ({
             id: String(f.id),
             display_name: f.display_name || f.schema_name || String(f.id),
@@ -36,10 +41,23 @@ export default function ViewCodebook() {
             metadata: { schema: f.schema_name, file: f },
           }));
         setAvailableCodebooks(codebookFiles);
-        if (codebookFiles.length > 0) {
-          setSelectedCodebook(String(codebookFiles[0].id));
-          setSelectedCodebookName(codebookFiles[0].display_name || "");
+        // If navigation provided a preselected codebook (from Project view), respect it
+        const pre = location?.state?.selected;
+        if (pre) {
+          const match = codebookFiles.find(
+            (it) =>
+              String(it.id) === String(pre) ||
+              it.metadata?.schema === pre ||
+              it.display_name === pre,
+          );
+          if (match) {
+            setSelectedCodebook(match.id);
+            setSelectedCodebookName(
+              match.display_name || match.name || match.id || "",
+            );
+          }
         }
+        // otherwise do not auto-select; require the user to click one
         return;
       }
 
@@ -50,6 +68,23 @@ export default function ViewCodebook() {
       const data = await response.json();
       setAvailableCodebooks(data.codebooks);
       if (data.codebooks.length > 0) {
+        // Respect navigation state.selected (e.g., from Project view)
+        const preNav = location?.state?.selected;
+        if (
+          preNav &&
+          data.codebooks.some((cb) => String(cb.id) === String(preNav))
+        ) {
+          setSelectedCodebook(String(preNav));
+          const sel = data.codebooks.find(
+            (cb) => String(cb.id) === String(preNav),
+          );
+          setSelectedCodebookName(
+            sel?.display_name || sel?.name || sel?.id || "",
+          );
+          // leave early — respect explicit navigation selection
+          return;
+        }
+
         const urlParams = new URLSearchParams(window.location.search);
         const selectedFromUrl = urlParams.get("selected");
         if (
@@ -57,17 +92,14 @@ export default function ViewCodebook() {
           data.codebooks.some((cb) => String(cb.id) === String(selectedFromUrl))
         ) {
           setSelectedCodebook(selectedFromUrl);
-        } else {
-          setSelectedCodebook(data.codebooks[data.codebooks.length - 1].id);
+          const sel = data.codebooks.find(
+            (cb) => String(cb.id) === String(selectedFromUrl),
+          );
+          setSelectedCodebookName(
+            sel?.display_name || sel?.name || sel?.id || "",
+          );
         }
-        const sel = data.codebooks.find(
-          (cb) =>
-            cb.id ===
-            (selectedFromUrl || data.codebooks[data.codebooks.length - 1].id),
-        );
-        setSelectedCodebookName(
-          sel?.display_name || sel?.name || sel?.id || "",
-        );
+        // otherwise leave nothing selected until the user chooses
       }
     } catch (err) {
       console.error("Error fetching codebooks list:", err);
@@ -110,8 +142,6 @@ export default function ViewCodebook() {
       const data = await resp.json();
       const projects = data.projects || [];
       setProjectsList(projects);
-      if (!selectedProject && projects.length > 0)
-        setSelectedProject(String(projects[0].id));
     } catch (e) {
       console.error("Error fetching projects:", e);
     }
@@ -216,48 +246,54 @@ export default function ViewCodebook() {
           </div>
 
           {viewMode === "markdown" ? (
-            (() => {
-              const selObj = availableCodebooks.find(
-                (cb) => cb.id === selectedCodebook,
-              );
-              const projectSchema =
-                selObj?.metadata?.schema ||
-                selObj?.schema_name ||
-                selObj?.id ||
-                null;
-              return (
-                <MarkdownView
-                  selectedId={selectedCodebook}
-                  title={selectedCodebookName}
-                  description={selObj?.description}
-                  fetchStyle="query"
-                  fetchBase="/api/codebook"
-                  queryParamName="codebook_id"
-                  saveUrl={"/api/save-file-codebook/"}
-                  saveIdFieldName={"schema_name"}
-                  saveAsProject={true}
-                  projectSchema={projectSchema}
-                  onSaved={(resp) => {
-                    if (typeof resp === "string") {
-                      if (resp !== selectedCodebook) {
-                        setSelectedCodebook(resp);
+            selectedCodebook ? (
+              (() => {
+                const selObj = availableCodebooks.find(
+                  (cb) => cb.id === selectedCodebook,
+                );
+                const projectSchema =
+                  selObj?.metadata?.schema ||
+                  selObj?.schema_name ||
+                  selObj?.id ||
+                  null;
+                return (
+                  <MarkdownView
+                    selectedId={selectedCodebook}
+                    title={selectedCodebookName}
+                    description={selObj?.description}
+                    fetchStyle="query"
+                    fetchBase="/api/codebook"
+                    queryParamName="codebook_id"
+                    saveUrl={"/api/save-file-codebook/"}
+                    saveIdFieldName={"schema_name"}
+                    saveAsProject={true}
+                    projectSchema={projectSchema}
+                    onSaved={(resp) => {
+                      if (typeof resp === "string") {
+                        if (resp !== selectedCodebook) {
+                          setSelectedCodebook(resp);
+                          fetchAvailableCodebooks();
+                        }
+                      } else if (resp && resp.display_name) {
+                        setSelectedCodebookName(resp.display_name);
                         fetchAvailableCodebooks();
                       }
-                    } else if (resp && resp.display_name) {
-                      setSelectedCodebookName(resp.display_name);
-                      fetchAvailableCodebooks();
-                    }
-                  }}
-                  emptyLabel="View Codebook"
-                />
-              );
-            })()
-          ) : (
+                    }}
+                    emptyLabel="View Codebook"
+                  />
+                );
+              })()
+            ) : (
+              <div style={{ color: "#888", padding: 20 }}>
+                Select a codebook file to view
+              </div>
+            )
+          ) : selectedCodebook ? (
             <CodebookTree
               codebookId={selectedCodebook}
               codebookName={selectedCodebookName}
             />
-          )}
+          ) : null}
           {!codebookContent && !loading && !error && (
             <p>No codebook selected or found. Generate a codebook first.</p>
           )}

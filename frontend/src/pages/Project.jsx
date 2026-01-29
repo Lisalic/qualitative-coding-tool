@@ -45,10 +45,10 @@ export default function Project() {
     (f) => f.file_type === "filtered_data",
   );
   const codebookFiles = (project.files || []).filter(
-    (f) => f.file_type === "codebook",
+    (f) => f.file_type === "codebook" || f.file_type === "codebook_comparison",
   );
   const codingFiles = (project.files || []).filter(
-    (f) => f.file_type === "coding",
+    (f) => f.file_type === "coding" || f.file_type === "coding_comparison",
   );
 
   const startEdit = () => {
@@ -764,9 +764,9 @@ export default function Project() {
                         <button
                           className="project-tab"
                           onClick={() =>
-                            navigate(
-                              `/codebook-view?selected=${encodeURIComponent(f.schema_name || f.display_name || f.id)}`,
-                            )
+                            navigate("/codebook-view", {
+                              state: { selected: String(f.id) },
+                            })
                           }
                           style={{
                             padding: "8px 14px",

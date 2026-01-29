@@ -24,7 +24,10 @@ export default function ViewCoding() {
         );
         const files = (projectObj && projectObj.files) || [];
         const codingFiles = files
-          .filter((f) => f.file_type === "coding")
+          .filter(
+            (f) =>
+              f.file_type === "coding" || f.file_type === "coding_comparison",
+          )
           .map((f) => ({
             id: String(f.id),
             name: f.display_name || f.schema_name || String(f.id),
@@ -34,15 +37,17 @@ export default function ViewCoding() {
             source: "project",
           }));
         setAvailableCodedData(codingFiles);
-        if (codingFiles.length > 0) {
-          const pre = location?.state?.selectedCodedData;
-          const match = pre ? codingFiles.find((it) => it.id === pre) : null;
-          const defaultId = match ? match.id : codingFiles[0].id;
-          setSelectedCodedData(defaultId);
-          const sel = codingFiles.find((cd) => cd.id === defaultId);
-          setSelectedCodedDataName(
-            sel?.display_name || sel?.name || sel?.id || "",
-          );
+        // Do not auto-select; require the user to pick a coded data file.
+        // If caller provided a preselected coded data via location.state, respect it.
+        const pre = location?.state?.selectedCodedData;
+        if (pre) {
+          const match = codingFiles.find((it) => it.id === pre);
+          if (match) {
+            setSelectedCodedData(match.id);
+            setSelectedCodedDataName(
+              match?.display_name || match?.name || match?.id || "",
+            );
+          }
         }
         return;
       }
@@ -62,16 +67,18 @@ export default function ViewCoding() {
           source: "project",
         }));
         setAvailableCodedData(items);
+        // Do not auto-select; only respect an explicit preselection via location.state
         if (items.length > 0) {
-          // If caller provided a preselected coded data via location.state, use it
           const pre = location?.state?.selectedCodedData;
-          const match = pre ? items.find((it) => it.id === pre) : null;
-          const defaultId = match ? match.id : items[0].id;
-          setSelectedCodedData(defaultId);
-          const sel = items.find((cd) => cd.id === defaultId);
-          setSelectedCodedDataName(
-            sel?.display_name || sel?.name || sel?.id || "",
-          );
+          if (pre) {
+            const match = items.find((it) => it.id === pre);
+            if (match) {
+              setSelectedCodedData(match.id);
+              setSelectedCodedDataName(
+                match?.display_name || match?.name || match?.id || "",
+              );
+            }
+          }
         }
         return;
       }
@@ -151,40 +158,46 @@ export default function ViewCoding() {
             backgroundColor: "#000000",
           }}
         >
-          <MarkdownView
-            key={
-              selectedCodedData
-                ? `${selectedCodedData}-${refreshKey}`
-                : `none-${refreshKey}`
-            }
-            selectedId={selectedCodedData}
-            title={selectedCodedDataName}
-            description={
-              availableCodedData.find((cd) => cd.id === selectedCodedData)
-                ?.description
-            }
-            fetchStyle="query"
-            fetchBase="/api/coded-data"
-            queryParamName="coded_id"
-            saveUrl={"/api/save-file-coded-data/"}
-            saveIdFieldName={"schema_name"}
-            saveAsProject={true}
-            projectSchema={selectedCodedData}
-            onSaved={(resp) => {
-              if (typeof resp === "string") {
-                if (resp !== selectedCodedData) {
-                  setSelectedCodedData(resp);
+          {selectedCodedData ? (
+            <MarkdownView
+              key={
+                selectedCodedData
+                  ? `${selectedCodedData}-${refreshKey}`
+                  : `none-${refreshKey}`
+              }
+              selectedId={selectedCodedData}
+              title={selectedCodedDataName}
+              description={
+                availableCodedData.find((cd) => cd.id === selectedCodedData)
+                  ?.description
+              }
+              fetchStyle="query"
+              fetchBase="/api/coded-data"
+              queryParamName="coded_id"
+              saveUrl={"/api/save-file-coded-data/"}
+              saveIdFieldName={"schema_name"}
+              saveAsProject={true}
+              projectSchema={selectedCodedData}
+              onSaved={(resp) => {
+                if (typeof resp === "string") {
+                  if (resp !== selectedCodedData) {
+                    setSelectedCodedData(resp);
+                    fetchAvailableCodedData();
+                  }
+                } else if (resp && resp.display_name) {
+                  setSelectedCodedDataName(resp.display_name);
                   fetchAvailableCodedData();
                 }
-              } else if (resp && resp.display_name) {
-                setSelectedCodedDataName(resp.display_name);
-                fetchAvailableCodedData();
-              }
-              // force remount/refresh of MarkdownView to reload content
-              setRefreshKey((k) => k + 1);
-            }}
-            emptyLabel="View Coding"
-          />
+                // force remount/refresh of MarkdownView to reload content
+                setRefreshKey((k) => k + 1);
+              }}
+              emptyLabel="View Coding"
+            />
+          ) : (
+            <div style={{ color: "#888", padding: 20 }}>
+              Select a coded data file to view
+            </div>
+          )}
         </div>
       </div>
     </>
