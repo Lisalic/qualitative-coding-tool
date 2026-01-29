@@ -30,7 +30,7 @@ export default function CodebookManager({ onViewCodebook }) {
             const schema = cb.metadata?.schema || cb.schema_name || cb.id;
             try {
               const resp = await apiFetch(
-                `/api/codebook?codebook_id=${encodeURIComponent(schema)}`
+                `/api/codebook?codebook_id=${encodeURIComponent(schema)}`,
               );
               if (resp.ok) {
                 const j = await resp.json();
@@ -45,7 +45,7 @@ export default function CodebookManager({ onViewCodebook }) {
             }
           }
           return cb;
-        })
+        }),
       );
 
       setCodebooks(enriched);
@@ -62,7 +62,7 @@ export default function CodebookManager({ onViewCodebook }) {
     }
     // find the codebook object
     const cb = codebooks.find(
-      (c) => c.id === oldId || String(c.id) === String(oldId)
+      (c) => c.id === oldId || String(c.id) === String(oldId),
     );
     try {
       if (cb && cb.source === "project") {
@@ -76,7 +76,7 @@ export default function CodebookManager({ onViewCodebook }) {
         // Always send description (allow clearing by sending empty string)
         formData.append(
           "description",
-          newDescription == null ? "" : newDescription
+          newDescription == null ? "" : newDescription,
         );
 
         const response = await apiFetch("/api/rename-file/", {
@@ -99,7 +99,7 @@ export default function CodebookManager({ onViewCodebook }) {
   const handleDeleteCodebook = async (cbId) => {
     try {
       const cb = codebooks.find(
-        (c) => c.id === cbId || String(c.id) === String(cbId)
+        (c) => c.id === cbId || String(c.id) === String(cbId),
       );
       if (cb && cb.source === "project") {
         // delete project schema (with auth)
@@ -112,7 +112,7 @@ export default function CodebookManager({ onViewCodebook }) {
           `/api/delete-database/${encodeURIComponent(schema)}`,
           {
             method: "DELETE",
-          }
+          },
         );
         if (!response.ok) throw new Error("Failed to delete project schema");
       } else {
@@ -133,7 +133,7 @@ export default function CodebookManager({ onViewCodebook }) {
   const startRename = (cbId) => {
     setRenamingCb(cbId);
     const cb = codebooks.find(
-      (c) => c.id === cbId || String(c.id) === String(cbId)
+      (c) => c.id === cbId || String(c.id) === String(cbId),
     );
     setNewName(cb?.name || cb?.display_name || String(cbId));
     setNewDescription(cb?.description || cb?.metadata?.description || "");
@@ -152,7 +152,10 @@ export default function CodebookManager({ onViewCodebook }) {
     const charCount =
       metaChars != null
         ? metaChars
-        : cb.content?.length ?? cb.codebook?.length ?? cb.text?.length ?? null;
+        : (cb.content?.length ??
+          cb.codebook?.length ??
+          cb.text?.length ??
+          null);
 
     const date =
       meta.date_created && meta.date_created > 0
@@ -180,7 +183,7 @@ export default function CodebookManager({ onViewCodebook }) {
     const charCount =
       metaChars != null
         ? metaChars
-        : cb.content?.length ?? cb.codebook?.length ?? cb.text?.length ?? 0;
+        : (cb.content?.length ?? cb.codebook?.length ?? cb.text?.length ?? 0);
     return `${charCount.toLocaleString()} characters`;
   };
 
@@ -235,7 +238,7 @@ export default function CodebookManager({ onViewCodebook }) {
                           width: "100%",
                           marginTop: "8px",
                           padding: "8px",
-                          backgroundColor: "#000",
+                          backgroundColor: "#000000",
                           color: "#fff",
                           border: "1px solid #fff",
                           borderRadius: "4px",
@@ -317,7 +320,7 @@ export default function CodebookManager({ onViewCodebook }) {
                           onClick={() => {
                             if (
                               confirm(
-                                `Are you sure you want to delete "${cb.name}"?`
+                                `Are you sure you want to delete "${cb.name}"?`,
                               )
                             ) {
                               handleDeleteCodebook(cb.id);

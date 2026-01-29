@@ -128,7 +128,7 @@ export default function Project() {
         {/* Project Header */}
         <div
           style={{
-            backgroundColor: "#111",
+            backgroundColor: "#000000",
             border: "2px solid #ffffff",
             borderRadius: "12px",
             padding: "24px",
@@ -261,7 +261,7 @@ export default function Project() {
         {/* Tab Navigation */}
         <div
           style={{
-            backgroundColor: "#000",
+            backgroundColor: "#000000",
             border: "2px solid #ffffff",
             borderRadius: "12px",
             padding: "20px",
@@ -360,7 +360,7 @@ export default function Project() {
           {activeTab === "database" && (
             <div
               style={{
-                backgroundColor: "#111",
+                backgroundColor: "#000000",
                 border: "2px solid #ffffff",
                 borderRadius: "12px",
                 padding: "24px",
@@ -414,7 +414,7 @@ export default function Project() {
                     <div
                       key={f.id}
                       style={{
-                        backgroundColor: "#000",
+                        backgroundColor: "#000000",
                         border: "1px solid #333",
                         borderRadius: "8px",
                         padding: "16px",
@@ -506,7 +506,7 @@ export default function Project() {
           {activeTab === "filtered" && (
             <div
               style={{
-                backgroundColor: "#111",
+                backgroundColor: "#000000",
                 border: "2px solid #ffffff",
                 borderRadius: "12px",
                 padding: "24px",
@@ -560,7 +560,7 @@ export default function Project() {
                     <div
                       key={f.id}
                       style={{
-                        backgroundColor: "#000",
+                        backgroundColor: "#000000",
                         border: "1px solid #333",
                         borderRadius: "8px",
                         padding: "16px",
@@ -652,7 +652,7 @@ export default function Project() {
           {activeTab === "codebook" && (
             <div
               style={{
-                backgroundColor: "#111",
+                backgroundColor: "#000000",
                 border: "2px solid #ffffff",
                 borderRadius: "12px",
                 padding: "24px",
@@ -708,7 +708,7 @@ export default function Project() {
                     <div
                       key={f.id}
                       style={{
-                        backgroundColor: "#000",
+                        backgroundColor: "#000000",
                         border: "1px solid #333",
                         borderRadius: "8px",
                         padding: "16px",
@@ -803,7 +803,7 @@ export default function Project() {
           {activeTab === "coding" && (
             <div
               style={{
-                backgroundColor: "#111",
+                backgroundColor: "#000000",
                 border: "2px solid #ffffff",
                 borderRadius: "12px",
                 padding: "24px",
@@ -859,7 +859,7 @@ export default function Project() {
                     <div
                       key={f.id}
                       style={{
-                        backgroundColor: "#000",
+                        backgroundColor: "#000000",
                         border: "1px solid #333",
                         borderRadius: "8px",
                         padding: "16px",

@@ -67,7 +67,7 @@ export default function ManageDatabase({
                         style={{
                           width: "100%",
                           padding: "8px",
-                          backgroundColor: "#000",
+                          backgroundColor: "#000000",
                           color: "#fff",
                           border: "1px solid #fff",
                           borderRadius: "4px",
@@ -110,11 +110,11 @@ export default function ManageDatabase({
                             (() => {
                               const submissions =
                                 metadata.tables.find(
-                                  (t) => t.table_name === "submissions"
+                                  (t) => t.table_name === "submissions",
                                 )?.row_count || 0;
                               const comments =
                                 metadata.tables.find(
-                                  (t) => t.table_name === "comments"
+                                  (t) => t.table_name === "comments",
                                 )?.row_count || 0;
                               return (
                                 <div className="metadata-row">
@@ -144,7 +144,7 @@ export default function ManageDatabase({
                                       {(() => {
                                         try {
                                           return new Date(
-                                            metadata.date_created * 1000
+                                            metadata.date_created * 1000,
                                           ).toLocaleString();
                                         } catch (e) {
                                           return "Unknown";
@@ -162,7 +162,7 @@ export default function ManageDatabase({
                                 {(() => {
                                   try {
                                     return new Date(
-                                      metadata.created_at
+                                      metadata.created_at,
                                     ).toLocaleString();
                                   } catch (e) {
                                     return "Unknown";
