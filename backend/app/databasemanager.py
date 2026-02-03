@@ -56,7 +56,7 @@ class ProjectRepository(BaseRepository):
     def get_all_for_user(self, user_id: str):
         return self.session.query(Project).filter_by(user_id=user_id).all()
 
-    def get_schema_name(self, project_id: int) -> Optional[str]:
+    def get_schema_name(self, project_id: str) -> Optional[str]:
         proj = self.session.get(Project, project_id)
         # `schema_name` column may be removed from `projects`; return None
         # Keep method for compatibility but avoid attribute access errors.
@@ -65,7 +65,7 @@ class ProjectRepository(BaseRepository):
         except Exception:
             return None
 
-    def rename_project(self, project_id: int, new_name: str) -> bool:
+    def rename_project(self, project_id: str, new_name: str) -> bool:
         proj = self.session.get(Project, project_id)
         if proj:
             proj.projectname = new_name

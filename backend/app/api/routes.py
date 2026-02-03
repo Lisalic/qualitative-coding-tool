@@ -101,7 +101,7 @@ async def upload_zst_file(
     data_type: str = Form(...),
     name: str = Form(None),
     description: str = Form(None),
-    project_id: int = Form(None),
+    project_id: str = Form(None),
 ):
 
     if not file.filename.endswith('.zst'):
@@ -164,7 +164,7 @@ async def upload_zst_file(
             # If a project_id was provided, ensure ownership and link the file to the project
             if project_id is not None:
                 try:
-                    proj = dm.session.query(Project).filter(Project.id == int(project_id)).first()
+                    proj = dm.session.query(Project).filter(Project.id == uuid.UUID(project_id)).first()
                     if proj is None:
                         raise HTTPException(status_code=404, detail="Project not found")
                     # ensure the project belongs to the authenticated user
@@ -493,7 +493,7 @@ async def merge_databases(request: Request):
             if project_id is not None:
                 try:
                     # project_id may be a string when coming from form-data
-                    pid = int(project_id)
+                    pid = uuid.UUID(project_id)
                     proj = dm.session.query(Project).filter(Project.id == pid).first()
                     if proj is None:
                         raise HTTPException(status_code=404, detail="Project not found")
@@ -560,7 +560,7 @@ async def save_comparison(
             # If project_id provided, verify ownership and link
             if project_id is not None:
                 try:
-                    proj = dm.session.query(Project).filter(Project.id == int(project_id)).first()
+                    proj = dm.session.query(Project).filter(Project.id == uuid.UUID(project_id)).first()
                     if proj is None:
                         raise HTTPException(status_code=404, detail="Project not found")
                     try:
@@ -775,7 +775,7 @@ def update_project(request: Request, project_id: int = Form(...), name: str = Fo
         raise HTTPException(status_code=401, detail="Invalid user id in token")
 
     # load project
-    proj = db.query(Project).filter(Project.id == int(project_id)).first()
+    proj = db.query(Project).filter(Project.id == uuid.UUID(project_id)).first()
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
     if proj.user_id != uid:
@@ -1906,7 +1906,7 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
                 # If a project_id was provided, ensure ownership and link the file to the project
                 if project_id is not None:
                     try:
-                        proj = dm.session.query(Project).filter(Project.id == int(project_id)).first()
+                        proj = dm.session.query(Project).filter(Project.id == uuid.UUID(project_id)).first()
                         if proj is None:
                             raise HTTPException(status_code=404, detail="Project not found")
                         # ensure the project belongs to the authenticated user

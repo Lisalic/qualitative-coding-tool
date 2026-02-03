@@ -55,7 +55,7 @@ def get_db():
 project_files_table = Table(
     "project_files",
     Base.metadata,
-    Column("project_id", Integer, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True),
+    Column("project_id", UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True),
     Column("file_id", Integer, ForeignKey("files.id", ondelete="CASCADE"), primary_key=True),
 )
 
@@ -76,7 +76,7 @@ class User(Base):
 class Project(Base):
     __tablename__ = "projects"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     projectname = Column(String, nullable=False)
     description = Column(String)
