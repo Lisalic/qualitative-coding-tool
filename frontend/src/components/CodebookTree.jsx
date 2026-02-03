@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { apiFetch } from "../api";
+import ReactMarkdown from "react-markdown";
 import "../styles/CodebookTree.css";
 
 export default function CodebookTree({
@@ -85,7 +86,11 @@ export default function CodebookTree({
                         {code.code_name || `Code ${ci + 1}`}
                       </div>
                       <div className="cb-code-def">
-                        {code.definition || "(no definition)"}
+                        {code.content ? (
+                          <ReactMarkdown>{code.content}</ReactMarkdown>
+                        ) : (
+                          "(no content)"
+                        )}
                       </div>
                     </li>
                   ))}
