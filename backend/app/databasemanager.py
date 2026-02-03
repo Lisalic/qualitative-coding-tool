@@ -53,7 +53,7 @@ class UserRepository(BaseRepository):
 
 
 class ProjectRepository(BaseRepository):
-    def get_all_for_user(self, user_id: int):
+    def get_all_for_user(self, user_id: str):
         return self.session.query(Project).filter_by(user_id=user_id).all()
 
     def get_schema_name(self, project_id: int) -> Optional[str]:
@@ -73,7 +73,7 @@ class ProjectRepository(BaseRepository):
             return True
         return False
 
-    def create(self, user_id: int, projectname: str, description: str = None) -> Project:
+    def create(self, user_id: str, projectname: str, description: str = None) -> Project:
         # Create a Project record without `project_type` or `schema_name` fields.
         proj = Project(user_id=user_id, projectname=projectname, description=description)
         self.session.add(proj)

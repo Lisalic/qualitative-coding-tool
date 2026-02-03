@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, UUID4
 from datetime import datetime
 from typing import Optional, List
 
@@ -65,12 +65,12 @@ class Code(CodeBase):
 
 
     class PromptCreate(PromptBase):
-        user_id: Optional[int] = None
+        user_id: Optional[UUID4] = None
 
 
     class Prompt(PromptBase):
         id: int
-        user_id: Optional[int]
+        user_id: Optional[UUID4]
 
         class Config:
             from_attributes = True

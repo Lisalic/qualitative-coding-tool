@@ -14,7 +14,7 @@ except Exception as exc:
         raise exc
 
 
-def migrate_sqlite_file(user_id: int, file_path: str, display_name: str, project_type: str = "raw_data"):
+def migrate_sqlite_file(user_id: str, file_path: str, display_name: str, project_type: str = "raw_data"):
     unique_id = secrets.token_hex(6)
     schema_name = f"proj_{unique_id}"
 

@@ -5,6 +5,7 @@ import tempfile
 import traceback
 import asyncio
 import inspect
+import uuid
 from pathlib import Path
 from fastapi import APIRouter, File as FastAPIFile, HTTPException, UploadFile, Form, Query, Depends, Request
 from pydantic import BaseModel
@@ -153,7 +154,7 @@ async def upload_zst_file(
     try:
         with DatabaseManager() as dm:
             # Create a File record instead of a Project; files back a Postgres schema
-            file_rec = File(user_id=int(user_id), filename=base_name, schemaname=schema_name, file_type="raw_data", description=(description or None))
+            file_rec = File(user_id=uuid.UUID(user_id), filename=base_name, schemaname=schema_name, file_type="raw_data", description=(description or None))
             dm.session.add(file_rec)
             try:
                 dm.session.flush()
@@ -168,7 +169,7 @@ async def upload_zst_file(
                         raise HTTPException(status_code=404, detail="Project not found")
                     # ensure the project belongs to the authenticated user
                     try:
-                        uid = int(user_id)
+                        uid = uuid.UUID(user_id)
                     except Exception:
                         uid = None
                     if proj.user_id != uid:
@@ -321,7 +322,7 @@ async def merge_databases(request: Request):
     db_check = SessionLocal()
     try:
         existing = db_check.query(File).filter(
-            File.user_id == int(user_id),
+            File.user_id == uuid.UUID(user_id),
         ).filter(
             (File.filename == name) | (File.schemaname == name)
         ).first()
@@ -479,7 +480,7 @@ async def merge_databases(request: Request):
 
         # Create file record and file_tables metadata using the final counts
         with DatabaseManager() as dm:
-            file_rec = File(user_id=int(user_id), filename=name, schemaname=schema_name, file_type='raw_data', description=(description or None))
+            file_rec = File(user_id=uuid.UUID(user_id), filename=name, schemaname=schema_name, file_type='raw_data', description=(description or None))
             dm.session.add(file_rec)
             try:
                 dm.session.flush()
@@ -497,7 +498,7 @@ async def merge_databases(request: Request):
                     if proj is None:
                         raise HTTPException(status_code=404, detail="Project not found")
                     try:
-                        uid = int(user_id)
+                        uid = uuid.UUID(user_id)
                     except Exception:
                         uid = None
                     if proj.user_id != uid:
@@ -548,7 +549,7 @@ async def save_comparison(
     try:
         with DatabaseManager() as dm:
             # create File record representing this saved comparison (backed by a schema)
-            file_rec = File(user_id=int(user_id), filename=base_name, schemaname=schema_name, file_type=(file_type or "comparison"), description=(description or None))
+            file_rec = File(user_id=uuid.UUID(user_id), filename=base_name, schemaname=schema_name, file_type=(file_type or "comparison"), description=(description or None))
             dm.session.add(file_rec)
             try:
                 dm.session.flush()
@@ -563,7 +564,7 @@ async def save_comparison(
                     if proj is None:
                         raise HTTPException(status_code=404, detail="Project not found")
                     try:
-                        uid = int(user_id)
+                        uid = uuid.UUID(user_id)
                     except Exception:
                         uid = None
                     if proj.user_id != uid:
@@ -678,7 +679,7 @@ def me(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     try:
-        uid = int(user_id)
+        uid = uuid.UUID(user_id)
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid user id in token")
 
@@ -699,11 +700,11 @@ def my_projects(request: Request, file_type: str = Query("raw_data"), db: Sessio
     # Use File table instead of Project; `file_type` query param maps to `file_type` on File
     # Allow callers requesting 'codebook' or 'coding' to also receive saved comparison files
     if file_type == 'codebook':
-        files = db.query(File).filter(File.user_id == int(user_id), File.file_type.in_(['codebook', 'codebook_comparison'])).all()
+        files = db.query(File).filter(File.user_id == uuid.UUID(user_id), File.file_type.in_(['codebook', 'codebook_comparison'])).all()
     elif file_type == 'coding':
-        files = db.query(File).filter(File.user_id == int(user_id), File.file_type.in_(['coding', 'coding_comparison'])).all()
+        files = db.query(File).filter(File.user_id == uuid.UUID(user_id), File.file_type.in_(['coding', 'coding_comparison'])).all()
     else:
-        files = db.query(File).filter(File.user_id == int(user_id), File.file_type == file_type).all()
+        files = db.query(File).filter(File.user_id == uuid.UUID(user_id), File.file_type == file_type).all()
     result = []
     for p in files:
         tables = []
@@ -741,7 +742,7 @@ def create_project(request: Request, name: str = Form(...), description: str = F
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     try:
-        uid = int(user_id)
+        uid = uuid.UUID(user_id)
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid user id in token")
 
@@ -769,7 +770,7 @@ def update_project(request: Request, project_id: int = Form(...), name: str = Fo
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     try:
-        uid = int(user_id)
+        uid = uuid.UUID(user_id)
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid user id in token")
 
@@ -804,7 +805,7 @@ def list_projects(request: Request):
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     try:
-        uid = int(user_id)
+        uid = uuid.UUID(user_id)
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid user id in token")
 
@@ -847,13 +848,13 @@ def list_prompts(request: Request, prompt_type: str = Query(None), db: Session =
 
     try:
         try:
-            uid = int(user_id)
+            uid = uuid.UUID(user_id)
         except Exception:
             uid = None
         q = db.query(Prompt).filter(Prompt.user_id == uid)
     except Exception:
         try:
-            uid = int(user_id)
+            uid = uuid.UUID(user_id)
         except Exception:
             uid = None
         q = db.query(Prompt).filter(Prompt.user_id == uid)
@@ -866,7 +867,7 @@ def list_prompts(request: Request, prompt_type: str = Query(None), db: Session =
     for r in rows:
         result.append({
             "id": int(r.id),
-            "user_id": int(r.user_id) if r.user_id is not None else None,
+            "user_id": str(r.user_id) if r.user_id is not None else None,
             "promptname": r.promptname,
             "prompt": r.prompt,
             "type": r.type,
@@ -947,7 +948,7 @@ async def create_prompt(request: Request, db: Session = Depends(get_db)):
             raise HTTPException(status_code=500, detail="Failed to resolve user identity")
 
     try:
-        uid = int(user_id)
+        uid = uuid.UUID(user_id)
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid user id in token")
 
@@ -960,7 +961,7 @@ async def create_prompt(request: Request, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=500, detail=str(exc))
 
-    return JSONResponse({"id": int(new.id), "user_id": int(new.user_id), "promptname": new.promptname, "prompt": new.prompt, "type": new.type})
+    return JSONResponse({"id": int(new.id), "user_id": str(new.user_id), "promptname": new.promptname, "prompt": new.prompt, "type": new.type})
 
 
 @router.post("/prompts/{prompt_id}/update")
@@ -980,7 +981,7 @@ def update_prompt(prompt_id: int, request: Request, display_name: str = Form(Non
     except Exception:
         owner_id = p.user_id
     try:
-        uid = int(user_id)
+        uid = uuid.UUID(user_id)
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid user id in token")
 
@@ -1003,7 +1004,7 @@ def update_prompt(prompt_id: int, request: Request, display_name: str = Form(Non
         db.rollback()
         raise HTTPException(status_code=500, detail=str(exc))
 
-    return JSONResponse({"id": int(p.id), "user_id": int(p.user_id), "promptname": p.promptname, "prompt": p.prompt, "type": p.type})
+    return JSONResponse({"id": int(p.id), "user_id": str(p.user_id), "promptname": p.promptname, "prompt": p.prompt, "type": p.type})
 
 
 @router.delete("/prompts/{prompt_id}")
@@ -1016,13 +1017,13 @@ def delete_prompt(prompt_id: int, request: Request, db: Session = Depends(get_db
     p = db.query(Prompt).filter(Prompt.id == prompt_id).first()
     if not p:
         raise HTTPException(status_code=404, detail="Prompt not found")
-    # ensure ownership: Prompt.user_id should be integer referencing User.id
+    # ensure ownership: Prompt.user_id should be UUID referencing User.id
     try:
-        owner_id = int(p.user_id) if p.user_id is not None else None
+        owner_id = str(p.user_id) if p.user_id is not None else None
     except Exception:
         owner_id = p.user_id
     try:
-        uid = int(user_id)
+        uid = uuid.UUID(user_id)
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid user id in token")
 
@@ -1052,7 +1053,7 @@ async def delete_database(db_name: str, request: Request, db: Session = Depends(
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    file_rec = db.query(File).filter(File.schemaname == schema, File.user_id == int(user_id)).first()
+    file_rec = db.query(File).filter(File.schemaname == schema, File.user_id == uuid.UUID(user_id)).first()
     if not file_rec:
         raise HTTPException(status_code=404, detail="File not found or you do not have permission")
 
@@ -1069,12 +1070,12 @@ async def delete_database(db_name: str, request: Request, db: Session = Depends(
 
 
 @router.post("/delete-row/")
-async def delete_row(request: Request, schema: str = Form(...), table: str = Form(...), row_id: str = Form(...), db: Session = Depends(get_db)):
+async def delete_row(request: Request, schemaname: str = Form(...), table: str = Form(...), row_id: str = Form(...), db: Session = Depends(get_db)):
     """Delete a single row (by id) from a file's table (submissions or comments).
 
     Requires authentication and file ownership.
     """
-    schema = (schema or "").strip()
+    schema = (schemaname or "").strip()
     if schema.endswith('.db'):
         schema = schema[:-3]
 
@@ -1089,7 +1090,7 @@ async def delete_row(request: Request, schema: str = Form(...), table: str = For
         return JSONResponse({"error": "Not authenticated"}, status_code=401)
 
     try:
-        file_rec = db.query(File).filter(File.schemaname == schema, File.user_id == int(user_id)).first()
+        file_rec = db.query(File).filter(File.schemaname == schema, File.user_id == uuid.UUID(user_id)).first()
         if not file_rec:
             return JSONResponse({"error": "File not found or not owned by user"}, status_code=403)
 
@@ -1140,7 +1141,7 @@ def rename_project(request: Request, schema_name: str = Form(...), display_name:
     # normalize schema name
     schema = schema_name.strip()
 
-    file_rec = db.query(File).filter(File.schemaname == schema, File.user_id == int(user_id)).first()
+    file_rec = db.query(File).filter(File.schemaname == schema, File.user_id == uuid.UUID(user_id)).first()
     if not file_rec:
         raise HTTPException(status_code=404, detail="File not found or you do not have permission")
 
@@ -1190,8 +1191,8 @@ async def move_rows(request: Request, db: Session = Depends(get_db)):
         return JSONResponse({"error": "Not authenticated"}, status_code=401)
 
     try:
-        file_src = db.query(File).filter(File.schemaname == source, File.user_id == int(user_id)).first()
-        file_tgt = db.query(File).filter(File.schemaname == target, File.user_id == int(user_id)).first()
+        file_src = db.query(File).filter(File.schemaname == source, File.user_id == uuid.UUID(user_id)).first()
+        file_tgt = db.query(File).filter(File.schemaname == target, File.user_id == uuid.UUID(user_id)).first()
         if not file_src or not file_tgt:
             return JSONResponse({"error": "Source or target file not found or not owned by user"}, status_code=403)
 
@@ -1371,7 +1372,7 @@ async def save_project_codebook(request: Request, schema_name: str = Form(...), 
 
     schema = schema_name.strip()
 
-    file_rec = db.query(File).filter(File.schemaname == schema, File.user_id == int(user_id)).first()
+    file_rec = db.query(File).filter(File.schemaname == schema, File.user_id == uuid.UUID(user_id)).first()
     if not file_rec:
         raise HTTPException(status_code=404, detail="File/project not found or you do not have permission")
 
@@ -1492,7 +1493,7 @@ async def save_project_coded_data(request: Request, schema_name: str = Form(None
         raise HTTPException(status_code=400, detail="schema_name and content are required")
 
     schema = schema_name.strip()
-    file_rec = db.query(File).filter(File.schemaname == schema, File.user_id == int(user_id), File.file_type == 'coding').first()
+    file_rec = db.query(File).filter(File.schemaname == schema, File.user_id == uuid.UUID(user_id), File.file_type == 'coding').first()
     if not file_rec:
         raise HTTPException(status_code=404, detail="File/project not found or you do not have permission")
 
@@ -1786,7 +1787,7 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
                 try:
                     print(f"[filter-data] Creating file metadata for schema {new_schema} (user={user_id})")
                     with DatabaseManager() as dm:
-                        file_rec = File(user_id=int(user_id), filename=name or new_schema, schemaname=new_schema, file_type='filtered_data')
+                        file_rec = File(user_id=uuid.UUID(user_id), filename=name or new_schema, schemaname=new_schema, file_type='filtered_data')
                         dm.session.add(file_rec)
                         dm.session.flush()
                         try:
@@ -1897,7 +1898,7 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
 
             # create file record and file_tables metadata
             with DatabaseManager() as dm:
-                file_rec = File(user_id=int(user_id), filename=name, schemaname=new_schema, file_type='codebook', description=final_description)
+                file_rec = File(user_id=uuid.UUID(user_id), filename=name, schemaname=new_schema, file_type='codebook', description=final_description)
                 dm.session.add(file_rec)
                 dm.session.flush()
                 dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name='content_store', row_count=1)
@@ -1910,7 +1911,7 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
                             raise HTTPException(status_code=404, detail="Project not found")
                         # ensure the project belongs to the authenticated user
                         try:
-                            uid = int(user_id)
+                            uid = uuid.UUID(user_id)
                         except Exception:
                             uid = None
                         if proj.user_id != uid:
@@ -2148,7 +2149,7 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
 
                     # create file row and table metadata
                     with DatabaseManager() as dm:
-                        file_rec = File(user_id=int(user_id), filename=display_name, schemaname=new_schema, file_type='coding')
+                        file_rec = File(user_id=uuid.UUID(user_id), filename=display_name, schemaname=new_schema, file_type='coding')
                         dm.session.add(file_rec)
                         dm.session.flush()
                         dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name='content_store', row_count=1)
