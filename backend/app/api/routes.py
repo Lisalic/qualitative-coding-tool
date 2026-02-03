@@ -635,7 +635,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    if not _verify_password(user.hashed_password, payload.password):
+    if not _verify_password(user.hash, payload.password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     token = create_access_token({"sub": str(user.id), "email": user.email})
@@ -655,7 +655,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
     hashed = _hash_password(payload.password)
 
     # let DB assign integer primary key
-    user = User(email=payload.email, hashed_password=hashed)
+    user = User(email=payload.email, hash=hashed)
     db.add(user)
     try:
         db.commit()
