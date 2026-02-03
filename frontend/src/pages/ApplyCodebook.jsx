@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import ActionForm from "../components/ActionForm";
-import CodebookManager from "../components/CodebookManager";
 import PromptManager from "../components/PromptManager";
 import "../styles/Home.css";
 import { apiFetch } from "../api";
@@ -23,7 +22,6 @@ export default function ApplyCodebook() {
   const [filteredDatabases, setFilteredDatabases] = useState([]);
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
-  const [rightView, setRightView] = useState("codebooks");
   const [saveMessage, setSaveMessage] = useState("");
   const [saveMessageType, setSaveMessageType] = useState("success");
 
@@ -290,9 +288,6 @@ export default function ApplyCodebook() {
               setSaveMessage(`Saved: ${label}`);
               setSaveMessageType("success");
               try {
-                setRightView("prompts");
-              } catch (e) {}
-              try {
                 window.dispatchEvent(new Event("promptSaved"));
               } catch (e) {}
               setTimeout(() => setSaveMessage(""), 3000);
@@ -376,38 +371,11 @@ export default function ApplyCodebook() {
             </div>
           </div>
           <div className="manager-section">
-            <div className="prompt-manager-controls">
-              <div className="left-group">
-                <button
-                  className={rightView === "prompts" ? "active" : ""}
-                  onClick={() => setRightView("prompts")}
-                >
-                  Saved Prompts
-                </button>
-              </div>
-              <div className="right-group">
-                <button
-                  className={rightView === "codebooks" ? "active" : ""}
-                  onClick={() => setRightView("codebooks")}
-                >
-                  Manage Codebooks
-                </button>
-              </div>
-            </div>
-
-            {rightView === "prompts" ? (
-              <PromptManager
-                onLoadPrompt={(p) => setMethodology(p)}
-                currentPrompt={methodology}
-                promptType="apply"
-              />
-            ) : (
-              <CodebookManager
-                onViewCodebook={(codebookId) =>
-                  navigate(`/codebook-view?selected=${codebookId}`)
-                }
-              />
-            )}
+            <PromptManager
+              onLoadPrompt={(p) => setMethodology(p)}
+              currentPrompt={methodology}
+              promptType="apply"
+            />
           </div>
         </div>
       </div>

@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { apiFetch } from "../api";
 import { useNavigate } from "react-router-dom";
 import ActionForm from "../components/ActionForm";
-import CodebookManager from "../components/CodebookManager";
 import PromptManager from "../components/PromptManager";
 import "../styles/Home.css";
 import "../styles/Data.css";
@@ -24,7 +23,6 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
   const [description, setDescription] = useState("");
   const [saveMessage, setSaveMessage] = useState("");
   const [saveMessageType, setSaveMessageType] = useState("success");
-  const [rightView, setRightView] = useState("codebooks"); // 'codebooks' or 'prompts'
 
   useEffect(() => {
     fetchDatabases();
@@ -267,9 +265,6 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
               setSaveMessage(`Saved: ${label}`);
               setSaveMessageType("success");
               try {
-                setRightView("prompts");
-              } catch (e) {}
-              try {
                 window.dispatchEvent(new Event("promptSaved"));
               } catch (e) {}
               setTimeout(() => setSaveMessage(""), 3000);
@@ -360,38 +355,11 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
             </div>
           </div>
           <div className="manager-section">
-            <div className="prompt-manager-controls">
-              <div className="left-group">
-                <button
-                  className={rightView === "prompts" ? "active" : ""}
-                  onClick={() => setRightView("prompts")}
-                >
-                  Saved Prompts
-                </button>
-              </div>
-              <div className="right-group">
-                <button
-                  className={rightView === "codebooks" ? "active" : ""}
-                  onClick={() => setRightView("codebooks")}
-                >
-                  Manage Codebooks
-                </button>
-              </div>
-            </div>
-
-            {rightView === "prompts" ? (
-              <PromptManager
-                onLoadPrompt={(p) => setPrompt(p)}
-                currentPrompt={prompt}
-                promptType="generate"
-              />
-            ) : (
-              <CodebookManager
-                onViewCodebook={(codebookId) =>
-                  navigate(`/codebook-view?selected=${codebookId}`)
-                }
-              />
-            )}
+            <PromptManager
+              onLoadPrompt={(p) => setPrompt(p)}
+              currentPrompt={prompt}
+              promptType="generate"
+            />
           </div>
         </div>
       </div>

@@ -1,7 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import ActionForm from "../components/ActionForm";
 import PromptManager from "../components/PromptManager";
-import ManageDatabase from "../components/ManageDatabase";
 import { useState, useEffect } from "react";
 import { apiFetch } from "../api";
 import "../styles/Home.css";
@@ -15,14 +14,10 @@ export default function Filter() {
   const [loading, setLoading] = useState(false);
   const [database, setDatabase] = useState("");
   const [databases, setDatabases] = useState([]); // raw data projects for selection
-  const [filteredDatabases, setFilteredDatabases] = useState([]); // filtered projects for ManageDatabase
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [rightView, setRightView] = useState("prompts"); // 'prompts' or 'database'
-  const [renamingDb, setRenamingDb] = useState(null);
-  const [newName, setNewName] = useState("");
 
   const EXAMPLE_PROMPT = `Act as a qualitative research assistant tasked with cleaning raw data transcripts for analysis. For each input item, decide whether it should be kept or removed. Apply these rules: remove spam/automated posts, remove obvious duplicates, and remove non-topical noise. Keep authentic human discussion and on-topic content.`;
 
@@ -71,97 +66,10 @@ export default function Filter() {
         meta: p,
       }));
 
-      // Fetch filtered_data projects for ManageDatabase view
-      const respFiltered = await apiFetch(
-        "/api/my-files/?file_type=filtered_data",
-      );
-      if (!respFiltered.ok)
-        throw new Error("Failed to fetch filtered projects");
-      const filtData = await respFiltered.json();
-      const filtOptions = (filtData.projects || []).map((p) => ({
-        value: p.schema_name,
-        label: p.display_name || p.schema_name,
-        meta: p,
-      }));
-
       setDatabases(rawOptions);
-      setFilteredDatabases(filtOptions);
       if (!database && rawOptions.length > 0) setDatabase(rawOptions[0].value);
     } catch (err) {
       console.error("Error fetching databases:", err);
-    }
-  };
-
-  const startRename = (dbName) => {
-    setRenamingDb(dbName);
-    const proj = filteredDatabases.find((d) => d.value === dbName);
-    if (proj && proj.label) setNewName(proj.label);
-    else setNewName(dbName.replace(".db", ""));
-  };
-
-  const cancelRename = () => {
-    setRenamingDb(null);
-    setNewName("");
-  };
-
-  const handleRenameDatabase = async (oldName) => {
-    if (!newName.trim()) {
-      setMessage("New name cannot be empty");
-      return;
-    }
-
-    try {
-      const formData = new FormData();
-      formData.append("schema_name", oldName);
-      formData.append("display_name", newName.trim());
-
-      const response = await apiFetch("/api/rename-file/", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!response.ok) {
-        let errMsg = "Failed to rename project";
-        try {
-          const errData = await response.json();
-          errMsg = errData.detail || errMsg;
-        } catch (e) {}
-        throw new Error(errMsg);
-      }
-
-      setRenamingDb(null);
-      setNewName("");
-      // refresh lists
-      await fetchDatabases();
-    } catch (err) {
-      console.error("Rename error:", err);
-      setMessage(`Error renaming database: ${err.message}`);
-    }
-  };
-
-  const handleDeleteDatabase = async (dbName) => {
-    if (!confirm(`Are you sure you want to delete the database "${dbName}"?`))
-      return;
-
-    try {
-      const response = await apiFetch(`/api/delete-database/${dbName}`, {
-        method: "DELETE",
-      });
-
-      if (!response.ok) {
-        let errMsg = "Failed to delete database";
-        try {
-          const data = await response.json();
-          errMsg = data.detail || errMsg;
-        } catch (e) {}
-        throw new Error(errMsg);
-      }
-
-      setMessage(`Deleted ${dbName}`);
-      await fetchDatabases();
-    } catch (err) {
-      console.error("Delete error:", err);
-      setMessage(`Error deleting database: ${err.message}`);
     }
   };
 
@@ -305,9 +213,6 @@ export default function Filter() {
               setSaveMessageType("success");
               // ensure the right-hand manager switches to prompts and reloads
               try {
-                setRightView("prompts");
-              } catch (e) {}
-              try {
                 window.dispatchEvent(new Event("promptSaved"));
               } catch (e) {}
               setTimeout(() => setSaveMessage(""), 3000);
@@ -431,61 +336,11 @@ export default function Filter() {
             </div>
           </div>
           <div className="prompt-manager-section">
-            <div className="prompt-manager-controls">
-              <div className="left-group">
-                <button
-                  className={rightView === "prompts" ? "active" : ""}
-                  onClick={() => setRightView("prompts")}
-                >
-                  Saved Prompts
-                </button>
-              </div>
-              <div className="right-group">
-                <button
-                  className={rightView === "database" ? "active" : ""}
-                  onClick={() => setRightView("database")}
-                >
-                  Manage Database
-                </button>
-              </div>
-            </div>
-
-            {rightView === "prompts" ? (
-              <PromptManager
-                onLoadPrompt={handleLoadPrompt}
-                currentPrompt={filterPrompt}
-                promptType="filter"
-              />
-            ) : (
-              <ManageDatabase
-                databases={filteredDatabases.map((d) => ({
-                  name: d.value,
-                  display_name: d.label,
-                  metadata: d.meta,
-                }))}
-                selectedDatabases={[]}
-                onSelect={() => {}}
-                onMergeDatabases={() => {}}
-                mergeName={""}
-                onMergeNameChange={() => {}}
-                loading={false}
-                successMessage={null}
-                errorMessage={message}
-                renamingDb={renamingDb}
-                newName={newName}
-                onNewNameChange={(v) => setNewName(v)}
-                onRename={(oldName) => handleRenameDatabase(oldName)}
-                onStartRename={(dbName) => startRename(dbName)}
-                onCancelRename={() => cancelRename()}
-                onDelete={(dbName) => handleDeleteDatabase(dbName)}
-                onView={(dbName) => {
-                  setDatabase(dbName);
-                  navigate("/filtered-data", {
-                    state: { selectedDatabase: dbName },
-                  });
-                }}
-              />
-            )}
+            <PromptManager
+              onLoadPrompt={handleLoadPrompt}
+              currentPrompt={filterPrompt}
+              promptType="filter"
+            />
           </div>
         </div>
       </div>
