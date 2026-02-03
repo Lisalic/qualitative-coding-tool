@@ -17,6 +17,13 @@ export default function Project() {
   const [newFileName, setNewFileName] = useState("");
   const [newFileDescription, setNewFileDescription] = useState("");
 
+  // Database merge state
+  const [selectedDatabases, setSelectedDatabases] = useState([]);
+  const [mergeName, setMergeName] = useState("");
+  const [mergeLoading, setMergeLoading] = useState(false);
+  const [mergeError, setMergeError] = useState("");
+  const [mergeSuccess, setMergeSuccess] = useState("");
+
   useEffect(() => {
     let mounted = true;
     setLoading(true);
@@ -36,6 +43,12 @@ export default function Project() {
       });
     return () => (mounted = false);
   }, [projectId]);
+
+  // Clear selected databases when switching tabs
+  useEffect(() => {
+    setSelectedDatabases([]);
+    setMergeName("");
+  }, [activeTab]);
 
   if (loading) return <div style={{ padding: 20 }}>Loading project...</div>;
   if (!project) return <div style={{ padding: 20 }}>Project not found</div>;
@@ -175,6 +188,68 @@ export default function Project() {
     } catch (err) {
       console.error("Delete error:", err);
       alert("Failed to delete file. Please try again.");
+    }
+  };
+
+  // Database merge functions
+  const handleSelectDatabase = (dbName) => {
+    setSelectedDatabases((prev) =>
+      prev.includes(dbName)
+        ? prev.filter((db) => db !== dbName)
+        : [...prev, dbName],
+    );
+  };
+
+  const handleMergeDatabases = async () => {
+    if (selectedDatabases.length < 2) {
+      setMergeError("Please select at least 2 databases to merge");
+      return;
+    }
+
+    if (!mergeName.trim()) {
+      setMergeError("Please enter a name for the merged database");
+      return;
+    }
+
+    setMergeLoading(true);
+    setMergeSuccess("");
+    setMergeError("");
+
+    try {
+      const formData = new FormData();
+      formData.append("databases", JSON.stringify(selectedDatabases));
+      formData.append("name", mergeName.trim());
+      formData.append("project_id", String(project.id));
+
+      const response = await apiFetch("/api/merge-databases/", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        let errorMsg = "Failed to merge databases";
+        try {
+          const errorData = await response.json();
+          errorMsg = errorData.detail || errorMsg;
+        } catch (e) {
+          // If we can't parse JSON, use the generic message
+        }
+        throw new Error(errorMsg);
+      }
+
+      const data = await response.json();
+      console.log("Databases merged:", data);
+      setMergeSuccess("Databases merged successfully!");
+      setSelectedDatabases([]);
+      setMergeName("");
+
+      // Refresh the page to show the new merged database
+      window.location.reload();
+    } catch (err) {
+      console.error("Merge error:", err);
+      setMergeError(err.message || "Failed to merge databases");
+    } finally {
+      setMergeLoading(false);
     }
   };
 
@@ -447,6 +522,7 @@ export default function Project() {
                   Add Database
                 </button>
               </div>
+
               {dbFiles.length === 0 ? (
                 <div
                   style={{
@@ -475,8 +551,7 @@ export default function Project() {
                         borderRadius: "8px",
                         padding: "16px",
                         display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
+                        alignItems: "flex-start",
                         transition: "border-color 0.2s",
                       }}
                       onMouseEnter={(e) => {
@@ -486,6 +561,17 @@ export default function Project() {
                         e.currentTarget.style.borderColor = "#333";
                       }}
                     >
+                      <div style={{ marginRight: "12px", marginTop: "4px" }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedDatabases.includes(f.schema_name)}
+                          onChange={() => handleSelectDatabase(f.schema_name)}
+                          style={{
+                            width: "16px",
+                            height: "16px",
+                          }}
+                        />
+                      </div>
                       <div style={{ flex: 1 }}>
                         {renamingFile === f.schema_name ? (
                           <form onSubmit={saveRenameFile}>
@@ -588,7 +674,13 @@ export default function Project() {
                         )}
                       </div>
                       {renamingFile !== f.schema_name && (
-                        <div style={{ display: "flex", gap: "8px" }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: "8px",
+                            marginLeft: "12px",
+                          }}
+                        >
                           <button
                             className="project-tab"
                             onClick={() =>
@@ -634,6 +726,85 @@ export default function Project() {
                   ))}
                 </div>
               )}
+
+              {/* Merge Controls */}
+              {dbFiles.length > 0 && (
+                <div style={{ marginTop: "20px", textAlign: "center" }}>
+                  <div style={{ marginBottom: "12px" }}>
+                    <input
+                      type="text"
+                      placeholder="Enter merged database name..."
+                      value={mergeName}
+                      onChange={(e) => setMergeName(e.target.value)}
+                      disabled={mergeLoading}
+                      style={{
+                        width: "300px",
+                        padding: "8px 12px",
+                        backgroundColor: "#000",
+                        color: "#fff",
+                        border: "1px solid #555",
+                        borderRadius: "4px",
+                        fontSize: "14px",
+                      }}
+                    />
+                  </div>
+
+                  <button
+                    className="project-tab"
+                    onClick={handleMergeDatabases}
+                    disabled={
+                      selectedDatabases.length < 2 ||
+                      mergeLoading ||
+                      !mergeName.trim()
+                    }
+                    style={{
+                      padding: "12px 24px",
+                      fontSize: "14px",
+                      fontWeight: "bold",
+                      opacity:
+                        selectedDatabases.length < 2 ||
+                        mergeLoading ||
+                        !mergeName.trim()
+                          ? 0.6
+                          : 1,
+                      cursor:
+                        selectedDatabases.length < 2 ||
+                        mergeLoading ||
+                        !mergeName.trim()
+                          ? "not-allowed"
+                          : "pointer",
+                    }}
+                  >
+                    {mergeLoading
+                      ? "Merging..."
+                      : `Merge ${selectedDatabases.length} Database${selectedDatabases.length !== 1 ? "s" : ""}`}
+                  </button>
+
+                  {mergeError && (
+                    <div
+                      style={{
+                        color: "#ff6b6b",
+                        fontSize: "14px",
+                        marginTop: "8px",
+                      }}
+                    >
+                      {mergeError}
+                    </div>
+                  )}
+
+                  {mergeSuccess && (
+                    <div
+                      style={{
+                        color: "#4CAF50",
+                        fontSize: "14px",
+                        marginTop: "8px",
+                      }}
+                    >
+                      {mergeSuccess}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -671,6 +842,7 @@ export default function Project() {
                   Add Filtered
                 </button>
               </div>
+
               {filteredFiles.length === 0 ? (
                 <div
                   style={{
@@ -699,8 +871,7 @@ export default function Project() {
                         borderRadius: "8px",
                         padding: "16px",
                         display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
+                        alignItems: "flex-start",
                         transition: "border-color 0.2s",
                       }}
                       onMouseEnter={(e) => {
@@ -710,6 +881,17 @@ export default function Project() {
                         e.currentTarget.style.borderColor = "#333";
                       }}
                     >
+                      <div style={{ marginRight: "12px", marginTop: "4px" }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedDatabases.includes(f.schema_name)}
+                          onChange={() => handleSelectDatabase(f.schema_name)}
+                          style={{
+                            width: "16px",
+                            height: "16px",
+                          }}
+                        />
+                      </div>
                       <div style={{ flex: 1 }}>
                         {renamingFile === f.schema_name ? (
                           <form onSubmit={saveRenameFile}>
@@ -856,6 +1038,85 @@ export default function Project() {
                       )}
                     </div>
                   ))}
+                </div>
+              )}
+
+              {/* Filtered Database Merge Controls */}
+              {filteredFiles.length > 0 && (
+                <div style={{ marginTop: "20px", textAlign: "center" }}>
+                  <div style={{ marginBottom: "12px" }}>
+                    <input
+                      type="text"
+                      placeholder="Enter merged filtered database name..."
+                      value={mergeName}
+                      onChange={(e) => setMergeName(e.target.value)}
+                      disabled={mergeLoading}
+                      style={{
+                        width: "300px",
+                        padding: "8px 12px",
+                        backgroundColor: "#000",
+                        color: "#fff",
+                        border: "1px solid #555",
+                        borderRadius: "4px",
+                        fontSize: "14px",
+                      }}
+                    />
+                  </div>
+
+                  <button
+                    className="project-tab"
+                    onClick={handleMergeDatabases}
+                    disabled={
+                      selectedDatabases.length < 2 ||
+                      mergeLoading ||
+                      !mergeName.trim()
+                    }
+                    style={{
+                      padding: "12px 24px",
+                      fontSize: "14px",
+                      fontWeight: "bold",
+                      opacity:
+                        selectedDatabases.length < 2 ||
+                        mergeLoading ||
+                        !mergeName.trim()
+                          ? 0.6
+                          : 1,
+                      cursor:
+                        selectedDatabases.length < 2 ||
+                        mergeLoading ||
+                        !mergeName.trim()
+                          ? "not-allowed"
+                          : "pointer",
+                    }}
+                  >
+                    {mergeLoading
+                      ? "Merging..."
+                      : `Merge ${selectedDatabases.length} Filtered Database${selectedDatabases.length !== 1 ? "s" : ""}`}
+                  </button>
+
+                  {mergeError && (
+                    <div
+                      style={{
+                        color: "#ff6b6b",
+                        fontSize: "14px",
+                        marginTop: "8px",
+                      }}
+                    >
+                      {mergeError}
+                    </div>
+                  )}
+
+                  {mergeSuccess && (
+                    <div
+                      style={{
+                        color: "#4CAF50",
+                        fontSize: "14px",
+                        marginTop: "8px",
+                      }}
+                    >
+                      {mergeSuccess}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
