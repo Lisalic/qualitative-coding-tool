@@ -13,6 +13,9 @@ export default function Project() {
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [saving, setSaving] = useState(false);
+  const [renamingFile, setRenamingFile] = useState(null);
+  const [newFileName, setNewFileName] = useState("");
+  const [newFileDescription, setNewFileDescription] = useState("");
 
   useEffect(() => {
     let mounted = true;
@@ -93,6 +96,59 @@ export default function Project() {
       // keep editing state so user can retry
     } finally {
       setSaving(false);
+    }
+  };
+
+  const startRenameFile = (file) => {
+    setRenamingFile(file.schema_name);
+    setNewFileName(file.display_name || file.filename || file.schema_name);
+    setNewFileDescription(file.description || "");
+  };
+
+  const cancelRenameFile = () => {
+    setRenamingFile(null);
+    setNewFileName("");
+    setNewFileDescription("");
+  };
+
+  const saveRenameFile = async (e) => {
+    e?.preventDefault();
+    if (!newFileName.trim()) {
+      alert("File name cannot be empty");
+      return;
+    }
+
+    try {
+      const formData = new FormData();
+      formData.append("schema_name", renamingFile);
+      formData.append("display_name", newFileName.trim());
+      formData.append("description", newFileDescription || "");
+
+      const response = await apiFetch("/api/rename-file/", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to rename file");
+      }
+
+      const data = await response.json();
+      console.log("File renamed:", data);
+
+      // Refresh the project data
+      const resp = await apiFetch("/api/projects/");
+      const projectData = await resp.json();
+      const rows = projectData.projects || [];
+      const found = rows.find((p) => String(p.id) === String(projectId));
+      setProject(found || null);
+
+      setRenamingFile(null);
+      setNewFileName("");
+      setNewFileDescription("");
+    } catch (err) {
+      console.error("Rename error:", err);
+      alert(`Error renaming file: ${err.message}`);
     }
   };
 
@@ -431,28 +487,93 @@ export default function Project() {
                       }}
                     >
                       <div style={{ flex: 1 }}>
-                        <div
-                          style={{
-                            fontSize: "1.1em",
-                            fontWeight: "bold",
-                            color: "#ffffff",
-                            marginBottom: "4px",
-                          }}
-                        >
-                          {f.display_name || f.schema_name}
-                        </div>
-                        {f.description && (
-                          <div
-                            style={{
-                              color: "#cccccc",
-                              marginBottom: "8px",
-                              fontSize: "0.95em",
-                            }}
-                          >
-                            {f.description}
-                          </div>
+                        {renamingFile === f.schema_name ? (
+                          <form onSubmit={saveRenameFile}>
+                            <div style={{ marginBottom: "8px" }}>
+                              <input
+                                type="text"
+                                value={newFileName}
+                                onChange={(e) => setNewFileName(e.target.value)}
+                                placeholder="File name"
+                                style={{
+                                  width: "100%",
+                                  padding: "4px 8px",
+                                  backgroundColor: "#333",
+                                  color: "#ffffff",
+                                  border: "1px solid #555",
+                                  borderRadius: "4px",
+                                }}
+                              />
+                            </div>
+                            <div style={{ marginBottom: "8px" }}>
+                              <textarea
+                                value={newFileDescription}
+                                onChange={(e) =>
+                                  setNewFileDescription(e.target.value)
+                                }
+                                placeholder="Description (optional)"
+                                rows={2}
+                                style={{
+                                  width: "100%",
+                                  padding: "4px 8px",
+                                  backgroundColor: "#333",
+                                  color: "#ffffff",
+                                  border: "1px solid #555",
+                                  borderRadius: "4px",
+                                  resize: "vertical",
+                                }}
+                              />
+                            </div>
+                            <div style={{ display: "flex", gap: "8px" }}>
+                              <button
+                                type="submit"
+                                className="project-tab"
+                                style={{
+                                  padding: "4px 8px",
+                                  fontSize: 12,
+                                }}
+                              >
+                                Save
+                              </button>
+                              <button
+                                type="button"
+                                className="project-tab"
+                                onClick={cancelRenameFile}
+                                style={{
+                                  padding: "4px 8px",
+                                  fontSize: 12,
+                                }}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </form>
+                        ) : (
+                          <>
+                            <div
+                              style={{
+                                fontSize: "1.1em",
+                                fontWeight: "bold",
+                                color: "#ffffff",
+                                marginBottom: "4px",
+                              }}
+                            >
+                              {f.display_name || f.schema_name}
+                            </div>
+                            {f.description && (
+                              <div
+                                style={{
+                                  color: "#cccccc",
+                                  marginBottom: "8px",
+                                  fontSize: "0.95em",
+                                }}
+                              >
+                                {f.description}
+                              </div>
+                            )}
+                          </>
                         )}
-                        {f.created_at && (
+                        {f.created_at && renamingFile !== f.schema_name && (
                           <div
                             style={{
                               color: "#888",
@@ -466,36 +587,49 @@ export default function Project() {
                           </div>
                         )}
                       </div>
-                      <div style={{ display: "flex", gap: "8px" }}>
-                        <button
-                          className="project-tab"
-                          onClick={() =>
-                            navigate("/data", {
-                              state: { selectedDatabase: f.schema_name },
-                            })
-                          }
-                          style={{
-                            padding: "8px 14px",
-                            fontSize: 13,
-                            fontWeight: "bold",
-                          }}
-                        >
-                          View
-                        </button>
-                        <button
-                          className="project-tab"
-                          onClick={() =>
-                            handleDeleteFile(f.schema_name, "database")
-                          }
-                          style={{
-                            padding: "8px 14px",
-                            fontSize: 13,
-                            fontWeight: "bold",
-                          }}
-                        >
-                          Delete
-                        </button>
-                      </div>
+                      {renamingFile !== f.schema_name && (
+                        <div style={{ display: "flex", gap: "8px" }}>
+                          <button
+                            className="project-tab"
+                            onClick={() =>
+                              navigate("/data", {
+                                state: { selectedDatabase: f.schema_name },
+                              })
+                            }
+                            style={{
+                              padding: "8px 14px",
+                              fontSize: 13,
+                              fontWeight: "bold",
+                            }}
+                          >
+                            View
+                          </button>
+                          <button
+                            className="project-tab"
+                            onClick={() => startRenameFile(f)}
+                            style={{
+                              padding: "8px 14px",
+                              fontSize: 13,
+                              fontWeight: "bold",
+                            }}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            className="project-tab"
+                            onClick={() =>
+                              handleDeleteFile(f.schema_name, "database")
+                            }
+                            style={{
+                              padding: "8px 14px",
+                              fontSize: 13,
+                              fontWeight: "bold",
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -577,28 +711,93 @@ export default function Project() {
                       }}
                     >
                       <div style={{ flex: 1 }}>
-                        <div
-                          style={{
-                            fontSize: "1.1em",
-                            fontWeight: "bold",
-                            color: "#ffffff",
-                            marginBottom: "4px",
-                          }}
-                        >
-                          {f.display_name || f.schema_name}
-                        </div>
-                        {f.description && (
-                          <div
-                            style={{
-                              color: "#cccccc",
-                              marginBottom: "8px",
-                              fontSize: "0.95em",
-                            }}
-                          >
-                            {f.description}
-                          </div>
+                        {renamingFile === f.schema_name ? (
+                          <form onSubmit={saveRenameFile}>
+                            <div style={{ marginBottom: "8px" }}>
+                              <input
+                                type="text"
+                                value={newFileName}
+                                onChange={(e) => setNewFileName(e.target.value)}
+                                placeholder="File name"
+                                style={{
+                                  width: "100%",
+                                  padding: "4px 8px",
+                                  backgroundColor: "#333",
+                                  color: "#ffffff",
+                                  border: "1px solid #555",
+                                  borderRadius: "4px",
+                                }}
+                              />
+                            </div>
+                            <div style={{ marginBottom: "8px" }}>
+                              <textarea
+                                value={newFileDescription}
+                                onChange={(e) =>
+                                  setNewFileDescription(e.target.value)
+                                }
+                                placeholder="Description (optional)"
+                                rows={2}
+                                style={{
+                                  width: "100%",
+                                  padding: "4px 8px",
+                                  backgroundColor: "#333",
+                                  color: "#ffffff",
+                                  border: "1px solid #555",
+                                  borderRadius: "4px",
+                                  resize: "vertical",
+                                }}
+                              />
+                            </div>
+                            <div style={{ display: "flex", gap: "8px" }}>
+                              <button
+                                type="submit"
+                                className="project-tab"
+                                style={{
+                                  padding: "4px 8px",
+                                  fontSize: 12,
+                                }}
+                              >
+                                Save
+                              </button>
+                              <button
+                                type="button"
+                                className="project-tab"
+                                onClick={cancelRenameFile}
+                                style={{
+                                  padding: "4px 8px",
+                                  fontSize: 12,
+                                }}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </form>
+                        ) : (
+                          <>
+                            <div
+                              style={{
+                                fontSize: "1.1em",
+                                fontWeight: "bold",
+                                color: "#ffffff",
+                                marginBottom: "4px",
+                              }}
+                            >
+                              {f.display_name || f.schema_name}
+                            </div>
+                            {f.description && (
+                              <div
+                                style={{
+                                  color: "#cccccc",
+                                  marginBottom: "8px",
+                                  fontSize: "0.95em",
+                                }}
+                              >
+                                {f.description}
+                              </div>
+                            )}
+                          </>
                         )}
-                        {f.created_at && (
+                        {f.created_at && renamingFile !== f.schema_name && (
                           <div
                             style={{
                               color: "#888",
@@ -612,36 +811,49 @@ export default function Project() {
                           </div>
                         )}
                       </div>
-                      <div style={{ display: "flex", gap: "8px" }}>
-                        <button
-                          className="project-tab"
-                          onClick={() =>
-                            navigate("/filtered-data", {
-                              state: { selectedDatabase: f.schema_name },
-                            })
-                          }
-                          style={{
-                            padding: "8px 14px",
-                            fontSize: 13,
-                            fontWeight: "bold",
-                          }}
-                        >
-                          View
-                        </button>
-                        <button
-                          className="project-tab"
-                          onClick={() =>
-                            handleDeleteFile(f.schema_name, "filtered")
-                          }
-                          style={{
-                            padding: "8px 14px",
-                            fontSize: 13,
-                            fontWeight: "bold",
-                          }}
-                        >
-                          Delete
-                        </button>
-                      </div>
+                      {renamingFile !== f.schema_name && (
+                        <div style={{ display: "flex", gap: "8px" }}>
+                          <button
+                            className="project-tab"
+                            onClick={() =>
+                              navigate("/filtered-data", {
+                                state: { selectedDatabase: f.schema_name },
+                              })
+                            }
+                            style={{
+                              padding: "8px 14px",
+                              fontSize: 13,
+                              fontWeight: "bold",
+                            }}
+                          >
+                            View
+                          </button>
+                          <button
+                            className="project-tab"
+                            onClick={() => startRenameFile(f)}
+                            style={{
+                              padding: "8px 14px",
+                              fontSize: 13,
+                              fontWeight: "bold",
+                            }}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            className="project-tab"
+                            onClick={() =>
+                              handleDeleteFile(f.schema_name, "filtered")
+                            }
+                            style={{
+                              padding: "8px 14px",
+                              fontSize: 13,
+                              fontWeight: "bold",
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -725,28 +937,93 @@ export default function Project() {
                       }}
                     >
                       <div style={{ flex: 1 }}>
-                        <div
-                          style={{
-                            fontSize: "1.1em",
-                            fontWeight: "bold",
-                            color: "#ffffff",
-                            marginBottom: "4px",
-                          }}
-                        >
-                          {f.display_name || f.schema_name}
-                        </div>
-                        {f.description && (
-                          <div
-                            style={{
-                              color: "#cccccc",
-                              marginBottom: "8px",
-                              fontSize: "0.95em",
-                            }}
-                          >
-                            {f.description}
-                          </div>
+                        {renamingFile === f.schema_name ? (
+                          <form onSubmit={saveRenameFile}>
+                            <div style={{ marginBottom: "8px" }}>
+                              <input
+                                type="text"
+                                value={newFileName}
+                                onChange={(e) => setNewFileName(e.target.value)}
+                                placeholder="File name"
+                                style={{
+                                  width: "100%",
+                                  padding: "4px 8px",
+                                  backgroundColor: "#333",
+                                  color: "#ffffff",
+                                  border: "1px solid #555",
+                                  borderRadius: "4px",
+                                }}
+                              />
+                            </div>
+                            <div style={{ marginBottom: "8px" }}>
+                              <textarea
+                                value={newFileDescription}
+                                onChange={(e) =>
+                                  setNewFileDescription(e.target.value)
+                                }
+                                placeholder="Description (optional)"
+                                rows={2}
+                                style={{
+                                  width: "100%",
+                                  padding: "4px 8px",
+                                  backgroundColor: "#333",
+                                  color: "#ffffff",
+                                  border: "1px solid #555",
+                                  borderRadius: "4px",
+                                  resize: "vertical",
+                                }}
+                              />
+                            </div>
+                            <div style={{ display: "flex", gap: "8px" }}>
+                              <button
+                                type="submit"
+                                className="project-tab"
+                                style={{
+                                  padding: "4px 8px",
+                                  fontSize: 12,
+                                }}
+                              >
+                                Save
+                              </button>
+                              <button
+                                type="button"
+                                className="project-tab"
+                                onClick={cancelRenameFile}
+                                style={{
+                                  padding: "4px 8px",
+                                  fontSize: 12,
+                                }}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </form>
+                        ) : (
+                          <>
+                            <div
+                              style={{
+                                fontSize: "1.1em",
+                                fontWeight: "bold",
+                                color: "#ffffff",
+                                marginBottom: "4px",
+                              }}
+                            >
+                              {f.display_name || f.schema_name}
+                            </div>
+                            {f.description && (
+                              <div
+                                style={{
+                                  color: "#cccccc",
+                                  marginBottom: "8px",
+                                  fontSize: "0.95em",
+                                }}
+                              >
+                                {f.description}
+                              </div>
+                            )}
+                          </>
                         )}
-                        {f.created_at && (
+                        {f.created_at && renamingFile !== f.schema_name && (
                           <div
                             style={{
                               color: "#888",
@@ -760,39 +1037,52 @@ export default function Project() {
                           </div>
                         )}
                       </div>
-                      <div style={{ display: "flex", gap: "8px" }}>
-                        <button
-                          className="project-tab"
-                          onClick={() =>
-                            navigate("/codebook-view", {
-                              state: { selected: String(f.id) },
-                            })
-                          }
-                          style={{
-                            padding: "8px 14px",
-                            fontSize: 13,
-                            fontWeight: "bold",
-                          }}
-                        >
-                          View
-                        </button>
-                        <button
-                          className="project-tab"
-                          onClick={() =>
-                            handleDeleteFile(
-                              f.schema_name || f.display_name || f.id,
-                              "codebook",
-                            )
-                          }
-                          style={{
-                            padding: "8px 14px",
-                            fontSize: 13,
-                            fontWeight: "bold",
-                          }}
-                        >
-                          Delete
-                        </button>
-                      </div>
+                      {renamingFile !== f.schema_name && (
+                        <div style={{ display: "flex", gap: "8px" }}>
+                          <button
+                            className="project-tab"
+                            onClick={() =>
+                              navigate("/codebook-view", {
+                                state: { selected: String(f.id) },
+                              })
+                            }
+                            style={{
+                              padding: "8px 14px",
+                              fontSize: 13,
+                              fontWeight: "bold",
+                            }}
+                          >
+                            View
+                          </button>
+                          <button
+                            className="project-tab"
+                            onClick={() => startRenameFile(f)}
+                            style={{
+                              padding: "8px 14px",
+                              fontSize: 13,
+                              fontWeight: "bold",
+                            }}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            className="project-tab"
+                            onClick={() =>
+                              handleDeleteFile(
+                                f.schema_name || f.display_name || f.id,
+                                "codebook",
+                              )
+                            }
+                            style={{
+                              padding: "8px 14px",
+                              fontSize: 13,
+                              fontWeight: "bold",
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -876,28 +1166,93 @@ export default function Project() {
                       }}
                     >
                       <div style={{ flex: 1 }}>
-                        <div
-                          style={{
-                            fontSize: "1.1em",
-                            fontWeight: "bold",
-                            color: "#ffffff",
-                            marginBottom: "4px",
-                          }}
-                        >
-                          {f.display_name || f.schema_name}
-                        </div>
-                        {f.description && (
-                          <div
-                            style={{
-                              color: "#cccccc",
-                              marginBottom: "8px",
-                              fontSize: "0.95em",
-                            }}
-                          >
-                            {f.description}
-                          </div>
+                        {renamingFile === f.schema_name ? (
+                          <form onSubmit={saveRenameFile}>
+                            <div style={{ marginBottom: "8px" }}>
+                              <input
+                                type="text"
+                                value={newFileName}
+                                onChange={(e) => setNewFileName(e.target.value)}
+                                placeholder="File name"
+                                style={{
+                                  width: "100%",
+                                  padding: "4px 8px",
+                                  backgroundColor: "#333",
+                                  color: "#ffffff",
+                                  border: "1px solid #555",
+                                  borderRadius: "4px",
+                                }}
+                              />
+                            </div>
+                            <div style={{ marginBottom: "8px" }}>
+                              <textarea
+                                value={newFileDescription}
+                                onChange={(e) =>
+                                  setNewFileDescription(e.target.value)
+                                }
+                                placeholder="Description (optional)"
+                                rows={2}
+                                style={{
+                                  width: "100%",
+                                  padding: "4px 8px",
+                                  backgroundColor: "#333",
+                                  color: "#ffffff",
+                                  border: "1px solid #555",
+                                  borderRadius: "4px",
+                                  resize: "vertical",
+                                }}
+                              />
+                            </div>
+                            <div style={{ display: "flex", gap: "8px" }}>
+                              <button
+                                type="submit"
+                                className="project-tab"
+                                style={{
+                                  padding: "4px 8px",
+                                  fontSize: 12,
+                                }}
+                              >
+                                Save
+                              </button>
+                              <button
+                                type="button"
+                                className="project-tab"
+                                onClick={cancelRenameFile}
+                                style={{
+                                  padding: "4px 8px",
+                                  fontSize: 12,
+                                }}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </form>
+                        ) : (
+                          <>
+                            <div
+                              style={{
+                                fontSize: "1.1em",
+                                fontWeight: "bold",
+                                color: "#ffffff",
+                                marginBottom: "4px",
+                              }}
+                            >
+                              {f.display_name || f.schema_name}
+                            </div>
+                            {f.description && (
+                              <div
+                                style={{
+                                  color: "#cccccc",
+                                  marginBottom: "8px",
+                                  fontSize: "0.95em",
+                                }}
+                              >
+                                {f.description}
+                              </div>
+                            )}
+                          </>
                         )}
-                        {f.created_at && (
+                        {f.created_at && renamingFile !== f.schema_name && (
                           <div
                             style={{
                               color: "#888",
@@ -911,36 +1266,49 @@ export default function Project() {
                           </div>
                         )}
                       </div>
-                      <div style={{ display: "flex", gap: "8px" }}>
-                        <button
-                          className="project-tab"
-                          onClick={() =>
-                            navigate("/coding-view", {
-                              state: { selectedCodedData: f.schema_name },
-                            })
-                          }
-                          style={{
-                            padding: "8px 14px",
-                            fontSize: 13,
-                            fontWeight: "bold",
-                          }}
-                        >
-                          View
-                        </button>
-                        <button
-                          className="project-tab"
-                          onClick={() =>
-                            handleDeleteFile(f.schema_name, "coding")
-                          }
-                          style={{
-                            padding: "8px 14px",
-                            fontSize: 13,
-                            fontWeight: "bold",
-                          }}
-                        >
-                          Delete
-                        </button>
-                      </div>
+                      {renamingFile !== f.schema_name && (
+                        <div style={{ display: "flex", gap: "8px" }}>
+                          <button
+                            className="project-tab"
+                            onClick={() =>
+                              navigate("/coding-view", {
+                                state: { selectedCodedData: f.schema_name },
+                              })
+                            }
+                            style={{
+                              padding: "8px 14px",
+                              fontSize: 13,
+                              fontWeight: "bold",
+                            }}
+                          >
+                            View
+                          </button>
+                          <button
+                            className="project-tab"
+                            onClick={() => startRenameFile(f)}
+                            style={{
+                              padding: "8px 14px",
+                              fontSize: 13,
+                              fontWeight: "bold",
+                            }}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            className="project-tab"
+                            onClick={() =>
+                              handleDeleteFile(f.schema_name, "coding")
+                            }
+                            style={{
+                              padding: "8px 14px",
+                              fontSize: 13,
+                              fontWeight: "bold",
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
