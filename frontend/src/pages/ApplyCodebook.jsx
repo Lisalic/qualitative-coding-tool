@@ -246,11 +246,6 @@ export default function ApplyCodebook() {
       onChange: (v) => setMethodology(v),
       extraButtons: [
         {
-          label: "Load example prompt",
-          onClick: () => setMethodology(EXAMPLE_PROMPT),
-          className: "load-prompt-btn",
-        },
-        {
           label: "Save prompt",
           onClick: async () => {
             try {
@@ -312,6 +307,11 @@ export default function ApplyCodebook() {
               setTimeout(() => setSaveMessage(""), 4000);
             }
           },
+          className: "load-prompt-btn",
+        },
+        {
+          label: "Load example prompt",
+          onClick: () => setMethodology(EXAMPLE_PROMPT),
           className: "load-prompt-btn",
         },
       ],

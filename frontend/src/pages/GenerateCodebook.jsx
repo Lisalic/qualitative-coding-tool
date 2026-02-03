@@ -223,11 +223,6 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
       rows: 4,
       extraButtons: [
         {
-          label: "Load example prompt",
-          onClick: () => setPrompt(EXAMPLE_PROMPT),
-          className: "load-prompt-btn",
-        },
-        {
           label: "Save prompt",
           onClick: async () => {
             try {
@@ -289,6 +284,11 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
               setTimeout(() => setSaveMessage(""), 4000);
             }
           },
+          className: "load-prompt-btn",
+        },
+        {
+          label: "Load example prompt",
+          onClick: () => setPrompt(EXAMPLE_PROMPT),
           className: "load-prompt-btn",
         },
       ],

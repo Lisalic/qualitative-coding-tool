@@ -213,46 +213,6 @@ export default function FileUpload({ onUploadSuccess, onView }) {
           </div>
 
           <div className="form-group">
-            <label htmlFor="subreddits">Filter by Subreddits</label>
-            <div className="subreddit-input-wrapper">
-              <div className="subreddit-input-group">
-                <input
-                  id="subreddits"
-                  type="text"
-                  placeholder="Enter subreddit name..."
-                  value={subredditInput}
-                  onChange={(e) => setSubredditInput(e.target.value)}
-                  onKeyDown={handleAddSubreddit}
-                  disabled={loading}
-                />
-                <button
-                  type="button"
-                  className="add-btn"
-                  onClick={handleAddSubredditClick}
-                  disabled={loading || !subredditInput.trim()}
-                >
-                  Add
-                </button>
-              </div>
-              <div className="subreddit-tags">
-                {subredditTags.map((subreddit, index) => (
-                  <div key={index} className="tag">
-                    <span>{subreddit}</span>
-                    <button
-                      type="button"
-                      className="tag-remove"
-                      onClick={() => handleRemoveSubreddit(index)}
-                      disabled={loading}
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="form-group">
             <label>Data Type</label>
             <div className="radio-group">
               <div>
@@ -289,26 +249,6 @@ export default function FileUpload({ onUploadSuccess, onView }) {
           </div>
 
           <div className="form-group">
-            <label htmlFor="project-select">Select Project</label>
-            <select
-              id="project-select"
-              value={selectedProject}
-              onChange={(e) => setSelectedProject(e.target.value)}
-              disabled={loading || projects.length === 0}
-              required
-            >
-              <option value="" disabled>
-                Select a project...
-              </option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.projectname}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="form-group">
             <label htmlFor="custom-name">Database Name</label>
             <input
               id="custom-name"
@@ -330,6 +270,52 @@ export default function FileUpload({ onUploadSuccess, onView }) {
               disabled={loading}
               rows={3}
             />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="subreddit-input">
+              Filter by Subreddits (optional)
+            </label>
+            <div className="subreddit-input-wrapper">
+              <input
+                id="subreddit-input"
+                type="text"
+                placeholder="Enter subreddit name..."
+                value={subredditInput}
+                onChange={(e) => setSubredditInput(e.target.value)}
+                disabled={loading}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleAddSubredditClick();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                onClick={handleAddSubredditClick}
+                disabled={loading || !subredditInput.trim()}
+                className="add-subreddit-btn"
+              >
+                Add
+              </button>
+            </div>
+            {subredditTags.length > 0 && (
+              <div className="subreddit-tags">
+                {subredditTags.map((tag, index) => (
+                  <span key={index} className="subreddit-tag">
+                    {tag}
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveSubreddit(index)}
+                      className="remove-tag-btn"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
           <button type="submit" disabled={loading} className="form-submit-btn">

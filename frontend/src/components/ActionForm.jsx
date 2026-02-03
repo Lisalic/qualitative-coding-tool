@@ -132,39 +132,34 @@ export default function ActionForm({
           }
           return (
             <div key={field.id} className="form-group">
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                }}
-              >
-                <label htmlFor={field.id}>{field.label}</label>
-                {field.extraButtons && Array.isArray(field.extraButtons)
-                  ? field.extraButtons.map((b, i) => (
-                      <button
-                        key={i}
-                        type="button"
-                        onClick={b.onClick}
-                        className={b.className || "load-prompt-btn"}
-                        disabled={submitButton?.disabled}
-                      >
-                        {b.label}
-                      </button>
-                    ))
-                  : field.extraButton && (
-                      <button
-                        type="button"
-                        onClick={field.extraButton.onClick}
-                        className={
-                          field.extraButton.className || "load-prompt-btn"
-                        }
-                        disabled={submitButton?.disabled}
-                      >
-                        {field.extraButton.label}
-                      </button>
-                    )}
-              </div>
+              <label htmlFor={field.id}>{field.label}</label>
+              {field.extraButtons && Array.isArray(field.extraButtons) ? (
+                <div style={{ textAlign: "right", marginTop: "-2rem" }}>
+                  {field.extraButtons.map((b, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={b.onClick}
+                      className={b.className || "load-prompt-btn"}
+                      disabled={submitButton?.disabled}
+                      style={{ marginLeft: "0.5rem" }}
+                    >
+                      {b.label}
+                    </button>
+                  ))}
+                </div>
+              ) : field.extraButton ? (
+                <div style={{ textAlign: "right", marginTop: "-2rem" }}>
+                  <button
+                    type="button"
+                    onClick={field.extraButton.onClick}
+                    className={field.extraButton.className || "load-prompt-btn"}
+                    disabled={submitButton?.disabled}
+                  >
+                    {field.extraButton.label}
+                  </button>
+                </div>
+              ) : null}
               {renderField(field)}
             </div>
           );

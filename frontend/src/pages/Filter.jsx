@@ -259,11 +259,6 @@ export default function Filter() {
       rows: 5,
       extraButtons: [
         {
-          label: "Load example prompt",
-          onClick: () => setFilterPrompt(EXAMPLE_PROMPT),
-          className: "load-prompt-btn",
-        },
-        {
           label: "Save prompt",
           onClick: async () => {
             try {
@@ -327,6 +322,11 @@ export default function Filter() {
               setTimeout(() => setSaveMessage(""), 4000);
             }
           },
+          className: "load-prompt-btn",
+        },
+        {
+          label: "Load example prompt",
+          onClick: () => setFilterPrompt(EXAMPLE_PROMPT),
           className: "load-prompt-btn",
         },
       ],
