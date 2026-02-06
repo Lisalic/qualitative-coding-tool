@@ -40,7 +40,7 @@ def get_client(system_prompt: str, user_prompt: str, api_key: str) -> str:
             print(f"Retrying in {wait_time}s...")
             time.sleep(wait_time)
 
-def filter_posts_with_ai(filter_prompt: str, posts_content: str, api_key: str) -> str:
+def filter_posts_with_ai(filter_prompt: str, posts_content: str, api_key: str) -> tuple[str, str, str]:
     """
     Use AI to filter posts based on a given prompt and return results in Python format.
 
@@ -77,13 +77,15 @@ CRITICAL: Return ONLY the raw Python array with NO markdown, NO backticks, NO co
         print(response[:100])
         print("...")
         print(response[-100:])
-        return wrap_in_python_array(response)
+        result = wrap_in_python_array(response)
+        return result, system_prompt, user_prompt
 
     except Exception as e:
-        return [{"error": f"Failed to filter posts: {str(e)}"}]
+        error_result = [{"error": f"Failed to filter posts: {str(e)}"}]
+        return error_result, system_prompt, user_prompt
 
 
-def filter_comments_with_ai(filter_prompt: str, comments_content: str, api_key: str):
+def filter_comments_with_ai(filter_prompt: str, comments_content: str, api_key: str) -> tuple[str, str, str]:
     """
     Use AI to filter comments based on a given prompt and return results as a Python list.
 
@@ -112,10 +114,12 @@ CRITICAL: Return ONLY the raw Python array with NO markdown, NO backticks, NO co
         print(response[:100])
         print("...")
         print(response[-100:])
-        return wrap_in_python_array(response)
+        result = wrap_in_python_array(response)
+        return result, system_prompt, user_prompt
         
     except Exception as e:
-        return [{"error": f"Failed to filter comments: {str(e)}"}]
+        error_result = [{"error": f"Failed to filter comments: {str(e)}"}]
+        return error_result, system_prompt, user_prompt
 
 
 

@@ -2,13 +2,14 @@ import time
 from openai import OpenAI
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
-FREE_MODEL = "google/gemini-2.0-flash-exp:free"
+FREE_MODEL = "tngtech/deepseek-r1t2-chimera:free"
 MAX_RETRIES = 3
 INITIAL_RETRY_DELAY = 2  
 
 def get_client(system_prompt: str, user_prompt: str, api_key: str) -> str:
     if not api_key:
         raise ValueError("OpenRouter API key is required")
+    print("Initiating API call to OpenRouter...")
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             client = OpenAI(
@@ -25,6 +26,7 @@ def get_client(system_prompt: str, user_prompt: str, api_key: str) -> str:
                 timeout=300, 
                 extra_body={"transforms": ["middle-out"]}
             )
+            print("API call successful.")
             return response.choices[0].message.content
         except KeyboardInterrupt:
             print("\nkeyboard interrupt")
@@ -37,7 +39,9 @@ def get_client(system_prompt: str, user_prompt: str, api_key: str) -> str:
             print(f"Retrying in {wait_time}s...")
             time.sleep(wait_time)
 
-def classify_posts(codebook: str, posts_content: str, methodology: str, api_key: str) -> str:
+def classify_posts(codebook: str, posts_content: str, methodology: str, api_key: str) -> tuple[str, str, str]:
+    
+    print("Starting codebook application process...")
     
     system_prompt = f"""
     You are a highly meticulous qualitative data coder. Your task is to process the raw POSTS CONTENT by applying the codes defined in the CODEBOOK.
@@ -73,6 +77,9 @@ def classify_posts(codebook: str, posts_content: str, methodology: str, api_key:
     {methodology}
     """
     
-    return get_client(system_prompt, user_prompt, api_key)
+    print("Prompts prepared. Sending request to AI model...")
+    result = get_client(system_prompt, user_prompt, api_key)
+    print("Response received from AI model. Codebook application completed.")
+    return result, system_prompt, user_prompt
 
 

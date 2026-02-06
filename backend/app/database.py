@@ -97,6 +97,8 @@ class File(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     file_type = Column(String)
     description = Column(String)
+    systemprompt = Column(String)
+    userprompt = Column(String)
 
     user = relationship("User", back_populates="files")
     projects = relationship("Project", secondary=project_files_table, back_populates="files")

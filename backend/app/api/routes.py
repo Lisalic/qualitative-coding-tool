@@ -68,10 +68,7 @@ router = APIRouter()
 
 
 def get_user_id_from_request(request: Request):
-    """Extract access token from cookie or Authorization header and decode it.
-
-    Returns the `sub` claim (user id as int) on success, or None on failure.
-    """
+    """Get user ID from request token. Returns int or None."""
     token = None
     try:
         token = request.cookies.get("access_token")
@@ -125,7 +122,6 @@ async def upload_zst_file(
         raise HTTPException(status_code=400, detail="data_type must be 'posts' or 'comments'")
     import_data_type = "submissions" if data_type == "posts" else data_type
 
-    # Save upload to a temporary .zst file
     try:
         content = await file.read()
         with tempfile.NamedTemporaryFile(suffix='.zst', delete=False) as tmp:
@@ -134,7 +130,6 @@ async def upload_zst_file(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to save uploaded file: {exc}")
 
-    # Resolve authenticated user from token
     user_id = get_user_id_from_request(request)
 
     response_data = {
@@ -143,7 +138,6 @@ async def upload_zst_file(
         "authenticated": bool(user_id),
     }
 
-    # If unauthenticated, reject the request
     if not user_id:
         try:
             os.unlink(tmp_path)
@@ -151,7 +145,6 @@ async def upload_zst_file(
             pass
         raise HTTPException(status_code=401, detail="Unauthenticated")
 
-    # Authenticated path: create Postgres schema, tables and stream-insert rows
     base_name = name if name is not None else file.filename.replace('.zst', '')
     unique_id = secrets.token_hex(6)
     schema_name = f"proj_{unique_id}"
@@ -159,7 +152,6 @@ async def upload_zst_file(
 
     try:
         with DatabaseManager() as dm:
-            # Create a File record instead of a Project; files back a Postgres schema
             file_rec = File(user_id=user_id, filename=base_name, schemaname=schema_name, file_type="raw_data", description=(description or None))
             dm.session.add(file_rec)
             try:
@@ -167,24 +159,19 @@ async def upload_zst_file(
             except Exception:
                 dm.session.rollback()
                 raise
-            # If a project_id was provided, ensure ownership and link the file to the project
             if project_id is not None:
                 try:
                     proj = dm.session.query(Project).filter(Project.id == project_id).first()
                     if proj is None:
                         raise HTTPException(status_code=404, detail="Project not found")
-                    # ensure the project belongs to the authenticated user
                     if proj.user_id != user_id:
                         raise HTTPException(status_code=403, detail="Forbidden: project does not belong to user")
-                    # create association
                     file_rec.projects.append(proj)
                     dm.session.flush()
                 except HTTPException:
                     raise
                 except Exception:
-                    # If anything goes wrong with linking, roll back and continue without linking
                     dm.session.rollback()
-            # create schema and tables
             with engine.begin() as conn:
                 conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
                 conn.execute(text(f'''
@@ -214,7 +201,6 @@ async def upload_zst_file(
 
             inserted_counts = stream_zst_to_postgres(tmp_path, schema_name, import_data_type, subreddit_filter=subreddit_list, batch_size=1000)
 
-            # add file_tables metadata
             if inserted_counts.get('submissions', 0) > 0:
                 dm.file_tables.add_table_metadata(
                     file_id=file_rec.id,
@@ -281,7 +267,6 @@ def get_database_metadata(db_path):
 
 @router.post("/merge-databases/")
 async def merge_databases(request: Request):
-    # Accept either form-data (`databases` as JSON string) or application/json
     try:
         ctype = (request.headers.get("content-type") or "").lower()
         if "application/json" in ctype:
@@ -297,7 +282,6 @@ async def merge_databases(request: Request):
             description = form.get("description")
             project_id = form.get("project_id")
 
-        # Normalize databases into a list
         if isinstance(databases, str):
             db_list = json.loads(databases)
         elif isinstance(databases, list):
@@ -315,12 +299,10 @@ async def merge_databases(request: Request):
     if not name or not name.strip():
         raise HTTPException(status_code=400, detail="Database name is required")
 
-    # Resolve authenticated user from token
     user_id = get_user_id_from_request(request)
     if not user_id:
         raise HTTPException(status_code=401, detail="Authentication required to merge databases")
 
-    # ensure user doesn't already have a file with same filename/schemaname
     db_check = SessionLocal()
     try:
         existing = db_check.query(File).filter(
@@ -349,7 +331,6 @@ async def merge_databases(request: Request):
         database_dir = Path(settings.database_dir)
 
         for db_name in db_list:
-            # Only support Postgres file schema sources (proj_...)
             if isinstance(db_name, str) and db_name.startswith("proj_"):
                 schema_src = db_name
                 try:
@@ -362,7 +343,6 @@ async def merge_databases(request: Request):
 
                 for table_name in src_tables:
                     try:
-                        # Read from Postgres schema.table into dataframe
                         df = pd.read_sql_query(text(f'SELECT * FROM "{schema_src}"."{table_name}"'), con=engine)
                     except Exception as e:
                         print(f"Failed to read table {schema_src}.{table_name} from Postgres: {e}")
@@ -371,12 +351,10 @@ async def merge_databases(request: Request):
 
 
 
-                    # skip empty dataframes
                     if df is None or df.shape[0] == 0:
                         tables_written[table_name] = 0
                         continue
 
-                    # Check if target table exists
                     try:
                         with engine.connect() as conn:
                             target_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": f"{schema_name}.{table_name}"}).scalar()
@@ -384,7 +362,6 @@ async def merge_databases(request: Request):
                         print(f"Error checking target table {schema_name}.{table_name}: {e}")
                         target_exists = None
 
-                    # If target doesn't exist, create it by replacing
                     if not target_exists:
                         try:
                             df.to_sql(name=table_name, con=engine, schema=schema_name, if_exists='replace', index=False, method='multi')
@@ -395,10 +372,8 @@ async def merge_databases(request: Request):
                             print(f"Error creating table {schema_name}.{table_name}: {e}")
                             continue
                     else:
-                        # Target exists: insert only rows not already present using a temporary table + EXCEPT
                         tmp_name = f"tmp_merge_{secrets.token_hex(4)}"
 
-                        # determine common columns between df and target
                         try:
                             with engine.connect() as conn:
                                 cols = [r[0] for r in conn.execute(text("SELECT column_name FROM information_schema.columns WHERE table_schema=:schema AND table_name=:table"), {"schema": schema_name, "table": table_name}).fetchall()]
@@ -415,7 +390,6 @@ async def merge_databases(request: Request):
                         cols_quoted = ",".join([f'"{c}"' for c in common_cols])
 
                         try:
-                            # write source rows to temporary table in target schema
                             df[common_cols].to_sql(name=tmp_name, con=engine, schema=schema_name, if_exists='replace', index=False, method='multi')
                         except Exception as e:
                             print(f"Error creating temporary table {schema_name}.{tmp_name}: {e}")
@@ -453,7 +427,6 @@ async def merge_databases(request: Request):
             print(f"Skipping non-Postgres source {db_name}; only proj_... schema names are supported")
             continue
 
-        # After writing all tables, compute final per-table row counts from the new schema
         final_table_counts = {}
         try:
             with engine.connect() as conn:
@@ -472,7 +445,6 @@ async def merge_databases(request: Request):
         total_rows = sum(final_table_counts.values())
 
         if total_rows == 0:
-            # nothing to migrate: drop empty schema and inform client
             try:
                 with engine.begin() as conn:
                     conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE'))
@@ -480,7 +452,6 @@ async def merge_databases(request: Request):
                 pass
             return JSONResponse({"message": "No rows found in selected databases; nothing migrated", "database": name, "total_submissions": 0, "total_comments": 0, "file_migrated": False})
 
-        # Create file record and file_tables metadata using the final counts
         with DatabaseManager() as dm:
             file_rec = File(user_id=user_id, filename=name, schemaname=schema_name, file_type='raw_data', description=(description or None))
             dm.session.add(file_rec)
@@ -491,7 +462,6 @@ async def merge_databases(request: Request):
                 raise
             for tbl, cnt in final_table_counts.items():
                 dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name=tbl, row_count=cnt)
-            # If a project_id was provided, attempt to link the created file to the project
             if project_id is not None:
                 try:
                     proj = dm.session.query(Project).filter(Project.id == project_id).first()
@@ -515,7 +485,6 @@ async def merge_databases(request: Request):
     except HTTPException:
         raise
     except Exception as exc:
-        # Attempt to drop the schema on failure
         try:
             with engine.begin() as conn:
                 conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE'))
@@ -533,7 +502,6 @@ async def save_comparison(
     file_type: str = Form(None),
     project_id: int = Form(None),
 ):
-    # Resolve authenticated user
     user_id = get_user_id_from_request(request)
     if not user_id:
         raise HTTPException(status_code=401, detail="Authentication required to save comparison")
@@ -544,7 +512,6 @@ async def save_comparison(
 
     try:
         with DatabaseManager() as dm:
-            # create File record representing this saved comparison (backed by a schema)
             file_rec = File(user_id=user_id, filename=base_name, schemaname=schema_name, file_type=(file_type or "comparison"), description=(description or None))
             dm.session.add(file_rec)
             try:
@@ -568,8 +535,6 @@ async def save_comparison(
                 except Exception:
                     dm.session.rollback()
 
-            # create schema and content_store table, then insert the content
-            # Use column name `file_text` to match other save/read endpoints
             with engine.begin() as conn:
                 conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
                 conn.execute(text(f'''
@@ -639,14 +604,12 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
 
 @router.post("/register/")
 def register(payload: RegisterRequest, db: Session = Depends(get_db)):
-    # Check if email already exists
     existing = db.query(User).filter(User.email == payload.email).first()
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
 
     hashed = _hash_password(payload.password)
 
-    # let DB assign integer primary key
     user = User(email=payload.email, password=hashed)
     db.add(user)
     try:
@@ -665,7 +628,6 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
 
 @router.get("/me/")
 def me(request: Request, db: Session = Depends(get_db)):
-    # Use token helper to get the user id; then return user record
     user_id = get_user_id_from_request(request)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -679,7 +641,6 @@ def me(request: Request, db: Session = Depends(get_db)):
 
 @router.get("/my-files/")
 def my_projects(request: Request, file_type: str = Query("raw_data"), db: Session = Depends(get_db)):
-    # Resolve authenticated user from token
     user_id = get_user_id_from_request(request)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -720,10 +681,7 @@ def my_projects(request: Request, file_type: str = Query("raw_data"), db: Sessio
 
 @router.post("/create-project/")
 def create_project(request: Request, name: str = Form(...), description: str = Form(None), db: Session = Depends(get_db)):
-    """Create a new Project owned by the authenticated user.
-
-    Returns the created project object.
-    """
+    """Create a new project."""
     user_id = get_user_id_from_request(request)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -746,12 +704,11 @@ def create_project(request: Request, name: str = Form(...), description: str = F
 
 @router.post("/update-project/")
 def update_project(request: Request, project_id: int = Form(...), name: str = Form(...), description: str = Form(None), db: Session = Depends(get_db)):
-    """Update an existing project owned by the authenticated user."""
+    """Update a project."""
     user_id = get_user_id_from_request(request)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    # load project
     proj = db.query(Project).filter(Project.id == project_id).first()
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -776,7 +733,7 @@ def update_project(request: Request, project_id: int = Form(...), name: str = Fo
 
 @router.get("/projects/")
 def list_projects(request: Request):
-    """List projects owned by the authenticated user."""
+    """List user's projects."""
     user_id = get_user_id_from_request(request)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -813,7 +770,7 @@ def list_projects(request: Request):
 
 @router.get("/prompts/")
 def list_prompts(request: Request, prompt_type: str = Query(None), db: Session = Depends(get_db)):
-    """List prompts belonging to the authenticated user. Optional `prompt_type` filters by `type`."""
+    """List user's prompts."""
     user_id = get_user_id_from_request(request)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -842,13 +799,7 @@ def list_prompts(request: Request, prompt_type: str = Query(None), db: Session =
 
 @router.post("/prompts/")
 async def create_prompt(request: Request, db: Session = Depends(get_db)):
-    """Create a new prompt for the authenticated user.
-
-    This endpoint accepts either multipart/form-data or application/json. It
-    validates required fields and returns clear 400 responses instead of the
-    default 422 when the client sends an unexpected payload shape.
-    """
-    # Read raw body for debugging and parse payload (form or json)
+    """Create a new prompt."""
     try:
         raw_body = await request.body()
     except Exception:
@@ -871,10 +822,8 @@ async def create_prompt(request: Request, db: Session = Depends(get_db)):
     ptype = data.get("type")
     user_id = data.get("user_id")
 
-    # Validate required fields and provide a helpful error message
     missing = [k for k, v in [("display_name", display_name), ("prompt", prompt_val), ("type", ptype)] if not (v or (isinstance(v, str) and v == "")) and v is None]
     if not display_name or not prompt_val or not ptype:
-        # Log helpful debug info to server stdout for diagnosis
         try:
             _ct = request.headers.get("content-type")
             _auth = request.headers.get("authorization")
@@ -891,7 +840,6 @@ async def create_prompt(request: Request, db: Session = Depends(get_db)):
             pass
         raise HTTPException(status_code=400, detail="Missing required fields: display_name, prompt, type")
 
-    # If `user_id` was not provided, resolve via the authenticated token
     if not user_id:
         try:
             user_resp = me(request, db)
@@ -930,7 +878,7 @@ async def create_prompt(request: Request, db: Session = Depends(get_db)):
 
 @router.post("/prompts/{prompt_id}/update")
 def update_prompt(prompt_id: int, request: Request, display_name: str = Form(None), promptname: str = Form(None), prompt: str = Form(None), type: str = Form(None), db: Session = Depends(get_db)):
-    """Update a prompt owned by the authenticated user."""
+    """Update a prompt."""
     user_id = get_user_id_from_request(request)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -939,7 +887,6 @@ def update_prompt(prompt_id: int, request: Request, display_name: str = Form(Non
     if not p:
         raise HTTPException(status_code=404, detail="Prompt not found")
 
-    # ensure ownership
     try:
         owner_id = int(p.user_id)
     except Exception:
@@ -1012,7 +959,6 @@ async def delete_database(db_name: str, request: Request, db: Session = Depends(
     if not (schema.startswith('proj_') or schema.startswith('cmp_')):
         raise HTTPException(status_code=400, detail="Invalid file schema identifier")
 
-    # Resolve authenticated user from token
     user_id = get_user_id_from_request(request)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -1035,10 +981,7 @@ async def delete_database(db_name: str, request: Request, db: Session = Depends(
 
 @router.post("/delete-row/")
 async def delete_row(request: Request, schemaname: str = Form(...), table: str = Form(...), row_id: str = Form(...), db: Session = Depends(get_db)):
-    """Delete a single row (by id) from a file's table (submissions or comments).
-
-    Requires authentication and file ownership.
-    """
+    """Delete a row from submissions or comments table."""
     schema = (schemaname or "").strip()
     if schema.endswith('.db'):
         schema = schema[:-3]
@@ -1065,7 +1008,6 @@ async def delete_row(request: Request, schemaname: str = Form(...), table: str =
             except Exception:
                 deleted = 0
 
-        # Update file_tables metadata: recount rows and persist
         try:
             with engine.connect() as conn:
                 cnt = conn.execute(text(f'SELECT COUNT(*) FROM "{schema}"."{table}"')).scalar() or 0
@@ -1097,12 +1039,10 @@ async def delete_row(request: Request, schemaname: str = Form(...), table: str =
 @router.post("/rename-file/")
 def rename_project(request: Request, schema_name: str = Form(...), display_name: str = Form(...), description: str = Form(None), db: Session = Depends(get_db)):
     """Rename a file's display_name. Requires authentication and ownership."""
-    # Resolve authenticated user from token
     user_id = get_user_id_from_request(request)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    # normalize schema name
     schema = schema_name.strip()
 
     file_rec = db.query(File).filter(File.schemaname == schema, File.user_id == user_id).first()
@@ -1124,10 +1064,7 @@ def rename_project(request: Request, schema_name: str = Form(...), display_name:
 
 @router.post("/move-rows/")
 async def move_rows(request: Request, db: Session = Depends(get_db)):
-    """Move rows from one file schema to another. Expects JSON body:
-    {"source_schema": "proj_x", "target_schema": "proj_y", "table": "submissions", "row_ids": [..]}
-    Requires authentication and ownership of both files.
-    """
+    """Move rows between file schemas."""
     try:
         body = await request.json()
     except Exception:
@@ -1217,16 +1154,13 @@ async def move_rows(request: Request, db: Session = Depends(get_db)):
 @router.post("/logout/")
 def logout():
     resp = JSONResponse({"message": "Logged out"})
-    # clear the HttpOnly cookie by setting an expired cookie
     resp.set_cookie("access_token", "", httponly=True, samesite="lax", max_age=0)
     return resp
 
 
 @router.get("/codebook")
 async def get_codebook(codebook_id: str = Query(None), db: Session = Depends(get_db)):
-    """Return a codebook stored in a File record with file_type='codebook'.
-    """
-    # First try to find a matching file (by schemaname or filename or id)
+    """Get a codebook file."""
     file_rec = None
     if codebook_id:
         # try schemaname match (include comparisons)
@@ -1252,7 +1186,11 @@ async def get_codebook(codebook_id: str = Query(None), db: Session = Depends(get
                 res = conn.execute(text(f'SELECT file_text FROM "{schema}".content_store LIMIT 1'))
                 row = res.fetchone()
                 if row:
-                    return JSONResponse({"codebook": row[0]})
+                    return JSONResponse({
+                        "codebook": row[0],
+                        "systemprompt": file_rec.systemprompt,
+                        "userprompt": file_rec.userprompt
+                    })
                 else:
                     return JSONResponse({"error": "Codebook content not found in file"}, status_code=404)
         except Exception as e:
@@ -1305,7 +1243,6 @@ async def parse_codebook(codebook_id: str = Query(None), db: Session = Depends(g
 
 @router.get("/list-codebooks")
 async def list_codebooks(db: Session = Depends(get_db)):
-    # Return DB-backed codebook files including saved comparisons
     codebooks = []
     try:
         files = db.query(File).filter(File.file_type.in_(['codebook', 'codebook_comparison'])).all()
@@ -1326,10 +1263,7 @@ async def list_codebooks(db: Session = Depends(get_db)):
 
 @router.post("/save-file-codebook/")
 async def save_project_codebook(request: Request, schema_name: str = Form(...), content: str = Form(...), db: Session = Depends(get_db)):
-    """Save codebook content into a Postgres file schema's content_store table.
-    Requires authentication and file ownership.
-    """
-    # Resolve authenticated user from token
+    """Save codebook content to file schema."""
     user_id = get_user_id_from_request(request)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -1340,7 +1274,6 @@ async def save_project_codebook(request: Request, schema_name: str = Form(...), 
     if not file_rec:
         raise HTTPException(status_code=404, detail="File/project not found or you do not have permission")
 
-    # Ensure content_store table exists and upsert the single row
     display_name = None
     try:
         # Try to read optional display_name from form data
@@ -1350,7 +1283,6 @@ async def save_project_codebook(request: Request, schema_name: str = Form(...), 
     except Exception:
         display_name = None
 
-    # Debug logging to help diagnose save failures
     try:
         print(f"[DEBUG] save_project_codebook called; authenticated={bool(user_id)}, user_id={user_id}, schema={schema}")
         try:
@@ -1492,11 +1424,9 @@ def project_entries(schema: str = Query(..., description="File schema name"), li
     if schema.endswith(".db"):
         schema = schema[:-3]
 
-    # Validate schema name (allow only letters, numbers, and underscore, must start with letter)
     if not re.match(r"^[A-Za-z][A-Za-z0-9_]*$", schema):
         raise HTTPException(status_code=400, detail="Invalid schema name")
 
-    # Build queries for submissions and comments inside the provided schema
     submissions = []
     comments = []
     sub_count = 0
@@ -1595,9 +1525,12 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
         # Call AI filter functions and print their responses
         posts_filtered = None
         comments_filtered = None
+        system_prompt = ""
+        user_prompt = ""
         try:
             if submissions_text and submissions_text.strip():
-                posts_filtered = filter_posts_with_ai(prompt or "", submissions_text, api_key)
+                result = filter_posts_with_ai(prompt or "", submissions_text, api_key)
+                posts_filtered, system_prompt, user_prompt = result
                 print(f"[filter-data] posts_filtered: {posts_filtered}")
             else:
                 posts_filtered = '[]'
@@ -1751,7 +1684,7 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
                 try:
                     print(f"[filter-data] Creating file metadata for schema {new_schema} (user={user_id})")
                     with DatabaseManager() as dm:
-                        file_rec = File(user_id=user_id, filename=name or new_schema, schemaname=new_schema, file_type='filtered_data')
+                        file_rec = File(user_id=user_id, filename=name or new_schema, schemaname=new_schema, file_type='filtered_data', systemprompt=system_prompt, userprompt=user_prompt)
                         dm.session.add(file_rec)
                         dm.session.flush()
                         try:
@@ -1787,7 +1720,6 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
 
 @router.post("/generate-codebook/")
 async def generate_codebook(request: Request, database: str = Form("original"), api_key: str = Form(...), prompt: str = Form(""), name: str = Form(...), description: str = Form(None), project_id: int = Form(None)):
-    # Read a Postgres file schema, assemble submissions/comments into text, log it.
     schema = (database or "").strip()
 
     if not schema.startswith('proj_'):
@@ -1829,8 +1761,10 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
 
         try:
             print("[INFO] generate_codebook: calling generate_codebook function for MODEL_1")
-            raw_out = generate_codebook_function(assembled, api_key, "", "", prompt, MODEL=MODEL_1)
-            codebook_text = await raw_out if asyncio.iscoroutine(raw_out) or inspect.isawaitable(raw_out) else raw_out
+            result = generate_codebook_function(assembled, api_key, "", "", prompt, MODEL=MODEL_1)
+            if asyncio.iscoroutine(result) or inspect.isawaitable(result):
+                result = await result
+            codebook_text, system_prompt, user_prompt = result
         except Exception as e:
             print(f"Error generating codebook for schema {schema}: {e}")
             traceback.print_exc()
@@ -1862,7 +1796,7 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
 
             # create file record and file_tables metadata
             with DatabaseManager() as dm:
-                file_rec = File(user_id=user_id, filename=name, schemaname=new_schema, file_type='codebook', description=final_description)
+                file_rec = File(user_id=user_id, filename=name, schemaname=new_schema, file_type='codebook', description=final_description, systemprompt=system_prompt, userprompt=user_prompt)
                 dm.session.add(file_rec)
                 dm.session.flush()
                 dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name='content_store', row_count=1)
@@ -2084,9 +2018,12 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
 
         # Attempt classification using the provided codebook and API key
         classification_output = ""
+        system_prompt = ""
+        user_prompt = ""
         try:
             if codebook_text and api_key:
-                classification_output = classify_posts(codebook_text, assembled, methodology or "", api_key)
+                result = classify_posts(codebook_text, assembled, methodology or "", api_key)
+                classification_output, system_prompt, user_prompt = result
             else:
                 classification_output = "API request error"
         except Exception:
@@ -2109,7 +2046,7 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
 
                     # create file row and table metadata
                     with DatabaseManager() as dm:
-                        file_rec = File(user_id=user_id, filename=display_name, schemaname=new_schema, file_type='coding')
+                        file_rec = File(user_id=user_id, filename=display_name, schemaname=new_schema, file_type='coding', systemprompt=system_prompt, userprompt=user_prompt)
                         dm.session.add(file_rec)
                         dm.session.flush()
                         dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name='content_store', row_count=1)

@@ -19,6 +19,8 @@ export default function ViewCodebook() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [viewMode, setViewMode] = useState("markdown");
+  const [systemPrompt, setSystemPrompt] = useState("");
+  const [userPrompt, setUserPrompt] = useState("");
 
   const fetchAvailableCodebooks = async () => {
     try {
@@ -120,8 +122,12 @@ export default function ViewCodebook() {
       const data = await response.json();
       if (data.codebook) {
         setCodebookContent(data.codebook);
+        setSystemPrompt(data.systemprompt || "");
+        setUserPrompt(data.userprompt || "");
       } else {
         setCodebookContent("");
+        setSystemPrompt("");
+        setUserPrompt("");
       }
     } catch (err) {
       setError(err.message);
@@ -208,8 +214,10 @@ export default function ViewCodebook() {
             <button
               onClick={() => setViewMode("markdown")}
               disabled={viewMode === "markdown"}
+              className="view-button"
               style={{
-                padding: "8px 12px",
+                padding: "8px 16px",
+                fontSize: "14px",
                 cursor: viewMode === "markdown" ? "default" : "pointer",
               }}
             >
@@ -218,30 +226,14 @@ export default function ViewCodebook() {
             <button
               onClick={() => setViewMode("tree")}
               disabled={viewMode === "tree"}
+              className="view-button"
               style={{
-                padding: "8px 12px",
+                padding: "8px 16px",
+                fontSize: "14px",
                 cursor: viewMode === "tree" ? "default" : "pointer",
               }}
             >
               Show Tree
-            </button>
-            <button
-              onClick={() => {
-                const selObj = availableCodebooks.find(
-                  (cb) => cb.id === selectedCodebook,
-                );
-                const codebookName =
-                  selObj?.metadata?.schema || selObj?.schema_name || selObj?.id;
-                navigate("/compare-codebook", {
-                  state: { codebookA: codebookName },
-                });
-              }}
-              style={{
-                padding: "8px 12px",
-                cursor: "pointer",
-              }}
-            >
-              Compare
             </button>
           </div>
 
@@ -268,6 +260,8 @@ export default function ViewCodebook() {
                     saveIdFieldName={"schema_name"}
                     saveAsProject={true}
                     projectSchema={projectSchema}
+                    systemPrompt={systemPrompt}
+                    userPrompt={userPrompt}
                     onSaved={(resp) => {
                       if (typeof resp === "string") {
                         if (resp !== selectedCodebook) {

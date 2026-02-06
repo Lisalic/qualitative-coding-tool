@@ -17,6 +17,8 @@ export default function MarkdownView({
   saveIdFieldName = "schema_name",
   onSaved = null,
   emptyLabel = "No item selected",
+  systemPrompt = "",
+  userPrompt = "",
 }) {
   const [content, setContent] = useState("");
   const [loading, setLoading] = useState(true);
@@ -24,6 +26,8 @@ export default function MarkdownView({
   const [isEditing, setIsEditing] = useState(false);
   const [editedContent, setEditedContent] = useState("");
   const [newName, setNewName] = useState("");
+  const [showSystemPrompt, setShowSystemPrompt] = useState(false);
+  const [showUserPrompt, setShowUserPrompt] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -209,33 +213,61 @@ export default function MarkdownView({
                   flex: 1,
                   display: "flex",
                   justifyContent: "flex-end",
+                  flexDirection: "column",
+                  alignItems: "flex-end",
                   gap: "8px",
                 }}
               >
                 {selectedId && (
                   <>
-                    <button
-                      onClick={() => {
-                        navigate("/compare-coding", {
-                          state: { codingA: selectedId },
-                        });
-                      }}
-                      className="view-button"
-                      style={{ fontSize: "14px", padding: "8px 16px" }}
-                    >
-                      Compare
-                    </button>
-                    <button
-                      onClick={() => {
-                        setIsEditing(true);
-                        setEditedContent(content);
-                        setNewName(title || selectedId);
-                      }}
-                      className="view-button"
-                      style={{ fontSize: "14px", padding: "8px 16px" }}
-                    >
-                      Edit
-                    </button>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <button
+                        onClick={() => {
+                          navigate("/compare-coding", {
+                            state: { codingA: selectedId },
+                          });
+                        }}
+                        className="view-button"
+                        style={{ fontSize: "14px", padding: "8px 16px" }}
+                      >
+                        Compare
+                      </button>
+                      <button
+                        onClick={() => {
+                          setIsEditing(true);
+                          setEditedContent(content);
+                          setNewName(title || selectedId);
+                        }}
+                        className="view-button"
+                        style={{ fontSize: "14px", padding: "8px 16px" }}
+                      >
+                        Edit
+                      </button>
+                    </div>
+                    {systemPrompt && (
+                      <button
+                        onClick={() => setShowSystemPrompt(!showSystemPrompt)}
+                        className="view-button"
+                        style={{
+                          padding: "8px 16px",
+                          fontSize: "14px",
+                        }}
+                      >
+                        {showSystemPrompt ? "Hide" : "Show"} System Prompt
+                      </button>
+                    )}
+                    {userPrompt && (
+                      <button
+                        onClick={() => setShowUserPrompt(!showUserPrompt)}
+                        className="view-button"
+                        style={{
+                          padding: "8px 16px",
+                          fontSize: "14px",
+                        }}
+                      >
+                        {showUserPrompt ? "Hide" : "Show"} User Prompt
+                      </button>
+                    )}
                   </>
                 )}
               </div>
@@ -243,6 +275,56 @@ export default function MarkdownView({
           </>
         )}
       </div>
+
+      {(showSystemPrompt || showUserPrompt) && (
+        <div
+          style={{
+            marginTop: "20px",
+            width: "100%",
+            display: "flex",
+            justifyContent: "flex-start",
+          }}
+        >
+          <div style={{ width: "100%", maxWidth: "800px" }}>
+            {showSystemPrompt && (
+              <div
+                style={{
+                  backgroundColor: "#1a1a1a",
+                  padding: "10px",
+                  borderRadius: "4px",
+                  marginTop: "5px",
+                  color: "#ccc",
+                  fontFamily: "monospace",
+                  whiteSpace: "pre-wrap",
+                  maxHeight: "200px",
+                  overflowY: "auto",
+                  maxWidth: "800px",
+                }}
+              >
+                {systemPrompt}
+              </div>
+            )}
+            {showUserPrompt && (
+              <div
+                style={{
+                  backgroundColor: "#1a1a1a",
+                  padding: "10px",
+                  borderRadius: "4px",
+                  marginTop: "5px",
+                  color: "#ccc",
+                  fontFamily: "monospace",
+                  whiteSpace: "pre-wrap",
+                  maxHeight: "200px",
+                  overflowY: "auto",
+                  maxWidth: "800px",
+                }}
+              >
+                {userPrompt}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {loading && <p style={{ color: "#ffffff" }}>Loading...</p>}
       {error && <p className="error-message">{error}</p>}

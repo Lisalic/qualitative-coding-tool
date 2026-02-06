@@ -15,8 +15,8 @@ export default function Import() {
     // Optionally navigate to data view or show success message
   };
 
-  const handleViewData = (dbName) => {
-    navigate("/data", { state: { selectedDatabase: dbName } });
+  const handleViewData = () => {
+    navigate("/data");
   };
 
   const handleDismissError = () => {

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { apiFetch } from "../api";
+import ReactMarkdown from "react-markdown";
 import "../styles/Home.css";
 
 export default function CompareCodebook() {
@@ -309,8 +310,8 @@ export default function CompareCodebook() {
                 {saveMessage}
               </div>
             )}
-            <div className="comparison-output" style={{ marginTop: 8 }}>
-              {comparison}
+            <div className="comparison-output">
+              <ReactMarkdown>{comparison}</ReactMarkdown>
             </div>
           </div>
         )}

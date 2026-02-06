@@ -525,13 +525,14 @@ input[type="radio"]:disabled + .radio-option {
   white-space: pre-wrap;
   background-color: #000000;
   color: #e6e6e6;
-  border: 1px solid #ffffff;
-  padding: 12px;
-  border-radius: 6px;
+  border: 2px solid #ffffff;
+  padding: 16px;
+  border-radius: 8px;
   max-height: 420px;
   overflow: auto;
   font-size: 14px;
-  box-shadow: 0 4px 6px rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 8px rgba(255, 255, 255, 0.15);
+  margin-top: 16px;
 }
 
 .select-compact:focus {
