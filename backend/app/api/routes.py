@@ -1935,6 +1935,35 @@ async def compare_codings(request: Request, coding_a: str = Form(...), coding_b:
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 
+@router.post("/summarize-coding/")
+async def summarize_coding(request: Request, coding: str = Form(...), api_key: str = Form(...), model: str = Form(None), prompt: str = Form("")):
+    """Summarize a coding output stored in Postgres schema by calling the LLM and return the summary."""
+    schema = (coding or "").strip()
+
+    if not schema.startswith("proj_"):
+        return JSONResponse({"error": "schema name must be proj_<id>"}, status_code=400)
+
+    if not api_key:
+        return JSONResponse({"error": "api_key is required"}, status_code=400)
+
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(text(f'SELECT file_text FROM "{schema}".content_store LIMIT 1')).fetchone()
+
+        coding_data = (row[0] if row else "") or ""
+
+        if not coding_data:
+            return JSONResponse({"error": "No content found in coding"}, status_code=400)
+
+        from scripts.summarize_coding import summarize_coding as summarize_coding_function
+
+        summary = summarize_coding_function(coding_data, prompt, api_key, model)
+        return JSONResponse({"summary": summary})
+    except Exception as exc:
+        traceback.print_exc()
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
 @router.post("/apply-codebook/")
 async def apply_codebook(request: Request, database: str = Form(...), codebook: str = Form(...), methodology: str = Form(""), report_name: str = Form(None), api_key: str = Form(...)):
     """Open the Postgres schema provided by `database`, read `submissions.title`/`selftext`

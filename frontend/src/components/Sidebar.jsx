@@ -58,6 +58,7 @@ export default function Sidebar() {
     ["Apply Codebook", "/codebook-apply"],
     ["Compare Codebook", "/compare-codebook"],
     ["Compare Coding", "/compare-coding"],
+    ["Summarize Coding", "/summarize-coding"],
     ["View Coding", "/coding-view"],
   ];
 

@@ -12,6 +12,7 @@ import ViewCoding from "./pages/ViewCoding";
 import Project from "./pages/Project";
 import CompareCodebook from "./pages/CompareCodebook";
 import CompareCoding from "./pages/CompareCoding";
+import SummarizeCoding from "./pages/SummarizeCoding";
 import Landing from "./pages/Landing";
 import { apiFetch } from "./api";
 import Login from "./pages/Login";
@@ -142,6 +143,14 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <CompareCoding />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/summarize-coding"
+                element={
+                  <ProtectedRoute>
+                    <SummarizeCoding />
                   </ProtectedRoute>
                 }
               />
