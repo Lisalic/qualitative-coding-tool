@@ -3,6 +3,7 @@ import ActionForm from "../components/ActionForm";
 import PromptManager from "../components/PromptManager";
 import { useState, useEffect } from "react";
 import { apiFetch } from "../api";
+import { AI_MODELS } from "../lib/constants";
 import "../styles/Home.css";
 
 export default function Filter() {
@@ -18,6 +19,7 @@ export default function Filter() {
   const [selectedProject, setSelectedProject] = useState("");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [model, setModel] = useState("tngtech/deepseek-r1t2-chimera:free");
 
   const EXAMPLE_PROMPT = `Act as a qualitative research assistant tasked with cleaning raw data transcripts for analysis. For each input item, decide whether it should be kept or removed. Apply these rules: remove spam/automated posts, remove obvious duplicates, and remove non-topical noise. Keep authentic human discussion and on-topic content.`;
 
@@ -112,6 +114,7 @@ export default function Filter() {
       const requestData = new FormData();
       requestData.append("api_key", savedApiKey);
       requestData.append("prompt", formData.filterPrompt);
+      if (model) requestData.append("model", model);
       // include desired output name if provided
       if (formData.name) {
         requestData.append("name", formData.name);
@@ -235,6 +238,14 @@ export default function Filter() {
           className: "load-prompt-btn",
         },
       ],
+    },
+    {
+      id: "model",
+      label: "AI Model",
+      type: "select",
+      value: model,
+      onChange: (v) => setModel(v),
+      options: AI_MODELS,
     },
   ];
 

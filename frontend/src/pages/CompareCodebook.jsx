@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { apiFetch } from "../api";
 import ReactMarkdown from "react-markdown";
+import { AI_MODELS } from "../lib/constants";
 import "../styles/Home.css";
 
 export default function CompareCodebook() {
@@ -12,7 +13,7 @@ export default function CompareCodebook() {
   const [loading, setLoading] = useState(false);
   const [comparison, setComparison] = useState("");
   const [error, setError] = useState("");
-  const [model, setModel] = useState("");
+  const [model, setModel] = useState("tngtech/deepseek-r1t2-chimera:free");
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [projects, setProjects] = useState([]);
@@ -113,7 +114,7 @@ export default function CompareCodebook() {
                 <div className="compare-card">
                   <div className="compare-toolbar">Codebook A</div>
                   <select
-                    className="select-compact"
+                    className="form-input"
                     value={a}
                     onChange={(e) => setA(e.target.value)}
                   >
@@ -146,7 +147,7 @@ export default function CompareCodebook() {
                 <div className="compare-card">
                   <div className="compare-toolbar">Codebook B</div>
                   <select
-                    className="select-compact"
+                    className="form-input"
                     value={b}
                     onChange={(e) => setB(e.target.value)}
                   >
@@ -167,43 +168,21 @@ export default function CompareCodebook() {
             <div>
               <label style={{ display: "block", marginBottom: 6 }}>Model</label>
               <select
-                className="model-select"
+                className="form-input"
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
               >
-                <option value="tngtech/deepseek-r1t2-chimera:free">
-                  tngtech/deepseek-r1t2-chimera:free
-                </option>
-                <option value="google/gemini-2.0-flash-exp:free">
-                  google/gemini-2.0-flash-exp:free
-                </option>
-                <option value="tngtech/deepseek-r1t-chimera:free">
-                  tngtech/deepseek-r1t-chimera:free
-                </option>
-                <option value="z-ai/glm-4.5-air:free">
-                  z-ai/glm-4.5-air:free
-                </option>
-                <option value="deepseek/deepseek-r1-0528:free">
-                  deepseek/deepseek-r1-0528:free
-                </option>
-                <option value="tngtech/tng-r1t-chimera:free">
-                  tngtech/tng-r1t-chimera:free
-                </option>
-                <option value="nvidia/nemotron-3-nano-30b-a3b:free">
-                  nvidia/nemotron-3-nano-30b-a3b:free
-                </option>
-                <option value="meta-llama/llama-3.3-70b-instruct:free">
-                  meta-llama/llama-3.3-70b-instruct:free
-                </option>
-                <option value="google/gemma-3-27b-it:free">
-                  google/gemma-3-27b-it:free
-                </option>
+                {AI_MODELS.map((modelOption) => (
+                  <option key={modelOption.value} value={modelOption.value}>
+                    {modelOption.label}
+                  </option>
+                ))}
               </select>
             </div>
 
             <div style={{ marginTop: 12 }}>
               <label style={{ display: "block", marginBottom: 6 }}>
-                Additional Instructions (Optional)
+                Prompt
               </label>
               <textarea
                 value={additionalPrompt}
@@ -312,6 +291,7 @@ export default function CompareCodebook() {
                   Save to project:
                 </label>
                 <select
+                  className="form-input"
                   value={selectedProject}
                   onChange={(e) => setSelectedProject(e.target.value)}
                 >

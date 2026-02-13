@@ -3,6 +3,7 @@ import { apiFetch } from "../api";
 import { useNavigate } from "react-router-dom";
 import ActionForm from "../components/ActionForm";
 import PromptManager from "../components/PromptManager";
+import { AI_MODELS } from "../lib/constants";
 import "../styles/Home.css";
 import "../styles/Data.css";
 
@@ -23,6 +24,7 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
   const [description, setDescription] = useState("");
   const [saveMessage, setSaveMessage] = useState("");
   const [saveMessageType, setSaveMessageType] = useState("success");
+  const [model, setModel] = useState("tngtech/deepseek-r1t2-chimera:free");
 
   useEffect(() => {
     fetchDatabases();
@@ -139,6 +141,7 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
       requestData.append("api_key", savedApiKey);
       requestData.append("database", formData.database || database);
       if (formData.prompt) requestData.append("prompt", formData.prompt);
+      if (model) requestData.append("model", model);
 
       if (selectedProject) {
         requestData.append("project_id", selectedProject);
@@ -287,6 +290,14 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
           className: "load-prompt-btn",
         },
       ],
+    },
+    {
+      id: "model",
+      label: "AI Model",
+      type: "select",
+      value: model,
+      onChange: (v) => setModel(v),
+      options: AI_MODELS,
     },
     {
       id: "name",

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import ActionForm from "../components/ActionForm";
 import PromptManager from "../components/PromptManager";
+import { AI_MODELS } from "../lib/constants";
 import "../styles/Home.css";
 import { apiFetch } from "../api";
 
@@ -24,6 +25,7 @@ export default function ApplyCodebook() {
   const [selectedProject, setSelectedProject] = useState("");
   const [saveMessage, setSaveMessage] = useState("");
   const [saveMessageType, setSaveMessageType] = useState("success");
+  const [model, setModel] = useState("tngtech/deepseek-r1t2-chimera:free");
 
   useEffect(() => {
     fetchCodebooks();
@@ -145,6 +147,7 @@ export default function ApplyCodebook() {
       requestData.append("report_name", formData.report_name);
       requestData.append("codebook", formData.codebook);
       requestData.append("methodology", formData.methodology);
+      if (model) requestData.append("model", model);
       if (formData.description)
         requestData.append("description", formData.description);
       if (selectedProject) {
@@ -312,6 +315,14 @@ export default function ApplyCodebook() {
       ],
       placeholder: "Enter your coding methodology or leave blank...",
       rows: 4,
+    },
+    {
+      id: "model",
+      label: "AI Model",
+      type: "select",
+      value: model,
+      onChange: (v) => setModel(v),
+      options: AI_MODELS,
     },
     {
       id: "report_name",

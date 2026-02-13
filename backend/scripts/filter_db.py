@@ -9,7 +9,7 @@ FREE_MODEL = "google/gemini-2.0-flash-exp:free"
 MAX_RETRIES = 3
 INITIAL_RETRY_DELAY = 2  
 
-def get_client(system_prompt: str, user_prompt: str, api_key: str) -> str:
+def get_client(system_prompt: str, user_prompt: str, api_key: str, model: str = FREE_MODEL) -> str:
     if not api_key:
         raise ValueError("OpenRouter API key is required")
     for attempt in range(1, MAX_RETRIES + 1):
@@ -19,7 +19,7 @@ def get_client(system_prompt: str, user_prompt: str, api_key: str) -> str:
                 base_url=OPENROUTER_URL,
             )
             response = client.chat.completions.create(
-                model=FREE_MODEL,
+                model=model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
@@ -40,7 +40,7 @@ def get_client(system_prompt: str, user_prompt: str, api_key: str) -> str:
             print(f"Retrying in {wait_time}s...")
             time.sleep(wait_time)
 
-def filter_posts_with_ai(filter_prompt: str, posts_content: str, api_key: str) -> tuple[str, str, str]:
+def filter_posts_with_ai(filter_prompt: str, posts_content: str, api_key: str, model: str = "") -> tuple[str, str, str]:
     """
     Use AI to filter posts based on a given prompt and return results in Python format.
 
@@ -73,7 +73,8 @@ CRITICAL: Return ONLY the raw Python array with NO markdown, NO backticks, NO co
     user_prompt = f"Here are the posts to filter:\n\n{posts_content}"
 
     try:
-        response = get_client(system_prompt, user_prompt, api_key)
+        chosen_model = model or FREE_MODEL
+        response = get_client(system_prompt, user_prompt, api_key, chosen_model)
         print(response[:100])
         print("...")
         print(response[-100:])
@@ -85,7 +86,7 @@ CRITICAL: Return ONLY the raw Python array with NO markdown, NO backticks, NO co
         return error_result, system_prompt, user_prompt
 
 
-def filter_comments_with_ai(filter_prompt: str, comments_content: str, api_key: str) -> tuple[str, str, str]:
+def filter_comments_with_ai(filter_prompt: str, comments_content: str, api_key: str, model: str = "") -> tuple[str, str, str]:
     """
     Use AI to filter comments based on a given prompt and return results as a Python list.
 
@@ -110,7 +111,8 @@ CRITICAL: Return ONLY the raw Python array with NO markdown, NO backticks, NO co
     user_prompt = f"Here are the comments to filter:\n\n{comments_content}"
 
     try:
-        response = get_client(system_prompt, user_prompt, api_key)
+        chosen_model = model or FREE_MODEL
+        response = get_client(system_prompt, user_prompt, api_key, chosen_model)
         print(response[:100])
         print("...")
         print(response[-100:])

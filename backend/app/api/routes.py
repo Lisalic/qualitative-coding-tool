@@ -1476,7 +1476,7 @@ def project_entries(schema: str = Query(..., description="File schema name"), li
 
 
 @router.post("/filter-data/")
-async def filter_data(request: Request, api_key: str = Form(...), prompt: str = Form(...), database: str = Form(None), name: str = Form(...)):
+async def filter_data(request: Request, api_key: str = Form(...), prompt: str = Form(...), database: str = Form(None), name: str = Form(...), model: str = Form("")):
     """Read a Postgres file schema (provided in `database`), assemble submissions and comments,
     merge into a single string and print it to the server stdout.
     """
@@ -1533,14 +1533,14 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
         user_prompt = ""
         try:
             if submissions_text and submissions_text.strip():
-                result = filter_posts_with_ai(prompt or "", submissions_text, api_key)
+                result = filter_posts_with_ai(prompt or "", submissions_text, api_key, model)
                 posts_filtered, system_prompt, user_prompt = result
                 print(f"[filter-data] posts_filtered: {posts_filtered}")
             else:
                 posts_filtered = '[]'
 
             if comments_text and comments_text.strip():
-                comments_filtered = filter_comments_with_ai(prompt or "", comments_text, api_key)
+                comments_filtered = filter_comments_with_ai(prompt or "", comments_text, api_key, model)
                 print(f"[filter-data] comments_filtered: {comments_filtered}")
             else:
                 comments_filtered = '[]'
@@ -1723,7 +1723,7 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
 
 
 @router.post("/generate-codebook/")
-async def generate_codebook(request: Request, database: str = Form("original"), api_key: str = Form(...), prompt: str = Form(""), name: str = Form(...), description: str = Form(None), project_id: int = Form(None)):
+async def generate_codebook(request: Request, database: str = Form("original"), api_key: str = Form(...), prompt: str = Form(""), name: str = Form(...), description: str = Form(None), project_id: int = Form(None), model: str = Form("")):
     schema = (database or "").strip()
 
     if not schema.startswith('proj_'):
@@ -1764,8 +1764,9 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
 
 
         try:
-            print("[INFO] generate_codebook: calling generate_codebook function for MODEL_1")
-            result = generate_codebook_function(assembled, api_key, "", "", prompt, MODEL=MODEL_1)
+            print("[INFO] generate_codebook: calling generate_codebook function")
+            chosen_model = model or MODEL_1
+            result = generate_codebook_function(assembled, api_key, "", "", prompt, MODEL=chosen_model)
             if asyncio.iscoroutine(result) or inspect.isawaitable(result):
                 result = await result
             codebook_text, system_prompt, user_prompt = result
@@ -1965,7 +1966,7 @@ async def summarize_coding(request: Request, coding: str = Form(...), api_key: s
 
 
 @router.post("/apply-codebook/")
-async def apply_codebook(request: Request, database: str = Form(...), codebook: str = Form(...), methodology: str = Form(""), report_name: str = Form(None), api_key: str = Form(...)):
+async def apply_codebook(request: Request, database: str = Form(...), codebook: str = Form(...), methodology: str = Form(""), report_name: str = Form(None), api_key: str = Form(...), model: str = Form("")):
     """Open the Postgres schema provided by `database`, read `submissions.title`/`selftext`
     and `comments.body`, assemble them into a single string, print it to stdout and
     return a preview in the response.
@@ -2059,7 +2060,7 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
         user_prompt = ""
         try:
             if codebook_text and api_key:
-                result = classify_posts(codebook_text, assembled, methodology or "", api_key)
+                result = classify_posts(codebook_text, assembled, methodology or "", api_key, model)
                 classification_output, system_prompt, user_prompt = result
             else:
                 classification_output = "API request error"

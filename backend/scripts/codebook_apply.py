@@ -6,7 +6,7 @@ FREE_MODEL = "tngtech/deepseek-r1t2-chimera:free"
 MAX_RETRIES = 3
 INITIAL_RETRY_DELAY = 2  
 
-def get_client(system_prompt: str, user_prompt: str, api_key: str) -> str:
+def get_client(system_prompt: str, user_prompt: str, api_key: str, model: str = FREE_MODEL) -> str:
     if not api_key:
         raise ValueError("OpenRouter API key is required")
     print("Initiating API call to OpenRouter...")
@@ -17,7 +17,7 @@ def get_client(system_prompt: str, user_prompt: str, api_key: str) -> str:
                 base_url=OPENROUTER_URL,
             )
             response = client.chat.completions.create(
-                model=FREE_MODEL,
+                model=model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
@@ -39,7 +39,7 @@ def get_client(system_prompt: str, user_prompt: str, api_key: str) -> str:
             print(f"Retrying in {wait_time}s...")
             time.sleep(wait_time)
 
-def classify_posts(codebook: str, posts_content: str, methodology: str, api_key: str) -> tuple[str, str, str]:
+def classify_posts(codebook: str, posts_content: str, methodology: str, api_key: str, model: str = "") -> tuple[str, str, str]:
     
     print("Starting codebook application process...")
     
@@ -78,7 +78,8 @@ def classify_posts(codebook: str, posts_content: str, methodology: str, api_key:
     """
     
     print("Prompts prepared. Sending request to AI model...")
-    result = get_client(system_prompt, user_prompt, api_key)
+    chosen_model = model or FREE_MODEL
+    result = get_client(system_prompt, user_prompt, api_key, chosen_model)
     print("Response received from AI model. Codebook application completed.")
     return result, system_prompt, user_prompt
 

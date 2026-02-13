@@ -428,9 +428,10 @@ input[type="radio"]:disabled + .radio-option {
 
 .compare-panel .panel-title {
   font-weight: 700;
-  font-size: 14px;
-  color: #cfcfcf;
-  margin: 0;
+  font-size: 2.5rem;
+  color: #ffffff;
+  margin: 0 0 1rem 0;
+  text-align: center;
 }
 
 .compare-actions {
@@ -445,6 +446,7 @@ input[type="radio"]:disabled + .radio-option {
   padding: 14px;
   border-radius: 8px;
   min-height: 120px;
+  width: 550px;
   display: flex;
   flex-direction: column;
   gap: 12px;
