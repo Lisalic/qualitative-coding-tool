@@ -1347,7 +1347,11 @@ async def get_coded_data_query(coded_id: str = Query(None), db: Session = Depend
                 res = conn.execute(text(f'SELECT file_text FROM "{schema}".content_store LIMIT 1'))
                 row = res.fetchone()
                 if row:
-                    return JSONResponse({"coded_data": row[0]})
+                    return JSONResponse({
+                        "coded_data": row[0],
+                        "systemprompt": file_rec.systemprompt,
+                        "userprompt": file_rec.userprompt
+                    })
                 else:
                     return JSONResponse({"error": "Coded data content not found in file"}, status_code=404)
         except Exception as e:
@@ -1837,7 +1841,7 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
 
 
 @router.post("/compare-codebooks/")
-async def compare_codebooks(request: Request, codebook_a: str = Form(...), codebook_b: str = Form(...), api_key: str = Form(...), model: str = Form(None)):
+async def compare_codebooks(request: Request, codebook_a: str = Form(...), codebook_b: str = Form(...), api_key: str = Form(...), model: str = Form(None), prompt: str = Form("")):
     """Compare two codebooks stored in Postgres schemas by calling the LLM and return the full message."""
     schema_a = (codebook_a or "").strip()
     schema_b = (codebook_b or "").strip()
@@ -1871,6 +1875,8 @@ async def compare_codebooks(request: Request, codebook_a: str = Form(...), codeb
         )
 
         user_prompt = f"Codebook A:\n{text_a}\n\n---\n\nCodebook B:\n{text_b}\n\nPlease compare them in detail."
+        if prompt.strip():
+            user_prompt += f"\n\nAdditional instructions: {prompt.strip()}"
 
         # choose model if provided, otherwise use MODEL_3 if available
         chosen_model = model or MODEL_3
@@ -1884,7 +1890,7 @@ async def compare_codebooks(request: Request, codebook_a: str = Form(...), codeb
 
 
 @router.post("/compare-codings/")
-async def compare_codings(request: Request, coding_a: str = Form(...), coding_b: str = Form(...), api_key: str = Form(...), model: str = Form(None)):
+async def compare_codings(request: Request, coding_a: str = Form(...), coding_b: str = Form(...), api_key: str = Form(...), model: str = Form(None), prompt: str = Form("")):
     """Compare two coding outputs stored in Postgres schemas by calling the LLM and return the full message."""
     schema_a = (coding_a or "").strip()
     schema_b = (coding_b or "").strip()
@@ -1917,6 +1923,8 @@ async def compare_codings(request: Request, coding_a: str = Form(...), coding_b:
         )
 
         user_prompt = f"Coding A:\n{text_a}\n\n---\n\nCoding B:\n{text_b}\n\nPlease compare them in detail."
+        if prompt.strip():
+            user_prompt += f"\n\nAdditional instructions: {prompt.strip()}"
 
         chosen_model = model or MODEL_3
 
@@ -2049,6 +2057,13 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
                         file_rec = File(user_id=user_id, filename=display_name, schemaname=new_schema, file_type='coding', systemprompt=system_prompt, userprompt=user_prompt)
                         dm.session.add(file_rec)
                         dm.session.flush()
+                        # Link the coding file to the same projects as the raw data
+                        raw_file = dm.session.query(File).filter(File.schemaname == schema, File.file_type == "raw_data").first()
+                        if raw_file:
+                            for proj in raw_file.projects:
+                                if proj not in file_rec.projects:
+                                    file_rec.projects.append(proj)
+                            dm.session.flush()
                         dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name='content_store', row_count=1)
             except Exception as e:
                     print(f"Failed to persist classification project/schema: {e}")

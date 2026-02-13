@@ -17,6 +17,7 @@ export default function CompareCodebook() {
   const [saveMessage, setSaveMessage] = useState("");
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
+  const [additionalPrompt, setAdditionalPrompt] = useState("");
 
   useEffect(() => {
     let mounted = true;
@@ -78,6 +79,7 @@ export default function CompareCodebook() {
     form.append("codebook_b", b);
     form.append("api_key", apiKey);
     if (model) form.append("model", model);
+    if (additionalPrompt.trim()) form.append("prompt", additionalPrompt.trim());
 
     try {
       setLoading(true);
@@ -101,11 +103,11 @@ export default function CompareCodebook() {
 
   return (
     <div className="home-container">
-      <div style={{ width: "100%", maxWidth: 1000, padding: 20 }}>
-        <h1>Compare Codebook</h1>
+      <div style={{ width: "100%", maxWidth: 1400, padding: 20 }}>
+        <h1 style={{ textAlign: "center" }}>Compare Codebook</h1>
 
         <form onSubmit={submitCompare}>
-          <div className="compare-wrap">
+          <div className="compare-wrap" style={{ flexDirection: "column" }}>
             <div style={{ flex: 1 }}>
               <div className="compare-grid">
                 <div className="compare-card">
@@ -158,67 +160,83 @@ export default function CompareCodebook() {
                 </div>
               </div>
             </div>
+          </div>
 
-            <div className="compare-panel">
-              <div className="panel-title">Compare Options</div>
-              <div>
-                <label style={{ display: "block", marginBottom: 6 }}>
-                  Model
-                </label>
-                <select
-                  className="model-select"
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                >
-                  <option value="tngtech/deepseek-r1t2-chimera:free">
-                    tngtech/deepseek-r1t2-chimera:free
-                  </option>
-                  <option value="google/gemini-2.0-flash-exp:free">
-                    google/gemini-2.0-flash-exp:free
-                  </option>
-                  <option value="tngtech/deepseek-r1t-chimera:free">
-                    tngtech/deepseek-r1t-chimera:free
-                  </option>
-                  <option value="z-ai/glm-4.5-air:free">
-                    z-ai/glm-4.5-air:free
-                  </option>
-                  <option value="deepseek/deepseek-r1-0528:free">
-                    deepseek/deepseek-r1-0528:free
-                  </option>
-                  <option value="tngtech/tng-r1t-chimera:free">
-                    tngtech/tng-r1t-chimera:free
-                  </option>
-                  <option value="nvidia/nemotron-3-nano-30b-a3b:free">
-                    nvidia/nemotron-3-nano-30b-a3b:free
-                  </option>
-                  <option value="meta-llama/llama-3.3-70b-instruct:free">
-                    meta-llama/llama-3.3-70b-instruct:free
-                  </option>
-                  <option value="google/gemma-3-27b-it:free">
-                    google/gemma-3-27b-it:free
-                  </option>
-                </select>
-              </div>
+          <div className="compare-panel" style={{ marginTop: 20 }}>
+            <div className="panel-title">Compare Options</div>
+            <div>
+              <label style={{ display: "block", marginBottom: 6 }}>Model</label>
+              <select
+                className="model-select"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+              >
+                <option value="tngtech/deepseek-r1t2-chimera:free">
+                  tngtech/deepseek-r1t2-chimera:free
+                </option>
+                <option value="google/gemini-2.0-flash-exp:free">
+                  google/gemini-2.0-flash-exp:free
+                </option>
+                <option value="tngtech/deepseek-r1t-chimera:free">
+                  tngtech/deepseek-r1t-chimera:free
+                </option>
+                <option value="z-ai/glm-4.5-air:free">
+                  z-ai/glm-4.5-air:free
+                </option>
+                <option value="deepseek/deepseek-r1-0528:free">
+                  deepseek/deepseek-r1-0528:free
+                </option>
+                <option value="tngtech/tng-r1t-chimera:free">
+                  tngtech/tng-r1t-chimera:free
+                </option>
+                <option value="nvidia/nemotron-3-nano-30b-a3b:free">
+                  nvidia/nemotron-3-nano-30b-a3b:free
+                </option>
+                <option value="meta-llama/llama-3.3-70b-instruct:free">
+                  meta-llama/llama-3.3-70b-instruct:free
+                </option>
+                <option value="google/gemma-3-27b-it:free">
+                  google/gemma-3-27b-it:free
+                </option>
+              </select>
+            </div>
 
-              <div style={{ marginTop: 6 }} className="compare-actions">
-                <button
-                  className="project-tab"
-                  type="submit"
-                  disabled={loading}
-                >
-                  {loading ? "Comparing..." : "Compare"}
-                </button>
-                <button
-                  className="project-tab"
-                  type="button"
-                  onClick={() => {
-                    setComparison("");
-                    setError("");
-                  }}
-                >
-                  Clear
-                </button>
-              </div>
+            <div style={{ marginTop: 12 }}>
+              <label style={{ display: "block", marginBottom: 6 }}>
+                Additional Instructions (Optional)
+              </label>
+              <textarea
+                value={additionalPrompt}
+                onChange={(e) => setAdditionalPrompt(e.target.value)}
+                placeholder="Enter any specific instructions for the comparison..."
+                style={{
+                  width: "100%",
+                  minHeight: 80,
+                  padding: 8,
+                  backgroundColor: "#1a1a1a",
+                  color: "#fff",
+                  border: "1px solid #555",
+                  borderRadius: 4,
+                  fontFamily: "inherit",
+                  resize: "vertical",
+                }}
+              />
+            </div>
+
+            <div style={{ marginTop: 6 }} className="compare-actions">
+              <button className="project-tab" type="submit" disabled={loading}>
+                {loading ? "Comparing..." : "Compare"}
+              </button>
+              <button
+                className="project-tab"
+                type="button"
+                onClick={() => {
+                  setComparison("");
+                  setError("");
+                }}
+              >
+                Clear
+              </button>
             </div>
           </div>
         </form>

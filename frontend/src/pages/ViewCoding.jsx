@@ -14,6 +14,10 @@ export default function ViewCoding() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [projectsList, setProjectsList] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
+  const [systemPrompt, setSystemPrompt] = useState("");
+  const [userPrompt, setUserPrompt] = useState("");
+  const [codedDataContent, setCodedDataContent] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const fetchAvailableCodedData = async () => {
     try {
@@ -93,6 +97,32 @@ export default function ViewCoding() {
     }
   };
 
+  const fetchCodedData = async (codedDataId) => {
+    try {
+      setLoading(true);
+      const response = await apiFetch(
+        `/api/coded-data?coded_id=${codedDataId}`,
+      );
+      if (!response.ok) {
+        throw new Error("Failed to fetch coded data");
+      }
+      const data = await response.json();
+      if (data.coded_data) {
+        setCodedDataContent(data.coded_data);
+        setSystemPrompt(data.systemprompt || "");
+        setUserPrompt(data.userprompt || "");
+      } else {
+        setCodedDataContent("");
+        setSystemPrompt("");
+        setUserPrompt("");
+      }
+    } catch (err) {
+      console.error("Error fetching coded data:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchAvailableCodedData();
     fetchProjects();
@@ -102,6 +132,12 @@ export default function ViewCoding() {
   useEffect(() => {
     fetchAvailableCodedData();
   }, [selectedProject, projectsList]);
+
+  useEffect(() => {
+    if (selectedCodedData) {
+      fetchCodedData(selectedCodedData);
+    }
+  }, [selectedCodedData]);
 
   const fetchProjects = async () => {
     try {
@@ -178,6 +214,8 @@ export default function ViewCoding() {
               saveIdFieldName={"schema_name"}
               saveAsProject={true}
               projectSchema={selectedCodedData}
+              systemPrompt={systemPrompt}
+              userPrompt={userPrompt}
               onSaved={(resp) => {
                 if (typeof resp === "string") {
                   if (resp !== selectedCodedData) {

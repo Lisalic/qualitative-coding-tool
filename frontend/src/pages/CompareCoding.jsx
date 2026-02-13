@@ -17,6 +17,7 @@ export default function CompareCoding() {
   const [saveMessage, setSaveMessage] = useState("");
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
+  const [additionalPrompt, setAdditionalPrompt] = useState("");
 
   useEffect(() => {
     let mounted = true;
@@ -78,6 +79,7 @@ export default function CompareCoding() {
     form.append("coding_b", b);
     form.append("api_key", apiKey);
     if (model) form.append("model", model);
+    if (additionalPrompt.trim()) form.append("prompt", additionalPrompt.trim());
 
     try {
       setLoading(true);
@@ -101,11 +103,11 @@ export default function CompareCoding() {
 
   return (
     <div className="home-container">
-      <div style={{ width: "100%", maxWidth: 1000, padding: 20 }}>
-        <h1>Compare Coding</h1>
+      <div style={{ width: "100%", maxWidth: 1400, padding: 20 }}>
+        <h1 style={{ textAlign: "center" }}>Compare Coding</h1>
 
         <form onSubmit={submitCompare}>
-          <div className="compare-wrap">
+          <div className="compare-wrap" style={{ flexDirection: "column" }}>
             <div style={{ flex: 1 }}>
               <div className="compare-grid">
                 <div className="compare-card">
@@ -159,7 +161,7 @@ export default function CompareCoding() {
               </div>
             </div>
 
-            <div className="compare-panel">
+            <div className="compare-panel" style={{ marginTop: 20 }}>
               <div className="panel-title">Compare Options</div>
               <div>
                 <label style={{ display: "block", marginBottom: 6 }}>
@@ -198,6 +200,28 @@ export default function CompareCoding() {
                     google/gemma-3-27b-it:free
                   </option>
                 </select>
+              </div>
+
+              <div style={{ marginTop: 12 }}>
+                <label style={{ display: "block", marginBottom: 6 }}>
+                  Additional Instructions (Optional)
+                </label>
+                <textarea
+                  value={additionalPrompt}
+                  onChange={(e) => setAdditionalPrompt(e.target.value)}
+                  placeholder="Enter any specific instructions for the comparison..."
+                  style={{
+                    width: "100%",
+                    minHeight: 80,
+                    padding: 8,
+                    backgroundColor: "#1a1a1a",
+                    color: "#fff",
+                    border: "1px solid #555",
+                    borderRadius: 4,
+                    fontFamily: "inherit",
+                    resize: "vertical",
+                  }}
+                />
               </div>
 
               <div style={{ marginTop: 6 }} className="compare-actions">
