@@ -1939,28 +1939,37 @@ async def compare_codings(request: Request, coding_a: str = Form(...), coding_b:
 @router.post("/summarize-coding/")
 async def summarize_coding(request: Request, coding: str = Form(...), api_key: str = Form(...), model: str = Form(None), prompt: str = Form("")):
     """Summarize a coding output stored in Postgres schema by calling the LLM and return the summary."""
+    print("[summarize-coding] Endpoint called")
     schema = (coding or "").strip()
 
     if not schema.startswith("proj_"):
+        print(f"[summarize-coding] Invalid schema name: {schema}")
         return JSONResponse({"error": "schema name must be proj_<id>"}, status_code=400)
 
     if not api_key:
+        print("[summarize-coding] No API key provided")
         return JSONResponse({"error": "api_key is required"}, status_code=400)
 
     try:
+        print(f"[summarize-coding] Retrieving data from schema: {schema}")
         with engine.connect() as conn:
             row = conn.execute(text(f'SELECT file_text FROM "{schema}".content_store LIMIT 1')).fetchone()
 
         coding_data = (row[0] if row else "") or ""
+        print(f"[summarize-coding] Retrieved coding data length: {len(coding_data)}")
 
         if not coding_data:
+            print("[summarize-coding] No content found in coding data")
             return JSONResponse({"error": "No content found in coding"}, status_code=400)
 
+        print("[summarize-coding] Calling summarize_coding function")
         from scripts.summarize_coding import summarize_coding as summarize_coding_function
 
         summary = summarize_coding_function(coding_data, prompt, api_key, model)
+        print(f"[summarize-coding] Summary generated, length: {len(summary)}")
         return JSONResponse({"summary": summary})
     except Exception as exc:
+        print(f"[summarize-coding] Error: {exc}")
         traceback.print_exc()
         return JSONResponse({"error": str(exc)}, status_code=500)
 

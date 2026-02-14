@@ -124,9 +124,32 @@ export default function SummarizeCoding() {
             </div>
 
             <div style={{ marginBottom: 16 }}>
-              <label style={{ display: "block", marginBottom: 6 }}>
-                Prompt
-              </label>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  marginBottom: 6,
+                }}
+              >
+                <label style={{ marginBottom: 0 }}>Prompt</label>
+                <button
+                  className="project-tab"
+                  type="button"
+                  onClick={() =>
+                    setAdditionalPrompt(
+                      "Please provide a comprehensive summary focusing on:\n- Key themes and patterns in the coded data\n- Most frequently applied codes and their significance\n- Relationships between different codes\n- Representative examples from the data\n- Overall insights and implications",
+                    )
+                  }
+                  style={{
+                    fontSize: "12px",
+                    padding: "4px 8px",
+                    flexShrink: 0,
+                  }}
+                >
+                  Load Example Prompt
+                </button>
+              </div>
               <textarea
                 value={additionalPrompt}
                 onChange={(e) => setAdditionalPrompt(e.target.value)}

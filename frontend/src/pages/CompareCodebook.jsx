@@ -164,7 +164,6 @@ export default function CompareCodebook() {
           </div>
 
           <div className="compare-panel" style={{ marginTop: 20 }}>
-            <div className="panel-title">Compare Options</div>
             <div>
               <label style={{ display: "block", marginBottom: 6 }}>Model</label>
               <select
@@ -181,9 +180,32 @@ export default function CompareCodebook() {
             </div>
 
             <div style={{ marginTop: 12 }}>
-              <label style={{ display: "block", marginBottom: 6 }}>
-                Prompt
-              </label>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  marginBottom: 6,
+                }}
+              >
+                <label style={{ marginBottom: 0 }}>Prompt</label>
+                <button
+                  className="project-tab"
+                  type="button"
+                  onClick={() =>
+                    setAdditionalPrompt(
+                      "Please provide a detailed comparison focusing on:\n- Key differences in coding approaches\n- Overlapping themes and codes\n- Unique insights from each codebook\n- Recommendations for merging or refining the codebooks",
+                    )
+                  }
+                  style={{
+                    fontSize: "12px",
+                    padding: "4px 8px",
+                    flexShrink: 0,
+                  }}
+                >
+                  Load Example Prompt
+                </button>
+              </div>
               <textarea
                 value={additionalPrompt}
                 onChange={(e) => setAdditionalPrompt(e.target.value)}
@@ -205,16 +227,6 @@ export default function CompareCodebook() {
             <div style={{ marginTop: 6 }} className="compare-actions">
               <button className="project-tab" type="submit" disabled={loading}>
                 {loading ? "Comparing..." : "Compare"}
-              </button>
-              <button
-                className="project-tab"
-                type="button"
-                onClick={() => {
-                  setComparison("");
-                  setError("");
-                }}
-              >
-                Clear
               </button>
             </div>
           </div>

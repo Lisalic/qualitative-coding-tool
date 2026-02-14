@@ -16,9 +16,11 @@ MAX_RETRIES = 3
 INITIAL_RETRY_DELAY = 2  
 
 def get_client(system_prompt: str, user_prompt: str, api_key: str, MODEL: str) -> str:
+    print(f"[get_client] Making API call to model: {MODEL}")
     if not api_key:
         raise ValueError("OpenRouter API key is required")
     for attempt in range(1, MAX_RETRIES + 1):
+        print(f"[get_client] Attempt {attempt}/{MAX_RETRIES}")
         try:
             client = OpenAI(
                 api_key=api_key,
@@ -34,6 +36,7 @@ def get_client(system_prompt: str, user_prompt: str, api_key: str, MODEL: str) -
                 timeout=300, 
                 extra_body={"transforms": ["middle-out"]}
             )
+            print(f"[get_client] API call completed successfully")
             # Validate response and extract text robustly
             if not response:
                 raise ValueError("Empty response from model")
@@ -41,19 +44,25 @@ def get_client(system_prompt: str, user_prompt: str, api_key: str, MODEL: str) -
             # Try common attribute patterns for SDK responses
             try:
                 # openai-like object: response.choices[0].message.content
-                return response.choices[0].message.content
+                content = response.choices[0].message.content
+                print(f"[get_client] Extracted content length: {len(content)}")
+                return content
             except Exception:
                 pass
 
             try:
                 # dict-like: response['choices'][0]['message']['content']
-                return response["choices"][0]["message"]["content"]
+                content = response["choices"][0]["message"]["content"]
+                print(f"[get_client] Extracted content length: {len(content)}")
+                return content
             except Exception:
                 pass
 
             try:
                 # older-style: response.choices[0].text
-                return response.choices[0].text
+                content = response.choices[0].text
+                print(f"[get_client] Extracted content length: {len(content)}")
+                return content
             except Exception:
                 pass
 
@@ -63,11 +72,11 @@ def get_client(system_prompt: str, user_prompt: str, api_key: str, MODEL: str) -
             print("\nkeyboard interrupt")
             raise
         except Exception as e:
+            print(f"[get_client] API call failed (attempt {attempt}/{MAX_RETRIES}): {type(e).__name__}: {e}")
             if attempt == MAX_RETRIES:
                 raise
             wait_time = INITIAL_RETRY_DELAY * (2 ** (attempt - 1))
-            print(f"\nAPI call failed (attempt {attempt}/{MAX_RETRIES}): {type(e).__name__}")
-            print(f"Retrying in {wait_time}s...")
+            print(f"[get_client] Retrying in {wait_time}s...")
             time.sleep(wait_time)
 
 def generate_codebook(posts_content: str, api_key: str, previous_codebook: str = "", feedback_text: str = "", custom_prompt: str = "", MODEL: str = MODEL_1) -> tuple[str, str, str]:
