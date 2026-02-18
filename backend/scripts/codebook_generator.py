@@ -79,7 +79,7 @@ def get_client(system_prompt: str, user_prompt: str, api_key: str, MODEL: str) -
             print(f"[get_client] Retrying in {wait_time}s...")
             time.sleep(wait_time)
 
-def generate_codebook(posts_content: str, api_key: str, previous_codebook: str = "", feedback_text: str = "", custom_prompt: str = "", MODEL: str = MODEL_1) -> tuple[str, str, str]:
+def generate_codebook(posts_content: str, api_key: str, custom_prompt: str = "", MODEL: str = MODEL_1) -> tuple[str, str, str]:
     base_system_prompt = """
     Act as a qualitative researcher analyzing the provided data. Your task is to develop or refine a concise and usable **Codebook** based on an open coding process applicable to general qualitative research topics.
 
@@ -109,22 +109,6 @@ def generate_codebook(posts_content: str, api_key: str, previous_codebook: str =
     Here is the data for analysis:
 
     {posts_content}
-    """
-
-    if previous_codebook:
-        user_prompt += f"""
-
-    EXISTING CODEBOOK:
-
-    {previous_codebook}
-    """
-
-    if feedback_text:
-        user_prompt += f"""
-
-    CODEBOOK FEEDBACK (please use these suggestions to improve the codebook):
-
-    {feedback_text}
     """
 
     result = get_client(system_prompt, user_prompt, api_key, MODEL)

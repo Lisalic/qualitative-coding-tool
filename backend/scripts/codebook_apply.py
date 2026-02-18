@@ -46,9 +46,9 @@ def classify_posts(codebook: str, posts_content: str, methodology: str, api_key:
     system_prompt = f"""
     You are a highly meticulous qualitative data coder. Your task is to process the raw POSTS CONTENT by applying the codes defined in the CODEBOOK.
 
-    Operate in a general qualitative research mode: apply the codebook consistently, provide concise justifications for each applied code, include representative quotations where helpful, and follow any instructions in the provided METHODOLOGY text.
+    Operate as a qualitative researcher: apply the codebook consistently, provide concise justifications for each applied code, include representative quotations, and follow any instructions in the provided METHODOLOGY text.
 
-    **STRICT OUTPUT INSTRUCTION:** Output a single raw text report that iterates through EVERY post in the provided content. If a post is not relevant, still include the post URL line and state 'No codes applied.' beneath it.
+    **STRICT OUTPUT INSTRUCTION:** Output a single raw text report that iterates through EVERY post in the provided content. If a post is not relevant, do not include it.
 
     Then, for every post, use the following format exactly.
 
