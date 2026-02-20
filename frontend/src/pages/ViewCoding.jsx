@@ -22,6 +22,119 @@ export default function ViewCoding() {
   const [postContents, setPostContents] = useState({});
   const [viewMode, setViewMode] = useState("text"); // "text" or "table"
 
+  // Color assignment for codes
+  const getCodeColor = (code) => {
+    // Simple hash function for consistent colors
+    let hash = 0;
+    for (let i = 0; i < code.length; i++) {
+      hash = code.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const hue = Math.abs(hash) % 360;
+    return `hsl(${hue}, 70%, 60%)`;
+  };
+
+  // Get all unique codes for legend
+  const getUniqueCodes = () => {
+    const codes = new Set();
+    parsedCoding.forEach((post) => {
+      post.codeEvidence.forEach(({ code }) => codes.add(code));
+    });
+    return Array.from(codes).sort();
+  };
+
+  // Highlight text in content based on code evidence using position-based approach
+  const highlightContent = (content, codeEvidence) => {
+    if (!content || !codeEvidence.length) return content;
+
+    // Find all evidence matches with their positions
+    const intervals = [];
+    codeEvidence
+      .filter(({ evidence }) => evidence)
+      .forEach(({ code, evidence }) => {
+        // Clean evidence: remove surrounding quotes and normalize whitespace
+        const cleanEvidence = evidence
+          .replace(/^["']|["']$/g, "") // Remove surrounding quotes
+          .replace(/\s+/g, " ") // Normalize whitespace (multiple spaces/newlines to single space)
+          .trim();
+
+        // Find all occurrences in the original content
+        let searchIndex = 0;
+        while (true) {
+          const index = content.indexOf(cleanEvidence, searchIndex);
+          if (index === -1) break;
+
+          intervals.push({
+            start: index,
+            end: index + cleanEvidence.length,
+            code,
+            evidence: cleanEvidence,
+            length: cleanEvidence.length,
+          });
+
+          searchIndex = index + 1; // Move past this match
+        }
+      });
+
+    if (intervals.length === 0) return content;
+
+    // Sort intervals by start position
+    intervals.sort((a, b) => a.start - b.start);
+
+    // Merge overlapping intervals with priority rules
+    const merged = [];
+    intervals.forEach((interval) => {
+      if (merged.length === 0) {
+        merged.push(interval);
+      } else {
+        const last = merged[merged.length - 1];
+        if (interval.start >= last.end) {
+          // No overlap, add as separate interval
+          merged.push(interval);
+        } else {
+          // Overlap - merge with priority rules
+          // Priority: shorter evidence first (more specific), then alphabetical by code
+          const shouldReplace =
+            interval.length < last.length ||
+            (interval.length === last.length && interval.code < last.code);
+
+          if (shouldReplace) {
+            // Replace the last interval with this one
+            merged[merged.length - 1] = interval;
+          }
+          // Extend end if necessary
+          if (interval.end > last.end) {
+            merged[merged.length - 1].end = interval.end;
+          }
+        }
+      }
+    });
+
+    // Build HTML by splitting content into segments
+    let result = "";
+    let lastEnd = 0;
+
+    merged.forEach((interval) => {
+      // Add unhighlighted text before this interval
+      if (interval.start > lastEnd) {
+        result += content.slice(lastEnd, interval.start);
+      }
+
+      // Add highlighted text
+      const color = getCodeColor(interval.code);
+      const highlightedText = content.slice(interval.start, interval.end);
+      result += `<mark style="background-color: ${color}; color: black; padding: 2px 4px; border-radius: 3px; font-weight: bold;" title="${interval.code}: ${interval.evidence}">${highlightedText}</mark>`;
+
+      lastEnd = interval.end;
+    });
+
+    // Add remaining unhighlighted text
+    if (lastEnd < content.length) {
+      result += content.slice(lastEnd);
+    }
+
+    return result;
+  };
+
   const fetchAvailableCodedData = async () => {
     try {
       // Prefer project-backed files when a project is selected
@@ -193,14 +306,36 @@ export default function ViewCoding() {
         }
         currentPost = {
           postId: trimmed.replace("POST_ID:", "").trim(),
-          codes: [],
+          codeEvidence: [],
         };
+      } else if (trimmed.startsWith("CODE:") && currentPost) {
+        // Parse "CODE: [code_name] - EVIDENCE: [text1]§[text2]§[text3]"
+        const codeMatch = trimmed.match(
+          /^CODE:\s*(.+?)\s*-\s*EVIDENCE:\s*(.+)$/,
+        );
+        if (codeMatch) {
+          const code = codeMatch[1].trim();
+          const evidenceString = codeMatch[2].trim();
+          // Split evidence on § separator and create separate entries for each snippet
+          const evidenceSnippets = evidenceString
+            .split("§")
+            .map((s) => s.trim())
+            .filter((s) => s);
+          evidenceSnippets.forEach((evidence) => {
+            currentPost.codeEvidence.push({ code, evidence });
+          });
+        }
       } else if (trimmed.startsWith("CODES:") && currentPost) {
+        // Backward compatibility: handle old format
         const codesStr = trimmed.replace("CODES:", "").trim();
-        currentPost.codes = codesStr
+        const codes = codesStr
           .split(",")
           .map((code) => code.trim())
           .filter((code) => code);
+        // For old format, add codes without evidence
+        codes.forEach((code) => {
+          currentPost.codeEvidence.push({ code, evidence: "" });
+        });
       }
     }
 
@@ -208,6 +343,7 @@ export default function ViewCoding() {
       parsed.push(currentPost);
     }
 
+    console.log("Parsed coding data:", parsed);
     setParsedCoding(parsed);
   };
 
@@ -252,8 +388,6 @@ export default function ViewCoding() {
 
       // Collect unique post IDs from parsed coding
       const postIds = [...new Set(parsedCoding.map((post) => post.postId))];
-      console.log("parsedCoding:", parsedCoding);
-      console.log("postIds:", postIds);
 
       if (postIds.length === 0) {
         console.log("No post IDs found");
@@ -302,153 +436,213 @@ export default function ViewCoding() {
   };
 
   const renderTableView = () => (
-    <div style={{ overflowX: "auto" }}>
-      <table
+    <div>
+      {/* Color Legend */}
+      <div
         style={{
-          width: "100%",
-          borderCollapse: "collapse",
-          backgroundColor: "#000",
-          color: "#fff",
+          marginBottom: "20px",
+          padding: "10px",
+          backgroundColor: "#222",
+          borderRadius: "8px",
         }}
       >
-        <thead>
-          <tr style={{ backgroundColor: "#333" }}>
-            <th
+        <h4 style={{ margin: "0 0 10px 0", color: "#fff" }}>Code Legend</h4>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+          {getUniqueCodes().map((code) => (
+            <div
+              key={code}
               style={{
-                padding: "12px",
-                border: "1px solid #555",
-                textAlign: "left",
+                display: "flex",
+                alignItems: "center",
+                backgroundColor: "#333",
+                padding: "4px 8px",
+                borderRadius: "4px",
+                fontSize: "0.9em",
               }}
             >
-              Post ID
-            </th>
-            <th
-              style={{
-                padding: "12px",
-                border: "1px solid #555",
-                textAlign: "left",
-              }}
-            >
-              Title
-            </th>
-            <th
-              style={{
-                padding: "12px",
-                border: "1px solid #555",
-                textAlign: "left",
-              }}
-            >
-              Content
-            </th>
-            <th
-              style={{
-                padding: "12px",
-                border: "1px solid #555",
-                textAlign: "left",
-              }}
-            >
-              Codes Applied
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {parsedCoding.map((item, index) => (
-            <tr key={index} style={{ borderBottom: "1px solid #333" }}>
-              <td
+              <div
                 style={{
-                  padding: "12px",
-                  border: "1px solid #555",
-                  verticalAlign: "top",
+                  width: "12px",
+                  height: "12px",
+                  backgroundColor: getCodeColor(code),
+                  borderRadius: "2px",
+                  marginRight: "6px",
                 }}
-              >
-                {item.postId}
-              </td>
-              <td
-                style={{
-                  padding: "12px",
-                  border: "1px solid #555",
-                  verticalAlign: "top",
-                  maxWidth: "300px",
-                }}
-              >
-                <div style={{ whiteSpace: "pre-wrap", wordWrap: "break-word" }}>
-                  {(() => {
-                    // Case-insensitive lookup for post content
-                    const postIdLower = item.postId.toLowerCase();
-                    const matchingKey = Object.keys(postContents).find(
-                      (key) => key.toLowerCase() === postIdLower,
-                    );
-                    const postData = matchingKey
-                      ? postContents[matchingKey]
-                      : null;
-                    console.log(
-                      `Post ${item.postId}: content exists = ${!!postData} (matched key: ${matchingKey})`,
-                    );
-                    if (!postData) {
-                      console.log(
-                        `Available postContents keys:`,
-                        Object.keys(postContents).slice(0, 10),
-                      );
-                    }
-                    return postData ? postData.title : "Title not found";
-                  })()}
-                </div>
-              </td>
-              <td
-                style={{
-                  padding: "12px",
-                  border: "1px solid #555",
-                  verticalAlign: "top",
-                  maxWidth: "400px",
-                }}
-              >
-                <div style={{ whiteSpace: "pre-wrap", wordWrap: "break-word" }}>
-                  {(() => {
-                    // Case-insensitive lookup for post content
-                    const postIdLower = item.postId.toLowerCase();
-                    const matchingKey = Object.keys(postContents).find(
-                      (key) => key.toLowerCase() === postIdLower,
-                    );
-                    const postData = matchingKey
-                      ? postContents[matchingKey]
-                      : null;
-                    return postData ? postData.content : "Content not found";
-                  })()}
-                </div>
-              </td>
-              <td
-                style={{
-                  padding: "12px",
-                  border: "1px solid #555",
-                  verticalAlign: "top",
-                }}
-              >
-                {item.codes.length > 0 ? (
-                  <div>
-                    {item.codes.map((code, codeIndex) => (
-                      <div
-                        key={codeIndex}
-                        style={{
-                          display: "inline-block",
-                          backgroundColor: "#444",
-                          padding: "4px 8px",
-                          margin: "2px",
-                          borderRadius: "4px",
-                          fontSize: "0.9em",
-                        }}
-                      >
-                        {code}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <span style={{ color: "#888" }}>No codes applied</span>
-                )}
-              </td>
-            </tr>
+              />
+              <span style={{ color: "#fff" }}>{code}</span>
+            </div>
           ))}
-        </tbody>
-      </table>
+        </div>
+      </div>
+
+      <div style={{ overflowX: "auto" }}>
+        <table
+          style={{
+            width: "100%",
+            borderCollapse: "collapse",
+            backgroundColor: "#000",
+            color: "#fff",
+          }}
+        >
+          <thead>
+            <tr style={{ backgroundColor: "#333" }}>
+              <th
+                style={{
+                  padding: "12px",
+                  border: "1px solid #555",
+                  textAlign: "left",
+                }}
+              >
+                Post ID
+              </th>
+              <th
+                style={{
+                  padding: "12px",
+                  border: "1px solid #555",
+                  textAlign: "left",
+                }}
+              >
+                Title
+              </th>
+              <th
+                style={{
+                  padding: "12px",
+                  border: "1px solid #555",
+                  textAlign: "left",
+                }}
+              >
+                Content
+              </th>
+              <th
+                style={{
+                  padding: "12px",
+                  border: "1px solid #555",
+                  textAlign: "left",
+                }}
+              >
+                Codes Applied
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {parsedCoding.map((item, index) => (
+              <tr key={index} style={{ borderBottom: "1px solid #333" }}>
+                <td
+                  style={{
+                    padding: "12px",
+                    border: "1px solid #555",
+                    verticalAlign: "top",
+                  }}
+                >
+                  {item.postId}
+                </td>
+                <td
+                  style={{
+                    padding: "12px",
+                    border: "1px solid #555",
+                    verticalAlign: "top",
+                    maxWidth: "300px",
+                  }}
+                >
+                  <div
+                    style={{ whiteSpace: "pre-wrap", wordWrap: "break-word" }}
+                  >
+                    {(() => {
+                      // Case-insensitive lookup for post content
+                      const postIdLower = item.postId.toLowerCase();
+                      const matchingKey = Object.keys(postContents).find(
+                        (key) => key.toLowerCase() === postIdLower,
+                      );
+                      const postData = matchingKey
+                        ? postContents[matchingKey]
+                        : null;
+                      console.log(
+                        `Post ${item.postId}: content exists = ${!!postData} (matched key: ${matchingKey})`,
+                      );
+                      if (!postData) {
+                        console.log(
+                          `Available postContents keys:`,
+                          Object.keys(postContents).slice(0, 10),
+                        );
+                      }
+                      return postData ? postData.title : "Title not found";
+                    })()}
+                  </div>
+                </td>
+                <td
+                  style={{
+                    padding: "12px",
+                    border: "1px solid #555",
+                    verticalAlign: "top",
+                    maxWidth: "400px",
+                  }}
+                >
+                  <div
+                    style={{ whiteSpace: "pre-wrap", wordWrap: "break-word" }}
+                  >
+                    {(() => {
+                      // Case-insensitive lookup for post content
+                      const postIdLower = item.postId.toLowerCase();
+                      const matchingKey = Object.keys(postContents).find(
+                        (key) => key.toLowerCase() === postIdLower,
+                      );
+                      const postData = matchingKey
+                        ? postContents[matchingKey]
+                        : null;
+                      if (postData && postData.content) {
+                        return (
+                          <div
+                            dangerouslySetInnerHTML={{
+                              __html: highlightContent(
+                                postData.content,
+                                item.codeEvidence,
+                              ),
+                            }}
+                          />
+                        );
+                      }
+                      return "Content not found";
+                    })()}
+                  </div>
+                </td>
+                <td
+                  style={{
+                    padding: "12px",
+                    border: "1px solid #555",
+                    verticalAlign: "top",
+                  }}
+                >
+                  {item.codeEvidence.length > 0 ? (
+                    <div>
+                      {[
+                        ...new Set(item.codeEvidence.map(({ code }) => code)),
+                      ].map((code) => (
+                        <div
+                          key={code}
+                          style={{
+                            display: "inline-block",
+                            backgroundColor: getCodeColor(code),
+                            color: "black",
+                            padding: "4px 8px",
+                            margin: "2px",
+                            borderRadius: "4px",
+                            fontSize: "0.9em",
+                            fontWeight: "bold",
+                          }}
+                        >
+                          {code}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <span style={{ color: "#888" }}>No codes applied</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 
