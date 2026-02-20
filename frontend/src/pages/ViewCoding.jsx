@@ -284,7 +284,11 @@ export default function ViewCoding() {
       }
 
       const data = await resp.json();
-      console.log("Fetched post contents:", data.contents);
+      console.log(
+        "Fetched post contents:",
+        Object.keys(data.contents || {}).length,
+        "posts",
+      );
       setPostContents(data.contents || {});
     } catch (error) {
       console.error("Error fetching post contents:", error);
@@ -325,7 +329,16 @@ export default function ViewCoding() {
                 textAlign: "left",
               }}
             >
-              Post Content
+              Title
+            </th>
+            <th
+              style={{
+                padding: "12px",
+                border: "1px solid #555",
+                textAlign: "left",
+              }}
+            >
+              Content
             </th>
             <th
               style={{
@@ -355,6 +368,37 @@ export default function ViewCoding() {
                   padding: "12px",
                   border: "1px solid #555",
                   verticalAlign: "top",
+                  maxWidth: "300px",
+                }}
+              >
+                <div style={{ whiteSpace: "pre-wrap", wordWrap: "break-word" }}>
+                  {(() => {
+                    // Case-insensitive lookup for post content
+                    const postIdLower = item.postId.toLowerCase();
+                    const matchingKey = Object.keys(postContents).find(
+                      (key) => key.toLowerCase() === postIdLower,
+                    );
+                    const postData = matchingKey
+                      ? postContents[matchingKey]
+                      : null;
+                    console.log(
+                      `Post ${item.postId}: content exists = ${!!postData} (matched key: ${matchingKey})`,
+                    );
+                    if (!postData) {
+                      console.log(
+                        `Available postContents keys:`,
+                        Object.keys(postContents).slice(0, 10),
+                      );
+                    }
+                    return postData ? postData.title : "Title not found";
+                  })()}
+                </div>
+              </td>
+              <td
+                style={{
+                  padding: "12px",
+                  border: "1px solid #555",
+                  verticalAlign: "top",
                   maxWidth: "400px",
                 }}
               >
@@ -365,19 +409,10 @@ export default function ViewCoding() {
                     const matchingKey = Object.keys(postContents).find(
                       (key) => key.toLowerCase() === postIdLower,
                     );
-                    const content = matchingKey
+                    const postData = matchingKey
                       ? postContents[matchingKey]
                       : null;
-                    console.log(
-                      `Post ${item.postId}: content exists = ${!!content} (matched key: ${matchingKey})`,
-                    );
-                    if (!content) {
-                      console.log(
-                        `Available postContents keys:`,
-                        Object.keys(postContents).slice(0, 10),
-                      );
-                    }
-                    return content || "Content not found";
+                    return postData ? postData.content : "Content not found";
                   })()}
                 </div>
               </td>

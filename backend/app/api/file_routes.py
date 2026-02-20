@@ -874,8 +874,10 @@ async def get_post_contents(
                 post_id = str(row[0])
                 title = row[1] or ""
                 selftext = row[2] or ""
-                content = f"Title: {title}\n{selftext}".strip()
-                posts[post_id] = content
+                posts[post_id] = {
+                    "title": title,
+                    "content": selftext
+                }
 
         return JSONResponse({"contents": posts})
     except Exception as e:
