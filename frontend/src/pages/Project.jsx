@@ -657,6 +657,18 @@ export default function Project() {
                                 {f.description}
                               </div>
                             )}
+                            <div
+                              style={{
+                                color: "#aaa",
+                                fontSize: "0.9em",
+                                marginBottom: "4px",
+                              }}
+                            >
+                              Parents:{" "}
+                              {f.parent_files && f.parent_files.length > 0
+                                ? f.parent_files.map((p) => p.name).join(", ")
+                                : "null"}
+                            </div>
                           </>
                         )}
                         {f.created_at && renamingFile !== f.schema_name && (
@@ -977,6 +989,18 @@ export default function Project() {
                                 {f.description}
                               </div>
                             )}
+                            <div
+                              style={{
+                                color: "#aaa",
+                                fontSize: "0.9em",
+                                marginBottom: "4px",
+                              }}
+                            >
+                              Parents:{" "}
+                              {f.parent_files && f.parent_files.length > 0
+                                ? f.parent_files.map((p) => p.name).join(", ")
+                                : "null"}
+                            </div>
                           </>
                         )}
                         {f.created_at && renamingFile !== f.schema_name && (
@@ -1282,6 +1306,18 @@ export default function Project() {
                                 {f.description}
                               </div>
                             )}
+                            <div
+                              style={{
+                                color: "#aaa",
+                                fontSize: "0.9em",
+                                marginBottom: "4px",
+                              }}
+                            >
+                              Parents:{" "}
+                              {f.parent_files && f.parent_files.length > 0
+                                ? f.parent_files.map((p) => p.name).join(", ")
+                                : "null"}
+                            </div>
                           </>
                         )}
                         {f.created_at && renamingFile !== f.schema_name && (
@@ -1511,6 +1547,18 @@ export default function Project() {
                                 {f.description}
                               </div>
                             )}
+                            <div
+                              style={{
+                                color: "#aaa",
+                                fontSize: "0.9em",
+                                marginBottom: "4px",
+                              }}
+                            >
+                              Parents:{" "}
+                              {f.parent_files && f.parent_files.length > 0
+                                ? f.parent_files.map((p) => p.name).join(", ")
+                                : "null"}
+                            </div>
                           </>
                         )}
                         {f.created_at && renamingFile !== f.schema_name && (

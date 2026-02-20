@@ -115,6 +115,18 @@ class FileTable(Base):
     file = relationship("File", back_populates="tables")
 
 
+class FileDependency(Base):
+    __tablename__ = "file_dependencies"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    child_file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=False)
+    parent_file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    child_file = relationship("File", foreign_keys=[child_file_id], backref="child_dependencies")
+    parent_file = relationship("File", foreign_keys=[parent_file_id], backref="parent_dependencies")
+
+
 class Prompt(Base):
     __tablename__ = "prompts"
 

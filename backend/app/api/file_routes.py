@@ -11,7 +11,7 @@ from sqlalchemy import text
 import pandas as pd
 
 from .utils import get_user_id_from_request, get_database_metadata
-from app.database import get_db, User, Prompt, Project, File, FileTable, engine, SessionLocal
+from app.database import get_db, User, Prompt, Project, File, FileTable, FileDependency, engine, SessionLocal
 from app.databasemanager import DatabaseManager
 from scripts.import_db import stream_zst_to_postgres
 
@@ -352,6 +352,16 @@ async def merge_databases(request: Request):
             except Exception:
                 dm.session.rollback()
                 raise
+            # Add dependencies for merged databases
+            for schema in db_list:
+                parent_file = dm.session.query(File).filter(File.schemaname == schema, File.user_id == user_id).first()
+                if parent_file:
+                    dep = FileDependency(child_file_id=file_rec.id, parent_file_id=parent_file.id)
+                    dm.session.add(dep)
+            try:
+                dm.session.flush()
+            except Exception:
+                dm.session.rollback()
             for tbl, cnt in final_table_counts.items():
                 dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name=tbl, row_count=cnt)
             if project_id is not None:
@@ -393,6 +403,7 @@ async def save_comparison(
     description: str = Form(None),
     file_type: str = Form(None),
     project_id: int = Form(None),
+    parent_file_ids: str = Form(None),
 ):
     user_id = get_user_id_from_request(request)
     if not user_id:
@@ -411,6 +422,17 @@ async def save_comparison(
             except Exception:
                 dm.session.rollback()
                 raise
+
+            # Add dependencies if parent_file_ids provided
+            if parent_file_ids:
+                try:
+                    parent_ids = json.loads(parent_file_ids) if isinstance(parent_file_ids, str) else parent_file_ids
+                    for pid in parent_ids:
+                        dep = FileDependency(child_file_id=file_rec.id, parent_file_id=int(pid))
+                        dm.session.add(dep)
+                    dm.session.flush()
+                except Exception:
+                    dm.session.rollback()
 
             # If project_id provided, verify ownership and link
             if project_id is not None:
@@ -472,6 +494,21 @@ def my_projects(request: Request, file_type: str = Query("raw_data"), db: Sessio
         except Exception:
             tables = []
 
+        # Query parent file IDs
+        parent_files = []
+        try:
+            deps = db.query(FileDependency).filter(FileDependency.child_file_id == p.id).all()
+            for d in deps:
+                parent_file = db.query(File).filter(File.id == d.parent_file_id).first()
+                if parent_file:
+                    parent_files.append({
+                        "id": str(parent_file.id),
+                        "name": parent_file.filename,
+                        "type": parent_file.file_type
+                    })
+        except Exception:
+            parent_files = []
+
         result.append({
             "id": str(p.id),
             "display_name": p.filename,
@@ -480,6 +517,7 @@ def my_projects(request: Request, file_type: str = Query("raw_data"), db: Sessio
             "file_type": p.file_type,
             "created_at": p.created_at.isoformat() if p.created_at else None,
             "tables": tables,
+            "parent_files": parent_files,
         })
 
     # Return under the legacy "projects" key so frontend code expecting
@@ -554,6 +592,20 @@ def list_projects(request: Request):
             files = []
             try:
                 for f in getattr(r, "files", []) or []:
+                    # Query parent files
+                    parent_files = []
+                    try:
+                        deps = dm.session.query(FileDependency).filter(FileDependency.child_file_id == f.id).all()
+                        for d in deps:
+                            parent_file = dm.session.query(File).filter(File.id == d.parent_file_id).first()
+                            if parent_file:
+                                parent_files.append({
+                                    "id": str(parent_file.id),
+                                    "name": parent_file.filename,
+                                    "type": parent_file.file_type
+                                })
+                    except Exception:
+                        parent_files = []
                     files.append({
                         "id": str(f.id),
                         "display_name": f.filename,
@@ -561,6 +613,7 @@ def list_projects(request: Request):
                         "file_type": f.file_type,
                         "description": f.description,
                         "created_at": f.created_at.isoformat() if f.created_at else None,
+                        "parent_files": parent_files,
                     })
             except Exception:
                 files = []
@@ -593,14 +646,27 @@ async def delete_database(db_name: str, request: Request, db: Session = Depends(
         raise HTTPException(status_code=404, detail="File not found or you do not have permission")
 
     try:
+        # First, clean up file dependencies to avoid foreign key issues
+        deps_deleted = db.query(FileDependency).filter(
+            (FileDependency.child_file_id == file_rec.id) | 
+            (FileDependency.parent_file_id == file_rec.id)
+        ).delete()
+        print(f"[DEBUG] Deleted {deps_deleted} file dependency records for file {file_rec.id}")
+        
         with engine.begin() as conn:
+            print(f"[DEBUG] Dropping schema {schema}")
             conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+            print(f"[DEBUG] Schema {schema} dropped successfully")
 
         db.delete(file_rec)
         db.commit()
+        print(f"[DEBUG] File record {file_rec.id} deleted successfully")
         return JSONResponse({"message": f"File '{file_rec.filename}' and schema '{schema}' deleted"})
     except Exception as e:
         db.rollback()
+        print(f"[ERROR] Failed to delete file/schema {schema}: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to delete file/schema: {str(e)}")
 
 

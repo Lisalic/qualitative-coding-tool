@@ -25,7 +25,7 @@ export default function ApplyCodebook() {
   const [selectedProject, setSelectedProject] = useState("");
   const [saveMessage, setSaveMessage] = useState("");
   const [saveMessageType, setSaveMessageType] = useState("success");
-  const [model, setModel] = useState("tngtech/deepseek-r1t2-chimera:free");
+  const [model, setModel] = useState("arcee-ai/trinity-large-preview:free");
 
   useEffect(() => {
     fetchCodebooks();
@@ -54,9 +54,12 @@ export default function ApplyCodebook() {
       const response = await apiFetch("/api/list-codebooks");
       if (!response.ok) throw new Error("Failed to fetch codebooks");
       const data = await response.json();
+      console.log("Fetched codebooks:", data.codebooks);
       setCodebooks(data.codebooks);
       if (data.codebooks.length > 0 && !codebook) {
-        setCodebook(data.codebooks[0].id.toString());
+        const defaultCodebook = data.codebooks[0].id.toString();
+        console.log("Setting default codebook to:", defaultCodebook);
+        setCodebook(defaultCodebook);
       }
     } catch (err) {
       console.error("Error fetching codebooks:", err);
@@ -136,10 +139,24 @@ export default function ApplyCodebook() {
       );
       return;
     }
+    if (!formData.codebook || !formData.codebook.trim()) {
+      setError("Please select a codebook before applying.");
+      return;
+    }
+    if (codebooks.length === 0) {
+      setError("No codebooks available. Please create a codebook first.");
+      return;
+    }
+    if (!formData.database || !formData.database.trim()) {
+      setError("Please select a database before applying.");
+      return;
+    }
     try {
       setLoading(true);
       setError(null);
       setResult(null);
+
+      console.log("Submitting apply-codebook with formData:", formData);
 
       const requestData = new FormData();
       requestData.append("api_key", savedApiKey);

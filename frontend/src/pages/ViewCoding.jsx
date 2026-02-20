@@ -18,6 +18,9 @@ export default function ViewCoding() {
   const [userPrompt, setUserPrompt] = useState("");
   const [codedDataContent, setCodedDataContent] = useState("");
   const [loading, setLoading] = useState(false);
+  const [viewMode, setViewMode] = useState("text"); // "text" or "table"
+  const [parentData, setParentData] = useState({}); // object mapping post IDs to content
+  const [parsedCoding, setParsedCoding] = useState([]); // array of {postId, codes} objects
 
   const fetchAvailableCodedData = async () => {
     try {
@@ -67,7 +70,7 @@ export default function ViewCoding() {
           name: p.display_name || p.schema_name || p.id,
           display_name: p.display_name,
           description: p.description || null,
-          metadata: { schema: p.schema_name },
+          metadata: { schema: p.schema_name, file: p },
           source: "project",
         }));
         setAvailableCodedData(items);
@@ -139,6 +142,13 @@ export default function ViewCoding() {
     }
   }, [selectedCodedData]);
 
+  useEffect(() => {
+    if (codedDataContent && selectedCodedData) {
+      parseCodingData(codedDataContent);
+      fetchParentData(selectedCodedData);
+    }
+  }, [codedDataContent, selectedCodedData]);
+
   const fetchProjects = async () => {
     try {
       const resp = await apiFetch("/api/projects/");
@@ -153,11 +163,189 @@ export default function ViewCoding() {
     }
   };
 
+  const parseCodingData = (content) => {
+    const lines = content.split("\n");
+    const parsed = [];
+    let currentPost = null;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith("POST_ID:")) {
+        if (currentPost) {
+          parsed.push(currentPost);
+        }
+        currentPost = {
+          postId: trimmed.replace("POST_ID:", "").trim(),
+          codes: [],
+        };
+      } else if (trimmed.startsWith("CODES:") && currentPost) {
+        const codesStr = trimmed.replace("CODES:", "").trim();
+        currentPost.codes = codesStr
+          .split(",")
+          .map((code) => code.trim())
+          .filter((code) => code);
+      }
+    }
+
+    if (currentPost) {
+      parsed.push(currentPost);
+    }
+
+    setParsedCoding(parsed);
+  };
+
+  const fetchParentData = async (codedDataId) => {
+    try {
+      // Find the selected coding file to get its parent files
+      const selectedFile = availableCodedData.find((f) => f.id === codedDataId);
+      if (!selectedFile || !selectedFile.metadata?.file?.parent_files) {
+        return;
+      }
+
+      // Find the parent database (raw_data or filtered_data)
+      const parentDb = selectedFile.metadata.file.parent_files.find(
+        (p) => p.type === "raw_data" || p.type === "filtered_data",
+      );
+
+      if (!parentDb) {
+        return;
+      }
+
+      // Fetch data from the parent database
+      const dataResp = await apiFetch(
+        `/api/get-data?database=${parentDb.name}&limit=1000`,
+      );
+      if (!dataResp.ok) return;
+
+      const data = await dataResp.json();
+      const postMap = {};
+
+      // Build mapping of post IDs to content
+      if (data.submissions) {
+        data.submissions.forEach((sub) => {
+          postMap[sub.id] =
+            `Title: ${sub.title || ""}\n${sub.selftext || ""}`.trim();
+        });
+      }
+
+      if (data.comments) {
+        data.comments.forEach((comment) => {
+          postMap[comment.id] = comment.body || "";
+        });
+      }
+
+      setParentData(postMap);
+    } catch (err) {
+      console.error("Error fetching parent data:", err);
+    }
+  };
+
   const handleCodedDataChange = (codedDataId) => {
     setSelectedCodedData(codedDataId);
     const sel = availableCodedData.find((cd) => cd.id === codedDataId);
     setSelectedCodedDataName(sel?.display_name || sel?.name || codedDataId);
   };
+
+  const renderTableView = () => (
+    <div style={{ overflowX: "auto" }}>
+      <table
+        style={{
+          width: "100%",
+          borderCollapse: "collapse",
+          backgroundColor: "#000",
+          color: "#fff",
+        }}
+      >
+        <thead>
+          <tr style={{ backgroundColor: "#333" }}>
+            <th
+              style={{
+                padding: "12px",
+                border: "1px solid #555",
+                textAlign: "left",
+              }}
+            >
+              Post ID
+            </th>
+            <th
+              style={{
+                padding: "12px",
+                border: "1px solid #555",
+                textAlign: "left",
+              }}
+            >
+              Post Content
+            </th>
+            <th
+              style={{
+                padding: "12px",
+                border: "1px solid #555",
+                textAlign: "left",
+              }}
+            >
+              Codes Applied
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {parsedCoding.map((item, index) => (
+            <tr key={index} style={{ borderBottom: "1px solid #333" }}>
+              <td
+                style={{
+                  padding: "12px",
+                  border: "1px solid #555",
+                  verticalAlign: "top",
+                }}
+              >
+                {item.postId}
+              </td>
+              <td
+                style={{
+                  padding: "12px",
+                  border: "1px solid #555",
+                  verticalAlign: "top",
+                  maxWidth: "400px",
+                }}
+              >
+                <div style={{ whiteSpace: "pre-wrap", wordWrap: "break-word" }}>
+                  {parentData[item.postId] || "Content not found"}
+                </div>
+              </td>
+              <td
+                style={{
+                  padding: "12px",
+                  border: "1px solid #555",
+                  verticalAlign: "top",
+                }}
+              >
+                {item.codes.length > 0 ? (
+                  <div>
+                    {item.codes.map((code, codeIndex) => (
+                      <div
+                        key={codeIndex}
+                        style={{
+                          display: "inline-block",
+                          backgroundColor: "#444",
+                          padding: "4px 8px",
+                          margin: "2px",
+                          borderRadius: "4px",
+                          fontSize: "0.9em",
+                        }}
+                      >
+                        {code}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <span style={{ color: "#888" }}>No codes applied</span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 
   return (
     <>
@@ -194,43 +382,65 @@ export default function ViewCoding() {
             backgroundColor: "#000000",
           }}
         >
+          {selectedCodedData && (
+            <div style={{ marginBottom: "16px", display: "flex", gap: "8px" }}>
+              <button
+                onClick={() => setViewMode("text")}
+                className={viewMode === "text" ? "project-tab" : "db-button"}
+                style={{ padding: "8px 16px" }}
+              >
+                Text View
+              </button>
+              <button
+                onClick={() => setViewMode("table")}
+                className={viewMode === "table" ? "project-tab" : "db-button"}
+                style={{ padding: "8px 16px" }}
+              >
+                Table View
+              </button>
+            </div>
+          )}
           {selectedCodedData ? (
-            <MarkdownView
-              key={
-                selectedCodedData
-                  ? `${selectedCodedData}-${refreshKey}`
-                  : `none-${refreshKey}`
-              }
-              selectedId={selectedCodedData}
-              title={selectedCodedDataName}
-              description={
-                availableCodedData.find((cd) => cd.id === selectedCodedData)
-                  ?.description
-              }
-              fetchStyle="query"
-              fetchBase="/api/coded-data"
-              queryParamName="coded_id"
-              saveUrl={"/api/save-file-coded-data/"}
-              saveIdFieldName={"schema_name"}
-              saveAsProject={true}
-              projectSchema={selectedCodedData}
-              systemPrompt={systemPrompt}
-              userPrompt={userPrompt}
-              onSaved={(resp) => {
-                if (typeof resp === "string") {
-                  if (resp !== selectedCodedData) {
-                    setSelectedCodedData(resp);
+            viewMode === "text" ? (
+              <MarkdownView
+                key={
+                  selectedCodedData
+                    ? `${selectedCodedData}-${refreshKey}`
+                    : `none-${refreshKey}`
+                }
+                selectedId={selectedCodedData}
+                title={selectedCodedDataName}
+                description={
+                  availableCodedData.find((cd) => cd.id === selectedCodedData)
+                    ?.description
+                }
+                fetchStyle="query"
+                fetchBase="/api/coded-data"
+                queryParamName="coded_id"
+                saveUrl={"/api/save-file-coded-data/"}
+                saveIdFieldName={"schema_name"}
+                saveAsProject={true}
+                projectSchema={selectedCodedData}
+                systemPrompt={systemPrompt}
+                userPrompt={userPrompt}
+                onSaved={(resp) => {
+                  if (typeof resp === "string") {
+                    if (resp !== selectedCodedData) {
+                      setSelectedCodedData(resp);
+                      fetchAvailableCodedData();
+                    }
+                  } else if (resp && resp.display_name) {
+                    setSelectedCodedDataName(resp.display_name);
                     fetchAvailableCodedData();
                   }
-                } else if (resp && resp.display_name) {
-                  setSelectedCodedDataName(resp.display_name);
-                  fetchAvailableCodedData();
-                }
-                // force remount/refresh of MarkdownView to reload content
-                setRefreshKey((k) => k + 1);
-              }}
-              emptyLabel="View Coding"
-            />
+                  // force remount/refresh of MarkdownView to reload content
+                  setRefreshKey((k) => k + 1);
+                }}
+                emptyLabel="View Coding"
+              />
+            ) : (
+              renderTableView()
+            )
           ) : (
             <div style={{ color: "#888", padding: 20 }}>
               Select a coded data file to view

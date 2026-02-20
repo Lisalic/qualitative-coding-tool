@@ -9,7 +9,7 @@ import traceback
 import pandas as pd
 
 from .utils import get_user_id_from_request, engine, SessionLocal
-from app.database import get_db, File, FileTable
+from app.database import get_db, File, FileTable, FileDependency, Project
 from app.databasemanager import DatabaseManager
 from scripts.filter_db import filter_posts_with_ai, filter_comments_with_ai
 
@@ -289,6 +289,12 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
                         file_rec = File(user_id=user_id, filename=name or new_schema, schemaname=new_schema, file_type='filtered_data', systemprompt=system_prompt, userprompt=user_prompt)
                         dm.session.add(file_rec)
                         dm.session.flush()
+                        # Add dependency for the source database
+                        source_file = dm.session.query(File).filter(File.schemaname == schema, File.user_id == user_id).first()
+                        if source_file:
+                            dep = FileDependency(child_file_id=file_rec.id, parent_file_id=source_file.id)
+                            dm.session.add(dep)
+                            dm.session.flush()
                         try:
                             dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name='submissions', row_count=len(posts_list))
                             print(f"[filter-data] Added file_tables entry for submissions (rows={len(posts_list)})")

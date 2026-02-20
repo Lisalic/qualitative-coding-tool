@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -62,7 +62,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
 
 
 @router.get("/me/")
-def me(request, db: Session = Depends(get_db)):
+def me(request: Request, db: Session = Depends(get_db)):
     user_id = get_user_id_from_request(request)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")

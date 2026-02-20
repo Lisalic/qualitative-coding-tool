@@ -7,7 +7,7 @@ import secrets
 import traceback
 
 from .utils import get_user_id_from_request, engine
-from app.database import get_db, File
+from app.database import get_db, File, FileDependency, Project
 from app.databasemanager import DatabaseManager
 from scripts.display_codebook import parse_codebook_to_json
 
@@ -178,7 +178,7 @@ async def save_project_codebook(request: Request, schema_name: str = Form(...), 
 @router.post("/generate-codebook/")
 async def generate_codebook(request: Request, database: str = Form("original"), api_key: str = Form(...), prompt: str = Form(""), name: str = Form(...), description: str = Form(None), project_id: int = Form(None), model: str = Form("")):
     from .utils import engine, MODEL_1
-    from scripts.codebook_generator import generate_codebook_function
+    from scripts.codebook_generator import generate_codebook
     import asyncio
     import inspect
 
@@ -224,7 +224,7 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
         try:
             print("[INFO] generate_codebook: calling generate_codebook function")
             chosen_model = model or MODEL_1
-            result = generate_codebook_function(assembled, api_key, prompt, MODEL=chosen_model)
+            result = generate_codebook(assembled, api_key, prompt, MODEL=chosen_model)
             if asyncio.iscoroutine(result) or inspect.isawaitable(result):
                 result = await result
             codebook_text, system_prompt, user_prompt = result
@@ -262,6 +262,12 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
                 file_rec = File(user_id=user_id, filename=name, schemaname=new_schema, file_type='codebook', description=final_description, systemprompt=system_prompt, userprompt=user_prompt)
                 dm.session.add(file_rec)
                 dm.session.flush()
+                # Add dependency for the source database
+                parent_file = dm.session.query(File).filter(File.schemaname == schema, File.user_id == user_id).first()
+                if parent_file:
+                    dep = FileDependency(child_file_id=file_rec.id, parent_file_id=parent_file.id)
+                    dm.session.add(dep)
+                    dm.session.flush()
                 dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name='content_store', row_count=1)
 
                 # If a project_id was provided, ensure ownership and link the file to the project

@@ -5,7 +5,7 @@ from sqlalchemy import text
 import json
 
 from .utils import get_user_id_from_request, engine
-from app.database import get_db, File
+from app.database import get_db, File, FileDependency, Project, SessionLocal
 from app.databasemanager import DatabaseManager
 
 router = APIRouter()
@@ -119,6 +119,8 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
     from .utils import classify_posts
     import secrets
 
+    print(f"DEBUG: apply_codebook called with codebook='{codebook}', database='{database}'")
+
     schema = (database or "").strip()
     if schema.endswith('.db'):
         schema = schema[:-3]
@@ -136,12 +138,14 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
                 rows = conn.execute(text(f'SELECT * FROM "{schema}"."submissions"')).fetchall()
                 for r in rows:
                     try:
+                        post_id = r._mapping.get('id')
                         title = r._mapping.get('title')
                         selftext = r._mapping.get('selftext')
                     except Exception:
-                        title = r[0] if len(r) > 0 else ""
-                        selftext = r[1] if len(r) > 1 else ""
-                    assembled += f"Title: {title or ''}\n{selftext or ''}\n\n"
+                        post_id = r[0] if len(r) > 0 else ""
+                        title = r[1] if len(r) > 1 else ""
+                        selftext = r[2] if len(r) > 2 else ""
+                    assembled += f"POST_ID: {post_id}\nTitle: {title or ''}\n{selftext or ''}\n\n"
             else:
                 # submissions table missing — proceed with whatever content was found
                 pass
@@ -153,10 +157,12 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
                 rows = conn.execute(text(f'SELECT * FROM "{schema}"."comments"')).fetchall()
                 for r in rows:
                     try:
+                        comment_id = r._mapping.get('id')
                         body = r._mapping.get('body')
                     except Exception:
-                        body = r[0] if len(r) > 0 else ""
-                    assembled += f"{body or ''}\n\n"
+                        comment_id = r[0] if len(r) > 0 else ""
+                        body = r[1] if len(r) > 1 else ""
+                    assembled += f"POST_ID: {comment_id}\n{body or ''}\n\n"
             else:
                 # comments table missing — proceed
                 pass
@@ -166,54 +172,87 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
         codebook_text = ""
         try:
             # provided codebook identifier (no stdout prints)
+            print(f"DEBUG: Resolving codebook from input: '{cb_schema_raw}'")
 
             resolved_schema = None
             if cb_schema_raw and cb_schema_raw.startswith('proj_'):
                 resolved_schema = cb_schema_raw
+                print(f"DEBUG: Codebook starts with 'proj_', using as schema: {resolved_schema}")
             else:
                 # Try to interpret the provided value as a File.id (integer) and resolve schemaname
                 try:
                     fid = int(cb_schema_raw)
+                    print(f"DEBUG: Treating '{cb_schema_raw}' as File ID: {fid}")
+                    
+                    # First, let's see what codebook files exist
                     db_sess = SessionLocal()
                     try:
-                        f = db_sess.query(File).filter(File.id == fid).first()
+                        all_codebooks = db_sess.query(File).filter(File.file_type.in_(['codebook', 'codebook_comparison'])).all()
+                        print(f"DEBUG: Available codebook IDs: {[f'{cb.id}: {cb.filename} ({cb.file_type})' for cb in all_codebooks]}")
+                        
+                        f = db_sess.query(File).filter(File.id == fid, File.file_type.in_(['codebook', 'codebook_comparison'])).first()
                         if f:
                             resolved_schema = f.schemaname
+                            print(f"DEBUG: Found codebook file with ID {fid}, schema: {resolved_schema}, type: {f.file_type}")
+                        else:
+                            print(f"DEBUG: No codebook file found with ID {fid} (checked {len(all_codebooks)} codebooks)")
+                            # Try without file_type filter to see if it exists as a different type
+                            any_file = db_sess.query(File).filter(File.id == fid).first()
+                            if any_file:
+                                print(f"DEBUG: File {fid} exists but has type: {any_file.file_type}")
+                            else:
+                                print(f"DEBUG: File {fid} does not exist at all")
                     finally:
                         try:
                             db_sess.close()
                         except Exception:
                             pass
-                except Exception:
-                    # not an integer / could not resolve
+                except Exception as e:
+                    print(f"DEBUG: Could not parse '{cb_schema_raw}' as integer: {e}")
                     resolved_schema = None
 
             if resolved_schema:
+                print(f"DEBUG: Querying codebook content from schema: {resolved_schema}")
                 with engine.connect() as conn:
                     tbl_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": f"{resolved_schema}.content_store"}).scalar()
                     if tbl_exists:
                         res = conn.execute(text(f'SELECT file_text FROM "{resolved_schema}".content_store LIMIT 1'))
                         row = res.fetchone()
                         codebook_text = row[0] if row else ""
+                        print(f"DEBUG: Retrieved codebook text, length: {len(codebook_text)}")
                     else:
-                        pass
+                        print(f"DEBUG: content_store table not found in schema {resolved_schema}")
             else:
-                pass
-        except Exception:
-            pass
+                print("DEBUG: Could not resolve codebook schema")
+        except Exception as e:
+            print(f"DEBUG: Exception during codebook resolution: {e}")
+            import traceback
+            traceback.print_exc()
 
         # Attempt classification using the provided codebook and API key
         classification_output = ""
         system_prompt = ""
         user_prompt = ""
         try:
+            print(f"DEBUG: codebook_text length: {len(codebook_text)}, api_key provided: {bool(api_key)}")
             if codebook_text and api_key:
+                print("DEBUG: Calling classify_posts...")
                 result = classify_posts(codebook_text, assembled, methodology or "", api_key, model)
                 classification_output, system_prompt, user_prompt = result
+                print(f"DEBUG: classify_posts returned successfully, output length: {len(classification_output)}")
             else:
-                classification_output = "API request error"
-        except Exception:
-            classification_output = "API request error"
+                error_msg = []
+                if not codebook_text:
+                    error_msg.append("codebook not found or empty")
+                if not api_key:
+                    error_msg.append("api_key not provided")
+                classification_output = f"Cannot apply codebook: {', '.join(error_msg)}"
+                print(f"DEBUG: Skipping classification: {classification_output}")
+        except Exception as e:
+            print(f"DEBUG: Exception during classification: {e}")
+            import traceback
+            traceback.print_exc()
+            classification_output = f"API request error: {str(e)}"
 
         # resolve auth (optional)
         user_id = get_user_id_from_request(request)
@@ -234,6 +273,16 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
                     with DatabaseManager() as dm:
                         file_rec = File(user_id=user_id, filename=display_name, schemaname=new_schema, file_type='coding', systemprompt=system_prompt, userprompt=user_prompt)
                         dm.session.add(file_rec)
+                        dm.session.flush()
+                        # Add dependencies for database and codebook
+                        db_file = dm.session.query(File).filter(File.schemaname == schema, File.user_id == user_id).first()
+                        if db_file:
+                            dep = FileDependency(child_file_id=file_rec.id, parent_file_id=db_file.id)
+                            dm.session.add(dep)
+                        cb_file = dm.session.query(File).filter((File.schemaname == codebook) | (File.filename == codebook), File.user_id == user_id).first()
+                        if cb_file:
+                            dep = FileDependency(child_file_id=file_rec.id, parent_file_id=cb_file.id)
+                            dm.session.add(dep)
                         dm.session.flush()
                         # Link the coding file to the same projects as the raw data
                         raw_file = dm.session.query(File).filter(File.schemaname == schema, File.file_type == "raw_data").first()

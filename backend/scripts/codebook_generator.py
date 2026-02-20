@@ -3,15 +3,13 @@ import re
 from openai import OpenAI
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
-MODEL_1 = "tngtech/deepseek-r1t2-chimera:free"
-MODEL_2 = "google/gemini-2.0-flash-exp:free"
-MODEL_3 = "tngtech/deepseek-r1t-chimera:free"
-MODEL_4 = "z-ai/glm-4.5-air:free"
-MODEL_5 = "deepseek/deepseek-r1-0528:free"
-MODEL_6 = "tngtech/tng-r1t-chimera:free"
-MODEL_7 = "nvidia/nemotron-3-nano-30b-a3b:free"
-MODEL_8 = "meta-llama/llama-3.3-70b-instruct:free"
-MODEL_9 = "google/gemma-3-27b-it:free"
+MODEL_1 = "arcee-ai/trinity-large-preview:free"
+MODEL_2 = "stepfun/step-3.5-flash:free"
+MODEL_3 = "z-ai/glm-4.5-air:free"
+MODEL_4 = "deepseek/deepseek-r1-0528:free"
+MODEL_5 = "nvidia/nemotron-3-nano-30b-a3b:free"
+MODEL_6 = "qwen/qwen3-235b-a22b-thinking-2507"
+MODEL_7 = "openai/gpt-oss-120b:free"
 MAX_RETRIES = 3
 INITIAL_RETRY_DELAY = 2  
 
@@ -37,37 +35,7 @@ def get_client(system_prompt: str, user_prompt: str, api_key: str, MODEL: str) -
                 extra_body={"transforms": ["middle-out"]}
             )
             print(f"[get_client] API call completed successfully")
-            # Validate response and extract text robustly
-            if not response:
-                raise ValueError("Empty response from model")
-
-            # Try common attribute patterns for SDK responses
-            try:
-                # openai-like object: response.choices[0].message.content
-                content = response.choices[0].message.content
-                print(f"[get_client] Extracted content length: {len(content)}")
-                return content
-            except Exception:
-                pass
-
-            try:
-                # dict-like: response['choices'][0]['message']['content']
-                content = response["choices"][0]["message"]["content"]
-                print(f"[get_client] Extracted content length: {len(content)}")
-                return content
-            except Exception:
-                pass
-
-            try:
-                # older-style: response.choices[0].text
-                content = response.choices[0].text
-                print(f"[get_client] Extracted content length: {len(content)}")
-                return content
-            except Exception:
-                pass
-
-            # Fallback: stringify response to aid debugging
-            raise ValueError(f"Unexpected model response format: {repr(response)}")
+            return response.choices[0].message.content
         except KeyboardInterrupt:
             print("\nkeyboard interrupt")
             raise

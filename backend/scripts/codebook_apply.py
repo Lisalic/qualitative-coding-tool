@@ -2,20 +2,24 @@ import time
 from openai import OpenAI
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
-FREE_MODEL = "tngtech/deepseek-r1t2-chimera:free"
+FREE_MODEL = "arcee-ai/trinity-large-preview:free"
 MAX_RETRIES = 3
 INITIAL_RETRY_DELAY = 2  
 
 def get_client(system_prompt: str, user_prompt: str, api_key: str, model: str = FREE_MODEL) -> str:
     if not api_key:
         raise ValueError("OpenRouter API key is required")
-    print("Initiating API call to OpenRouter...")
+    print(f"DEBUG: About to create OpenAI client with model: {model}")
+    print(f"DEBUG: API key provided: {bool(api_key)}")
     for attempt in range(1, MAX_RETRIES + 1):
         try:
+            print(f"DEBUG: Attempt {attempt}/{MAX_RETRIES} - Creating client...")
             client = OpenAI(
                 api_key=api_key,
                 base_url=OPENROUTER_URL,
             )
+            print(f"DEBUG: Client created, making API call...")
+            print(f"DEBUG: Calling client.chat.completions.create with timeout=30...")
             response = client.chat.completions.create(
                 model=model,
                 messages=[
@@ -23,7 +27,7 @@ def get_client(system_prompt: str, user_prompt: str, api_key: str, model: str = 
                     {"role": "user", "content": user_prompt},
                 ],
                 temperature=0.05,
-                timeout=300, 
+                timeout=30, 
                 extra_body={"transforms": ["middle-out"]}
             )
             print("API call successful.")
@@ -54,19 +58,15 @@ def classify_posts(codebook: str, posts_content: str, methodology: str, api_key:
 
     **REQUIRED POST FORMAT:**
 
-    Post URL: [The URL for the post]
-    Code applied: [Exact Specific Code Name from the Codebook]
-    Reason: [A concise, specific justification for applying the code as well as a quotation from the post]
-    Code applied: [Another Exact Specific Code Name if applicable]
-    Reason: [A concise, specific justification for applying the code as well as a quotation from the post]
-    ...
+    POST_ID: [id]
+    CODES: [codes]
 
-    Ensure you use the exact CODE NAMES from the CODEBOOK.
+    Where [id] is the post identifier and [codes] is a comma-separated list of exact code names from the CODEBOOK that apply to this post.
 
     """
     
     user_prompt = f"""
-    Please apply the following Codebook to the provided Posts Content and generate the Detailed Classification Report in the specified format, including a reason for every code applied.
+    Please apply the following Codebook to the provided Posts Content and generate the Structured Classification Report in the specified format.
 
     CODEBOOK:
     {codebook}
