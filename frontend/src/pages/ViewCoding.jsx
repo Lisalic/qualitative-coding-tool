@@ -18,9 +18,9 @@ export default function ViewCoding() {
   const [userPrompt, setUserPrompt] = useState("");
   const [codedDataContent, setCodedDataContent] = useState("");
   const [loading, setLoading] = useState(false);
+  const [parsedCoding, setParsedCoding] = useState([]);
+  const [postContents, setPostContents] = useState({});
   const [viewMode, setViewMode] = useState("text"); // "text" or "table"
-  const [parentData, setParentData] = useState({}); // object mapping post IDs to content
-  const [parsedCoding, setParsedCoding] = useState([]); // array of {postId, codes} objects
 
   const fetchAvailableCodedData = async () => {
     try {
@@ -145,13 +145,30 @@ export default function ViewCoding() {
   useEffect(() => {
     if (codedDataContent && selectedCodedData) {
       parseCodingData(codedDataContent);
-      fetchParentData(selectedCodedData);
     }
   }, [codedDataContent, selectedCodedData]);
 
+  useEffect(() => {
+    if (parsedCoding.length > 0 && selectedCodedData) {
+      console.log(
+        "useEffect triggered: parsedCoding has",
+        parsedCoding.length,
+        "items",
+      );
+      fetchPostContents(selectedCodedData);
+    } else {
+      console.log(
+        "useEffect not triggered: parsedCoding.length =",
+        parsedCoding.length,
+        "selectedCodedData =",
+        selectedCodedData,
+      );
+    }
+  }, [parsedCoding, selectedCodedData]);
+
   const fetchProjects = async () => {
     try {
-      const resp = await apiFetch("/api/projects/");
+      const resp = await apiFetch("/api/projects/", { cache: "no-cache" });
       if (!resp.ok) return;
       const data = await resp.json();
       const projects = data.projects || [];
@@ -194,11 +211,14 @@ export default function ViewCoding() {
     setParsedCoding(parsed);
   };
 
-  const fetchParentData = async (codedDataId) => {
+  const fetchPostContents = async (codedDataId) => {
+    console.log("fetchPostContents called with codedDataId:", codedDataId);
     try {
       // Find the selected coding file to get its parent files
       const selectedFile = availableCodedData.find((f) => f.id === codedDataId);
+      console.log("selectedFile:", selectedFile);
       if (!selectedFile || !selectedFile.metadata?.file?.parent_files) {
+        console.log("No selected file or parent files", selectedFile);
         return;
       }
 
@@ -206,37 +226,68 @@ export default function ViewCoding() {
       const parentDb = selectedFile.metadata.file.parent_files.find(
         (p) => p.type === "raw_data" || p.type === "filtered_data",
       );
+      console.log("parentDb:", parentDb);
 
       if (!parentDb) {
+        console.log(
+          "No parent database found",
+          selectedFile.metadata.file.parent_files,
+        );
         return;
       }
 
-      // Fetch data from the parent database
-      const dataResp = await apiFetch(
-        `/api/get-data?database=${parentDb.name}&limit=1000`,
+      console.log("Found parent DB:", parentDb);
+      console.log("Schema name:", parentDb.schema_name);
+      console.log("Name:", parentDb.name);
+
+      // Use schema_name if available, otherwise try to construct schema name from name
+      const schemaName =
+        parentDb.schema_name ||
+        (parentDb.name.startsWith("proj_") ? parentDb.name : null);
+      console.log("Final schema name:", schemaName);
+      if (!schemaName) {
+        console.log("No schema name available");
+        return;
+      }
+
+      // Collect unique post IDs from parsed coding
+      const postIds = [...new Set(parsedCoding.map((post) => post.postId))];
+      console.log("parsedCoding:", parsedCoding);
+      console.log("postIds:", postIds);
+
+      if (postIds.length === 0) {
+        console.log("No post IDs found");
+        return;
+      }
+
+      console.log(
+        "Fetching contents for post IDs:",
+        postIds,
+        "in schema:",
+        schemaName,
       );
-      if (!dataResp.ok) return;
 
-      const data = await dataResp.json();
-      const postMap = {};
+      // Call the backend endpoint
+      const resp = await apiFetch("/api/post-contents/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ schema: schemaName, post_ids: postIds }),
+        cache: "no-cache",
+      });
+      console.log("API response status:", resp.status);
 
-      // Build mapping of post IDs to content
-      if (data.submissions) {
-        data.submissions.forEach((sub) => {
-          postMap[sub.id] =
-            `Title: ${sub.title || ""}\n${sub.selftext || ""}`.trim();
-        });
+      if (!resp.ok) {
+        console.log("API call failed:", resp.status);
+        const errorText = await resp.text();
+        console.log("Error response:", errorText);
+        return;
       }
 
-      if (data.comments) {
-        data.comments.forEach((comment) => {
-          postMap[comment.id] = comment.body || "";
-        });
-      }
-
-      setParentData(postMap);
-    } catch (err) {
-      console.error("Error fetching parent data:", err);
+      const data = await resp.json();
+      console.log("Fetched post contents:", data.contents);
+      setPostContents(data.contents || {});
+    } catch (error) {
+      console.error("Error fetching post contents:", error);
     }
   };
 
@@ -308,7 +359,26 @@ export default function ViewCoding() {
                 }}
               >
                 <div style={{ whiteSpace: "pre-wrap", wordWrap: "break-word" }}>
-                  {parentData[item.postId] || "Content not found"}
+                  {(() => {
+                    // Case-insensitive lookup for post content
+                    const postIdLower = item.postId.toLowerCase();
+                    const matchingKey = Object.keys(postContents).find(
+                      (key) => key.toLowerCase() === postIdLower,
+                    );
+                    const content = matchingKey
+                      ? postContents[matchingKey]
+                      : null;
+                    console.log(
+                      `Post ${item.postId}: content exists = ${!!content} (matched key: ${matchingKey})`,
+                    );
+                    if (!content) {
+                      console.log(
+                        `Available postContents keys:`,
+                        Object.keys(postContents).slice(0, 10),
+                      );
+                    }
+                    return content || "Content not found";
+                  })()}
                 </div>
               </td>
               <td

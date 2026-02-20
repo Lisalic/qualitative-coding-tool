@@ -504,6 +504,7 @@ def my_projects(request: Request, file_type: str = Query("raw_data"), db: Sessio
                     parent_files.append({
                         "id": str(parent_file.id),
                         "name": parent_file.filename,
+                        "schema_name": parent_file.schemaname,
                         "type": parent_file.file_type
                     })
         except Exception:
@@ -836,6 +837,47 @@ async def move_rows(request: Request, db: Session = Depends(get_db)):
             pass
 
         return JSONResponse({"moved": moved})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.post("/post-contents/")
+async def get_post_contents(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    try:
+        data = await request.json()
+        schema_name = data.get("schema")
+        post_ids = data.get("post_ids", [])
+
+        if not schema_name or not post_ids:
+            raise HTTPException(status_code=400, detail="schema and post_ids are required")
+
+        # Query the database for the posts
+        with engine.connect() as conn:
+            # Build the query
+            placeholders = ", ".join([f":id_{i}" for i in range(len(post_ids))])
+            params = {f"id_{i}": pid for i, pid in enumerate(post_ids)}
+            
+            query = f"""
+            SELECT id, title, selftext
+            FROM "{schema_name}".submissions
+            WHERE id IN ({placeholders})
+            """
+            
+            result = conn.execute(text(query), params)
+            posts = {}
+            for row in result:
+                post_id = str(row[0])
+                title = row[1] or ""
+                selftext = row[2] or ""
+                content = f"Title: {title}\n{selftext}".strip()
+                posts[post_id] = content
+
+        return JSONResponse({"contents": posts})
     except Exception as e:
         import traceback
         traceback.print_exc()

@@ -135,7 +135,7 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
             subs_tbl = f"{schema}.submissions"
             subs_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": subs_tbl}).scalar()
             if subs_exists:
-                rows = conn.execute(text(f'SELECT * FROM "{schema}"."submissions"')).fetchall()
+                rows = conn.execute(text(f'SELECT * FROM "{schema}"."submissions" LIMIT 100')).fetchall()  # Limit to 100 posts for AI processing
                 for r in rows:
                     try:
                         post_id = r._mapping.get('id')
@@ -154,7 +154,7 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
             comm_tbl = f"{schema}.comments"
             comm_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": comm_tbl}).scalar()
             if comm_exists:
-                rows = conn.execute(text(f'SELECT * FROM "{schema}"."comments"')).fetchall()
+                rows = conn.execute(text(f'SELECT * FROM "{schema}"."comments" LIMIT 50')).fetchall()  # Limit comments too
                 for r in rows:
                     try:
                         comment_id = r._mapping.get('id')

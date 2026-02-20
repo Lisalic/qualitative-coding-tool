@@ -52,16 +52,18 @@ def classify_posts(codebook: str, posts_content: str, methodology: str, api_key:
 
     Operate as a qualitative researcher: apply the codebook consistently, provide concise justifications for each applied code, include representative quotations, and follow any instructions in the provided METHODOLOGY text.
 
-    **STRICT OUTPUT INSTRUCTION:** Output a single raw text report that iterates through EVERY post in the provided content. If a post is not relevant, do not include it.
+    **CRITICAL INSTRUCTION:** You MUST use the EXACT POST_ID values from the input POSTS CONTENT. Do NOT make up, modify, or invent new post IDs. Only include posts that actually exist in the provided content. The POST_ID values are alphanumeric strings like "132031", "100l8bs", etc. - use them exactly as they appear.
 
-    Then, for every post, use the following format exactly.
+    **STRICT OUTPUT INSTRUCTION:** Output a single raw text report that iterates through posts in the provided content. For each post that has applicable codes, use the following format exactly.
 
     **REQUIRED POST FORMAT:**
 
-    POST_ID: [id]
+    POST_ID: [exact_id_from_input]
     CODES: [codes]
 
-    Where [id] is the post identifier and [codes] is a comma-separated list of exact code names from the CODEBOOK that apply to this post.
+    Where [exact_id_from_input] is the EXACT post identifier as it appears in the POSTS CONTENT (do not change it in any way), and [codes] is a comma-separated list of exact code names from the CODEBOOK that apply to this post.
+
+    **IMPORTANT:** Only output posts that have at least one applicable code. Do not output posts with no codes.
 
     """
     
