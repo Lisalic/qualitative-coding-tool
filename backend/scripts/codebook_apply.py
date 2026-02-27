@@ -9,17 +9,12 @@ INITIAL_RETRY_DELAY = 2
 def get_client(system_prompt: str, user_prompt: str, api_key: str, model: str = FREE_MODEL) -> str:
     if not api_key:
         raise ValueError("OpenRouter API key is required")
-    print(f"DEBUG: About to create OpenAI client with model: {model}")
-    print(f"DEBUG: API key provided: {bool(api_key)}")
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            print(f"DEBUG: Attempt {attempt}/{MAX_RETRIES} - Creating client...")
             client = OpenAI(
                 api_key=api_key,
                 base_url=OPENROUTER_URL,
             )
-            print(f"DEBUG: Client created, making API call...")
-            print(f"DEBUG: Calling client.chat.completions.create with timeout=30...")
             response = client.chat.completions.create(
                 model=model,
                 messages=[

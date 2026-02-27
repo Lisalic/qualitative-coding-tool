@@ -90,15 +90,51 @@ export default function Sidebar() {
         </button>
       </div>
 
-      {items.map(([label, path]) => (
-        <button
-          key={path}
-          className="sidebar-btn"
-          onClick={() => navigate(path)}
-        >
-          {label}
-        </button>
-      ))}
+      {(() => {
+        if (!isAuth) {
+          return items.map(([label, path]) => (
+            <button
+              key={path}
+              className="sidebar-btn"
+              onClick={() => navigate(path)}
+            >
+              {label}
+            </button>
+          ));
+        }
+
+        // Explicit order as requested
+        const order = [
+          "Home",
+          "Import Data",
+          "Filter Data",
+          "Generate Codebook",
+          "Apply Codebook",
+          "Compare Codebook",
+          "Compare Coding",
+          "Summarize Coding",
+          "View Data",
+          "View Filtered Data",
+          "View Codebook",
+          "View Coding",
+        ];
+
+        const mapByLabel = Object.fromEntries(
+          items.map(([label, path]) => [label, path]),
+        );
+
+        return order
+          .filter((label) => label in mapByLabel)
+          .map((label) => (
+            <button
+              key={mapByLabel[label]}
+              className="sidebar-btn"
+              onClick={() => navigate(mapByLabel[label])}
+            >
+              {label}
+            </button>
+          ));
+      })()}
     </aside>
   );
 }

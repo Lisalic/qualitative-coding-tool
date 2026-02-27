@@ -90,37 +90,48 @@ export default function SummarizeCoding() {
           <div className="compare-panel">
             <div className="panel-title">Summarize Coding</div>
 
-            <div style={{ marginBottom: 16 }}>
-              <label style={{ display: "block", marginBottom: 6 }}>
-                Coding
-              </label>
-              <select
-                className="form-input"
-                value={selectedCoding}
-                onChange={(e) => setSelectedCoding(e.target.value)}
-              >
-                <option value="">-- select --</option>
-                {codings.map((coding) => (
-                  <option key={coding.value} value={coding.value}>
-                    {coding.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: 16,
+                alignItems: "flex-start",
+                marginBottom: 16,
+              }}
+            >
+              <div style={{ flex: 1 }}>
+                <label style={{ display: "block", marginBottom: 6 }}>
+                  Coding
+                </label>
+                <select
+                  className="form-input"
+                  value={selectedCoding}
+                  onChange={(e) => setSelectedCoding(e.target.value)}
+                >
+                  <option value="">-- select --</option>
+                  {codings.map((coding) => (
+                    <option key={coding.value} value={coding.value}>
+                      {coding.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-            <div style={{ marginBottom: 16 }}>
-              <label style={{ display: "block", marginBottom: 6 }}>Model</label>
-              <select
-                className="form-input"
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-              >
-                {AI_MODELS.map((modelOption) => (
-                  <option key={modelOption.value} value={modelOption.value}>
-                    {modelOption.label}
-                  </option>
-                ))}
-              </select>
+              <div style={{ width: 320, minWidth: 200 }}>
+                <label style={{ display: "block", marginBottom: 6 }}>
+                  Model
+                </label>
+                <select
+                  className="form-input"
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                >
+                  {AI_MODELS.map((modelOption) => (
+                    <option key={modelOption.value} value={modelOption.value}>
+                      {modelOption.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             <div style={{ marginBottom: 16 }}>

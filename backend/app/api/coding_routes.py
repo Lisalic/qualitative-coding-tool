@@ -119,7 +119,7 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
     from .utils import classify_posts
     import secrets
 
-    print(f"DEBUG: apply_codebook called with codebook='{codebook}', database='{database}'")
+    # apply-codebook endpoint invoked
 
     schema = (database or "").strip()
     if schema.endswith('.db'):
@@ -171,61 +171,47 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
         cb_schema_raw = (codebook or "").strip()
         codebook_text = ""
         try:
-            # provided codebook identifier (no stdout prints)
-            print(f"DEBUG: Resolving codebook from input: '{cb_schema_raw}'")
+            # provided codebook identifier
 
             resolved_schema = None
             if cb_schema_raw and cb_schema_raw.startswith('proj_'):
                 resolved_schema = cb_schema_raw
-                print(f"DEBUG: Codebook starts with 'proj_', using as schema: {resolved_schema}")
             else:
                 # Try to interpret the provided value as a File.id (integer) and resolve schemaname
                 try:
                     fid = int(cb_schema_raw)
-                    print(f"DEBUG: Treating '{cb_schema_raw}' as File ID: {fid}")
                     
                     # First, let's see what codebook files exist
                     db_sess = SessionLocal()
                     try:
                         all_codebooks = db_sess.query(File).filter(File.file_type.in_(['codebook', 'codebook_comparison'])).all()
-                        print(f"DEBUG: Available codebook IDs: {[f'{cb.id}: {cb.filename} ({cb.file_type})' for cb in all_codebooks]}")
-                        
                         f = db_sess.query(File).filter(File.id == fid, File.file_type.in_(['codebook', 'codebook_comparison'])).first()
                         if f:
                             resolved_schema = f.schemaname
-                            print(f"DEBUG: Found codebook file with ID {fid}, schema: {resolved_schema}, type: {f.file_type}")
                         else:
-                            print(f"DEBUG: No codebook file found with ID {fid} (checked {len(all_codebooks)} codebooks)")
                             # Try without file_type filter to see if it exists as a different type
                             any_file = db_sess.query(File).filter(File.id == fid).first()
                             if any_file:
-                                print(f"DEBUG: File {fid} exists but has type: {any_file.file_type}")
-                            else:
-                                print(f"DEBUG: File {fid} does not exist at all")
+                                # file exists but not a codebook
+                                resolved_schema = None
                     finally:
                         try:
                             db_sess.close()
                         except Exception:
                             pass
-                except Exception as e:
-                    print(f"DEBUG: Could not parse '{cb_schema_raw}' as integer: {e}")
+                except Exception:
                     resolved_schema = None
 
             if resolved_schema:
-                print(f"DEBUG: Querying codebook content from schema: {resolved_schema}")
+                # query the codebook content
                 with engine.connect() as conn:
                     tbl_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": f"{resolved_schema}.content_store"}).scalar()
                     if tbl_exists:
                         res = conn.execute(text(f'SELECT file_text FROM "{resolved_schema}".content_store LIMIT 1'))
                         row = res.fetchone()
                         codebook_text = row[0] if row else ""
-                        print(f"DEBUG: Retrieved codebook text, length: {len(codebook_text)}")
-                    else:
-                        print(f"DEBUG: content_store table not found in schema {resolved_schema}")
-            else:
-                print("DEBUG: Could not resolve codebook schema")
         except Exception as e:
-            print(f"DEBUG: Exception during codebook resolution: {e}")
+            print(f"Exception during codebook resolution: {e}")
             import traceback
             traceback.print_exc()
 
@@ -234,12 +220,10 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
         system_prompt = ""
         user_prompt = ""
         try:
-            print(f"DEBUG: codebook_text length: {len(codebook_text)}, api_key provided: {bool(api_key)}")
             if codebook_text and api_key:
-                print("DEBUG: Calling classify_posts...")
+                # call into classification routine
                 result = classify_posts(codebook_text, assembled, methodology or "", api_key, model)
                 classification_output, system_prompt, user_prompt = result
-                print(f"DEBUG: classify_posts returned successfully, output length: {len(classification_output)}")
             else:
                 error_msg = []
                 if not codebook_text:
@@ -247,9 +231,8 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
                 if not api_key:
                     error_msg.append("api_key not provided")
                 classification_output = f"Cannot apply codebook: {', '.join(error_msg)}"
-                print(f"DEBUG: Skipping classification: {classification_output}")
         except Exception as e:
-            print(f"DEBUG: Exception during classification: {e}")
+            print(f"Exception during classification: {e}")
             import traceback
             traceback.print_exc()
             classification_output = f"API request error: {str(e)}"

@@ -119,10 +119,9 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
 
         # Print only lengths
         try:
-            print(f"[filter-data] submissions length: {len(submissions_text)}")
-            print(f"[filter-data] comments length: {len(comments_text)}")
-        except Exception as e:
-            print(f"[filter-data] Error printing lengths: {e}")
+            pass
+        except Exception:
+            pass
 
         # Call AI filter functions and print their responses
         posts_filtered = None
@@ -133,24 +132,21 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
             if submissions_text and submissions_text.strip():
                 result = filter_posts_with_ai(prompt or "", submissions_text, api_key, model)
                 posts_filtered, system_prompt, user_prompt = result
-                print(f"[filter-data] posts_filtered: {posts_filtered}")
             else:
                 posts_filtered = '[]'
 
             if comments_text and comments_text.strip():
                 comments_filtered = filter_comments_with_ai(prompt or "", comments_text, api_key, model)
-                print(f"[filter-data] comments_filtered: {comments_filtered}")
             else:
                 comments_filtered = '[]'
         except Exception as e:
-            print(f"[filter-data] Error calling filter functions: {e}")
             traceback.print_exc()
             posts_filtered = f'[{{"error": "Filtering failed: {e}"}}]'
             comments_filtered = f'[{{"error": "Filtering failed: {e}"}}]'
 
         posts_list = posts_filtered if isinstance(posts_filtered, list) else []
         comments_list = comments_filtered if isinstance(comments_filtered, list) else []
-        print(len(posts_list), len(comments_list))
+        pass
         try:
             selected_posts = []
             selected_comments = []
@@ -198,14 +194,12 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
             comments_list = selected_comments
 
             try:
-                print(f"[filter-data] Parsed posts_list length: {len(posts_list)}")
-                print(f"[filter-data] Parsed comments_list length: {len(comments_list)}")
+                pass
             except Exception:
                 pass
         except Exception as e:
-            print(f"[filter-data] Error normalizing parsed results: {e}")
             try:
-                print(f"[filter-data] Raw posts_list type: {type(posts_list)}, comments_list type: {type(comments_list)}")
+                pass
             except Exception:
                 pass
 
@@ -219,17 +213,17 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
             unique_id = secrets.token_hex(6)
             new_schema = f"proj_{unique_id}"
             with engine.begin() as conn:
-                print(f"[filter-data] Creating schema {new_schema}")
+                pass
                 conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{new_schema}"'))
                 # create submissions and comments tables
                 conn.execute(text(f"CREATE TABLE IF NOT EXISTS \"{new_schema}\".submissions (id text PRIMARY KEY, title text, selftext text)"))
                 conn.execute(text(f"CREATE TABLE IF NOT EXISTS \"{new_schema}\".comments (id text PRIMARY KEY, body text)"))
-                print(f"[filter-data] Created tables in schema {new_schema}")
+                pass
 
                 # insert submissions
                 inserted_subs = 0
                 total_subs = len(posts_list)
-                print(f"[filter-data] Inserting {total_subs} submissions into {new_schema}.submissions")
+                pass
                 for item in posts_list:
                     try:
                         if not isinstance(item, dict):
@@ -249,17 +243,17 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
                                 )
                             inserted_subs += 1
                         except Exception as ie:
-                            print(f"[filter-data] Skipping invalid submission row (savepoint rollback): {ie}")
+                            pass
                             # continue to next item
                     except Exception as ie:
-                        print(f"[filter-data] Skipping invalid submission row: {ie}")
+                        pass
 
-                print(f"[filter-data] Inserted {inserted_subs}/{total_subs} submissions")
+                pass
 
                 # insert comments
                 inserted_comments = 0
                 total_comments = len(comments_list)
-                print(f"[filter-data] Inserting {total_comments} comments into {new_schema}.comments")
+                pass
                 for item in comments_list:
                     try:
                         cid = str(item.get('id')) if item.get('id') is not None else None
@@ -274,17 +268,16 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
                                 )
                             inserted_comments += 1
                         except Exception as ie:
-                            print(f"[filter-data] Skipping invalid comment row (savepoint rollback): {ie}")
+                            pass
                             # continue to next item
                     except Exception as ie:
-                        print(f"[filter-data] Skipping invalid comment row: {ie}")
+                        pass
 
-                print(f"[filter-data] Inserted {inserted_comments}/{total_comments} comments")
+                pass
 
             # create file row and metadata if user authenticated
             if user_id:
                 try:
-                    print(f"[filter-data] Creating file metadata for schema {new_schema} (user={user_id})")
                     with DatabaseManager() as dm:
                         file_rec = File(user_id=user_id, filename=name or new_schema, schemaname=new_schema, file_type='filtered_data', systemprompt=system_prompt, userprompt=user_prompt)
                         dm.session.add(file_rec)
@@ -297,19 +290,16 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
                             dm.session.flush()
                         try:
                             dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name='submissions', row_count=len(posts_list))
-                            print(f"[filter-data] Added file_tables entry for submissions (rows={len(posts_list)})")
-                        except Exception as e:
-                            print(f"[filter-data] Failed to add submissions table metadata: {e}")
+                        except Exception:
+                            pass
                         try:
                             dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name='comments', row_count=len(comments_list))
-                            print(f"[filter-data] Added file_tables entry for comments (rows={len(comments_list)})")
-                        except Exception as e:
-                            print(f"[filter-data] Failed to add comments table metadata: {e}")
+                        except Exception:
+                            pass
                 except Exception as e:
-                    print(f"[filter-data] Failed to create file metadata: {e}")
+                    pass
 
         except Exception as e:
-            print(f"[filter-data] Failed to persist filtered results to Postgres: {e}")
             traceback.print_exc()
 
         return JSONResponse({
@@ -321,7 +311,6 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
             "file": {"id": str(file_rec.id), "schema_name": new_schema, "filename": file_rec.filename} if file_rec else None,
         })
     except Exception as exc:
-        print(f"[filter-data] Error reading schema {schema}: {exc}")
         traceback.print_exc()
         return JSONResponse({"error": str(exc)}, status_code=500)
 

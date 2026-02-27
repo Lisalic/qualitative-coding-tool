@@ -55,14 +55,14 @@ def generate_codebook(posts_content: str, api_key: str, custom_prompt: str = "",
 
     **STRICT OUTPUT INSTRUCTION:** Provide ONLY the codebook content below. Do not include any introductory or concluding conversational text.
 
-    Format the output using the following Markdown structure for each code:
+    Format the output using the following structure for each code:
 
-### Code Family: [Theme Name]
-#### Code Name: [Name]
-**Definition:** [Concise Definition]  
-**Inclusion Criteria:** [When to use this code]  
-**Key Words:** [Words or phrases frequently found in this code]  
-**Example:** [Quote from data]
+Code Family: [Theme Name]
+Code Name: [Name]
+Definition: [Concise Definition]
+Inclusion Criteria: [When to use this code]
+Key Words: [Words or phrases frequently found in this code]
+Example: [Quote from data]
     """
 
     user_prompt = f"Here is the data for analysis: {posts_content} Additional Instructions: {custom_prompt}"
