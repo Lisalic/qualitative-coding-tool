@@ -24,6 +24,9 @@ export default function Project() {
   const [mergeError, setMergeError] = useState("");
   const [mergeSuccess, setMergeSuccess] = useState("");
 
+  const [codebookFilter, setCodebookFilter] = useState("all");
+  const [codingFilter, setCodingFilter] = useState("all");
+
   useEffect(() => {
     let mounted = true;
     setLoading(true);
@@ -66,6 +69,23 @@ export default function Project() {
   const codingFiles = (project.files || []).filter(
     (f) => f.file_type === "coding" || f.file_type === "coding_comparison",
   );
+
+  // Filtered files based on filter state
+  const filteredCodebookFiles = codebookFiles.filter((f) => {
+    if (codebookFilter === "all") return true;
+    if (codebookFilter === "codebook") return f.file_type === "codebook";
+    if (codebookFilter === "comparisons")
+      return f.file_type === "codebook_comparison";
+    return true;
+  });
+
+  const filteredCodingFiles = codingFiles.filter((f) => {
+    if (codingFilter === "all") return true;
+    if (codingFilter === "coding") return f.file_type === "coding";
+    if (codingFilter === "comparisons")
+      return f.file_type === "coding_comparison";
+    return true;
+  });
 
   const startEdit = () => {
     setEditName(project.projectname || "");
@@ -1182,7 +1202,32 @@ export default function Project() {
                   Add Codebook
                 </button>
               </div>
-              {codebookFiles.length === 0 ? (
+              <div
+                style={{ display: "flex", gap: "10px", marginBottom: "20px" }}
+              >
+                <button
+                  className={`project-tab ${codebookFilter === "codebook" ? "selected" : ""}`}
+                  onClick={() => setCodebookFilter("codebook")}
+                  style={{ padding: "8px 12px", fontSize: 12 }}
+                >
+                  Show Codebook
+                </button>
+                <button
+                  className={`project-tab ${codebookFilter === "comparisons" ? "selected" : ""}`}
+                  onClick={() => setCodebookFilter("comparisons")}
+                  style={{ padding: "8px 12px", fontSize: 12 }}
+                >
+                  Show Comparisons
+                </button>
+                <button
+                  className={`project-tab ${codebookFilter === "all" ? "selected" : ""}`}
+                  onClick={() => setCodebookFilter("all")}
+                  style={{ padding: "8px 12px", fontSize: 12 }}
+                >
+                  Show All
+                </button>
+              </div>
+              {filteredCodebookFiles.length === 0 ? (
                 <div
                   style={{
                     textAlign: "center",
@@ -1201,7 +1246,7 @@ export default function Project() {
                     gap: "12px",
                   }}
                 >
-                  {codebookFiles.map((f) => (
+                  {filteredCodebookFiles.map((f) => (
                     <div
                       key={f.id}
                       style={{
@@ -1423,7 +1468,32 @@ export default function Project() {
                   Add Coding
                 </button>
               </div>
-              {codingFiles.length === 0 ? (
+              <div
+                style={{ display: "flex", gap: "10px", marginBottom: "20px" }}
+              >
+                <button
+                  className={`project-tab ${codingFilter === "coding" ? "selected" : ""}`}
+                  onClick={() => setCodingFilter("coding")}
+                  style={{ padding: "8px 12px", fontSize: 12 }}
+                >
+                  Show Coding
+                </button>
+                <button
+                  className={`project-tab ${codingFilter === "comparisons" ? "selected" : ""}`}
+                  onClick={() => setCodingFilter("comparisons")}
+                  style={{ padding: "8px 12px", fontSize: 12 }}
+                >
+                  Show Comparisons
+                </button>
+                <button
+                  className={`project-tab ${codingFilter === "all" ? "selected" : ""}`}
+                  onClick={() => setCodingFilter("all")}
+                  style={{ padding: "8px 12px", fontSize: 12 }}
+                >
+                  Show All
+                </button>
+              </div>
+              {filteredCodingFiles.length === 0 ? (
                 <div
                   style={{
                     textAlign: "center",
@@ -1442,7 +1512,7 @@ export default function Project() {
                     gap: "12px",
                   }}
                 >
-                  {codingFiles.map((f) => (
+                  {filteredCodingFiles.map((f) => (
                     <div
                       key={f.id}
                       style={{

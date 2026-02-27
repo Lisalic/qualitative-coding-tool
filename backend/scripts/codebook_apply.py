@@ -54,6 +54,8 @@ def classify_posts(codebook: str, posts_content: str, methodology: str, api_key:
 
     **CRITICAL INSTRUCTION:** You MUST use the EXACT POST_ID values from the input POSTS CONTENT. Do NOT make up, modify, or invent new post IDs. Only include posts that actually exist in the provided content. The POST_ID values are alphanumeric strings like "132031", "100l8bs", etc. - use them exactly as they appear.
 
+    **MULTIPLE CODES PER POST:** A single post can and often should have MULTIPLE codes applied if different aspects of the post content support different codes from the codebook. Apply as many relevant codes as supported by the evidence in the post. Do not limit yourself to just one code per post - use multiple codes when the content warrants it.
+
     **EVIDENCE REQUIREMENT:** For each code you apply to a post, you MUST provide one or more representative quotations or text snippets from the post content that demonstrate why that code applies. If multiple separate text portions support the same code, separate them with the § symbol (section sign). Each evidence snippet should be a direct quote or close paraphrase from the post's title or body text.
 
     **STRICT OUTPUT INSTRUCTION:** Output a single raw text report. For each post that has applicable codes, use the following format exactly:
@@ -63,12 +65,14 @@ def classify_posts(codebook: str, posts_content: str, methodology: str, api_key:
     POST_ID: [exact_id_from_input]
     CODE: [code_name] - EVIDENCE: [quoted_text_snippet1]§[quoted_text_snippet2]§[quoted_text_snippet3]
     CODE: [another_code_name] - EVIDENCE: [another_quoted_text_snippet]
+    CODE: [yet_another_code_name] - EVIDENCE: [more_evidence]
 
     Where:
     - [exact_id_from_input] is the EXACT post identifier from the POSTS CONTENT
     - [code_name] is an exact code name from the CODEBOOK
     - [quoted_text_snippet] is a representative quote from the post demonstrating the code application
     - Multiple evidence snippets for the same code are separated by § (section sign)
+    - Multiple codes can be applied to the same post when supported by the content
 
     Only include posts that have at least one applicable code with evidence.
 
@@ -76,6 +80,8 @@ def classify_posts(codebook: str, posts_content: str, methodology: str, api_key:
     
     user_prompt = f"""
     Please apply the following Codebook to the provided Posts Content and generate the Structured Classification Report in the specified format.
+
+    IMPORTANT: Apply MULTIPLE codes to the same post when the content supports multiple different themes or concepts from the codebook. Do not limit yourself to just one code per post - use as many relevant codes as the content warrants.
 
     CODEBOOK:
     {codebook}
