@@ -340,9 +340,7 @@ async def compare_codebooks(request: Request, codebook_a: str = Form(...), codeb
             "Return the full comparison as text (no extra JSON or metadata)."
         )
 
-        user_prompt = f"Codebook A:\n{text_a}\n\n---\n\nCodebook B:\n{text_b}\n\nPlease compare them in detail."
-        if prompt.strip():
-            user_prompt += f"\n\nAdditional instructions: {prompt.strip()}"
+        user_prompt = f"Codebook A: {text_a} Codebook B: {text_b} Please compare them in detail. Additional instructions: {prompt}"
 
         # choose model if provided, otherwise use MODEL_3 if available
         chosen_model = model or MODEL_3

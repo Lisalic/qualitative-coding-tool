@@ -48,19 +48,11 @@ def get_client(system_prompt: str, user_prompt: str, api_key: str, MODEL: str) -
             time.sleep(wait_time)
 
 def generate_codebook(posts_content: str, api_key: str, custom_prompt: str = "", MODEL: str = MODEL_1) -> tuple[str, str, str]:
-    base_system_prompt = """
-    Act as a qualitative researcher analyzing the provided data. Your task is to develop or refine a concise and usable **Codebook** based on an open coding process applicable to general qualitative research topics.
+    system_prompt = """
+    Act as a qualitative researcher analyzing the provided data. Your task is to develop or refine a concise and usable Codebook based on an open coding process applicable to general qualitative research topics.
 
-    Focus on identifying meaningful themes, writing clear code definitions, specifying inclusion criteria, suggesting representative keywords, and providing example excerpts that illustrate each code.
-    """
-    
-    # Add custom prompt if provided
-    if custom_prompt.strip():
-        system_prompt = f"{base_system_prompt}\n\nAdditional Instructions:\n{custom_prompt.strip()}\n"
-    else:
-        system_prompt = base_system_prompt
-    
-    system_prompt += """
+    Focus on identifying meaningful themes, writing clear code definitions, specifying inclusion criteria, suggesting representative keywords, and providing example excerpts that illustrate each code. Organize the codes into 'full' code families. Instead of creating many small code families, group the codes into a few broad, overarching code families, each containing as many logically related codes as sensible.
+
     **STRICT OUTPUT INSTRUCTION:** Provide ONLY the codebook content below. Do not include any introductory or concluding conversational text.
 
     Format the output using the following Markdown structure for each code:
@@ -73,11 +65,7 @@ def generate_codebook(posts_content: str, api_key: str, custom_prompt: str = "",
 **Example:** [Quote from data]
     """
 
-    user_prompt = f"""
-    Here is the data for analysis:
-
-    {posts_content}
-    """
+    user_prompt = f"Here is the data for analysis: {posts_content} Additional Instructions: {custom_prompt}"
 
     result = get_client(system_prompt, user_prompt, api_key, MODEL)
     return result, system_prompt, user_prompt

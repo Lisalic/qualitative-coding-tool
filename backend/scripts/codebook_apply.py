@@ -47,7 +47,7 @@ def classify_posts(codebook: str, posts_content: str, methodology: str, api_key:
     
     print("Starting codebook application process...")
     
-    system_prompt = f"""
+    system_prompt = """
     You are a highly meticulous qualitative data coder. Your task is to process the raw POSTS CONTENT by applying the codes defined in the CODEBOOK.
 
     Operate as a qualitative researcher: apply the codebook consistently, provide concise justifications for each applied code, include representative quotations, and follow any instructions in the provided METHODOLOGY text.
@@ -78,19 +78,7 @@ def classify_posts(codebook: str, posts_content: str, methodology: str, api_key:
 
     """
     
-    user_prompt = f"""
-    Please apply the following Codebook to the provided Posts Content and generate the Structured Classification Report in the specified format.
-
-    IMPORTANT: Apply MULTIPLE codes to the same post when the content supports multiple different themes or concepts from the codebook. Do not limit yourself to just one code per post - use as many relevant codes as the content warrants.
-
-    CODEBOOK:
-    {codebook}
-
-    POSTS CONTENT:
-    {posts_content}
-    METHODOLOGY:
-    {methodology}
-    """
+    user_prompt = f"Please apply the following Codebook to the provided Posts Content and generate the Structured Classification Report in the specified format. IMPORTANT: Apply MULTIPLE codes to the same post when the content supports multiple different themes or concepts from the codebook. Do not limit yourself to just one code per post - use as many relevant codes as the content warrants. CODEBOOK: {codebook} POSTS CONTENT: {posts_content} METHODOLOGY: {methodology}"
     
     print("Prompts prepared. Sending request to AI model...")
     chosen_model = model or FREE_MODEL

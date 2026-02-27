@@ -52,9 +52,7 @@ def filter_posts_with_ai(filter_prompt: str, posts_content: str, api_key: str, m
     Returns:
         str: Python string with filtered posts as an array of objects: [{id, title, selftext}, ...]
     """
-    system_prompt = f"""You are an expert content analyst. Your task is to filter posts and return ONLY a Python array of post IDs.
-
-FILTERING CRITERIA: {filter_prompt}
+    system_prompt = """You are an expert content analyst. Your task is to filter posts and return ONLY a Python array of post IDs.
 
 INSTRUCTIONS:
 1. Analyze each post in the provided content.
@@ -70,7 +68,7 @@ EXAMPLE OUTPUT FORMAT:
 
 CRITICAL: Return ONLY the raw Python array with NO markdown, NO backticks, NO code fences, and NO additional text or commentary."""
 
-    user_prompt = f"Here are the posts to filter:\n\n{posts_content}"
+    user_prompt = f"Here are the posts to filter: {posts_content} Here are some additional filtering criteria: {filter_prompt}"
 
     try:
         chosen_model = model or FREE_MODEL
@@ -92,9 +90,7 @@ def filter_comments_with_ai(filter_prompt: str, comments_content: str, api_key: 
 
     Returns an array of objects with ids.
     """
-    system_prompt = f"""You are an expert content analyst. Your task is to filter comments and return ONLY a Python array of comment IDs.
-
-FILTERING CRITERIA: {filter_prompt}
+    system_prompt = """You are an expert content analyst. Your task is to filter comments and return ONLY a Python array of comment IDs.
 
 INSTRUCTIONS:
 1. Analyze each comment in the provided content.
@@ -108,7 +104,7 @@ EXAMPLE OUTPUT FORMAT:
 
 CRITICAL: Return ONLY the raw Python array with NO markdown, NO backticks, NO code fences, and NO additional text or commentary."""
 
-    user_prompt = f"Here are the comments to filter:\n\n{comments_content}"
+    user_prompt = f"Here are the comments to filter: {comments_content} Here are some additional filtering criteria: {filter_prompt}"
 
     try:
         chosen_model = model or FREE_MODEL

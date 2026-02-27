@@ -338,9 +338,7 @@ async def compare_codings(request: Request, coding_a: str = Form(...), coding_b:
             "Return the full comparison in a markdown format."
         )
 
-        user_prompt = f"Coding A:\n{text_a}\n\n---\n\nCoding B:\n{text_b}\n\nPlease compare them in detail."
-        if prompt.strip():
-            user_prompt += f"\n\nAdditional instructions: {prompt.strip()}"
+        user_prompt = f"Coding A: {text_a} Coding B: {text_b} Please compare them in detail. Additional instructions: {prompt}"
 
         chosen_model = model or MODEL_3
 

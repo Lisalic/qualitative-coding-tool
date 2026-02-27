@@ -33,14 +33,11 @@ def summarize_coding(coding_data: str, user_prompt: str = "", api_key: str = "",
     )
 
     # Combine the coding data with user instructions
-    full_user_prompt = f"Coding Data to Summarize:\n\n{coding_data}\n\n"
-    if user_prompt.strip():
-        full_user_prompt += f"Additional Instructions: {user_prompt.strip()}\n\n"
-    full_user_prompt += "Please provide a comprehensive summary of this coded qualitative data using qualitative research techniques."
+    user_prompt = f"Coding Data to Summarize: {coding_data} Additional Instructions: {user_prompt} Please provide a comprehensive summary of this coded qualitative data using qualitative research techniques."
 
-    print(f"[summarize_coding] Making API call with system prompt length: {len(system_prompt)}, user prompt length: {len(full_user_prompt)}")
+    print(f"[summarize_coding] Making API call with system prompt length: {len(system_prompt)}, user prompt length: {len(user_prompt)}")
     try:
-        response = get_client(system_prompt, full_user_prompt, api_key, chosen_model)
+        response = get_client(system_prompt, user_prompt, api_key, chosen_model)
         print(f"[summarize_coding] API call successful, response length: {len(response)}")
         return response
     except Exception as exc:
