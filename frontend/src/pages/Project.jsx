@@ -69,6 +69,9 @@ export default function Project() {
   const codingFiles = (project.files || []).filter(
     (f) => f.file_type === "coding" || f.file_type === "coding_comparison",
   );
+  const summaryFiles = (project.files || []).filter(
+    (f) => f.file_type === "summary",
+  );
 
   // Filtered files based on filter state
   const filteredCodebookFiles = codebookFiles.filter((f) => {
@@ -503,6 +506,23 @@ export default function Project() {
             >
               Coding
             </button>
+            <button
+              type="button"
+              className={`project-tab ${activeTab === "summary" ? "selected" : ""}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                setActiveTab("summary");
+              }}
+              style={{
+                padding: "12px 20px",
+                fontSize: 15,
+                fontWeight: "bold",
+                minWidth: "140px",
+                justifyContent: "center",
+              }}
+            >
+              Summary
+            </button>
           </div>
         </div>
 
@@ -528,21 +548,24 @@ export default function Project() {
                 <h2 style={{ margin: 0, color: "#ffffff", fontSize: "1.3em" }}>
                   Database Files
                 </h2>
-                <button
-                  className="project-tab"
-                  onClick={() =>
-                    navigate("/import", { state: { projectId: project.id } })
-                  }
-                  style={{
-                    padding: "10px 16px",
-                    fontSize: 14,
-                    fontWeight: "bold",
-                  }}
-                >
-                  Add Database
-                </button>
+                <div>
+                  <button
+                    className="project-tab"
+                    onClick={() =>
+                      navigate("/summarize-coding", {
+                        state: { projectId: project.id },
+                      })
+                    }
+                    style={{
+                      padding: "10px 16px",
+                      fontSize: 14,
+                      fontWeight: "bold",
+                    }}
+                  >
+                    Add Summary
+                  </button>
+                </div>
               </div>
-
               {dbFiles.length === 0 ? (
                 <div
                   style={{
@@ -1688,6 +1711,199 @@ export default function Project() {
                           </button>
                         </div>
                       )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === "summary" && (
+            <div
+              style={{
+                backgroundColor: "#000000",
+                border: "2px solid #ffffff",
+                borderRadius: "12px",
+                padding: "24px",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: "20px",
+                }}
+              >
+                <h2 style={{ margin: 0, color: "#ffffff", fontSize: "1.3em" }}>
+                  Summary Files
+                </h2>
+                <div>
+                  <button
+                    className="project-tab"
+                    onClick={() =>
+                      navigate("/summarize-coding", {
+                        state: { projectId: project.id },
+                      })
+                    }
+                    style={{
+                      padding: "10px 16px",
+                      fontSize: 14,
+                      fontWeight: "bold",
+                    }}
+                  >
+                    Add Summary
+                  </button>
+                </div>
+              </div>
+
+              {summaryFiles.length === 0 ? (
+                <div
+                  style={{
+                    textAlign: "center",
+                    color: "#888",
+                    padding: "40px",
+                    fontSize: "1.1em",
+                  }}
+                >
+                  No summary files yet
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "12px",
+                  }}
+                >
+                  {summaryFiles.map((f) => (
+                    <div
+                      key={f.id}
+                      style={{
+                        backgroundColor: "#000000",
+                        border: "1px solid #333",
+                        padding: "12px",
+                        borderRadius: 8,
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: "bold" }}>
+                          {f.display_name}
+                        </div>
+                        <div style={{ color: "#888", fontSize: 12 }}>
+                          {f.created_at
+                            ? new Date(f.created_at).toLocaleString()
+                            : ""}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button
+                          className="project-tab"
+                          onClick={() =>
+                            navigate("/summaryview", {
+                              state: {
+                                selectedSummary:
+                                  f.schema_name || f.display_name || f.id,
+                              },
+                            })
+                          }
+                          style={{
+                            padding: "8px 14px",
+                            fontSize: 13,
+                            fontWeight: "bold",
+                          }}
+                        >
+                          View
+                        </button>
+
+                        {renamingFile === f.schema_name ? (
+                          <form
+                            onSubmit={saveRenameFile}
+                            style={{
+                              display: "flex",
+                              gap: 8,
+                              alignItems: "center",
+                            }}
+                          >
+                            <input
+                              type="text"
+                              value={newFileName}
+                              onChange={(e) => setNewFileName(e.target.value)}
+                              placeholder="File name"
+                              style={{
+                                padding: "6px 8px",
+                                backgroundColor: "#333",
+                                color: "#fff",
+                                border: "1px solid #555",
+                                borderRadius: 4,
+                              }}
+                            />
+                            <input
+                              type="text"
+                              value={newFileDescription}
+                              onChange={(e) =>
+                                setNewFileDescription(e.target.value)
+                              }
+                              placeholder="Description (optional)"
+                              style={{
+                                padding: "6px 8px",
+                                backgroundColor: "#333",
+                                color: "#fff",
+                                border: "1px solid #555",
+                                borderRadius: 4,
+                              }}
+                            />
+                            <button
+                              type="submit"
+                              className="project-tab"
+                              style={{ padding: "8px 12px" }}
+                            >
+                              Save
+                            </button>
+                            <button
+                              type="button"
+                              className="project-tab"
+                              onClick={cancelRenameFile}
+                              style={{ padding: "8px 12px" }}
+                            >
+                              Cancel
+                            </button>
+                          </form>
+                        ) : (
+                          <>
+                            <button
+                              className="project-tab"
+                              onClick={() => startRenameFile(f)}
+                              style={{
+                                padding: "8px 14px",
+                                fontSize: 13,
+                                fontWeight: "bold",
+                              }}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              className="project-tab"
+                              onClick={() =>
+                                handleDeleteFile(
+                                  f.schema_name || f.display_name || f.id,
+                                  "summary",
+                                )
+                              }
+                              style={{
+                                padding: "8px 14px",
+                                fontSize: 13,
+                                fontWeight: "bold",
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>

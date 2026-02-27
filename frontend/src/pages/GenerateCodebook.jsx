@@ -24,7 +24,8 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
   const [description, setDescription] = useState("");
   const [saveMessage, setSaveMessage] = useState("");
   const [saveMessageType, setSaveMessageType] = useState("success");
-  const [model, setModel] = useState("tngtech/deepseek-r1t2-chimera:free");
+  // No default model: require explicit user selection
+  const [model, setModel] = useState("");
 
   useEffect(() => {
     fetchDatabases();
@@ -141,7 +142,8 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
       requestData.append("api_key", savedApiKey);
       requestData.append("database", formData.database || database);
       if (formData.prompt) requestData.append("prompt", formData.prompt);
-      if (model) requestData.append("model", model);
+      // Use the model selected in the form (if provided) to avoid relying on component defaults
+      if (formData.model) requestData.append("model", formData.model);
 
       if (selectedProject) {
         requestData.append("project_id", selectedProject);
@@ -297,7 +299,7 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
       type: "select",
       value: model,
       onChange: (v) => setModel(v),
-      options: AI_MODELS,
+      options: [{ value: "", label: "-- select model --" }, ...AI_MODELS],
     },
     {
       id: "name",

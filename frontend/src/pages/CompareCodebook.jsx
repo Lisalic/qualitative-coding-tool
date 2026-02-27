@@ -13,7 +13,8 @@ export default function CompareCodebook() {
   const [loading, setLoading] = useState(false);
   const [comparison, setComparison] = useState("");
   const [error, setError] = useState("");
-  const [model, setModel] = useState("tngtech/deepseek-r1t2-chimera:free");
+  // No default model: require explicit user selection
+  const [model, setModel] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [projects, setProjects] = useState([]);
@@ -171,6 +172,7 @@ export default function CompareCodebook() {
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
               >
+                <option value="">-- select model --</option>
                 {AI_MODELS.map((modelOption) => (
                   <option key={modelOption.value} value={modelOption.value}>
                     {modelOption.label}

@@ -25,7 +25,8 @@ export default function ApplyCodebook() {
   const [selectedProject, setSelectedProject] = useState("");
   const [saveMessage, setSaveMessage] = useState("");
   const [saveMessageType, setSaveMessageType] = useState("success");
-  const [model, setModel] = useState("arcee-ai/trinity-large-preview:free");
+  // No default model: require explicit user selection
+  const [model, setModel] = useState("");
 
   useEffect(() => {
     fetchCodebooks();
@@ -164,7 +165,8 @@ export default function ApplyCodebook() {
       requestData.append("report_name", formData.report_name);
       requestData.append("codebook", formData.codebook);
       requestData.append("methodology", formData.methodology);
-      if (model) requestData.append("model", model);
+      // Use the model selected in the form (if provided) to avoid relying on component defaults
+      if (formData.model) requestData.append("model", formData.model);
       if (formData.description)
         requestData.append("description", formData.description);
       if (selectedProject) {
@@ -339,7 +341,7 @@ export default function ApplyCodebook() {
       type: "select",
       value: model,
       onChange: (v) => setModel(v),
-      options: AI_MODELS,
+      options: [{ value: "", label: "-- select model --" }, ...AI_MODELS],
     },
     {
       id: "report_name",

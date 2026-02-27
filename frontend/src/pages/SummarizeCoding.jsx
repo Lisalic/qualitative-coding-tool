@@ -13,7 +13,13 @@ export default function SummarizeCoding() {
   const [loading, setLoading] = useState(false);
   const [summary, setSummary] = useState("");
   const [error, setError] = useState("");
-  const [model, setModel] = useState("tngtech/deepseek-r1t2-chimera:free");
+  const [saveName, setSaveName] = useState("");
+  const [saveDescription, setSaveDescription] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState("");
+  const [saveError, setSaveError] = useState("");
+  // No default model: require explicit user selection
+  const [model, setModel] = useState("");
 
   useEffect(() => {
     let mounted = true;
@@ -83,6 +89,43 @@ export default function SummarizeCoding() {
     }
   };
 
+  const saveSummaryToProject = async (ev) => {
+    ev?.preventDefault();
+    setSaveError("");
+    setSaveSuccess("");
+    if (!saveName || !saveName.trim())
+      return setSaveError("Provide a name for the summary");
+    if (!selectedProject)
+      return setSaveError("Select a project to attach the summary to");
+
+    try {
+      setSaving(true);
+      const form = new FormData();
+      form.append("content", summary || "");
+      form.append("name", saveName.trim());
+      form.append("description", saveDescription || "");
+      form.append("project_id", String(selectedProject));
+
+      const resp = await apiFetch("/api/save-summary/", {
+        method: "POST",
+        body: form,
+      });
+      if (!resp.ok) {
+        const d = await resp.json().catch(() => ({}));
+        throw new Error(d.detail || d.error || `HTTP ${resp.status}`);
+      }
+      const data = await resp.json();
+      setSaveSuccess("Saved summary to project");
+      // Optionally reset fields
+      setSaveName("");
+      setSaveDescription("");
+    } catch (err) {
+      setSaveError(String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="home-container">
       <div style={{ width: "100%", maxWidth: 1400, padding: 20 }}>
@@ -125,6 +168,7 @@ export default function SummarizeCoding() {
                   value={model}
                   onChange={(e) => setModel(e.target.value)}
                 >
+                  <option value="">-- select model --</option>
                   {AI_MODELS.map((modelOption) => (
                     <option key={modelOption.value} value={modelOption.value}>
                       {modelOption.label}
@@ -212,6 +256,78 @@ export default function SummarizeCoding() {
               }}
             >
               <ReactMarkdown>{summary}</ReactMarkdown>
+            </div>
+
+            <div
+              style={{
+                marginTop: 12,
+                padding: 12,
+                background: "#0f0f0f",
+                border: "1px solid #333",
+                borderRadius: 8,
+              }}
+            >
+              <h4 style={{ margin: "0 0 8px 0" }}>Save Summary</h4>
+              <div style={{ display: "flex", gap: 12, marginBottom: 8 }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: "block", marginBottom: 6 }}>
+                    Project
+                  </label>
+                  <select
+                    className="form-input"
+                    value={selectedProject}
+                    onChange={(e) => setSelectedProject(e.target.value)}
+                  >
+                    <option value="">-- select project --</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.projectname}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: "block", marginBottom: 6 }}>
+                    Name
+                  </label>
+                  <input
+                    className="form-input"
+                    value={saveName}
+                    onChange={(e) => setSaveName(e.target.value)}
+                    placeholder="Summary name"
+                  />
+                </div>
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                <label style={{ display: "block", marginBottom: 6 }}>
+                  Description (optional)
+                </label>
+                <input
+                  className="form-input"
+                  value={saveDescription}
+                  onChange={(e) => setSaveDescription(e.target.value)}
+                  placeholder="Short description"
+                />
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  className="project-tab"
+                  onClick={saveSummaryToProject}
+                  disabled={saving}
+                >
+                  {saving ? "Saving..." : "Save Summary to Project"}
+                </button>
+                {saveSuccess && (
+                  <div style={{ color: "#4CAF50", alignSelf: "center" }}>
+                    {saveSuccess}
+                  </div>
+                )}
+                {saveError && (
+                  <div style={{ color: "#ff6b6b", alignSelf: "center" }}>
+                    {saveError}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
