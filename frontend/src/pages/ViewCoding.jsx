@@ -21,6 +21,7 @@ export default function ViewCoding() {
   const [parsedCoding, setParsedCoding] = useState([]);
   const [postContents, setPostContents] = useState({});
   const [viewMode, setViewMode] = useState("text"); // "text" or "table"
+  const [selectedFilterCodes, setSelectedFilterCodes] = useState([]);
 
   // Color assignment for codes
   const getCodeColor = (code) => {
@@ -40,6 +41,14 @@ export default function ViewCoding() {
       post.codeEvidence.forEach(({ code }) => codes.add(code));
     });
     return Array.from(codes).sort();
+  };
+
+  // Get filtered coding data based on selected filter codes
+  const getFilteredCoding = () => {
+    if (selectedFilterCodes.length === 0) return parsedCoding;
+    return parsedCoding.filter((post) =>
+      post.codeEvidence.some((ev) => selectedFilterCodes.includes(ev.code)),
+    );
   };
 
   // Highlight text in content based on code evidence using position-based approach
@@ -437,6 +446,25 @@ export default function ViewCoding() {
 
   const renderTableView = () => (
     <div>
+      {selectedFilterCodes.length > 0 && (
+        <div style={{ marginBottom: "10px", color: "#fff" }}>
+          <strong>Filtering by codes:</strong> {selectedFilterCodes.join(", ")}{" "}
+          <button
+            onClick={() => setSelectedFilterCodes([])}
+            style={{
+              backgroundColor: "#555",
+              color: "#fff",
+              border: "none",
+              padding: "2px 6px",
+              borderRadius: "3px",
+              cursor: "pointer",
+              fontSize: "0.8em",
+            }}
+          >
+            Clear Filter
+          </button>
+        </div>
+      )}
       {/* Color Legend */}
       <div
         style={{
@@ -446,18 +474,32 @@ export default function ViewCoding() {
           borderRadius: "8px",
         }}
       >
-        <h4 style={{ margin: "0 0 10px 0", color: "#fff" }}>Code Legend</h4>
+        <h4 style={{ margin: "0 0 10px 0", color: "#fff" }}>Legend</h4>
         <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
           {getUniqueCodes().map((code) => (
             <div
               key={code}
+              onClick={() =>
+                setSelectedFilterCodes((prev) =>
+                  prev.includes(code)
+                    ? prev.filter((c) => c !== code)
+                    : [...prev, code],
+                )
+              }
               style={{
                 display: "flex",
                 alignItems: "center",
-                backgroundColor: "#333",
+                backgroundColor: selectedFilterCodes.includes(code)
+                  ? "#555"
+                  : "#333",
                 padding: "4px 8px",
                 borderRadius: "4px",
                 fontSize: "0.9em",
+                cursor: "pointer",
+                border: selectedFilterCodes.includes(code)
+                  ? "2px solid #fff"
+                  : "none",
+                transition: "background-color 0.2s",
               }}
             >
               <div
@@ -525,7 +567,7 @@ export default function ViewCoding() {
             </tr>
           </thead>
           <tbody>
-            {parsedCoding.map((item, index) => (
+            {getFilteredCoding().map((item, index) => (
               <tr key={index} style={{ borderBottom: "1px solid #333" }}>
                 <td
                   style={{
