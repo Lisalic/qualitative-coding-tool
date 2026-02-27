@@ -122,10 +122,20 @@ CRITICAL: Return ONLY the raw Python array with NO markdown, NO backticks, NO co
 
 
 def wrap_in_python_array(content: str):
-    matches = re.findall(r"['\"]([a-zA-Z0-9]+)['\"]", content)
+    # Try to parse a Python literal list first (best-effort)
+    try:
+        obj = ast.literal_eval(content.strip())
+        if isinstance(obj, list):
+            return [str(x) for x in obj if x is not None]
+    except Exception:
+        pass
 
+    # Fallback: extract any quoted tokens (allow underscores, hyphens, colons)
+    matches = re.findall(r"['\"]([^'\"]+)['\"]", content)
     if not matches:
         print("Warning: No IDs found in content")
         return []
 
-    return matches
+    # Filter matches to reasonable ID-like tokens
+    filtered = [m for m in matches if re.match(r"^[A-Za-z0-9_:-]+$", m)]
+    return filtered

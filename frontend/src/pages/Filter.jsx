@@ -19,7 +19,7 @@ export default function Filter() {
   const [selectedProject, setSelectedProject] = useState("");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [model, setModel] = useState("tngtech/deepseek-r1t2-chimera:free");
+  const [model, setModel] = useState("");
 
   const EXAMPLE_PROMPT = `Act as a qualitative research assistant tasked with cleaning raw data transcripts for analysis. For each input item, decide whether it should be kept or removed. Apply these rules: remove spam/automated posts, remove obvious duplicates, and remove non-topical noise. Keep authentic human discussion and on-topic content.`;
 
@@ -93,6 +93,12 @@ export default function Filter() {
   };
 
   const handleSubmit = async (formData) => {
+    console.debug(
+      "[filter] handleSubmit received formData:",
+      formData,
+      "component model:",
+      model,
+    );
     const savedApiKey = localStorage.getItem("apiKey");
     if (!savedApiKey) {
       throw new Error("Please set your API key in the navbar first.");
@@ -114,7 +120,9 @@ export default function Filter() {
       const requestData = new FormData();
       requestData.append("api_key", savedApiKey);
       requestData.append("prompt", formData.filterPrompt);
-      if (model) requestData.append("model", model);
+      // Only use the model explicitly provided by the user via the form
+      const modelToSend = formData.model;
+      if (modelToSend) requestData.append("model", modelToSend);
       // include desired output name if provided
       if (formData.name) {
         requestData.append("name", formData.name);

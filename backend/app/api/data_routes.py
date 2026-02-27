@@ -74,13 +74,21 @@ def project_entries(schema: str = Query(..., description="File schema name"), li
 
 
 @router.post("/filter-data/")
-async def filter_data(request: Request, api_key: str = Form(...), prompt: str = Form(...), database: str = Form(None), name: str = Form(...), model: str = Form("")):
+async def filter_data(request: Request, api_key: str = Form(...), prompt: str = Form(...), database: str = Form(None), name: str = Form(...), model: str = Form(""), project_id: str = Form(None), description: str = Form(None)):
     """Read a Postgres file schema (provided in `database`), assemble submissions and comments,
     merge into a single string and print it to the server stdout.
     """
     schema = (database or "").strip()
 
+    print(f"[filter-data] incoming: database={schema!r} name={name!r} model={model!r} prompt_len={len((prompt or '').strip())}")
+
+    # Require explicit model selection from the frontend — do not fall back to server defaults
+    if not model or not str(model).strip():
+        print("[filter-data] no model provided in form; aborting per policy to avoid silent defaults")
+        return JSONResponse({"error": "No model specified. Please select a model in the form."}, status_code=400)
+
     if not schema or not schema.startswith('proj_'):
+        print("[filter-data] invalid database parameter; expected proj_<id>")
         return JSONResponse({"error": "This endpoint expects a proj_<id> schema name in 'database'"}, status_code=400)
 
     submissions_text = ""
@@ -117,11 +125,11 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
                         body = r[1] if len(r) > 1 else ""
                     comments_text += f"CommentID: {cid or ''}\n{body or ''}\n\n"
 
-        # Print only lengths
+        # Log textual lengths for debugging
         try:
-            pass
+            print(f"[filter-data] submissions_text_len={len(submissions_text)} comments_text_len={len(comments_text)}")
         except Exception:
-            pass
+            print("[filter-data] failed to compute text lengths")
 
         # Call AI filter functions and print their responses
         posts_filtered = None
@@ -146,7 +154,18 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
 
         posts_list = posts_filtered if isinstance(posts_filtered, list) else []
         comments_list = comments_filtered if isinstance(comments_filtered, list) else []
-        pass
+        try:
+            print(f"[filter-data] AI results: posts_filtered_type={type(posts_filtered).__name__} comments_filtered_type={type(comments_filtered).__name__}")
+            if isinstance(posts_filtered, (list, tuple)):
+                print(f"[filter-data] posts_filtered_count={len(posts_filtered)} sample={posts_filtered[:5]}")
+            else:
+                print(f"[filter-data] posts_filtered_preview={str(posts_filtered)[:200]}")
+            if isinstance(comments_filtered, (list, tuple)):
+                print(f"[filter-data] comments_filtered_count={len(comments_filtered)} sample={comments_filtered[:5]}")
+            else:
+                print(f"[filter-data] comments_filtered_preview={str(comments_filtered)[:200]}")
+        except Exception:
+            print("[filter-data] failed to log AI results")
         try:
             selected_posts = []
             selected_comments = []
@@ -194,14 +213,14 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
             comments_list = selected_comments
 
             try:
-                pass
+                print(f"[filter-data] selected_posts_count={len(selected_posts)} selected_comments_count={len(selected_comments)}")
             except Exception:
-                pass
+                print("[filter-data] failed to log selected post/comment counts")
         except Exception as e:
             try:
-                pass
+                print(f"[filter-data] creating schema {new_schema}")
             except Exception:
-                pass
+                print("[filter-data] failed to log schema creation")
 
         # Create a new Postgres schema and store results there; attach to authenticated user if present
         # Resolve authenticated user (optional)
@@ -279,7 +298,7 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
             if user_id:
                 try:
                     with DatabaseManager() as dm:
-                        file_rec = File(user_id=user_id, filename=name or new_schema, schemaname=new_schema, file_type='filtered_data', systemprompt=system_prompt, userprompt=user_prompt)
+                        file_rec = File(user_id=user_id, filename=name or new_schema, schemaname=new_schema, file_type='filtered_data', systemprompt=system_prompt, userprompt=user_prompt, description=(description or None))
                         dm.session.add(file_rec)
                         dm.session.flush()
                         # Add dependency for the source database
@@ -294,6 +313,20 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
                             pass
                         try:
                             dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name='comments', row_count=len(comments_list))
+                        except Exception:
+                            pass
+                        # Attach to specified project if provided and exists
+                        try:
+                            if project_id:
+                                try:
+                                    pid = int(project_id)
+                                except Exception:
+                                    pid = None
+                                if pid is not None:
+                                    proj = dm.session.get(Project, pid)
+                                    if proj:
+                                        file_rec.projects.append(proj)
+                                        dm.session.flush()
                         except Exception:
                             pass
                 except Exception as e:

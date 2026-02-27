@@ -48,6 +48,7 @@ export default function ActionForm({
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (onSubmit) {
+      console.debug("[ActionForm] submitting formData:", formData);
       await onSubmit(formData);
     }
   };
