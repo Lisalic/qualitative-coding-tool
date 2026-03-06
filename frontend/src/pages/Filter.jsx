@@ -14,7 +14,7 @@ export default function Filter() {
   const [saveMessageType, setSaveMessageType] = useState("success");
   const [loading, setLoading] = useState(false);
   const [database, setDatabase] = useState("");
-  const [databases, setDatabases] = useState([]); // raw data projects for selection
+  const [databases, setDatabases] = useState([]);
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
   const [name, setName] = useState("");
@@ -92,6 +92,13 @@ export default function Filter() {
     }
   };
 
+  const getErrorMessage = (err) => {
+    if (typeof err === "string") return err;
+    if (err && typeof err.message === "string") return err.message;
+    if (err && err.message) return JSON.stringify(err.message);
+    return JSON.stringify(err);
+  };
+
   const handleSubmit = async (formData) => {
     console.debug(
       "[filter] handleSubmit received formData:",
@@ -104,13 +111,14 @@ export default function Filter() {
       throw new Error("Please set your API key in the navbar first.");
     }
 
-    if (!formData.filterPrompt.trim()) {
-      throw new Error("Please enter a filter prompt");
-    }
-
     // Require a name for the filtered DB
     if (!formData.name || !formData.name.trim()) {
       throw new Error("Please provide a name for the filtered database");
+    }
+
+    // Require a model selection
+    if (!formData.model || !formData.model.trim()) {
+      throw new Error("Please select an AI model.");
     }
 
     setLoading(true);
@@ -119,7 +127,9 @@ export default function Filter() {
     try {
       const requestData = new FormData();
       requestData.append("api_key", savedApiKey);
-      requestData.append("prompt", formData.filterPrompt);
+      if (formData.filterPrompt) {
+        requestData.append("prompt", formData.filterPrompt);
+      }
       // Only use the model explicitly provided by the user via the form
       const modelToSend = formData.model;
       if (modelToSend) requestData.append("model", modelToSend);
@@ -148,7 +158,12 @@ export default function Filter() {
         let errorMsg = "Filtering failed";
         try {
           const errorData = JSON.parse(text);
-          errorMsg = errorData.detail || errorMsg;
+          errorMsg =
+            typeof errorData.detail === "string"
+              ? errorData.detail
+              : typeof errorData.error === "string"
+                ? errorData.error
+                : JSON.stringify(errorData) || errorMsg;
         } catch (e) {
           errorMsg = text || errorMsg;
         }
@@ -158,10 +173,14 @@ export default function Filter() {
       const text = await response.text();
       const data = JSON.parse(text);
 
-      setMessage(`✓ ${data.message}`);
+      let resultMessage = `✓ ${data.message}`;
+      if (data.ai_response) {
+        resultMessage += `\n\nAI Response:\n${JSON.stringify(data.ai_response, null, 2)}`;
+      }
+      setMessage(resultMessage);
       setFilterPrompt("");
     } catch (err) {
-      setMessage(`Error: ${err.message}`);
+      setMessage(`Error: ${getErrorMessage(err)}`);
     } finally {
       setLoading(false);
     }

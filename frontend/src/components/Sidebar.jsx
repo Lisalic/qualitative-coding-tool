@@ -59,6 +59,7 @@ export default function Sidebar() {
     ["Compare Codebook", "/compare-codebook"],
     ["Compare Coding", "/compare-coding"],
     ["Summarize Coding", "/summarize-coding"],
+    ["View Summary", "/summaryview"],
     ["View Coding", "/coding-view"],
   ];
 
@@ -103,7 +104,6 @@ export default function Sidebar() {
           ));
         }
 
-        // Explicit order as requested
         const order = [
           "Home",
           "Import Data",
@@ -117,6 +117,7 @@ export default function Sidebar() {
           "View Filtered Data",
           "View Codebook",
           "View Coding",
+          "View Summary",
         ];
 
         const mapByLabel = Object.fromEntries(

@@ -551,18 +551,14 @@ export default function Project() {
                 <div>
                   <button
                     className="project-tab"
-                    onClick={() =>
-                      navigate("/summarize-coding", {
-                        state: { projectId: project.id },
-                      })
-                    }
+                    onClick={() => navigate("/import")}
                     style={{
                       padding: "10px 16px",
                       fontSize: 14,
                       fontWeight: "bold",
                     }}
                   >
-                    Add Summary
+                    Add Database
                   </button>
                 </div>
               </div>

@@ -65,9 +65,23 @@ export default function ActionForm({
     };
 
     switch (field.type) {
-      case "select":
+      case "select": {
+        let placeholderText =
+          field.placeholder ||
+          `Select a ${field.label.toLowerCase().replace(/^select\s+/i, "")}`;
+        if (
+          field.id === "model" ||
+          field.label.toLowerCase().includes("ai model")
+        ) {
+          placeholderText = "Select an AI model";
+        }
         return (
           <select {...commonProps}>
+            {!value && (
+              <option value="" disabled>
+                {placeholderText}
+              </option>
+            )}
             {field.options.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
@@ -75,6 +89,7 @@ export default function ActionForm({
             ))}
           </select>
         );
+      }
       case "radio":
         return (
           <div className="radio-group">

@@ -7,6 +7,7 @@ import re
 import secrets
 import traceback
 import pandas as pd
+from typing import Optional
 
 from .utils import get_user_id_from_request, engine, SessionLocal
 from app.database import get_db, File, FileTable, FileDependency, Project
@@ -74,7 +75,7 @@ def project_entries(schema: str = Query(..., description="File schema name"), li
 
 
 @router.post("/filter-data/")
-async def filter_data(request: Request, api_key: str = Form(...), prompt: str = Form(...), database: str = Form(None), name: str = Form(...), model: str = Form(""), project_id: str = Form(None), description: str = Form(None)):
+async def filter_data(request: Request, api_key: str = Form(...), prompt: Optional[str] = Form(None), database: str = Form(None), name: str = Form(...), model: str = Form(""), project_id: str = Form(None), description: Optional[str] = Form(None)):
     """Read a Postgres file schema (provided in `database`), assemble submissions and comments,
     merge into a single string and print it to the server stdout.
     """
@@ -151,6 +152,12 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
             traceback.print_exc()
             posts_filtered = f'[{{"error": "Filtering failed: {e}"}}]'
             comments_filtered = f'[{{"error": "Filtering failed: {e}"}}]'
+
+        # Check for AI errors after the try-except
+        if isinstance(posts_filtered, list) and len(posts_filtered) == 1 and isinstance(posts_filtered[0], dict) and "error" in posts_filtered[0]:
+            raise ValueError(f"Posts filtering failed: {posts_filtered[0]['error']}")
+        if isinstance(comments_filtered, list) and len(comments_filtered) == 1 and isinstance(comments_filtered[0], dict) and "error" in comments_filtered[0]:
+            raise ValueError(f"Comments filtering failed: {comments_filtered[0]['error']}")
 
         posts_list = posts_filtered if isinstance(posts_filtered, list) else []
         comments_list = comments_filtered if isinstance(comments_filtered, list) else []
@@ -341,6 +348,10 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: str = 
             "comments_length": len(comments_text),
             "posts_filtered_count": len(posts_list),
             "comments_filtered_count": len(comments_list),
+            "ai_response": {
+                "posts_filtered": posts_filtered,
+                "comments_filtered": comments_filtered,
+            },
             "file": {"id": str(file_rec.id), "schema_name": new_schema, "filename": file_rec.filename} if file_rec else None,
         })
     except Exception as exc:

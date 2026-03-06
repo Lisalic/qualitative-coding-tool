@@ -119,7 +119,7 @@ export default function CompareCoding() {
                     value={a}
                     onChange={(e) => setA(e.target.value)}
                   >
-                    <option value="">-- select --</option>
+                    <option value="">Select a coding</option>
                     {items.map((it) => (
                       <option key={it.value} value={it.value}>
                         {it.label}
@@ -152,7 +152,7 @@ export default function CompareCoding() {
                     value={b}
                     onChange={(e) => setB(e.target.value)}
                   >
-                    <option value="">-- select --</option>
+                    <option value="">Select a coding</option>
                     {items.map((it) => (
                       <option key={it.value} value={it.value}>
                         {it.label}
@@ -173,7 +173,7 @@ export default function CompareCoding() {
                   value={model}
                   onChange={(e) => setModel(e.target.value)}
                 >
-                  <option value="">-- select model --</option>
+                  <option value="">Select a model</option>
                   {AI_MODELS.map((modelOption) => (
                     <option key={modelOption.value} value={modelOption.value}>
                       {modelOption.label}
@@ -314,6 +314,7 @@ export default function CompareCoding() {
                   value={selectedProject}
                   onChange={(e) => setSelectedProject(e.target.value)}
                 >
+                  <option value="">Select a project</option>
                   {projects.map((pr) => (
                     <option key={pr.id} value={pr.id}>
                       {pr.projectname}

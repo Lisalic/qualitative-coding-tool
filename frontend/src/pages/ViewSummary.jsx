@@ -82,34 +82,42 @@ export default function ViewSummary() {
             padding: 24,
           }}
         >
-          <div style={{ display: "flex", gap: 20, marginBottom: 16 }}>
-            <div style={{ width: 260 }}>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+              marginBottom: 16,
+            }}
+          >
+            <div style={{ width: "100%" }}>
               <SelectionList
+                className="database-selector"
+                buttonClass="db-button"
                 items={available}
                 selectedId={selected}
                 onSelect={(id) => setSelected(id)}
                 emptyMessage="No summaries available"
               />
             </div>
-            <div style={{ flex: 1 }}>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                }}
-              >
-                <h2 style={{ color: "#ffffff", margin: 0 }}>
-                  {selectedName || "Select a summary"}
-                </h2>
-              </div>
 
-              {loading && <div style={{ color: "#ffffff" }}>Loading...</div>}
-              {error && <div style={{ color: "#ff6b6b" }}>{error}</div>}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
+              <h2 style={{ color: "#ffffff", margin: 0 }}>
+                {selectedName || "Select a summary"}
+              </h2>
+            </div>
 
-              <div style={{ marginTop: 12, color: "#ffffff" }}>
-                <ReactMarkdown>{content}</ReactMarkdown>
-              </div>
+            {loading && <div style={{ color: "#ffffff" }}>Loading...</div>}
+            {error && <div style={{ color: "#ff6b6b" }}>{error}</div>}
+
+            <div style={{ marginTop: 0, color: "#ffffff" }}>
+              <ReactMarkdown>{content}</ReactMarkdown>
             </div>
           </div>
         </div>
