@@ -295,7 +295,7 @@ export default function FileUpload({ onUploadSuccess, onView }) {
                 type="button"
                 onClick={handleAddSubredditClick}
                 disabled={loading || !subredditInput.trim()}
-                className="add-subreddit-btn"
+                className="add-btn"
               >
                 Add
               </button>

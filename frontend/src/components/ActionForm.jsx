@@ -23,7 +23,9 @@ export default function ActionForm({
     setFormData((prev) => {
       const merged = { ...prev };
       fields.forEach((field) => {
-        if (merged[field.id] === undefined) {
+        if (field.onChange) {
+          merged[field.id] = field.value || "";
+        } else if (merged[field.id] === undefined) {
           merged[field.id] = field.value || "";
         }
       });
@@ -41,20 +43,27 @@ export default function ActionForm({
   const handleFieldChange = (field, value) => {
     if (field.onChange) {
       field.onChange(value);
+    } else {
+      handleInputChange(field.id, value);
     }
-    handleInputChange(field.id, value);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (onSubmit) {
-      console.debug("[ActionForm] submitting formData:", formData);
-      await onSubmit(formData);
+      const finalFormData = { ...formData };
+      fields.forEach((field) => {
+        if (field.onChange) {
+          finalFormData[field.id] = field.value;
+        }
+      });
+      console.debug("[ActionForm] submitting formData:", finalFormData);
+      await onSubmit(finalFormData);
     }
   };
 
   const renderField = (field) => {
-    const value = formData[field.id];
+    const value = field.onChange ? field.value : formData[field.id];
     const commonProps = {
       id: field.id,
       value,

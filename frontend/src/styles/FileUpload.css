@@ -149,8 +149,9 @@ input[type="radio"]:disabled + .radio-label {
 
 .subreddit-input-wrapper {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   gap: 0.5rem;
+  align-items: flex-start;
 }
 
 .subreddit-tags {

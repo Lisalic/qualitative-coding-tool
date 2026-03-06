@@ -115,8 +115,29 @@ async def create_prompt(request: Request, db: Session = Depends(get_db)):
 
 
 @router.post("/prompts/{prompt_id}/update")
-def update_prompt(prompt_id: int, request: Request, display_name: str = None, promptname: str = None, prompt: str = None, type: str = None, db: Session = Depends(get_db)):
+async def update_prompt(prompt_id: int, request: Request, db: Session = Depends(get_db)):
     """Update a prompt."""
+    try:
+        raw_body = await request.body()
+    except Exception:
+        raw_body = b""
+
+    content_type = (request.headers.get("content-type") or "").lower()
+    data = {}
+    try:
+        if "application/json" in content_type:
+            data = await request.json()
+        else:
+            form = await request.form()
+            # convert FormData to a simple dict
+            data = {k: form.get(k) for k in form.keys()}
+    except Exception:
+        data = {}
+
+    display_name = data.get("display_name") or data.get("promptname")
+    prompt_val = data.get("prompt")
+    ptype = data.get("type")
+
     user_id = get_user_id_from_request(request)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -138,13 +159,13 @@ def update_prompt(prompt_id: int, request: Request, display_name: str = None, pr
         raise HTTPException(status_code=403, detail="Forbidden")
 
     # accept either `display_name` (legacy) or `promptname` (canonical)
-    new_name = promptname if (promptname is not None) else display_name
+    new_name = display_name
     if new_name is not None:
         p.promptname = new_name
-    if prompt is not None:
-        p.prompt = prompt
-    if type is not None:
-        p.type = type
+    if prompt_val is not None:
+        p.prompt = prompt_val
+    if ptype is not None:
+        p.type = ptype
 
     try:
         db.commit()
