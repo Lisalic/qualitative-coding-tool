@@ -92,11 +92,27 @@ export default function Filter() {
     }
   };
 
-  const getErrorMessage = (err) => {
-    if (typeof err === "string") return err;
-    if (err && typeof err.message === "string") return err.message;
-    if (err && err.message) return JSON.stringify(err.message);
-    return JSON.stringify(err);
+  const getStatusCodeErrorMessage = (status) => {
+    switch (status) {
+      case 400:
+        return "Bad Request: AI model unreachable try another model.";
+      case 401:
+        return "Invalid credentials: Please check your API key.";
+      case 402:
+        return "Your account or API key has insufficient credits for ths model. Add more credits and retry the request.";
+      case 403:
+        return "Your chosen model requires moderation and your input was flagged.";
+      case 408:
+        return "Your request timed out. This can happen with long inputs or if the model is under heavy load. Please try again.";
+      case 429:
+        return "You are being rate limited. Please wait and try again.";
+      case 502:
+        return "Your chosen model is down or we received an invalid response from it. Please try again later or select a different model.";
+      case 503:
+        return "Openrouter is currently unavailable. Please try again later.";
+      default:
+        return null;
+    }
   };
 
   const handleSubmit = async (formData) => {
@@ -154,20 +170,26 @@ export default function Filter() {
       });
 
       if (!response.ok) {
-        const text = await response.text();
-        let errorMsg = "Filtering failed";
-        try {
-          const errorData = JSON.parse(text);
-          errorMsg =
-            typeof errorData.detail === "string"
-              ? errorData.detail
-              : typeof errorData.error === "string"
-                ? errorData.error
-                : JSON.stringify(errorData) || errorMsg;
-        } catch (e) {
-          errorMsg = text || errorMsg;
+        const status = response.status;
+        const statusMessage = getStatusCodeErrorMessage(status);
+        if (statusMessage) {
+          throw new Error(statusMessage);
+        } else {
+          const text = await response.text();
+          let errorMsg = "Filtering failed";
+          try {
+            const errorData = JSON.parse(text);
+            errorMsg =
+              typeof errorData.detail === "string"
+                ? errorData.detail
+                : typeof errorData.error === "string"
+                  ? errorData.error
+                  : JSON.stringify(errorData) || errorMsg;
+          } catch (e) {
+            errorMsg = text || errorMsg;
+          }
+          throw new Error(errorMsg);
         }
-        throw new Error(errorMsg);
       }
 
       const text = await response.text();
@@ -180,7 +202,17 @@ export default function Filter() {
       setMessage(resultMessage);
       setFilterPrompt("");
     } catch (err) {
-      setMessage(`Error: ${getErrorMessage(err)}`);
+      let errorMessage = err.message;
+      // Check if the error message contains an error code
+      const codeMatch = errorMessage.match(/Error code: (\d+)/);
+      if (codeMatch) {
+        const code = parseInt(codeMatch[1], 10);
+        const statusMessage = getStatusCodeErrorMessage(code);
+        if (statusMessage) {
+          errorMessage = statusMessage;
+        }
+      }
+      setMessage(`Error: ${errorMessage}`);
     } finally {
       setLoading(false);
     }

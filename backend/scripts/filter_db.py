@@ -28,6 +28,10 @@ def get_client(system_prompt: str, user_prompt: str, api_key: str, model: str = 
                 timeout=300, 
                 extra_body={"transforms": ["middle-out"]}
             )
+            if not response.choices or not isinstance(response.choices, list) or len(response.choices) == 0:
+                raise ValueError(f"API returned no choices for model {model}")
+            if not response.choices[0].message or not response.choices[0].message.content:
+                raise ValueError(f"API returned empty message content for model {model}")
             return response.choices[0].message.content
         except KeyboardInterrupt:
             print("\nkeyboard interrupt")
