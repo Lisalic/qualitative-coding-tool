@@ -153,12 +153,6 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: Option
             posts_filtered = f'[{{"error": "Filtering failed: {e}"}}]'
             comments_filtered = f'[{{"error": "Filtering failed: {e}"}}]'
 
-        # Check for AI errors after the try-except
-        if isinstance(posts_filtered, list) and len(posts_filtered) == 1 and isinstance(posts_filtered[0], dict) and "error" in posts_filtered[0]:
-            raise ValueError(f"Posts filtering failed: {posts_filtered[0]['error']}")
-        if isinstance(comments_filtered, list) and len(comments_filtered) == 1 and isinstance(comments_filtered[0], dict) and "error" in comments_filtered[0]:
-            raise ValueError(f"Comments filtering failed: {comments_filtered[0]['error']}")
-
         posts_list = posts_filtered if isinstance(posts_filtered, list) else []
         comments_list = comments_filtered if isinstance(comments_filtered, list) else []
         try:
@@ -348,10 +342,6 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: Option
             "comments_length": len(comments_text),
             "posts_filtered_count": len(posts_list),
             "comments_filtered_count": len(comments_list),
-            "ai_response": {
-                "posts_filtered": posts_filtered,
-                "comments_filtered": comments_filtered,
-            },
             "file": {"id": str(file_rec.id), "schema_name": new_schema, "filename": file_rec.filename} if file_rec else None,
         })
     except Exception as exc:
@@ -391,3 +381,46 @@ async def get_comments_for_submission(submission_id: str, database: str = Query(
         print(f"Error reading comments from schema {schema}: {exc}")
         traceback.print_exc()
         return JSONResponse({"error": str(exc)}, status_code=500)
+
+@router.post("/post-contents/")
+async def get_post_contents(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    try:
+        data = await request.json()
+        schema_name = data.get("schema")
+        post_ids = data.get("post_ids", [])
+
+        if not schema_name or not post_ids:
+            raise HTTPException(status_code=400, detail="schema and post_ids are required")
+
+        # Query the database for the posts
+        with engine.connect() as conn:
+            # Build the query
+            placeholders = ", ".join([f":id_{i}" for i in range(len(post_ids))])
+            params = {f"id_{i}": pid for i, pid in enumerate(post_ids)}
+            
+            query = f"""
+            SELECT id, title, selftext
+            FROM "{schema_name}".submissions
+            WHERE id IN ({placeholders})
+            """
+            
+            result = conn.execute(text(query), params)
+            posts = {}
+            for row in result:
+                post_id = str(row[0])
+                title = row[1] or ""
+                selftext = row[2] or ""
+                posts[post_id] = {
+                    "title": title,
+                    "content": selftext
+                }
+
+        return JSONResponse({"contents": posts})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"error": str(e)}, status_code=500)
+
