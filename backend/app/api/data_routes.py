@@ -97,14 +97,16 @@ def record_counts_by_words(schema: str = Query(...), min_words: int = Query(0)):
 
 @router.get("/word-count-ranges/")
 def word_count_ranges(schema: str = Query(...)):
-    """Return word count ranges (0-1000 in steps of 10) for submissions and comments."""
+    """Return word count ranges (0-1000 in steps of 10) for submissions and comments using efficient SQL binning."""
     schema = (schema or "").strip()
     if schema.endswith(".db"):
         schema = schema[:-3]
     if not schema or not re.match(r"^[A-Za-z][A-Za-z0-9_]*$", schema):
         raise HTTPException(status_code=400, detail="Invalid schema name")
 
-    ranges = []
+    submissions_ranges = []
+    comments_ranges = []
+
     try:
         with engine.connect() as conn:
             subs_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": f"{schema}.submissions"}).scalar()
@@ -116,59 +118,72 @@ def word_count_ranges(schema: str = Query(...)):
             if subs_exists:
                 has_word_count_subs = conn.execute(text(f"""
                     SELECT EXISTS (
-                        SELECT 1 FROM information_schema.columns 
+                        SELECT 1 FROM information_schema.columns
                         WHERE table_schema = '{schema}' AND table_name = 'submissions' AND column_name = 'word_count'
                     )
                 """)).scalar()
             if comm_exists:
                 has_word_count_comm = conn.execute(text(f"""
                     SELECT EXISTS (
-                        SELECT 1 FROM information_schema.columns 
+                        SELECT 1 FROM information_schema.columns
                         WHERE table_schema = '{schema}' AND table_name = 'comments' AND column_name = 'word_count'
                     )
                 """)).scalar()
 
-            # Generate ranges from 0 to 1000 in steps of 10
-            for min_words in range(0, 1001, 10):
-                sub_count = 0
-                com_count = 0
+            # Get submissions ranges using efficient SQL binning
+            if subs_exists and has_word_count_subs:
+                result = conn.execute(text(f"""
+                    SELECT
+                        (floor(word_count / 10) * 10)::int as min_words,
+                        COUNT(*) as count
+                    FROM "{schema}"."submissions"
+                    WHERE word_count >= 0
+                    GROUP BY floor(word_count / 10) * 10
+                    ORDER BY min_words
+                """))
+                submissions_ranges = [{"min_words": row[0], "count": row[1]} for row in result]
+            elif subs_exists:
+                # Fallback to computed word counts if no word_count column
+                result = conn.execute(text(f"""
+                    SELECT
+                        (floor(({_word_count_expr(["title", "selftext"])}) / 10) * 10)::int as min_words,
+                        COUNT(*) as count
+                    FROM "{schema}"."submissions"
+                    WHERE {_word_count_expr(["title", "selftext"])} >= 0
+                    GROUP BY floor(({_word_count_expr(["title", "selftext"])}) / 10) * 10
+                    ORDER BY min_words
+                """))
+                submissions_ranges = [{"min_words": row[0], "count": row[1]} for row in result]
 
-                if subs_exists:
-                    if has_word_count_subs:
-                        sub_count = conn.execute(
-                            text(f'SELECT COUNT(*) FROM "{schema}"."submissions" WHERE word_count >= :mw'),
-                            {"mw": min_words}
-                        ).scalar() or 0
-                    else:
-                        wc = _word_count_expr(["title", "selftext"])
-                        sub_count = conn.execute(
-                            text(f'SELECT COUNT(*) FROM "{schema}"."submissions" WHERE {wc} >= :mw'),
-                            {"mw": min_words}
-                        ).scalar() or 0
-
-                if comm_exists:
-                    if has_word_count_comm:
-                        com_count = conn.execute(
-                            text(f'SELECT COUNT(*) FROM "{schema}"."comments" WHERE word_count >= :mw'),
-                            {"mw": min_words}
-                        ).scalar() or 0
-                    else:
-                        wc = _word_count_expr(["body"])
-                        com_count = conn.execute(
-                            text(f'SELECT COUNT(*) FROM "{schema}"."comments" WHERE {wc} >= :mw'),
-                            {"mw": min_words}
-                        ).scalar() or 0
-
-                ranges.append({
-                    "min_words": min_words,
-                    "submissions": sub_count,
-                    "comments": com_count
-                })
+            # Get comments ranges using efficient SQL binning
+            if comm_exists and has_word_count_comm:
+                result = conn.execute(text(f"""
+                    SELECT
+                        (floor(word_count / 10) * 10)::int as min_words,
+                        COUNT(*) as count
+                    FROM "{schema}"."comments"
+                    WHERE word_count >= 0
+                    GROUP BY floor(word_count / 10) * 10
+                    ORDER BY min_words
+                """))
+                comments_ranges = [{"min_words": row[0], "count": row[1]} for row in result]
+            elif comm_exists:
+                # Fallback to computed word counts if no word_count column
+                result = conn.execute(text(f"""
+                    SELECT
+                        (floor(({_word_count_expr(["body"])}) / 10) * 10)::int as min_words,
+                        COUNT(*) as count
+                    FROM "{schema}"."comments"
+                    WHERE {_word_count_expr(["body"])} >= 0
+                    GROUP BY floor(({_word_count_expr(["body"])}) / 10) * 10
+                    ORDER BY min_words
+                """))
+                comments_ranges = [{"min_words": row[0], "count": row[1]} for row in result]
 
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500)
 
-    return JSONResponse({"ranges": ranges})
+    return JSONResponse({"submissions": submissions_ranges, "comments": comments_ranges})
 
 
 @router.get("/file-entries/")

@@ -21,7 +21,10 @@ export default function Filter() {
   const [description, setDescription] = useState("");
   const [model, setModel] = useState("");
   const [minWords, setMinWords] = useState(0);
-  const [wordCountRanges, setWordCountRanges] = useState([]); // Array of {min_words, submissions, comments}
+  const [wordCountRanges, setWordCountRanges] = useState({
+    submissions: [],
+    comments: [],
+  }); // {submissions: [...], comments: [...]}
   const [rangesLoading, setRangesLoading] = useState(false);
 
   const EXAMPLE_PROMPT = `Act as a qualitative research assistant tasked with cleaning raw data transcripts for analysis. For each input item, decide whether it should be kept or removed. Apply these rules: remove spam/automated posts, remove obvious duplicates, and remove non-topical noise. Keep authentic human discussion and on-topic content.`;
@@ -53,31 +56,34 @@ export default function Filter() {
   // Fetch word count ranges for the selected database
   const fetchWordCountRanges = useCallback(async (schema) => {
     if (!schema) {
-      setWordCountRanges([]);
+      setWordCountRanges({ submissions: [], comments: [] });
       setRangesLoading(false);
       return;
     }
     const schemaVal = typeof schema === "object" ? schema.value : schema;
     if (!schemaVal) {
-      setWordCountRanges([]);
+      setWordCountRanges({ submissions: [], comments: [] });
       setRangesLoading(false);
       return;
     }
     setRangesLoading(true);
-    setWordCountRanges([]); // Clear previous ranges while loading
+    setWordCountRanges({ submissions: [], comments: [] }); // Clear previous ranges while loading
     try {
       const resp = await apiFetch(
         `/api/word-count-ranges/?schema=${encodeURIComponent(schemaVal)}`,
       );
       if (resp.ok) {
         const data = await resp.json();
-        setWordCountRanges(data.ranges || []);
+        setWordCountRanges({
+          submissions: data.submissions || [],
+          comments: data.comments || [],
+        });
       } else {
-        setWordCountRanges([]);
+        setWordCountRanges({ submissions: [], comments: [] });
       }
     } catch (e) {
       console.error("Error fetching word count ranges:", e);
-      setWordCountRanges([]);
+      setWordCountRanges({ submissions: [], comments: [] });
     } finally {
       setRangesLoading(false);
     }
@@ -85,15 +91,19 @@ export default function Filter() {
 
   // Get current record counts for the selected minWords value
   const getCurrentCounts = useCallback(() => {
-    if (!wordCountRanges.length) {
-      return { submissions: 0, comments: 0 };
-    }
-    // Find the range that matches the current minWords (rounded down to nearest 10)
-    const roundedMinWords = Math.floor(minWords / 10) * 10;
-    const range = wordCountRanges.find((r) => r.min_words === roundedMinWords);
-    return range
-      ? { submissions: range.submissions, comments: range.comments }
-      : { submissions: 0, comments: 0 };
+    // Since wordCountRanges now contains cumulative counts,
+    // we just need to find the exact minWords match
+    const submissionsRange = wordCountRanges.submissions.find(
+      (range) => range.min_words === minWords
+    );
+    const commentsRange = wordCountRanges.comments.find(
+      (range) => range.min_words === minWords
+    );
+
+    return {
+      submissions: submissionsRange ? submissionsRange.count : 0,
+      comments: commentsRange ? commentsRange.count : 0,
+    };
   }, [wordCountRanges, minWords]);
 
   // Fetch word count ranges when database changes
