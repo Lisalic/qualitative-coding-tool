@@ -25,6 +25,7 @@ export default function Filter() {
     submissions: 0,
     comments: 0,
   });
+  const [recordCountsLoading, setRecordCountsLoading] = useState(false);
   const debounceRef = useRef(null);
 
   const EXAMPLE_PROMPT = `Act as a qualitative research assistant tasked with cleaning raw data transcripts for analysis. For each input item, decide whether it should be kept or removed. Apply these rules: remove spam/automated posts, remove obvious duplicates, and remove non-topical noise. Keep authentic human discussion and on-topic content.`;
@@ -58,6 +59,7 @@ export default function Filter() {
     if (!schema) return;
     const schemaVal = typeof schema === "object" ? schema.value : schema;
     if (!schemaVal) return;
+    setRecordCountsLoading(true);
     try {
       const resp = await apiFetch(
         `/api/record-counts-by-words/?schema=${encodeURIComponent(schemaVal)}&min_words=${mc}`,
@@ -71,6 +73,8 @@ export default function Filter() {
       }
     } catch (e) {
       console.error("Error fetching record counts:", e);
+    } finally {
+      setRecordCountsLoading(false);
     }
   }, []);
 
@@ -78,7 +82,7 @@ export default function Filter() {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       fetchRecordCounts(database, minWords);
-    }, 150);
+    }, 500);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
@@ -371,9 +375,9 @@ export default function Filter() {
             </span>
           </div>
           <div style={{ marginTop: "6px", fontSize: "0.85em", color: "#999" }}>
-            {recordCounts.submissions + recordCounts.comments} records match (
-            {recordCounts.submissions} submissions, {recordCounts.comments}{" "}
-            comments)
+            {recordCountsLoading
+              ? "Calculating record counts..."
+              : `${recordCounts.submissions + recordCounts.comments} records match (${recordCounts.submissions} submissions, ${recordCounts.comments} comments)`}
           </div>
         </div>
       ),

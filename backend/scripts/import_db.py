@@ -69,7 +69,12 @@ def stream_zst_to_postgres(file_path: str, schema_name: str, data_type: str, sub
             author TEXT,
             created_utc BIGINT,
             score INTEGER,
-            num_comments INTEGER
+            num_comments INTEGER,
+            word_count INTEGER GENERATED ALWAYS AS (
+                CASE WHEN COALESCE(TRIM(title || ' ' || selftext), '') = '' THEN 0
+                ELSE array_length(string_to_array(regexp_replace(TRIM(title || ' ' || selftext), '\\s+', ' ', 'g'), ' '), 1)
+                END
+            ) STORED
         )
         '''))
         conn.execute(text(f'''
@@ -81,9 +86,17 @@ def stream_zst_to_postgres(file_path: str, schema_name: str, data_type: str, sub
             created_utc BIGINT,
             score INTEGER,
             link_id TEXT,
-            parent_id TEXT
+            parent_id TEXT,
+            word_count INTEGER GENERATED ALWAYS AS (
+                CASE WHEN COALESCE(TRIM(body), '') = '' THEN 0
+                ELSE array_length(string_to_array(regexp_replace(TRIM(body), '\\s+', ' ', 'g'), ' '), 1)
+                END
+            ) STORED
         )
         '''))
+        # Add indexes on word_count
+        conn.execute(text(f'CREATE INDEX IF NOT EXISTS idx_{schema_name}_submissions_word_count ON "{schema_name}"."submissions" (word_count)'))
+        conn.execute(text(f'CREATE INDEX IF NOT EXISTS idx_{schema_name}_comments_word_count ON "{schema_name}"."comments" (word_count)'))
 
     subs_batch = []
     comm_batch = []

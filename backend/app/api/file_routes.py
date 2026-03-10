@@ -105,7 +105,12 @@ async def upload_zst_file(
                     author TEXT,
                     created_utc BIGINT,
                     score INTEGER,
-                    num_comments INTEGER
+                    num_comments INTEGER,
+                    word_count INTEGER GENERATED ALWAYS AS (
+                        CASE WHEN COALESCE(TRIM(title || ' ' || selftext), '') = '' THEN 0
+                        ELSE array_length(string_to_array(regexp_replace(TRIM(title || ' ' || selftext), '\\s+', ' ', 'g'), ' '), 1)
+                        END
+                    ) STORED
                 )
                 '''))
                 conn.execute(text(f'''
@@ -117,9 +122,17 @@ async def upload_zst_file(
                     created_utc BIGINT,
                     score INTEGER,
                     link_id TEXT,
-                    parent_id TEXT
+                    parent_id TEXT,
+                    word_count INTEGER GENERATED ALWAYS AS (
+                        CASE WHEN COALESCE(TRIM(body), '') = '' THEN 0
+                        ELSE array_length(string_to_array(regexp_replace(TRIM(body), '\\s+', ' ', 'g'), ' '), 1)
+                        END
+                    ) STORED
                 )
                 '''))
+                # Add indexes on word_count
+                conn.execute(text(f'CREATE INDEX IF NOT EXISTS idx_{schema_name}_submissions_word_count ON "{schema_name}"."submissions" (word_count)'))
+                conn.execute(text(f'CREATE INDEX IF NOT EXISTS idx_{schema_name}_comments_word_count ON "{schema_name}"."comments" (word_count)'))
 
             inserted_counts = stream_zst_to_postgres(tmp_path, schema_name, import_data_type, subreddit_filter=subreddit_list, batch_size=1000)
 

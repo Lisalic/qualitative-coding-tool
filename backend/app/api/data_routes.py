@@ -25,9 +25,11 @@ def _word_count_expr(columns):
     else:
         parts = " || ' ' || ".join(f"COALESCE({c}, '')" for c in columns)
         combined = parts
+    # Optimized: normalize multiple whitespace to single spaces, then split
+    normalized = f"regexp_replace(TRIM({combined}), '\\s+', ' ', 'g')"
     return (
         f"CASE WHEN COALESCE(TRIM({combined}), '') = '' THEN 0 "
-        f"ELSE array_length(regexp_split_to_array(TRIM({combined}), '\\s+'), 1) END"
+        f"ELSE array_length(string_to_array({normalized}, ' '), 1) END"
     )
 
 
@@ -46,19 +48,47 @@ def record_counts_by_words(schema: str = Query(...), min_words: int = Query(0)):
         with engine.connect() as conn:
             subs_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": f"{schema}.submissions"}).scalar()
             if subs_exists:
-                wc = _word_count_expr(["title", "selftext"])
-                sub_count = conn.execute(
-                    text(f'SELECT COUNT(*) FROM "{schema}"."submissions" WHERE {wc} >= :mw'),
-                    {"mw": min_words}
-                ).scalar() or 0
+                # Check if word_count column exists (for optimized databases)
+                has_word_count = conn.execute(text(f"""
+                    SELECT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_schema = '{schema}' AND table_name = 'submissions' AND column_name = 'word_count'
+                    )
+                """)).scalar()
+                
+                if has_word_count:
+                    sub_count = conn.execute(
+                        text(f'SELECT COUNT(*) FROM "{schema}"."submissions" WHERE word_count >= :mw'),
+                        {"mw": min_words}
+                    ).scalar() or 0
+                else:
+                    wc = _word_count_expr(["title", "selftext"])
+                    sub_count = conn.execute(
+                        text(f'SELECT COUNT(*) FROM "{schema}"."submissions" WHERE {wc} >= :mw'),
+                        {"mw": min_words}
+                    ).scalar() or 0
 
             comm_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": f"{schema}.comments"}).scalar()
             if comm_exists:
-                wc = _word_count_expr(["body"])
-                com_count = conn.execute(
-                    text(f'SELECT COUNT(*) FROM "{schema}"."comments" WHERE {wc} >= :mw'),
-                    {"mw": min_words}
-                ).scalar() or 0
+                # Check if word_count column exists (for optimized databases)
+                has_word_count = conn.execute(text(f"""
+                    SELECT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_schema = '{schema}' AND table_name = 'comments' AND column_name = 'word_count'
+                    )
+                """)).scalar()
+                
+                if has_word_count:
+                    com_count = conn.execute(
+                        text(f'SELECT COUNT(*) FROM "{schema}"."comments" WHERE word_count >= :mw'),
+                        {"mw": min_words}
+                    ).scalar() or 0
+                else:
+                    wc = _word_count_expr(["body"])
+                    com_count = conn.execute(
+                        text(f'SELECT COUNT(*) FROM "{schema}"."comments" WHERE {wc} >= :mw'),
+                        {"mw": min_words}
+                    ).scalar() or 0
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500)
 
@@ -289,7 +319,12 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: Option
                     author TEXT,
                     created_utc BIGINT,
                     score INTEGER,
-                    num_comments INTEGER
+                    num_comments INTEGER,
+                    word_count INTEGER GENERATED ALWAYS AS (
+                        CASE WHEN COALESCE(TRIM(title || ' ' || selftext), '') = '' THEN 0
+                        ELSE array_length(string_to_array(regexp_replace(TRIM(title || ' ' || selftext), '\\s+', ' ', 'g'), ' '), 1)
+                        END
+                    ) STORED
                 )
                 '''))
                 conn.execute(text(f'''
@@ -301,9 +336,17 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: Option
                     created_utc BIGINT,
                     score INTEGER,
                     link_id TEXT,
-                    parent_id TEXT
+                    parent_id TEXT,
+                    word_count INTEGER GENERATED ALWAYS AS (
+                        CASE WHEN COALESCE(TRIM(body), '') = '' THEN 0
+                        ELSE array_length(string_to_array(regexp_replace(TRIM(body), '\\s+', ' ', 'g'), ' '), 1)
+                        END
+                    ) STORED
                 )
                 '''))
+                # Add indexes on word_count
+                conn.execute(text(f'CREATE INDEX IF NOT EXISTS idx_{new_schema}_submissions_word_count ON "{new_schema}"."submissions" (word_count)'))
+                conn.execute(text(f'CREATE INDEX IF NOT EXISTS idx_{new_schema}_comments_word_count ON "{new_schema}"."comments" (word_count)'))
                 pass
 
                 # insert submissions - fetch complete records from original database
