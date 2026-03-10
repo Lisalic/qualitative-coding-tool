@@ -22,44 +22,47 @@ export default function Home() {
   };
 
   // Fetch user's projects (includes associated files)
-  useEffect(() => {
+  const fetchProjects = async () => {
     let mounted = true;
     setLoading(true);
     setError(null);
-    apiFetch(`/api/projects/`)
-      .then(async (resp) => {
-        if (!mounted) return;
-        if (!resp.ok) {
-          try {
-            const d = await resp.json().catch(() => ({}));
-            setError(d.detail || `HTTP ${resp.status}`);
-          } catch (e) {
-            setError(`HTTP ${resp.status}`);
-          }
-          setLoading(false);
-          return;
-        }
+    try {
+      const resp = await apiFetch(`/api/projects/`);
+      if (!mounted) return;
+      if (!resp.ok) {
         try {
-          const d = await resp.json();
-          const list = Array.isArray(d.projects) ? d.projects : [];
-          // Sort by creation date ascending: oldest first
-          list.sort((a, b) => {
-            const ta = a && a.created_at ? Date.parse(a.created_at) : 0;
-            const tb = b && b.created_at ? Date.parse(b.created_at) : 0;
-            return ta - tb;
-          });
-          setProjects(list);
+          const d = await resp.json().catch(() => ({}));
+          setError(d.detail || `HTTP ${resp.status}`);
         } catch (e) {
-          setError("Failed to parse projects response");
+          setError(`HTTP ${resp.status}`);
         }
         setLoading(false);
-      })
-      .catch((e) => {
-        if (!mounted) return;
-        setError(String(e));
-        setLoading(false);
-      });
+        return;
+      }
+      try {
+        const d = await resp.json();
+        const list = Array.isArray(d.projects) ? d.projects : [];
+        // Sort by creation date ascending: oldest first
+        list.sort((a, b) => {
+          const ta = a && a.created_at ? Date.parse(a.created_at) : 0;
+          const tb = b && b.created_at ? Date.parse(b.created_at) : 0;
+          return ta - tb;
+        });
+        setProjects(list);
+      } catch (e) {
+        setError("Failed to parse projects response");
+      }
+      setLoading(false);
+    } catch (e) {
+      if (!mounted) return;
+      setError(String(e));
+      setLoading(false);
+    }
     return () => (mounted = false);
+  };
+
+  useEffect(() => {
+    fetchProjects();
   }, []);
 
   const handleSubmit = async (e) => {
@@ -87,6 +90,8 @@ export default function Home() {
       setShowForm(false);
       setName("");
       setDescription("");
+      // Refresh the projects list to show the new project
+      fetchProjects();
       // optionally navigate to project view
       // navigate(`/data?schema=${data.project.schema_name}`)
     } catch (err) {

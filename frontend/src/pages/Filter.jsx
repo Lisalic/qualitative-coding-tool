@@ -166,6 +166,13 @@ export default function Filter() {
         throw new Error(`Missing required fields: ${missing.join(", ")}`);
       }
 
+      const savedApiKey = localStorage.getItem("apiKey");
+      if (!savedApiKey) {
+        throw new Error(
+          "API key not set. Please set your API key in the navbar.",
+        );
+      }
+
       const requestData = new FormData();
       requestData.append("api_key", savedApiKey);
       if (formData.filterPrompt) {
