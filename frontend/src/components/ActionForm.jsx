@@ -136,6 +136,8 @@ export default function ActionForm({
         );
       case "title":
         return <h1>{field.label}</h1>;
+      case "custom":
+        return field.render ? field.render() : null;
       default:
         return <input {...commonProps} type={field.type || "text"} />;
     }

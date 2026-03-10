@@ -57,7 +57,6 @@ export default function CompareCodebook() {
         if (!mounted || !data) return;
         const list = Array.isArray(data.projects) ? data.projects : [];
         setProjects(list);
-        if (list.length > 0) setSelectedProject(list[0].id || "");
       })
       .catch(() => {});
     return () => (mounted = false);

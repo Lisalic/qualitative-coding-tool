@@ -964,3 +964,51 @@ input[type="radio"]:disabled + .radio-option {
     flex: none;
   }
 }
+
+/* Slider – dark theme */
+.slider-input {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: #333;
+  outline: none;
+  cursor: pointer;
+}
+
+.slider-input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2px solid #ffffff;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.slider-input::-webkit-slider-thumb:hover {
+  background: #cccccc;
+}
+
+.slider-input::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2px solid #ffffff;
+  cursor: pointer;
+}
+
+.slider-input::-moz-range-track {
+  height: 6px;
+  border-radius: 3px;
+  background: #333;
+}
+
+.slider-input:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

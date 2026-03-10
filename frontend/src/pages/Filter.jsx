@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import ActionForm from "../components/ActionForm";
 import PromptManager from "../components/PromptManager";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { apiFetch } from "../api";
 import { AI_MODELS } from "../lib/constants";
 import "../styles/Home.css";
@@ -20,6 +20,12 @@ export default function Filter() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [model, setModel] = useState("");
+  const [minWords, setMinWords] = useState(0);
+  const [recordCounts, setRecordCounts] = useState({
+    submissions: 0,
+    comments: 0,
+  });
+  const debounceRef = useRef(null);
 
   const EXAMPLE_PROMPT = `Act as a qualitative research assistant tasked with cleaning raw data transcripts for analysis. For each input item, decide whether it should be kept or removed. Apply these rules: remove spam/automated posts, remove obvious duplicates, and remove non-topical noise. Keep authentic human discussion and on-topic content.`;
 
@@ -42,19 +48,41 @@ export default function Filter() {
       .then((data) => {
         if (!mounted || !data) return;
         setProjects(data.projects || []);
-        if (!selectedProject && data.projects && data.projects.length > 0) {
-          setSelectedProject(String(data.projects[0].id));
-        }
       })
       .catch(() => {});
     return () => (mounted = false);
   }, []);
 
-  useEffect(() => {
-    if (databases.length > 0 && !database) {
-      setDatabase(databases[0]);
+  // Fetch record counts whenever database or minChars changes (debounced)
+  const fetchRecordCounts = useCallback(async (schema, mc) => {
+    if (!schema) return;
+    const schemaVal = typeof schema === "object" ? schema.value : schema;
+    if (!schemaVal) return;
+    try {
+      const resp = await apiFetch(
+        `/api/record-counts-by-words/?schema=${encodeURIComponent(schemaVal)}&min_words=${mc}`,
+      );
+      if (resp.ok) {
+        const data = await resp.json();
+        setRecordCounts({
+          submissions: data.submissions || 0,
+          comments: data.comments || 0,
+        });
+      }
+    } catch (e) {
+      console.error("Error fetching record counts:", e);
     }
-  }, [databases]);
+  }, []);
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      fetchRecordCounts(database, minWords);
+    }, 150);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [database, minWords, fetchRecordCounts]);
 
   const fetchDatabases = async () => {
     try {
@@ -69,7 +97,6 @@ export default function Filter() {
       }));
 
       setDatabases(rawOptions);
-      if (!database && rawOptions.length > 0) setDatabase(rawOptions[0].value);
     } catch (err) {
       console.error("Error fetching databases:", err);
     }
@@ -122,25 +149,23 @@ export default function Filter() {
       "component model:",
       model,
     );
-    const savedApiKey = localStorage.getItem("apiKey");
-    if (!savedApiKey) {
-      throw new Error("Please set your API key in the navbar first.");
-    }
-
-    // Require a name for the filtered DB
-    if (!formData.name || !formData.name.trim()) {
-      throw new Error("Please provide a name for the filtered database");
-    }
-
-    // Require a model selection
-    if (!formData.model || !formData.model.trim()) {
-      throw new Error("Please select an AI model.");
-    }
 
     setLoading(true);
     setMessage("");
 
     try {
+      // Collect all missing required fields
+      const missing = [];
+      if (!formData.database) missing.push("Database");
+      if (!formData.project_id) missing.push("Project");
+      if (!formData.name || !formData.name.trim())
+        missing.push("Filtered Database Name");
+      if (!formData.model || !formData.model.trim()) missing.push("AI Model");
+
+      if (missing.length > 0) {
+        throw new Error(`Missing required fields: ${missing.join(", ")}`);
+      }
+
       const requestData = new FormData();
       requestData.append("api_key", savedApiKey);
       if (formData.filterPrompt) {
@@ -162,6 +187,9 @@ export default function Filter() {
       }
       if (selectedProject) {
         requestData.append("project_id", selectedProject);
+      }
+      if (minWords > 0) {
+        requestData.append("min_words", String(minWords));
       }
 
       const response = await apiFetch("/api/filter-data/", {
@@ -306,6 +334,43 @@ export default function Filter() {
       onChange: (v) => setModel(v),
       options: AI_MODELS,
     },
+    {
+      id: "minWords",
+      label: "Minimum Words",
+      type: "custom",
+      render: () => (
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <input
+              type="range"
+              min={0}
+              max={1000}
+              step={10}
+              value={minWords}
+              onChange={(e) => setMinWords(Number(e.target.value))}
+              className="slider-input"
+              disabled={loading}
+            />
+            <span
+              style={{
+                minWidth: "60px",
+                textAlign: "right",
+                fontWeight: 600,
+                color: "#ffffff",
+                fontFamily: "system-ui, -apple-system, sans-serif",
+              }}
+            >
+              {minWords}
+            </span>
+          </div>
+          <div style={{ marginTop: "6px", fontSize: "0.85em", color: "#999" }}>
+            {recordCounts.submissions + recordCounts.comments} records match (
+            {recordCounts.submissions} submissions, {recordCounts.comments}{" "}
+            comments)
+          </div>
+        </div>
+      ),
+    },
   ];
 
   const nameField = {
@@ -332,6 +397,7 @@ export default function Filter() {
       label: "Select Database",
       type: "select",
       value: database,
+      onChange: (v) => setDatabase(v),
       options: databases.map((d) => ({
         value: d.value,
         label: d.label,

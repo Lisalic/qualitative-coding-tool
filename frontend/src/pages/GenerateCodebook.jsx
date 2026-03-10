@@ -36,9 +36,6 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
       .then((data) => {
         if (!mounted || !data) return;
         setProjects(data.projects || []);
-        if (!selectedProject && data.projects && data.projects.length > 0) {
-          setSelectedProject(String(data.projects[0].id));
-        }
       })
       .catch(() => {});
     return () => (mounted = false);

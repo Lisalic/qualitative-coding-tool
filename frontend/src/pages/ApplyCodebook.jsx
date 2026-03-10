@@ -42,9 +42,6 @@ export default function ApplyCodebook() {
       const data = await resp.json();
       const list = data.projects || [];
       setProjects(list);
-      if (!selectedProject && list.length > 0) {
-        setSelectedProject(String(list[0].id));
-      }
     } catch (err) {
       console.error("Error fetching projects:", err);
     }

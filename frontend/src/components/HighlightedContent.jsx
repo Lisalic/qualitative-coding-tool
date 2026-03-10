@@ -142,8 +142,8 @@ const HighlightedContent = ({ content, codeEvidence, getCodeColor }) => {
         data-codes={codes.join(",")}
         style={{
           position: "relative",
-          backgroundColor: "#4a4a4a",
-          color: "#f0f0f0",
+          backgroundColor: "#e0e0e0",
+          color: "#000000",
           borderRadius: "2px",
           padding: "1px 2px",
           cursor: "pointer",

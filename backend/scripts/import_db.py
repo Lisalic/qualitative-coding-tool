@@ -100,13 +100,12 @@ def stream_zst_to_postgres(file_path: str, schema_name: str, data_type: str, sub
                 continue
 
             submission_id = data.get('id')
-            external_url = data.get('url')
             selftext = data.get('selftext')
-            if not selftext:
-                if not data.get('is_self') and external_url:
-                    selftext = external_url
-                else:
-                    selftext = None
+        
+
+            # Skip submissions with empty or deleted selftext
+            if not selftext or selftext == '[deleted]':
+                continue
 
             subs_batch.append({
                 'id': submission_id,
@@ -146,10 +145,14 @@ def stream_zst_to_postgres(file_path: str, schema_name: str, data_type: str, sub
             link_id = data.get('link_id', '').replace('t3_', '')
             parent_id = data.get('parent_id', '')
 
+            body = data.get('body')
+            if not body or body == '[deleted]':
+                continue
+
             comm_batch.append({
                 'id': data.get('id'),
                 'subreddit': subreddit,
-                'body': data.get('body'),
+                'body': body,
                 'author': data.get('author'),
                 'created_utc': data.get('created_utc'),
                 'score': data.get('score'),

@@ -17,6 +17,54 @@ from scripts.filter_db import filter_posts_with_ai, filter_comments_with_ai
 router = APIRouter()
 
 
+def _word_count_expr(columns):
+    """Build a SQL expression that returns the exact word count for one or more text columns concatenated."""
+    if len(columns) == 1:
+        col = columns[0]
+        combined = f"COALESCE({col}, '')"
+    else:
+        parts = " || ' ' || ".join(f"COALESCE({c}, '')" for c in columns)
+        combined = parts
+    return (
+        f"CASE WHEN COALESCE(TRIM({combined}), '') = '' THEN 0 "
+        f"ELSE array_length(regexp_split_to_array(TRIM({combined}), '\\s+'), 1) END"
+    )
+
+
+@router.get("/record-counts-by-words/")
+def record_counts_by_words(schema: str = Query(...), min_words: int = Query(0)):
+    """Return the number of submissions and comments whose word count >= min_words."""
+    schema = (schema or "").strip()
+    if schema.endswith(".db"):
+        schema = schema[:-3]
+    if not schema or not re.match(r"^[A-Za-z][A-Za-z0-9_]*$", schema):
+        raise HTTPException(status_code=400, detail="Invalid schema name")
+
+    sub_count = 0
+    com_count = 0
+    try:
+        with engine.connect() as conn:
+            subs_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": f"{schema}.submissions"}).scalar()
+            if subs_exists:
+                wc = _word_count_expr(["title", "selftext"])
+                sub_count = conn.execute(
+                    text(f'SELECT COUNT(*) FROM "{schema}"."submissions" WHERE {wc} >= :mw'),
+                    {"mw": min_words}
+                ).scalar() or 0
+
+            comm_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": f"{schema}.comments"}).scalar()
+            if comm_exists:
+                wc = _word_count_expr(["body"])
+                com_count = conn.execute(
+                    text(f'SELECT COUNT(*) FROM "{schema}"."comments" WHERE {wc} >= :mw'),
+                    {"mw": min_words}
+                ).scalar() or 0
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+    return JSONResponse({"submissions": sub_count, "comments": com_count, "min_words": min_words})
+
+
 @router.get("/file-entries/")
 def project_entries(schema: str = Query(..., description="File schema name"), limit: int = 10, offset: int = 0):
     # Allow optional .db suffix (frontend may supply schema.db); validate and strip it.
@@ -75,8 +123,8 @@ def project_entries(schema: str = Query(..., description="File schema name"), li
 
 
 @router.post("/filter-data/")
-async def filter_data(request: Request, api_key: str = Form(...), prompt: Optional[str] = Form(None), database: str = Form(None), name: str = Form(...), model: str = Form(""), project_id: str = Form(None), description: Optional[str] = Form(None)):
-    """Read a Postgres file schema (provided in `database`), assemble submissions and comments,
+async def filter_data(request: Request, api_key: str = Form(...), prompt: Optional[str] = Form(None), database: str = Form(None), name: str = Form(...), model: str = Form(""), project_id: str = Form(None), description: Optional[str] = Form(None), min_words: int = Form(0)):
+    """Read a Postgres file schema, assemble submissions and comments,
     merge into a single string and print it to the server stdout.
     """
     schema = (database or "").strip()
@@ -96,11 +144,15 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: Option
     comments_text = ""
     try:
         with engine.connect() as conn:
-            # Submissions: id, title, selftext
+            # Submissions: id, title, selftext (filtered by min_words)
             subs_tbl = f"{schema}.submissions"
             subs_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": subs_tbl}).scalar()
             if subs_exists:
-                rows = conn.execute(text(f'SELECT * FROM "{schema}"."submissions"')).fetchall()
+                wc = _word_count_expr(["title", "selftext"])
+                rows = conn.execute(
+                    text(f'SELECT id, title, selftext FROM "{schema}"."submissions" WHERE {wc} >= :mw'),
+                    {"mw": min_words}
+                ).fetchall()
                 for r in rows:
                     try:
                         rid = r._mapping.get('id')
@@ -112,11 +164,15 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: Option
                         selftext = r[2] if len(r) > 2 else ""
                     submissions_text += f"ID: {rid or ''}\nTitle: {title or ''}\n{selftext or ''}\n\n"
 
-            # Comments: id, body
+            # Comments: id, body (filtered by min_words)
             comm_tbl = f"{schema}.comments"
             comm_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": comm_tbl}).scalar()
             if comm_exists:
-                rows = conn.execute(text(f'SELECT * FROM "{schema}"."comments"')).fetchall()
+                wc = _word_count_expr(["body"])
+                rows = conn.execute(
+                    text(f'SELECT id, body FROM "{schema}"."comments" WHERE {wc} >= :mw'),
+                    {"mw": min_words}
+                ).fetchall()
                 for r in rows:
                     try:
                         cid = r._mapping.get('id')
@@ -171,7 +227,7 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: Option
             selected_posts = []
             selected_comments = []
             with engine.connect() as conn:
-                # posts_list is expected to be a list of id strings; fetch records for each id
+                # posts_list is expected to be a list of id strings; fetch complete records for each id
                 if isinstance(posts_list, list):
                     for item in posts_list:
                         if not item:
@@ -179,19 +235,12 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: Option
                         try:
                             row = conn.execute(text(f'SELECT * FROM "{schema}"."submissions" WHERE id = :id'), {"id": item}).fetchone()
                             if row:
-                                try:
-                                    sid = row._mapping.get('id')
-                                    title = row._mapping.get('title')
-                                    selftext = row._mapping.get('selftext')
-                                except Exception:
-                                    sid = row[0] if len(row) > 0 else None
-                                    title = row[1] if len(row) > 1 else None
-                                    selftext = row[2] if len(row) > 2 else None
-                                selected_posts.append({"id": sid, "title": title, "selftext": selftext})
+                                # Include all fields from the original record
+                                selected_posts.append(dict(row._mapping))
                         except Exception:
                             pass
 
-                # comments_list is expected to be a list of id strings; fetch records for each id
+                # comments_list is expected to be a list of id strings; fetch complete records for each id
                 if isinstance(comments_list, list):
                     for item in comments_list:
                         if not item:
@@ -199,13 +248,8 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: Option
                         try:
                             row = conn.execute(text(f'SELECT * FROM "{schema}"."comments" WHERE id = :id'), {"id": item}).fetchone()
                             if row:
-                                try:
-                                    cid = row._mapping.get('id')
-                                    body = row._mapping.get('body')
-                                except Exception:
-                                    cid = row[0] if len(row) > 0 else None
-                                    body = row[1] if len(row) > 1 else None
-                                selected_comments.append({"id": cid, "body": body})
+                                # Include all fields from the original record
+                                selected_comments.append(dict(row._mapping))
                         except Exception:
                             pass
 
@@ -235,12 +279,34 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: Option
             with engine.begin() as conn:
                 pass
                 conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{new_schema}"'))
-                # create submissions and comments tables
-                conn.execute(text(f"CREATE TABLE IF NOT EXISTS \"{new_schema}\".submissions (id text PRIMARY KEY, title text, selftext text)"))
-                conn.execute(text(f"CREATE TABLE IF NOT EXISTS \"{new_schema}\".comments (id text PRIMARY KEY, body text)"))
+                # create submissions and comments tables with all original fields
+                conn.execute(text(f'''
+                CREATE TABLE IF NOT EXISTS "{new_schema}"."submissions" (
+                    id TEXT PRIMARY KEY,
+                    subreddit TEXT,
+                    title TEXT,
+                    selftext TEXT,
+                    author TEXT,
+                    created_utc BIGINT,
+                    score INTEGER,
+                    num_comments INTEGER
+                )
+                '''))
+                conn.execute(text(f'''
+                CREATE TABLE IF NOT EXISTS "{new_schema}"."comments" (
+                    id TEXT PRIMARY KEY,
+                    subreddit TEXT,
+                    body TEXT,
+                    author TEXT,
+                    created_utc BIGINT,
+                    score INTEGER,
+                    link_id TEXT,
+                    parent_id TEXT
+                )
+                '''))
                 pass
 
-                # insert submissions
+                # insert submissions - fetch complete records from original database
                 inserted_subs = 0
                 total_subs = len(posts_list)
                 pass
@@ -249,17 +315,25 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: Option
                         if not isinstance(item, dict):
                             continue
                         sid = str(item.get('id')) if item.get('id') is not None else None
-                        title = item.get('title')
-                        selftext = item.get('selftext')
                         if sid is None:
                             continue
                         try:
+                            # Fetch the complete record from original database
+                            orig_row = conn.execute(text(f'SELECT * FROM "{schema}"."submissions" WHERE id = :id'), {"id": sid}).fetchone()
+                            if not orig_row:
+                                continue
+                            
                             # Use a nested transaction (savepoint) so a single bad row
                             # does not abort the outer transaction.
                             with conn.begin_nested():
+                                # Insert all fields from the original record
+                                orig_dict = dict(orig_row._mapping)
+                                columns = list(orig_dict.keys())
+                                placeholders = ", ".join([f":{col}" for col in columns])
+                                columns_str = ", ".join([f'"{col}"' for col in columns])
                                 conn.execute(
-                                    text(f'INSERT INTO "{new_schema}".submissions (id, title, selftext) VALUES (:id, :title, :selftext)'),
-                                    {"id": sid, "title": title, "selftext": selftext},
+                                    text(f'INSERT INTO "{new_schema}".submissions ({columns_str}) VALUES ({placeholders})'),
+                                    orig_dict,
                                 )
                             inserted_subs += 1
                         except Exception as ie:
@@ -270,21 +344,30 @@ async def filter_data(request: Request, api_key: str = Form(...), prompt: Option
 
                 pass
 
-                # insert comments
+                # insert comments - fetch complete records from original database
                 inserted_comments = 0
                 total_comments = len(comments_list)
                 pass
                 for item in comments_list:
                     try:
                         cid = str(item.get('id')) if item.get('id') is not None else None
-                        body = item.get('body')
                         if cid is None:
                             continue
                         try:
+                            # Fetch the complete record from original database
+                            orig_row = conn.execute(text(f'SELECT * FROM "{schema}"."comments" WHERE id = :id'), {"id": cid}).fetchone()
+                            if not orig_row:
+                                continue
+                            
                             with conn.begin_nested():
+                                # Insert all fields from the original record
+                                orig_dict = dict(orig_row._mapping)
+                                columns = list(orig_dict.keys())
+                                placeholders = ", ".join([f":{col}" for col in columns])
+                                columns_str = ", ".join([f'"{col}"' for col in columns])
                                 conn.execute(
-                                    text(f'INSERT INTO "{new_schema}".comments (id, body) VALUES (:id, :body)'),
-                                    {"id": cid, "body": body},
+                                    text(f'INSERT INTO "{new_schema}".comments ({columns_str}) VALUES ({placeholders})'),
+                                    orig_dict,
                                 )
                             inserted_comments += 1
                         except Exception as ie:
