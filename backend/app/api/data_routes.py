@@ -95,6 +95,82 @@ def record_counts_by_words(schema: str = Query(...), min_words: int = Query(0)):
     return JSONResponse({"submissions": sub_count, "comments": com_count, "min_words": min_words})
 
 
+@router.get("/word-count-ranges/")
+def word_count_ranges(schema: str = Query(...)):
+    """Return word count ranges (0-1000 in steps of 10) for submissions and comments."""
+    schema = (schema or "").strip()
+    if schema.endswith(".db"):
+        schema = schema[:-3]
+    if not schema or not re.match(r"^[A-Za-z][A-Za-z0-9_]*$", schema):
+        raise HTTPException(status_code=400, detail="Invalid schema name")
+
+    ranges = []
+    try:
+        with engine.connect() as conn:
+            subs_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": f"{schema}.submissions"}).scalar()
+            comm_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": f"{schema}.comments"}).scalar()
+
+            # Check if word_count columns exist
+            has_word_count_subs = False
+            has_word_count_comm = False
+            if subs_exists:
+                has_word_count_subs = conn.execute(text(f"""
+                    SELECT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_schema = '{schema}' AND table_name = 'submissions' AND column_name = 'word_count'
+                    )
+                """)).scalar()
+            if comm_exists:
+                has_word_count_comm = conn.execute(text(f"""
+                    SELECT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_schema = '{schema}' AND table_name = 'comments' AND column_name = 'word_count'
+                    )
+                """)).scalar()
+
+            # Generate ranges from 0 to 1000 in steps of 10
+            for min_words in range(0, 1001, 10):
+                sub_count = 0
+                com_count = 0
+
+                if subs_exists:
+                    if has_word_count_subs:
+                        sub_count = conn.execute(
+                            text(f'SELECT COUNT(*) FROM "{schema}"."submissions" WHERE word_count >= :mw'),
+                            {"mw": min_words}
+                        ).scalar() or 0
+                    else:
+                        wc = _word_count_expr(["title", "selftext"])
+                        sub_count = conn.execute(
+                            text(f'SELECT COUNT(*) FROM "{schema}"."submissions" WHERE {wc} >= :mw'),
+                            {"mw": min_words}
+                        ).scalar() or 0
+
+                if comm_exists:
+                    if has_word_count_comm:
+                        com_count = conn.execute(
+                            text(f'SELECT COUNT(*) FROM "{schema}"."comments" WHERE word_count >= :mw'),
+                            {"mw": min_words}
+                        ).scalar() or 0
+                    else:
+                        wc = _word_count_expr(["body"])
+                        com_count = conn.execute(
+                            text(f'SELECT COUNT(*) FROM "{schema}"."comments" WHERE {wc} >= :mw'),
+                            {"mw": min_words}
+                        ).scalar() or 0
+
+                ranges.append({
+                    "min_words": min_words,
+                    "submissions": sub_count,
+                    "comments": com_count
+                })
+
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+    return JSONResponse({"ranges": ranges})
+
+
 @router.get("/file-entries/")
 def project_entries(schema: str = Query(..., description="File schema name"), limit: int = 10, offset: int = 0):
     # Allow optional .db suffix (frontend may supply schema.db); validate and strip it.

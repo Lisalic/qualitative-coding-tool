@@ -21,12 +21,8 @@ export default function Filter() {
   const [description, setDescription] = useState("");
   const [model, setModel] = useState("");
   const [minWords, setMinWords] = useState(0);
-  const [recordCounts, setRecordCounts] = useState({
-    submissions: 0,
-    comments: 0,
-  });
-  const [recordCountsLoading, setRecordCountsLoading] = useState(false);
-  const debounceRef = useRef(null);
+  const [wordCountRanges, setWordCountRanges] = useState([]); // Array of {min_words, submissions, comments}
+  const [rangesLoading, setRangesLoading] = useState(false);
 
   const EXAMPLE_PROMPT = `Act as a qualitative research assistant tasked with cleaning raw data transcripts for analysis. For each input item, decide whether it should be kept or removed. Apply these rules: remove spam/automated posts, remove obvious duplicates, and remove non-topical noise. Keep authentic human discussion and on-topic content.`;
 
@@ -54,39 +50,56 @@ export default function Filter() {
     return () => (mounted = false);
   }, []);
 
-  // Fetch record counts whenever database or minChars changes (debounced)
-  const fetchRecordCounts = useCallback(async (schema, mc) => {
-    if (!schema) return;
+  // Fetch word count ranges for the selected database
+  const fetchWordCountRanges = useCallback(async (schema) => {
+    if (!schema) {
+      setWordCountRanges([]);
+      setRangesLoading(false);
+      return;
+    }
     const schemaVal = typeof schema === "object" ? schema.value : schema;
-    if (!schemaVal) return;
-    setRecordCountsLoading(true);
+    if (!schemaVal) {
+      setWordCountRanges([]);
+      setRangesLoading(false);
+      return;
+    }
+    setRangesLoading(true);
+    setWordCountRanges([]); // Clear previous ranges while loading
     try {
       const resp = await apiFetch(
-        `/api/record-counts-by-words/?schema=${encodeURIComponent(schemaVal)}&min_words=${mc}`,
+        `/api/word-count-ranges/?schema=${encodeURIComponent(schemaVal)}`,
       );
       if (resp.ok) {
         const data = await resp.json();
-        setRecordCounts({
-          submissions: data.submissions || 0,
-          comments: data.comments || 0,
-        });
+        setWordCountRanges(data.ranges || []);
+      } else {
+        setWordCountRanges([]);
       }
     } catch (e) {
-      console.error("Error fetching record counts:", e);
+      console.error("Error fetching word count ranges:", e);
+      setWordCountRanges([]);
     } finally {
-      setRecordCountsLoading(false);
+      setRangesLoading(false);
     }
   }, []);
 
+  // Get current record counts for the selected minWords value
+  const getCurrentCounts = useCallback(() => {
+    if (!wordCountRanges.length) {
+      return { submissions: 0, comments: 0 };
+    }
+    // Find the range that matches the current minWords (rounded down to nearest 10)
+    const roundedMinWords = Math.floor(minWords / 10) * 10;
+    const range = wordCountRanges.find((r) => r.min_words === roundedMinWords);
+    return range
+      ? { submissions: range.submissions, comments: range.comments }
+      : { submissions: 0, comments: 0 };
+  }, [wordCountRanges, minWords]);
+
+  // Fetch word count ranges when database changes
   useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      fetchRecordCounts(database, minWords);
-    }, 500);
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [database, minWords, fetchRecordCounts]);
+    fetchWordCountRanges(database);
+  }, [database, fetchWordCountRanges]);
 
   const fetchDatabases = async () => {
     try {
@@ -375,9 +388,12 @@ export default function Filter() {
             </span>
           </div>
           <div style={{ marginTop: "6px", fontSize: "0.85em", color: "#999" }}>
-            {recordCountsLoading
-              ? "Calculating record counts..."
-              : `${recordCounts.submissions + recordCounts.comments} records match (${recordCounts.submissions} submissions, ${recordCounts.comments} comments)`}
+            {rangesLoading
+              ? "Loading word count ranges..."
+              : (() => {
+                  const counts = getCurrentCounts();
+                  return `${counts.submissions + counts.comments} records match (${counts.submissions} submissions, ${counts.comments} comments)`;
+                })()}
           </div>
         </div>
       ),
