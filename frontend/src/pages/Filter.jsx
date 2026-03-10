@@ -91,19 +91,15 @@ export default function Filter() {
 
   // Get current record counts for the selected minWords value
   const getCurrentCounts = useCallback(() => {
-    // Since wordCountRanges now contains cumulative counts,
-    // we just need to find the exact minWords match
-    const submissionsRange = wordCountRanges.submissions.find(
-      (range) => range.min_words === minWords
-    );
-    const commentsRange = wordCountRanges.comments.find(
-      (range) => range.min_words === minWords
-    );
+    const submissions = wordCountRanges.submissions
+      .filter((range) => range.min_words >= minWords)
+      .reduce((sum, range) => sum + range.count, 0);
 
-    return {
-      submissions: submissionsRange ? submissionsRange.count : 0,
-      comments: commentsRange ? commentsRange.count : 0,
-    };
+    const comments = wordCountRanges.comments
+      .filter((range) => range.min_words >= minWords)
+      .reduce((sum, range) => sum + range.count, 0);
+
+    return { submissions, comments };
   }, [wordCountRanges, minWords]);
 
   // Fetch word count ranges when database changes

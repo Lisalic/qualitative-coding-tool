@@ -2,16 +2,141 @@ import time
 import ast
 import json
 import re
+import datetime
 from openai import OpenAI
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
 FREE_MODEL = "google/gemini-2.0-flash-exp:free"
 MAX_RETRIES = 3
-INITIAL_RETRY_DELAY = 2  
+INITIAL_RETRY_DELAY = 2
+
+# Approximate token limits for common models (chars, assuming ~4 chars/token)
+# Reserve ~20% for system prompt + response overhead
+MODEL_CONTEXT_LIMITS = {
+    "default": 100_000 * 4,   # 100k tokens usable
+    "gemini": 800_000 * 4,    # 800k tokens usable (1M total)
+    "claude": 160_000 * 4,    # 160k tokens usable (200k total)
+    "gpt-4": 100_000 * 4,     # 100k tokens usable (128k total)
+    "stepfun": 80_000 * 4,    # Conservative for stepfun models
+}
+
+# Maximum number of API calls per filter operation (to control costs)
+MAX_CHUNKS = 3
+
+# Separator used between entries in content
+ENTRY_SEPARATOR = "\n---\n"
+
+# Error code to human-readable message mapping
+ERROR_MESSAGES = {
+    400: "Bad Request: invalid or missing parameters",
+    401: "Invalid credentials: your API key is missing, disabled, or expired",
+    402: "Insufficient credits: your account or API key needs more credits",
+    403: "Content flagged: your chosen model requires moderation and your input was flagged",
+    408: "Request timed out",
+    429: "Rate limited: too many requests, please wait and try again",
+    502: "Model unavailable: your chosen model is down or returned an invalid response",
+    503: "No available model provider meets your routing requirements",
+}
+
+
+class AIFilterError(Exception):
+    """Raised when AI filtering fails with a known error code."""
+    def __init__(self, message: str, code: int = 0):
+        self.code = code
+        super().__init__(message)
+
+
+def _extract_error_code(error: Exception) -> int:
+    """Extract HTTP error code from an OpenAI/OpenRouter exception."""
+    error_str = str(error)
+    # Match "Error code: 401" pattern
+    match = re.search(r'Error code:\s*(\d{3})', error_str)
+    if match:
+        return int(match.group(1))
+    # Check for status_code attribute
+    if hasattr(error, 'status_code'):
+        return error.status_code
+    return 0
+
+
+def _error_message_for_code(code: int) -> str:
+    """Get human-readable error message for an HTTP error code."""
+    return ERROR_MESSAGES.get(code, f"API error (code {code})")
+
+
+def _log_ai(stage: str, message: str, data: dict = None):
+    """Human-readable logging for AI operations."""
+    timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+    prefix = f"[{timestamp}] AI_FILTER | {stage}"
+    if data:
+        details = " | ".join(f"{k}={v}" for k, v in data.items())
+        print(f"{prefix} | {message} | {details}")
+    else:
+        print(f"{prefix} | {message}")
+
+
+def _estimate_context_limit(model: str) -> int:
+    """Estimate usable context limit in characters for a model."""
+    model_lower = model.lower()
+    if "gemini" in model_lower:
+        return MODEL_CONTEXT_LIMITS["gemini"]
+    elif "claude" in model_lower:
+        return MODEL_CONTEXT_LIMITS["claude"]
+    elif "gpt-4" in model_lower:
+        return MODEL_CONTEXT_LIMITS["gpt-4"]
+    elif "stepfun" in model_lower or "step-" in model_lower:
+        return MODEL_CONTEXT_LIMITS["stepfun"]
+    return MODEL_CONTEXT_LIMITS["default"]
+
+
+def _chunk_content(content: str, max_chars: int, separator: str = ENTRY_SEPARATOR) -> list[str]:
+    """
+    Split content into chunks that fit within max_chars.
+    Splits on separator boundaries to avoid cutting entries mid-way.
+    """
+    if len(content) <= max_chars:
+        return [content]
+    
+    entries = content.split(separator)
+    chunks = []
+    current_chunk = []
+    current_size = 0
+    
+    for entry in entries:
+        entry_size = len(entry) + len(separator)
+        if current_size + entry_size > max_chars and current_chunk:
+            chunks.append(separator.join(current_chunk))
+            current_chunk = [entry]
+            current_size = entry_size
+        else:
+            current_chunk.append(entry)
+            current_size += entry_size
+    
+    if current_chunk:
+        chunks.append(separator.join(current_chunk))
+    
+    return chunks
+
+
+def _preview_response(response: str, max_len: int = 500) -> str:
+    """Create a readable preview of AI response."""
+    response = response.strip()
+    if len(response) <= max_len:
+        return response
+    half = max_len // 2 - 10
+    return f"{response[:half]}\n... [{len(response) - max_len} chars omitted] ...\n{response[-half:]}"
+
 
 def get_client(system_prompt: str, user_prompt: str, api_key: str, model: str = FREE_MODEL) -> str:
     if not api_key:
-        raise ValueError("OpenRouter API key is required")
+        raise AIFilterError("OpenRouter API key is required", code=401)
+    
+    total_chars = len(system_prompt) + len(user_prompt)
+    
+    _log_ai("REQUEST", f"API call to {model}", {
+        "prompt_chars": f"{total_chars:,}"
+    })
+    
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             client = OpenAI(
@@ -32,114 +157,164 @@ def get_client(system_prompt: str, user_prompt: str, api_key: str, model: str = 
                 raise ValueError(f"API returned no choices for model {model}")
             if not response.choices[0].message or not response.choices[0].message.content:
                 raise ValueError(f"API returned empty message content for model {model}")
-            return response.choices[0].message.content
+            
+            content = response.choices[0].message.content
+            return content
+            
         except KeyboardInterrupt:
-            print("\nkeyboard interrupt")
             raise
         except Exception as e:
+            code = _extract_error_code(e)
             if attempt == MAX_RETRIES:
-                raise
+                msg = _error_message_for_code(code) if code else str(e)
+                _log_ai("ERROR", f"All {MAX_RETRIES} attempts failed: {msg}")
+                raise AIFilterError(msg, code=code)
             wait_time = INITIAL_RETRY_DELAY * (2 ** (attempt - 1))
-            print(f"\nAPI call failed (attempt {attempt}/{MAX_RETRIES}): {type(e).__name__}")
-            print(f"Retrying in {wait_time}s...")
+            _log_ai("RETRY", f"Attempt {attempt}/{MAX_RETRIES} failed: {type(e).__name__}", {"wait": f"{wait_time}s"})
             time.sleep(wait_time)
 
-def filter_posts_with_ai(filter_prompt: str, posts_content: str, api_key: str, model: str = "") -> tuple[str, str, str]:
+
+def _run_chunked_filter(content_type: str, filter_prompt: str, content: str, api_key: str, model: str, system_prompt: str) -> tuple[list, str]:
     """
-    Use AI to filter posts based on a given prompt and return results in Python format.
-
-    Args:
-        filter_prompt (str): The filtering criteria/prompt
-        posts_content (str): The posts content to filter through
-        api_key (str): OpenRouter API key
-
+    Shared chunked filtering logic for both posts and comments.
+    
+    Error policy:
+    - If chunk 1 fails → raise immediately (likely a config/auth problem)
+    - If chunk 2+ fails → stop processing, return results collected so far
+    
     Returns:
-        str: Python string with filtered posts as an array of objects: [{id, title, selftext}, ...]
+        tuple: (list of IDs, last_user_prompt)
+    """
+    chosen_model = model or FREE_MODEL
+    context_limit = _estimate_context_limit(chosen_model)
+    max_content_chars = context_limit - len(system_prompt) - len(filter_prompt) - 1000
+    
+    _log_ai(f"FILTER_{content_type.upper()}", f"Starting with {chosen_model}", {
+        "content_chars": f"{len(content):,}",
+        "context_limit": f"{context_limit:,}",
+        "max_per_chunk": f"{max_content_chars:,}"
+    })
+    
+    # Chunk if needed, limit to MAX_CHUNKS
+    chunks = _chunk_content(content, max_content_chars)
+    total_chunks = len(chunks)
+    
+    if total_chunks > MAX_CHUNKS:
+        _log_ai("CHUNKING", f"Content requires {total_chunks} chunks, limiting to {MAX_CHUNKS} (sampling evenly)")
+        indices = [int(i * (total_chunks - 1) / (MAX_CHUNKS - 1)) for i in range(MAX_CHUNKS)]
+        chunks = [chunks[i] for i in indices]
+    else:
+        _log_ai("CHUNKING", f"Split into {total_chunks} chunk(s)")
+    
+    all_ids = []
+    last_user_prompt = ""
+    label = "Posts" if content_type == "posts" else "Comments"
+    
+    for i, chunk in enumerate(chunks):
+        if filter_prompt:
+            user_prompt = f"Filter criteria: {filter_prompt}\n\n{label} to analyze:\n{chunk}"
+        else:
+            user_prompt = f"Return ALL {content_type.lower()} IDs:\n{chunk}"
+        last_user_prompt = user_prompt
+        
+        _log_ai("CHUNK", f"Processing chunk {i+1}/{len(chunks)}", {"chars": f"{len(chunk):,}"})
+        
+        try:
+            response = get_client(system_prompt, user_prompt, api_key, chosen_model)
+            
+            _log_ai("RESPONSE", f"Chunk {i+1} response ({len(response)} chars):")
+            print(f"    {_preview_response(response, 300)}")
+            
+            chunk_ids = wrap_in_python_array(response)
+            _log_ai("CHUNK_RESULT", f"Chunk {i+1}: extracted {len(chunk_ids)} IDs")
+            all_ids.extend(chunk_ids)
+            
+        except AIFilterError as e:
+            if i == 0:
+                # First chunk failed — this is a fundamental problem, raise it
+                _log_ai("FATAL", f"Chunk 1 failed, aborting: {e}")
+                raise
+            else:
+                # Later chunk failed — stop but keep what we have
+                _log_ai("CHUNK_STOP", f"Chunk {i+1} failed, stopping with {len(all_ids)} IDs collected so far: {e}")
+                break
+    
+    unique_ids = list(dict.fromkeys(all_ids))
+    _log_ai("COMPLETE", f"Total unique IDs: {len(unique_ids)}")
+    
+    return unique_ids, last_user_prompt
+
+
+def filter_posts_with_ai(filter_prompt: str, posts_content: str, api_key: str, model: str = "") -> tuple[list, str, str]:
+    """
+    Use AI to filter posts. Raises AIFilterError on first-chunk failure.
     """
     system_prompt = """You are an expert content analyst. Your task is to filter posts and return ONLY a Python array of post IDs.
 
 INSTRUCTIONS:
-1. Analyze each post in the provided content.
-2. Determine which posts match the filtering criteria.
-3. RETURN ONLY a valid Python array of STRING IDs. Each ID must be a quoted string (e.g. 't3_abcd' or "t3_abcd").
-4. LIMIT your response to AT MOST 1000 IDs unless the user specifies a different number.
-5. Include ONLY the matching IDs. Do NOT return objects, dictionaries, additional fields, or any explanatory text.
-6. If no posts match, return an empty array: []
-7. ALWAYS ensure the Python array is syntactically valid and properly closed with ].
+1. Analyze each post in the provided content. Posts are separated by "---".
+2. Each post starts with [ID] followed by the content.
+3. Return ONLY IDs of posts that match the filtering criteria.
+4. RETURN ONLY a valid Python array of STRING IDs, e.g. ['t3_abc', 't3_xyz']
+5. If no posts match, return: []
 
-EXAMPLE OUTPUT FORMAT:
-['id1','id2','id3']
+CRITICAL: Return ONLY the raw Python array. No markdown, no backticks, no explanation."""
 
-CRITICAL: Return ONLY the raw Python array with NO markdown, NO backticks, NO code fences, and NO additional text or commentary."""
-
-    user_prompt = f"Here are the posts to filter: {posts_content} Here are some additional filtering criteria: {filter_prompt}"
-
-    try:
-        chosen_model = model or FREE_MODEL
-        response = get_client(system_prompt, user_prompt, api_key, chosen_model)
-        print(response[:100])
-        print("...")
-        print(response[-100:])
-        result = wrap_in_python_array(response)
-        return result, system_prompt, user_prompt
-
-    except Exception as e:
-        error_result = [{"error": f"Failed to filter posts: {str(e)}"}]
-        return error_result, system_prompt, user_prompt
+    ids, last_user_prompt = _run_chunked_filter("posts", filter_prompt, posts_content, api_key, model, system_prompt)
+    return ids, system_prompt, last_user_prompt
 
 
-def filter_comments_with_ai(filter_prompt: str, comments_content: str, api_key: str, model: str = "") -> tuple[str, str, str]:
+def filter_comments_with_ai(filter_prompt: str, comments_content: str, api_key: str, model: str = "") -> tuple[list, str, str]:
     """
-    Use AI to filter comments based on a given prompt and return results as a Python list.
-
-    Returns an array of objects with ids.
+    Use AI to filter comments. Raises AIFilterError on first-chunk failure.
     """
     system_prompt = """You are an expert content analyst. Your task is to filter comments and return ONLY a Python array of comment IDs.
 
 INSTRUCTIONS:
-1. Analyze each comment in the provided content.
-2. Determine which comments match the filtering criteria.
-3. RETURN ONLY a valid Python array of STRING IDs. Each ID must be a quoted string (e.g. 'c1_xyz' or "c1_xyz").
-4. If no comments match, return an empty array: []
-5. ALWAYS ensure the Python array is syntactically valid and properly closed with ].
+1. Analyze each comment in the provided content. Comments are separated by "---".
+2. Each comment starts with [ID] followed by the content.
+3. Return ONLY IDs of comments that match the filtering criteria.
+4. RETURN ONLY a valid Python array of STRING IDs, e.g. ['t1_abc', 't1_xyz']
+5. If no comments match, return: []
 
-EXAMPLE OUTPUT FORMAT:
-['id1','id2','id3']
+CRITICAL: Return ONLY the raw Python array. No markdown, no backticks, no explanation."""
 
-CRITICAL: Return ONLY the raw Python array with NO markdown, NO backticks, NO code fences, and NO additional text or commentary."""
+    ids, last_user_prompt = _run_chunked_filter("comments", filter_prompt, comments_content, api_key, model, system_prompt)
+    return ids, system_prompt, last_user_prompt
 
-    user_prompt = f"Here are the comments to filter: {comments_content} Here are some additional filtering criteria: {filter_prompt}"
 
+
+def wrap_in_python_array(content: str) -> list:
+    """
+    Parse AI response into a list of ID strings.
+    Handles various formats the AI might return.
+    """
+    content = content.strip()
+    
+    # Remove common markdown artifacts
+    if content.startswith("```"):
+        lines = content.split("\n")
+        # Remove first line (```python or ```) and last line (```)
+        lines = [l for l in lines if not l.strip().startswith("```")]
+        content = "\n".join(lines).strip()
+    
+    # Try to parse as Python literal
     try:
-        chosen_model = model or FREE_MODEL
-        response = get_client(system_prompt, user_prompt, api_key, chosen_model)
-        print(response[:100])
-        print("...")
-        print(response[-100:])
-        result = wrap_in_python_array(response)
-        return result, system_prompt, user_prompt
-        
-    except Exception as e:
-        error_result = [{"error": f"Failed to filter comments: {str(e)}"}]
-        return error_result, system_prompt, user_prompt
-
-
-
-def wrap_in_python_array(content: str):
-    # Try to parse a Python literal list first (best-effort)
-    try:
-        obj = ast.literal_eval(content.strip())
+        obj = ast.literal_eval(content)
         if isinstance(obj, list):
-            return [str(x) for x in obj if x is not None]
-    except Exception:
-        pass
+            result = [str(x) for x in obj if x is not None]
+            _log_ai("PARSE", f"Parsed {len(result)} IDs via ast.literal_eval")
+            return result
+    except Exception as e:
+        _log_ai("PARSE_WARN", f"ast.literal_eval failed: {e}, falling back to regex")
 
-    # Fallback: extract any quoted tokens (allow underscores, hyphens, colons)
+    # Fallback: extract quoted strings
     matches = re.findall(r"['\"]([^'\"]+)['\"]", content)
     if not matches:
-        print("Warning: No IDs found in content")
+        _log_ai("PARSE_WARN", "No quoted strings found in response")
         return []
 
-    # Filter matches to reasonable ID-like tokens
+    # Filter to ID-like tokens only
     filtered = [m for m in matches if re.match(r"^[A-Za-z0-9_:-]+$", m)]
+    _log_ai("PARSE", f"Extracted {len(filtered)} IDs via regex fallback (from {len(matches)} quoted strings)")
     return filtered
