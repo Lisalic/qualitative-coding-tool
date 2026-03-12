@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import ActionForm from "../components/ActionForm";
 import PromptManager from "../components/PromptManager";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { apiFetch } from "../api";
 import { AI_MODELS } from "../lib/constants";
 import "../styles/Home.css";
@@ -142,85 +142,80 @@ export default function Filter() {
     }
   };
 
-  const getStatusCodeErrorMessage = (status) => {
-    switch (status) {
-      case 400:
-        return "Bad Request: AI model unreachable try another model.";
-      case 401:
-        return "Invalid credentials: Please check your API key.";
-      case 402:
-        return "Your account or API key has insufficient credits for ths model. Add more credits and retry the request.";
-      case 403:
-        return "Your chosen model requires moderation and your input was flagged.";
-      case 408:
-        return "Your request timed out. This can happen with long inputs or if the model is under heavy load. Please try again.";
-      case 429:
-        return "You are being rate limited. Please wait and try again.";
-      case 502:
-        return "Your chosen model is down or we received an invalid response from it. Please try again later or select a different model.";
-      case 503:
-        return "Openrouter is currently unavailable. Please try again later.";
-      default:
-        return null;
+  const validateForm = (formData) => {
+    const missing = [];
+    if (!formData.database) missing.push("Database");
+    if (!formData.project_id) missing.push("Project");
+    if (!formData.name || !formData.name.trim()) {
+      missing.push("Filtered Database Name");
+    }
+    if (!formData.model || !formData.model.trim()) {
+      missing.push("AI Model");
+    }
+    if (missing.length) {
+      return `Missing required fields: ${missing.join(", ")}`;
+    }
+    const savedApiKey = localStorage.getItem("apiKey");
+    if (!savedApiKey) {
+      return "API key not set. Please set your API key in the navbar.";
+    }
+    return null;
+  };
+
+  const buildRequestData = (formData, apiKey) => {
+    const requestData = new FormData();
+    requestData.append("api_key", apiKey);
+    if (formData.filterPrompt) {
+      requestData.append("prompt", formData.filterPrompt);
+    }
+    if (formData.model) {
+      requestData.append("model", formData.model);
+    }
+    if (formData.name) {
+      requestData.append("name", formData.name);
+    }
+    if (formData.description) {
+      requestData.append("description", formData.description);
+    }
+    if (formData.database) {
+      requestData.append("database", formData.database);
+    }
+    if (selectedProject) {
+      requestData.append("project_id", selectedProject);
+    }
+    if (minWords > 0) {
+      requestData.append("min_words", String(minWords));
+    }
+    return requestData;
+  };
+
+  const parseErrorResponse = async (response) => {
+    const text = await response.text();
+    let errorMsg = `Filtering failed (HTTP ${response.status})`;
+    if (!text) return errorMsg;
+    try {
+      const errorData = JSON.parse(text);
+      if (typeof errorData.error === "string") return errorData.error;
+      if (typeof errorData.detail === "string") return errorData.detail;
+      return errorMsg;
+    } catch {
+      return text || errorMsg;
     }
   };
 
   const handleSubmit = async (formData) => {
-    console.debug(
-      "[filter] handleSubmit received formData:",
-      formData,
-      "component model:",
-      model,
-    );
-
     setLoading(true);
     setMessage("");
 
     try {
-      // Collect all missing required fields
-      const missing = [];
-      if (!formData.database) missing.push("Database");
-      if (!formData.project_id) missing.push("Project");
-      if (!formData.name || !formData.name.trim())
-        missing.push("Filtered Database Name");
-      if (!formData.model || !formData.model.trim()) missing.push("AI Model");
-
-      if (missing.length > 0) {
-        throw new Error(`Missing required fields: ${missing.join(", ")}`);
+      const error = validateForm(formData);
+      if (error) {
+        setMessage(`Error: ${error}`);
+        return;
       }
 
       const savedApiKey = localStorage.getItem("apiKey");
-      if (!savedApiKey) {
-        throw new Error(
-          "API key not set. Please set your API key in the navbar.",
-        );
-      }
-
-      const requestData = new FormData();
-      requestData.append("api_key", savedApiKey);
-      if (formData.filterPrompt) {
-        requestData.append("prompt", formData.filterPrompt);
-      }
-      // Only use the model explicitly provided by the user via the form
-      const modelToSend = formData.model;
-      if (modelToSend) requestData.append("model", modelToSend);
-      // include desired output name if provided
-      if (formData.name) {
-        requestData.append("name", formData.name);
-      }
-      if (formData.description) {
-        requestData.append("description", formData.description);
-      }
-      // include selected database if provided
-      if (formData.database) {
-        requestData.append("database", formData.database);
-      }
-      if (selectedProject) {
-        requestData.append("project_id", selectedProject);
-      }
-      if (minWords > 0) {
-        requestData.append("min_words", String(minWords));
-      }
+      const requestData = buildRequestData(formData, savedApiKey);
 
       const response = await apiFetch("/api/filter-data/", {
         method: "POST",
@@ -228,26 +223,9 @@ export default function Filter() {
       });
 
       if (!response.ok) {
-        const status = response.status;
-        const statusMessage = getStatusCodeErrorMessage(status);
-        if (statusMessage) {
-          throw new Error(statusMessage);
-        } else {
-          const text = await response.text();
-          let errorMsg = "Filtering failed";
-          try {
-            const errorData = JSON.parse(text);
-            errorMsg =
-              typeof errorData.detail === "string"
-                ? errorData.detail
-                : typeof errorData.error === "string"
-                  ? errorData.error
-                  : JSON.stringify(errorData) || errorMsg;
-          } catch (e) {
-            errorMsg = text || errorMsg;
-          }
-          throw new Error(errorMsg);
-        }
+        const errorMsg = await parseErrorResponse(response);
+        setMessage(`Error: ${errorMsg}`);
+        return;
       }
 
       const text = await response.text();
@@ -255,22 +233,16 @@ export default function Filter() {
 
       let resultMessage = `✓ ${data.message}`;
       if (data.ai_response) {
-        resultMessage += `\n\nAI Response:\n${JSON.stringify(data.ai_response, null, 2)}`;
+        resultMessage += `\n\nAI Response:\n${JSON.stringify(
+          data.ai_response,
+          null,
+          2,
+        )}`;
       }
       setMessage(resultMessage);
       setFilterPrompt("");
     } catch (err) {
-      let errorMessage = err.message;
-      // Check if the error message contains an error code
-      const codeMatch = errorMessage.match(/Error code: (\d+)/);
-      if (codeMatch) {
-        const code = parseInt(codeMatch[1], 10);
-        const statusMessage = getStatusCodeErrorMessage(code);
-        if (statusMessage) {
-          errorMessage = statusMessage;
-        }
-      }
-      setMessage(`Error: ${errorMessage}`);
+      setMessage(`Error: ${err.message || "Filtering failed"}`);
     } finally {
       setLoading(false);
     }
@@ -323,7 +295,6 @@ export default function Filter() {
               if (fetchedUserId) form.append("user_id", fetchedUserId);
 
               const res = await api.post("/api/prompts/", form);
-              console.log("Saved prompt response:", res);
               const saved = res && res.data ? res.data : null;
               const label =
                 (saved &&

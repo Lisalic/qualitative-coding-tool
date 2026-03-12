@@ -27,44 +27,36 @@ def my_projects(request: Request, file_type: str = Query("raw_data"), db: Sessio
         files = db.query(File).filter(File.user_id == user_id, File.file_type == file_type).all()
     result = []
     for p in files:
-        tables = []
-        try:
-            # Query file-backed table metadata
-            rows = db.query(FileTable).filter(FileTable.file_id == p.id).all()
-            for r in rows:
-                tables.append({"table_name": r.tablename, "row_count": r.row_count})
-        except Exception:
-            tables = []
+        rows = db.query(FileTable).filter(FileTable.file_id == p.id).all()
+        tables = [{"table_name": r.tablename, "row_count": r.row_count} for r in rows]
 
-        # Query parent file IDs
+        deps = db.query(FileDependency).filter(FileDependency.child_file_id == p.id).all()
         parent_files = []
-        try:
-            deps = db.query(FileDependency).filter(FileDependency.child_file_id == p.id).all()
-            for d in deps:
-                parent_file = db.query(File).filter(File.id == d.parent_file_id).first()
-                if parent_file:
-                    parent_files.append({
+        for d in deps:
+            parent_file = db.query(File).filter(File.id == d.parent_file_id).first()
+            if parent_file:
+                parent_files.append(
+                    {
                         "id": str(parent_file.id),
                         "name": parent_file.filename,
                         "schema_name": parent_file.schemaname,
-                        "type": parent_file.file_type
-                    })
-        except Exception:
-            parent_files = []
+                        "type": parent_file.file_type,
+                    }
+                )
 
-        result.append({
-            "id": str(p.id),
-            "display_name": p.filename,
-            "description": p.description,
-            "schema_name": p.schemaname,
-            "file_type": p.file_type,
-            "created_at": p.created_at.isoformat() if p.created_at else None,
-            "tables": tables,
-            "parent_files": parent_files,
-        })
+        result.append(
+            {
+                "id": str(p.id),
+                "display_name": p.filename,
+                "description": p.description,
+                "schema_name": p.schemaname,
+                "file_type": p.file_type,
+                "created_at": p.created_at.isoformat() if p.created_at else None,
+                "tables": tables,
+                "parent_files": parent_files,
+            }
+        )
 
-    # Return under the legacy "projects" key so frontend code expecting
-    # `data.projects` continues to work.
     return JSONResponse({"projects": result})
 
 

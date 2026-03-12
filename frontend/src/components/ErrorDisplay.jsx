@@ -1,14 +1,21 @@
-import '../styles/ErrorDisplay.css'
+import "../styles/ErrorDisplay.css";
 
 export default function ErrorDisplay({ message, onDismiss }) {
-  if (!message) return null
+  if (!message) return null;
 
   return (
-    <div className="error-display">
+    <div className="error-display" role="alert">
       <p className="error-message">{message}</p>
       {onDismiss && (
-        <button onClick={onDismiss} className="dismiss-btn">×</button>
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="dismiss-btn"
+          aria-label="Dismiss error"
+        >
+          ×
+        </button>
       )}
     </div>
-  )
+  );
 }

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { apiFetch } from "../api";
 import ReactMarkdown from "react-markdown";
 import "../styles/CodebookTree.css";
@@ -12,12 +12,7 @@ export default function CodebookTree({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    fetchParsed();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [codebookId]);
-
-  async function fetchParsed() {
+  const fetchParsed = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -31,18 +26,24 @@ export default function CodebookTree({
       setTree(j.parsed || []);
       // expand all families by default
       const init = {};
-      (j.parsed || []).forEach((f, i) => (init[i] = true));
+      (j.parsed || []).forEach((_, i) => {
+        init[i] = true;
+      });
       setExpanded(init);
     } catch (e) {
       setError(String(e.message || e));
     } finally {
       setLoading(false);
     }
-  }
+  }, [codebookId]);
 
-  function toggleFamily(idx) {
+  useEffect(() => {
+    fetchParsed();
+  }, [fetchParsed]);
+
+  const toggleFamily = (idx) => {
     setExpanded((s) => ({ ...s, [idx]: !s[idx] }));
-  }
+  };
 
   return (
     <div className="codebook-tree">

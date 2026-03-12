@@ -117,14 +117,17 @@ export default function FilteredData() {
   // Do not auto-select a file when project changes; require explicit selection
 
   return (
-    <>
-      <div className="data-container">
-        <div style={{ marginBottom: 12 }}>
-          <label style={{ color: "#fff", marginRight: 8 }}>Project:</label>
+    <div className="layout-page">
+      <div className="layout-card layout-card--padded" style={{ width: "100%" }}>
+        <div className="body-base" style={{ marginBottom: 12 }}>
+          <label className="text-primary" style={{ marginRight: 8 }}>
+            Project:
+          </label>
           <select
             value={selectedProject}
             onChange={(e) => setSelectedProject(e.target.value)}
-            style={{ padding: "6px 8px", borderRadius: 6 }}
+            className="form__input"
+            style={{ maxWidth: 260, padding: "6px 8px" }}
           >
             <option value="">All Projects</option>
             {(projectsList.length > 0 ? projectsList : userProjects || []).map(
@@ -157,8 +160,8 @@ export default function FilteredData() {
                 }))}
                 selectedId={selectedDatabase}
                 onSelect={(id) => setSelectedDatabase(id)}
-                className="database-selector"
-                buttonClass="db-button"
+                className="selector-strip"
+                buttonClass="selector-button"
                 emptyMessage={
                   filteredFiles.length
                     ? "No files"
@@ -184,8 +187,8 @@ export default function FilteredData() {
             })}
             selectedId={selectedDatabase}
             onSelect={(id) => setSelectedDatabase(id)}
-            className="database-selector"
-            buttonClass="db-button"
+            className="selector-strip"
+            buttonClass="selector-button"
             emptyMessage="No filtered databases available"
           />
         )}
@@ -213,11 +216,11 @@ export default function FilteredData() {
             }
           />
         ) : (
-          <div style={{ color: "#888", padding: 20 }}>
+          <div className="empty-state mt-md">
             Select a project file to view filtered data
           </div>
         )}
       </div>
-    </>
+    </div>
   );
 }

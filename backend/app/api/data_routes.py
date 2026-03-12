@@ -48,77 +48,107 @@ def word_count_ranges(schema: str = Query(...)):
 
     try:
         with engine.connect() as conn:
-            subs_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": f"{schema}.submissions"}).scalar()
-            comm_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": f"{schema}.comments"}).scalar()
+            subs_exists = conn.execute(
+                text("SELECT to_regclass(:tbl)"), {"tbl": f"{schema}.submissions"}
+            ).scalar()
+            comm_exists = conn.execute(
+                text("SELECT to_regclass(:tbl)"), {"tbl": f"{schema}.comments"}
+            ).scalar()
 
-            # Check if word_count columns exist
             has_word_count_subs = False
             has_word_count_comm = False
             if subs_exists:
-                has_word_count_subs = conn.execute(text(f"""
+                has_word_count_subs = conn.execute(
+                    text(
+                        """
                     SELECT EXISTS (
                         SELECT 1 FROM information_schema.columns
-                        WHERE table_schema = '{schema}' AND table_name = 'submissions' AND column_name = 'word_count'
+                        WHERE table_schema = :schema AND table_name = 'submissions' AND column_name = 'word_count'
                     )
-                """)).scalar()
+                    """
+                    ),
+                    {"schema": schema},
+                ).scalar()
             if comm_exists:
-                has_word_count_comm = conn.execute(text(f"""
+                has_word_count_comm = conn.execute(
+                    text(
+                        """
                     SELECT EXISTS (
                         SELECT 1 FROM information_schema.columns
-                        WHERE table_schema = '{schema}' AND table_name = 'comments' AND column_name = 'word_count'
+                        WHERE table_schema = :schema AND table_name = 'comments' AND column_name = 'word_count'
                     )
-                """)).scalar()
+                    """
+                    ),
+                    {"schema": schema},
+                ).scalar()
 
-            # Get submissions ranges using bin counts
-            if subs_exists and has_word_count_subs:
-                result = conn.execute(text(f"""
-                    SELECT
-                        LEAST((floor(word_count / 10) * 10)::int, 1000) as min_words,
-                        COUNT(*) as count
-                    FROM "{schema}"."submissions"
-                    WHERE word_count >= 0 AND word_count <= 1000
-                    GROUP BY LEAST((floor(word_count / 10) * 10)::int, 1000)
-                    ORDER BY min_words
-                """))
-                submissions_ranges = [{"min_words": row[0], "count": row[1]} for row in result]
-            elif subs_exists:
-                # Fallback to computed word counts if no word_count column
-                result = conn.execute(text(f"""
-                    SELECT
-                        LEAST((floor(({_word_count_expr(["title", "selftext"])}) / 10) * 10)::int, 1000) as min_words,
-                        COUNT(*) as count
-                    FROM "{schema}"."submissions"
-                    WHERE {_word_count_expr(["title", "selftext"])} >= 0 AND {_word_count_expr(["title", "selftext"])} <= 1000
-                    GROUP BY LEAST((floor(({_word_count_expr(["title", "selftext"])}) / 10) * 10)::int, 1000)
-                    ORDER BY min_words
-                """))
-                submissions_ranges = [{"min_words": row[0], "count": row[1]} for row in result]
+            if subs_exists:
+                if has_word_count_subs:
+                    result = conn.execute(
+                        text(
+                            f"""
+                        SELECT
+                            LEAST((floor(word_count / 10) * 10)::int, 1000) as min_words,
+                            COUNT(*) as count
+                        FROM "{schema}"."submissions"
+                        WHERE word_count BETWEEN 0 AND 1000
+                        GROUP BY LEAST((floor(word_count / 10) * 10)::int, 1000)
+                        ORDER BY min_words
+                        """
+                        )
+                    )
+                else:
+                    wc_expr = _word_count_expr(["title", "selftext"])
+                    result = conn.execute(
+                        text(
+                            f"""
+                        SELECT
+                            LEAST((floor(({wc_expr}) / 10) * 10)::int, 1000) as min_words,
+                            COUNT(*) as count
+                        FROM "{schema}"."submissions"
+                        WHERE {wc_expr} BETWEEN 0 AND 1000
+                        GROUP BY LEAST((floor(({wc_expr}) / 10) * 10)::int, 1000)
+                        ORDER BY min_words
+                        """
+                        )
+                    )
+                submissions_ranges = [
+                    {"min_words": row[0], "count": row[1]} for row in result
+                ]
 
-            # Get comments ranges using bin counts
-            if comm_exists and has_word_count_comm:
-                result = conn.execute(text(f"""
-                    SELECT
-                        LEAST((floor(word_count / 10) * 10)::int, 1000) as min_words,
-                        COUNT(*) as count
-                    FROM "{schema}"."comments"
-                    WHERE word_count >= 0 AND word_count <= 1000
-                    GROUP BY LEAST((floor(word_count / 10) * 10)::int, 1000)
-                    ORDER BY min_words
-                """))
-                comments_ranges = [{"min_words": row[0], "count": row[1]} for row in result]
-            elif comm_exists:
-                # Fallback to computed word counts if no word_count column
-                result = conn.execute(text(f"""
-                    SELECT
-                        LEAST((floor(({_word_count_expr(["body"])}) / 10) * 10)::int, 1000) as min_words,
-                        COUNT(*) as count
-                    FROM "{schema}"."comments"
-                    WHERE {_word_count_expr(["body"])} >= 0 AND {_word_count_expr(["body"])} <= 1000
-                    GROUP BY LEAST((floor(({_word_count_expr(["body"])}) / 10) * 10)::int, 1000)
-                    ORDER BY min_words
-                """))
-                comments_ranges = [{"min_words": row[0], "count": row[1]} for row in result]
-
+            if comm_exists:
+                if has_word_count_comm:
+                    result = conn.execute(
+                        text(
+                            f"""
+                        SELECT
+                            LEAST((floor(word_count / 10) * 10)::int, 1000) as min_words,
+                            COUNT(*) as count
+                        FROM "{schema}"."comments"
+                        WHERE word_count BETWEEN 0 AND 1000
+                        GROUP BY LEAST((floor(word_count / 10) * 10)::int, 1000)
+                        ORDER BY min_words
+                        """
+                        )
+                    )
+                else:
+                    wc_expr = _word_count_expr(["body"])
+                    result = conn.execute(
+                        text(
+                            f"""
+                        SELECT
+                            LEAST((floor(({wc_expr}) / 10) * 10)::int, 1000) as min_words,
+                            COUNT(*) as count
+                        FROM "{schema}"."comments"
+                        WHERE {wc_expr} BETWEEN 0 AND 1000
+                        GROUP BY LEAST((floor(({wc_expr}) / 10) * 10)::int, 1000)
+                        ORDER BY min_words
+                        """
+                        )
+                    )
+                comments_ranges = [
+                    {"min_words": row[0], "count": row[1]} for row in result
+                ]
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500)
 

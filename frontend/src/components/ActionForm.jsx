@@ -50,16 +50,14 @@ export default function ActionForm({
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (onSubmit) {
-      const finalFormData = { ...formData };
-      fields.forEach((field) => {
-        if (field.onChange) {
-          finalFormData[field.id] = field.value;
-        }
-      });
-      console.debug("[ActionForm] submitting formData:", finalFormData);
-      await onSubmit(finalFormData);
-    }
+    if (!onSubmit) return;
+    const finalFormData = { ...formData };
+    fields.forEach((field) => {
+      if (field.onChange) {
+        finalFormData[field.id] = field.value;
+      }
+    });
+    await onSubmit(finalFormData);
   };
 
   const renderField = (field) => {

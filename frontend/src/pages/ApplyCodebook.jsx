@@ -52,11 +52,9 @@ export default function ApplyCodebook() {
       const response = await apiFetch("/api/list-codebooks");
       if (!response.ok) throw new Error("Failed to fetch codebooks");
       const data = await response.json();
-      console.log("Fetched codebooks:", data.codebooks);
       setCodebooks(data.codebooks);
       if (data.codebooks.length > 0 && !codebook) {
         const defaultCodebook = data.codebooks[0].id.toString();
-        console.log("Setting default codebook to:", defaultCodebook);
         setCodebook(defaultCodebook);
       }
     } catch (err) {
@@ -153,8 +151,6 @@ export default function ApplyCodebook() {
       setLoading(true);
       setError(null);
       setResult(null);
-
-      console.log("Submitting apply-codebook with formData:", formData);
 
       const requestData = new FormData();
       requestData.append("api_key", savedApiKey);
@@ -298,7 +294,6 @@ export default function ApplyCodebook() {
               if (fetchedUserId) form.append("user_id", fetchedUserId);
 
               const res = await api.post("/api/prompts/", form);
-              console.log("Saved prompt response:", res);
               const saved = res && res.data ? res.data : null;
               const label =
                 (saved &&

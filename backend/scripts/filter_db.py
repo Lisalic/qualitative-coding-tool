@@ -10,32 +10,27 @@ FREE_MODEL = "google/gemini-2.0-flash-exp:free"
 MAX_RETRIES = 3
 INITIAL_RETRY_DELAY = 2
 
-# Approximate token limits for common models (chars, assuming ~4 chars/token)
-# Reserve ~20% for system prompt + response overhead
 MODEL_CONTEXT_LIMITS = {
-    "default": 100_000 * 4,   # 100k tokens usable
-    "gemini": 800_000 * 4,    # 800k tokens usable (1M total)
-    "claude": 160_000 * 4,    # 160k tokens usable (200k total)
-    "gpt-4": 100_000 * 4,     # 100k tokens usable (128k total)
-    "stepfun": 80_000 * 4,    # Conservative for stepfun models
+    "default": 100_000 * 4,   
+    "gemini": 800_000 * 4,    
+    "claude": 160_000 * 4,    
+    "gpt-4": 100_000 * 4,  
+    "stepfun": 80_000 * 4,   
 }
 
-# Maximum number of API calls per filter operation (to control costs)
 MAX_CHUNKS = 3
 
-# Separator used between entries in content
 ENTRY_SEPARATOR = "\n---\n"
 
-# Error code to human-readable message mapping
 ERROR_MESSAGES = {
-    400: "Bad Request: invalid or missing parameters",
-    401: "Invalid credentials: your API key is missing, disabled, or expired",
-    402: "Insufficient credits: your account or API key needs more credits",
-    403: "Content flagged: your chosen model requires moderation and your input was flagged",
-    408: "Request timed out",
-    429: "Rate limited: too many requests, please wait and try again",
-    502: "Model unavailable: your chosen model is down or returned an invalid response",
-    503: "No available model provider meets your routing requirements",
+    400: "Bad Request: The AI model is unreachable. Try another model.",
+    401: "Invalid API key: Your key is missing, disabled, or expired. Please check your API key.",
+    402: "Insufficient credits: Your account or API key needs more credits. Add more credits and retry.",
+    403: "Content flagged: Your chosen model requires moderation and your input was flagged.",
+    408: "Request timed out: This can happen with long inputs or heavy model load. Please try again.",
+    429: "Rate limited: Too many requests. Please wait and try again.",
+    502: "Model unavailable: Your chosen model is down or returned an invalid response. Try another model.",
+    503: "Service unavailable: No model provider is available right now. Please try again later.",
 }
 
 

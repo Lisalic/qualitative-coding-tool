@@ -23,9 +23,10 @@ async def get_coded_data_query(coded_id: str = None, db: Session = Depends(get_d
         if not file_rec:
             try:
                 fid = int(coded_id)
-                file_rec = db.query(File).filter(File.file_type.in_(['coding', 'coding_comparison']), File.id == fid).first()
             except Exception:
                 file_rec = None
+            else:
+                file_rec = db.query(File).filter(File.file_type.in_(['coding', 'coding_comparison']), File.id == fid).first()
     else:
         file_rec = db.query(File).filter(File.file_type.in_(['coding', 'coding_comparison'])).order_by(File.created_at.desc()).first()
 
@@ -47,7 +48,6 @@ async def get_coded_data_query(coded_id: str = None, db: Session = Depends(get_d
                 else:
                     return JSONResponse({"error": "Coded data content not found in file"}, status_code=404)
         except Exception as e:
-            print(f"Error reading coded data from schema {schema}: {e}")
             return JSONResponse({"error": f"Error reading coded data: {e}"}, status_code=500)
 
     return JSONResponse({"error": "No coded data file found"}, status_code=404)
@@ -106,7 +106,6 @@ async def save_project_coded_data(request: Request, schema_name: str = Form(None
 
         return JSONResponse({"message": "File coded data saved", "id": str(file_rec.id), "filename": file_rec.filename})
     except Exception as e:
-        print(f"Error saving file coded data to schema {schema}: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
@@ -146,9 +145,7 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
                         title = r[1] if len(r) > 1 else ""
                         selftext = r[2] if len(r) > 2 else ""
                     assembled += f"POST_ID: {post_id}\nTitle: {title or ''}\n{selftext or ''}\n\n"
-            else:
-                # submissions table missing — proceed with whatever content was found
-                pass
+            # submissions table missing — proceed with whatever content was found
 
             # Comments
             comm_tbl = f"{schema}.comments"
@@ -163,9 +160,7 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
                         comment_id = r[0] if len(r) > 0 else ""
                         body = r[1] if len(r) > 1 else ""
                     assembled += f"POST_ID: {comment_id}\n{body or ''}\n\n"
-            else:
-                # comments table missing — proceed
-                pass
+            # comments table missing — proceed
 
 
         cb_schema_raw = (codebook or "").strip()

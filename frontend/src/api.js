@@ -30,6 +30,50 @@ export async function apiFetch(path, options = {}) {
   return fetch(url, opts);
 }
 
+// Convenience helpers for common patterns
+export async function getJSON(path) {
+  const resp = await apiFetch(path, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+  });
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(
+      `GET ${path} failed: ${resp.status} ${resp.statusText} ${text || ""}`,
+    );
+  }
+  return resp.json();
+}
+
+export async function postJSON(path, body) {
+  const resp = await apiFetch(path, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(body ?? {}),
+  });
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(
+      `POST ${path} failed: ${resp.status} ${resp.statusText} ${text || ""}`,
+    );
+  }
+  return resp.json();
+}
+
+export async function downloadFile(path) {
+  const resp = await apiFetch(path, { method: "GET" });
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(
+      `Download ${path} failed: ${resp.status} ${resp.statusText} ${text || ""}`,
+    );
+  }
+  return resp.blob();
+}
+
 // Ensure axios instance uses Authorization header if token exists
 try {
   if (typeof window !== "undefined") {

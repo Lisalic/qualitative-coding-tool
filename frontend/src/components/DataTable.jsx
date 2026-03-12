@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { apiFetch } from "../api";
 import EntryModal from "./EntryModal";
 import "../styles/DataTable.css";
@@ -23,9 +23,9 @@ export default function DataTable({
   const [selectedItems, setSelectedItems] = useState(new Set());
   const [projects, setProjects] = useState([]);
   const [targetDb, setTargetDb] = useState("");
-  const MAX_SEARCH_FETCH = 100000000; // when searching, fetch up to this many rows
+  const MAX_SEARCH_FETCH = 5000;
 
-  const fetchEntries = async () => {
+  const fetchEntries = useCallback(async () => {
     if (!currentDatabase || String(currentDatabase).trim() === "") {
       setDbEntries(null);
       setLoading(false);
@@ -42,13 +42,13 @@ export default function DataTable({
       const offsetParam = isSearching ? 0 : offset;
       let response;
       const isProjectSchema = /^proj_[A-Za-z0-9_]+(?:\.db)?$/.test(
-        String(currentDatabase) || ""
+        String(currentDatabase) || "",
       );
       if (currentDatabase && isProjectSchema) {
         response = await apiFetch(
           `/api/file-entries/?limit=${fetchLimit}&offset=${offsetParam}&schema=${encodeURIComponent(
-            String(currentDatabase)
-          )}`
+            String(currentDatabase),
+          )}`,
         );
       }
 
@@ -66,7 +66,7 @@ export default function DataTable({
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentDatabase, limit, page, searchTerm]);
 
   useEffect(() => {
     setCurrentDatabase(database);
@@ -75,7 +75,7 @@ export default function DataTable({
 
   useEffect(() => {
     fetchEntries();
-  }, [currentDatabase, limit, searchTerm, page]);
+  }, [fetchEntries]);
 
   // Clear selections when view changes (new DB, page, limit, or search)
   useEffect(() => {
@@ -93,7 +93,7 @@ export default function DataTable({
           // set default target if not set and there is another project
           if (!targetDb) {
             const other = (data.projects || []).find(
-              (p) => p.schema_name !== currentDatabase
+              (p) => p.schema_name !== currentDatabase,
             );
             if (other) setTargetDb(other.schema_name);
           }
@@ -150,13 +150,17 @@ export default function DataTable({
       ? displayName || String(currentDatabase).replace(/\.db$/i, "")
       : title;
 
-  let filteredSubmissions = [];
-  let filteredComments = [];
-  if (dbEntries) {
+  const { filteredSubmissions, filteredComments } = useMemo(() => {
+    if (!dbEntries) {
+      return { filteredSubmissions: [], filteredComments: [] };
+    }
     const q = (searchTerm || "").trim().toLowerCase();
     const isSearchingLocal = (searchTerm || "").trim();
+    let submissions = dbEntries.submissions || [];
+    let comments = dbEntries.comments || [];
+
     if (q) {
-      filteredSubmissions = (dbEntries.submissions || []).filter((sub) => {
+      submissions = submissions.filter((sub) => {
         return (
           (sub.title && sub.title.toLowerCase().includes(q)) ||
           (sub.selftext && sub.selftext.toLowerCase().includes(q)) ||
@@ -164,35 +168,37 @@ export default function DataTable({
           (sub.author && sub.author.toLowerCase().includes(q))
         );
       });
-      filteredComments = (dbEntries.comments || []).filter((c) => {
+      comments = comments.filter((c) => {
         return (
           (c.body && c.body.toLowerCase().includes(q)) ||
           (c.subreddit && c.subreddit.toLowerCase().includes(q)) ||
           (c.author && c.author.toLowerCase().includes(q))
         );
       });
-    } else {
-      filteredSubmissions = dbEntries.submissions || [];
-      filteredComments = dbEntries.comments || [];
     }
 
-    if (Array.isArray(filteredSubmissions)) {
+    if (Array.isArray(submissions)) {
       if (isSearchingLocal) {
         const start = page * limit;
-        filteredSubmissions = filteredSubmissions.slice(start, start + limit);
+        submissions = submissions.slice(start, start + limit);
       } else {
-        filteredSubmissions = filteredSubmissions.slice(0, limit);
+        submissions = submissions.slice(0, limit);
       }
     }
-    if (Array.isArray(filteredComments)) {
+    if (Array.isArray(comments)) {
       if (isSearchingLocal) {
         const start = page * limit;
-        filteredComments = filteredComments.slice(start, start + limit);
+        comments = comments.slice(start, start + limit);
       } else {
-        filteredComments = filteredComments.slice(0, limit);
+        comments = comments.slice(0, limit);
       }
     }
-  }
+
+    return {
+      filteredSubmissions: submissions,
+      filteredComments: comments,
+    };
+  }, [dbEntries, searchTerm, page, limit]);
 
   // Helpers for modal navigation
   let currentList = [];
@@ -317,81 +323,73 @@ export default function DataTable({
     }
   };
 
-  // Selection helpers (for checkboxes)
-  const keyFor = (type, id) => `${type}:${id}`;
-  const isSelected = (type, id) => selectedItems.has(keyFor(type, id));
-  const toggleSelection = (type, id, e) => {
-    if (e && e.stopPropagation) e.stopPropagation();
-    setSelectedItems((prev) => {
-      const next = new Set(prev);
-      const k = keyFor(type, id);
-      if (next.has(k)) next.delete(k);
-      else next.add(k);
-      return next;
-    });
-  };
+  const keyFor = useCallback((type, id) => `${type}:${id}`, []);
 
-  const toggleSelectAll = (type, list) => {
-    const keys = (list || []).map((it) => keyFor(type, it.id));
-    setSelectedItems((prev) => {
-      const next = new Set(prev);
-      const allSelected = keys.length > 0 && keys.every((k) => next.has(k));
-      if (allSelected) {
-        keys.forEach((k) => next.delete(k));
-      } else {
-        keys.forEach((k) => next.add(k));
-      }
-      return next;
-    });
-  };
+  const isSelected = useCallback(
+    (type, id) => selectedItems.has(keyFor(type, id)),
+    [selectedItems, keyFor],
+  );
+
+  const toggleSelection = useCallback(
+    (type, id, e) => {
+      if (e && e.stopPropagation) e.stopPropagation();
+      setSelectedItems((prev) => {
+        const next = new Set(prev);
+        const k = keyFor(type, id);
+        if (next.has(k)) next.delete(k);
+        else next.add(k);
+        return next;
+      });
+    },
+    [keyFor],
+  );
+
+  const toggleSelectAll = useCallback(
+    (type, list) => {
+      const keys = (list || []).map((it) => keyFor(type, it.id));
+      setSelectedItems((prev) => {
+        const next = new Set(prev);
+        const allSelected = keys.length > 0 && keys.every((k) => next.has(k));
+        if (allSelected) {
+          keys.forEach((k) => next.delete(k));
+        } else {
+          keys.forEach((k) => next.add(k));
+        }
+        return next;
+      });
+    },
+    [keyFor],
+  );
   return (
-    <div className="data-table-container">
-      <div
-        className="table-header"
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "center",
-          alignItems: "center",
-        }}
-      >
-        <h1 style={{ margin: 0, textAlign: "center" }}>
+    <div className="table-shell">
+      <div className="panel-header layout-flex-col layout-center">
+        <h1 className="heading-lg text-center">
           {currentDatabase && String(currentDatabase).trim()
             ? `Database: ${displayDbName}`
             : title}
         </h1>
         {description ? (
-          <div
-            style={{
-              width: "100%",
-              textAlign: "center",
-              color: "#cccccc",
-              marginTop: 6,
-            }}
-          >
+          <div className="text-muted text-center mt-md">
             {description}
           </div>
         ) : null}
       </div>
 
-      {error && <p className="error-message">{error}</p>}
+      {error && <p className="alert alert--error">{error}</p>}
 
       {!dbEntries && !loading && !error && (
-        <p className="info-message">Select a database to view its contents.</p>
+        <p className="alert alert--info">Select a database to view its contents.</p>
       )}
 
       {loading && (
-        <p className="loading-message">Loading database contents...</p>
+        <p className="alert alert--info">Loading database contents...</p>
       )}
 
       {dbEntries && (
         <>
           {/* Render metadata (counts/date) similarly to ManageDatabase */}
           {metadata && (
-            <div
-              className="database-metadata"
-              style={{ marginBottom: "0.75rem" }}
-            >
+            <div className="database-metadata" style={{ marginBottom: "0.75rem" }}>
               {metadata.tables ? (
                 (() => {
                   const submissions =
@@ -458,18 +456,8 @@ export default function DataTable({
             </div>
           )}
 
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              marginBottom: "1rem",
-              width: "100%",
-            }}
-          >
-            <div
-              style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}
-            >
+          <div className="layout-flex-row layout-space-between" style={{ marginBottom: "1rem", width: "100%" }}>
+            <div className="layout-flex-row gap-sm">
               <div className="limit-selector">
                 <label htmlFor="entry-limit">Show entries: </label>
                 <select
@@ -489,7 +477,7 @@ export default function DataTable({
                 </select>
               </div>
             </div>
-            <div style={{ display: "flex", alignItems: "center" }}>
+            <div className="layout-flex-row">
               <input
                 type="text"
                 className="search-input"
@@ -505,17 +493,17 @@ export default function DataTable({
           </div>
 
           {dbEntries.message && (
-            <p className="info-message">{dbEntries.message}</p>
+            <p className="alert alert--info">{dbEntries.message}</p>
           )}
 
           {filteredSubmissions.length > 0 && (
             <div className="table-section">
-              <h3>Sample Posts ({limit})</h3>
+              <h3 className="table-section__title">Sample Posts ({limit})</h3>
               <div className="table-wrapper">
-                <table className="data-table">
+                <table className="table">
                   <thead>
                     <tr>
-                      <th style={{ width: 48 }}>
+                      <th className="table__th" style={{ width: 48 }}>
                         <input
                           type="checkbox"
                           aria-label="select-all-submissions"
@@ -530,20 +518,20 @@ export default function DataTable({
                           }
                         />
                       </th>
-                      <th>ID</th>
+                      <th className="table__th">ID</th>
                       {isFilteredView || currentDatabase === "filtered" ? (
                         <>
-                          <th>Title</th>
-                          <th>Selftext</th>
-                          <th>Actions</th>
+                          <th className="table__th">Title</th>
+                          <th className="table__th">Selftext</th>
+                          <th className="table__th">Actions</th>
                         </>
                       ) : (
                         <>
-                          <th>Subreddit</th>
-                          <th>Title</th>
-                          <th>Author</th>
-                          <th>Score</th>
-                          <th>Actions</th>
+                          <th className="table__th">Subreddit</th>
+                          <th className="table__th">Title</th>
+                          <th className="table__th">Author</th>
+                          <th className="table__th">Score</th>
+                          <th className="table__th">Actions</th>
                         </>
                       )}
                     </tr>
@@ -553,9 +541,9 @@ export default function DataTable({
                       <tr
                         key={sub.id}
                         onClick={() => handleRowClick(sub, "submission")}
-                        className="clickable-row"
+                        className="table__row--clickable table__row--hover"
                       >
-                        <td>
+                        <td className="table__td">
                           <input
                             type="checkbox"
                             checked={isSelected("submission", sub.id)}
@@ -565,12 +553,12 @@ export default function DataTable({
                             onClick={(e) => e.stopPropagation()}
                           />
                         </td>
-                        <td>{sub.id}</td>
+                        <td className="table__td">{sub.id}</td>
                         {isFilteredView || currentDatabase === "filtered" ? (
                           <>
-                            <td className="truncate">{sub.title}</td>
-                            <td className="truncate">{sub.selftext}</td>
-                            <td>
+                            <td className="table__td truncate-cell">{sub.title}</td>
+                            <td className="table__td truncate-cell">{sub.selftext}</td>
+                            <td className="table__td">
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -586,11 +574,11 @@ export default function DataTable({
                           </>
                         ) : (
                           <>
-                            <td>{sub.subreddit}</td>
-                            <td className="truncate">{sub.title}</td>
-                            <td>{sub.author}</td>
-                            <td>{sub.score}</td>
-                            <td>
+                            <td className="table__td">{sub.subreddit}</td>
+                            <td className="table__td truncate-cell">{sub.title}</td>
+                            <td className="table__td">{sub.author}</td>
+                            <td className="table__td">{sub.score}</td>
+                            <td className="table__td">
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -615,12 +603,12 @@ export default function DataTable({
 
           {filteredComments.length > 0 && (
             <div className="table-section">
-              <h3>Sample Comments ({limit})</h3>
+              <h3 className="table-section__title">Sample Comments ({limit})</h3>
               <div className="table-wrapper">
-                <table className="data-table">
+                <table className="table">
                   <thead>
                     <tr>
-                      <th style={{ width: 48 }}>
+                      <th className="table__th" style={{ width: 48 }}>
                         <input
                           type="checkbox"
                           aria-label="select-all-comments"
@@ -635,12 +623,12 @@ export default function DataTable({
                           }
                         />
                       </th>
-                      <th>ID</th>
-                      <th>Subreddit</th>
-                      <th>Body</th>
-                      <th>Author</th>
-                      <th>Score</th>
-                      <th>Actions</th>
+                      <th className="table__th">ID</th>
+                      <th className="table__th">Subreddit</th>
+                      <th className="table__th">Body</th>
+                      <th className="table__th">Author</th>
+                      <th className="table__th">Score</th>
+                      <th className="table__th">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -648,9 +636,9 @@ export default function DataTable({
                       <tr
                         key={comment.id}
                         onClick={() => handleRowClick(comment, "comment")}
-                        className="clickable-row"
+                        className="table__row--clickable table__row--hover"
                       >
-                        <td>
+                        <td className="table__td">
                           <input
                             type="checkbox"
                             checked={isSelected("comment", comment.id)}
@@ -660,12 +648,12 @@ export default function DataTable({
                             onClick={(e) => e.stopPropagation()}
                           />
                         </td>
-                        <td>{comment.id}</td>
-                        <td>{comment.subreddit}</td>
-                        <td className="truncate">{comment.body}</td>
-                        <td>{comment.author}</td>
-                        <td>{comment.score}</td>
-                        <td>
+                        <td className="table__td">{comment.id}</td>
+                        <td className="table__td">{comment.subreddit}</td>
+                        <td className="table__td truncate-cell">{comment.body}</td>
+                        <td className="table__td">{comment.author}</td>
+                        <td className="table__td">{comment.score}</td>
+                        <td className="table__td">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -688,20 +676,12 @@ export default function DataTable({
 
           {dbEntries.submissions.length === 0 &&
             dbEntries.comments.length === 0 && (
-              <p className="no-data">
+              <p className="empty-state">
                 No data available. Please upload a file first.
               </p>
             )}
 
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "center",
-              alignItems: "center",
-              gap: "0.75rem",
-              marginTop: "1rem",
-            }}
-          >
+          <div className="layout-flex-row layout-center gap-sm" style={{ marginTop: "1rem" }}>
             <button
               onClick={() => setPage((p) => Math.max(0, p - 1))}
               className="btn btn-secondary"
@@ -727,13 +707,7 @@ export default function DataTable({
             </button>
           </div>
 
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "center",
-              marginTop: "0.5rem",
-            }}
-          >
+          <div className="layout-flex-row layout-center" style={{ marginTop: "0.5rem" }}>
             <button
               onClick={deleteSelected}
               className="btn btn-danger"
@@ -742,21 +716,15 @@ export default function DataTable({
               Delete Selected ({selectedItems.size})
             </button>
           </div>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "center",
-              gap: "0.75rem",
-              marginTop: "0.5rem",
-            }}
-          >
-            <label style={{ color: "#fff", alignSelf: "center" }}>
+          <div className="layout-flex-row layout-center gap-sm" style={{ marginTop: "0.5rem" }}>
+            <label className="text-primary" style={{ alignSelf: "center" }}>
               Move selected to:
             </label>
             <select
               value={targetDb}
               onChange={(e) => setTargetDb(e.target.value)}
-              style={{ minWidth: 280 }}
+              className="form__input"
+              style={{ minWidth: 280, maxWidth: 320 }}
             >
               <option value="">-- select database --</option>
               {projects.map((p) => (

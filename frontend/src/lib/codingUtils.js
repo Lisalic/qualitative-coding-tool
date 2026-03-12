@@ -16,19 +16,36 @@ export const getCodeColor = (code) => {
 
 // Get all unique codes for legend
 export const getUniqueCodes = (parsedCoding) => {
+  if (!Array.isArray(parsedCoding)) return [];
   const codes = new Set();
   parsedCoding.forEach((post) => {
-    post.codeEvidence.forEach(({ code }) => codes.add(code));
+    (post.codeEvidence || []).forEach(({ code }) => {
+      if (code) codes.add(code);
+    });
   });
   return Array.from(codes).sort();
 };
 
 // Get filtered coding data based on selected filter codes
 export const getFilteredCoding = (parsedCoding, selectedFilterCodes) => {
-  if (selectedFilterCodes.length === 0) return parsedCoding;
+  if (!Array.isArray(parsedCoding)) return [];
+  if (!selectedFilterCodes || selectedFilterCodes.length === 0) {
+    return parsedCoding;
+  }
+  const filterSet = new Set(selectedFilterCodes);
   return parsedCoding.filter((post) =>
-    post.codeEvidence.some((ev) => selectedFilterCodes.includes(ev.code)),
+    (post.codeEvidence || []).some((ev) => filterSet.has(ev.code)),
   );
+};
+
+// Case-insensitive lookup helper for post contents mapped by id
+export const getPostDataById = (postContents, postId) => {
+  if (!postContents || !postId) return null;
+  const postIdLower = String(postId).toLowerCase();
+  const matchingKey = Object.keys(postContents).find(
+    (key) => key.toLowerCase() === postIdLower,
+  );
+  return matchingKey ? postContents[matchingKey] : null;
 };
 
 // Parse coding data from raw text content
@@ -80,6 +97,5 @@ export const parseCodingData = (content) => {
     parsed.push(currentPost);
   }
 
-  console.log("Parsed coding data:", parsed);
   return parsed;
 };

@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { Navigate, useLocation } from "react-router-dom";
 import { apiFetch } from "../api";
+import Landing from "../pages/Landing";
+const Home = React.lazy(() => import("../pages/Home"));
 
-const ProtectedRoute = ({ children }) => {
+const AuthGate = () => {
   const [status, setStatus] = useState("loading");
-  const location = useLocation();
 
   useEffect(() => {
     let mounted = true;
@@ -43,12 +43,8 @@ const ProtectedRoute = ({ children }) => {
     );
   }
 
-  if (status !== "auth") {
-    return <Navigate to="/login" state={{ from: location }} replace />;
-  }
-
-  return children;
+  return status === "auth" ? <Home /> : <Landing />;
 };
 
-export default ProtectedRoute;
+export default AuthGate;
 

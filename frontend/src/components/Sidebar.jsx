@@ -73,10 +73,10 @@ export default function Sidebar() {
   if (collapsed) return null;
 
   return (
-    <aside className="app-sidebar">
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+    <aside className="app-shell__sidebar">
+      <div className="sidebar__header">
         <button
-          className="sidebar-close"
+          className="sidebar__close"
           aria-label="Collapse sidebar"
           onClick={() => {
             setCollapsed(true);
@@ -96,7 +96,7 @@ export default function Sidebar() {
           return items.map(([label, path]) => (
             <button
               key={path}
-              className="sidebar-btn"
+              className="sidebar__button"
               onClick={() => navigate(path)}
             >
               {label}
@@ -129,7 +129,7 @@ export default function Sidebar() {
           .map((label) => (
             <button
               key={mapByLabel[label]}
-              className="sidebar-btn"
+              className="sidebar__button"
               onClick={() => navigate(mapByLabel[label])}
             >
               {label}

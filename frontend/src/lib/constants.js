@@ -78,10 +78,6 @@ export const AI_MODELS = [
       "mistralai/mistral-small-3.1-24b-instruct:free: Mistral: Mistral Small 3.1 24B (free)",
   },
   {
-    value: "google/gemma-3-12b-it:free",
-    label: "google/gemma-3-12b-it:free: Google: Gemma 3 12B (free)",
-  },
-  {
     value: "meta-llama/llama-3.3-70b-instruct:free",
     label:
       "meta-llama/llama-3.3-70b-instruct:free: Meta: Llama 3.3 70B Instruct (free)",

@@ -72,28 +72,14 @@ export default function ViewSummary() {
   }, [selected]);
 
   return (
-    <div className="home-container">
-      <div className="form-wrapper">
-        <div
-          style={{
-            backgroundColor: "#000000",
-            border: "2px solid #ffffff",
-            borderRadius: 12,
-            padding: 24,
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 12,
-              marginBottom: 16,
-            }}
-          >
+    <div className="layout-page">
+      <div className="layout-card layout-card--padded" style={{ width: "100%", maxWidth: 900 }}>
+        <div className="panel panel-body">
+          <div className="layout-flex-col gap-sm" style={{ marginBottom: 16 }}>
             <div style={{ width: "100%" }}>
               <SelectionList
-                className="database-selector"
-                buttonClass="db-button"
+                className="selector-strip"
+                buttonClass="selector-button"
                 items={available}
                 selectedId={selected}
                 onSelect={(id) => setSelected(id)}
@@ -101,22 +87,16 @@ export default function ViewSummary() {
               />
             </div>
 
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-              }}
-            >
-              <h2 style={{ color: "#ffffff", margin: 0 }}>
+            <div className="layout-space-between">
+              <h2 className="heading-md">
                 {selectedName || "Select a summary"}
               </h2>
             </div>
 
-            {loading && <div style={{ color: "#ffffff" }}>Loading...</div>}
-            {error && <div style={{ color: "#ff6b6b" }}>{error}</div>}
+            {loading && <div className="alert alert--info">Loading...</div>}
+            {error && <div className="alert alert--error">{error}</div>}
 
-            <div style={{ marginTop: 0, color: "#ffffff" }}>
+            <div className="body-base text-primary">
               <ReactMarkdown>{content}</ReactMarkdown>
             </div>
           </div>

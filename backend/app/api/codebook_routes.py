@@ -28,9 +28,10 @@ async def get_codebook(codebook_id: str = None, db: Session = Depends(get_db)):
             # try id match (integer)
             try:
                 fid = int(codebook_id)
-                file_rec = db.query(File).filter(File.file_type.in_(['codebook', 'codebook_comparison']), File.id == fid).first()
             except Exception:
                 file_rec = None
+            else:
+                file_rec = db.query(File).filter(File.file_type.in_(['codebook', 'codebook_comparison']), File.id == fid).first()
     else:
         # No id supplied: pick latest codebook or codebook_comparison file if any
         file_rec = db.query(File).filter(File.file_type.in_(['codebook', 'codebook_comparison'])).order_by(File.created_at.desc()).first()
@@ -50,7 +51,6 @@ async def get_codebook(codebook_id: str = None, db: Session = Depends(get_db)):
                 else:
                     return JSONResponse({"error": "Codebook content not found in file"}, status_code=404)
         except Exception as e:
-            print(f"Error reading codebook from schema {schema}: {e}")
             return JSONResponse({"error": f"Error reading codebook: {e}"}, status_code=500)
 
     return JSONResponse({"error": "No codebook file found"}, status_code=404)
@@ -69,9 +69,10 @@ async def parse_codebook(codebook_id: str = None, db: Session = Depends(get_db))
         if not file_rec:
             try:
                 fid = int(codebook_id)
-                file_rec = db.query(File).filter(File.file_type == 'codebook', File.id == fid).first()
             except Exception:
                 file_rec = None
+            else:
+                file_rec = db.query(File).filter(File.file_type == 'codebook', File.id == fid).first()
     else:
         file_rec = db.query(File).filter(File.file_type == 'codebook').order_by(File.created_at.desc()).first()
 
@@ -93,7 +94,6 @@ async def parse_codebook(codebook_id: str = None, db: Session = Depends(get_db))
             except Exception as e:
                 return JSONResponse({"error": f"Failed to parse codebook: {e}", "raw": raw}, status_code=500)
     except Exception as e:
-        print(f"Error reading codebook from schema {schema}: {e}")
         return JSONResponse({"error": f"Error reading codebook: {e}"}, status_code=500)
 
 

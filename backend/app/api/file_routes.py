@@ -193,13 +193,12 @@ async def merge_databases(request: Request):
             db_list = databases
         else:
             raise HTTPException(status_code=400, detail="Invalid databases format")
-        print(f"Merging databases: {db_list} into {name}")
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid databases format")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid databases format") from exc
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid request body: {exc}")
+        raise HTTPException(status_code=400, detail=f"Invalid request body: {exc}") from exc
 
     if not name or not name.strip():
         raise HTTPException(status_code=400, detail="Database name is required")
@@ -242,15 +241,13 @@ async def merge_databases(request: Request):
                     with engine.connect() as conn:
                         tbls = conn.execute(text("SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = :schema"), {"schema": schema_src}).fetchall()
                         src_tables = [r[0] for r in tbls]
-                except Exception as e:
-                    print(f"Error listing tables for Postgres schema {schema_src}: {e}")
+                except Exception:
                     continue
 
                 for table_name in src_tables:
                     try:
                         df = pd.read_sql_query(text(f'SELECT * FROM "{schema_src}"."{table_name}"'), con=engine)
-                    except Exception as e:
-                        print(f"Failed to read table {schema_src}.{table_name} from Postgres: {e}")
+                    except Exception:
                         continue
 
 
@@ -263,8 +260,7 @@ async def merge_databases(request: Request):
                     try:
                         with engine.connect() as conn:
                             target_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": f"{schema_name}.{table_name}"}).scalar()
-                    except Exception as e:
-                        print(f"Error checking target table {schema_name}.{table_name}: {e}")
+                    except Exception:
                         target_exists = None
 
                     if not target_exists:
@@ -273,8 +269,7 @@ async def merge_databases(request: Request):
                             with engine.connect() as conn:
                                 res = conn.execute(text(f'SELECT COUNT(*) FROM "{schema_name}"."{table_name}"'))
                                 pg_count = int(res.scalar() or 0)
-                        except Exception as e:
-                            print(f"Error creating table {schema_name}.{table_name}: {e}")
+                        except Exception:
                             continue
                     else:
                         tmp_name = f"tmp_merge_{secrets.token_hex(4)}"
@@ -282,8 +277,7 @@ async def merge_databases(request: Request):
                         try:
                             with engine.connect() as conn:
                                 cols = [r[0] for r in conn.execute(text("SELECT column_name FROM information_schema.columns WHERE table_schema=:schema AND table_name=:table"), {"schema": schema_name, "table": table_name}).fetchall()]
-                        except Exception as e:
-                            print(f"Error fetching columns for target {schema_name}.{table_name}: {e}")
+                        except Exception:
                             cols = list(df.columns)
 
                         common_cols = [c for c in df.columns if c in cols]
@@ -296,8 +290,7 @@ async def merge_databases(request: Request):
 
                         try:
                             df[common_cols].to_sql(name=tmp_name, con=engine, schema=schema_name, if_exists='replace', index=False, method='multi')
-                        except Exception as e:
-                            print(f"Error creating temporary table {schema_name}.{tmp_name}: {e}")
+                        except Exception:
                             try:
                                 with engine.begin() as conn:
                                     conn.execute(text(f'DROP TABLE IF EXISTS "{schema_name}"."{tmp_name}"'))
@@ -313,8 +306,7 @@ async def merge_databases(request: Request):
                                 conn.execute(insert_sql)
                                 after = conn.execute(text(f'SELECT COUNT(*) FROM "{schema_name}"."{table_name}"')).scalar() or 0
                                 pg_count = int(after - before)
-                        except Exception as e:
-                            print(f"Error inserting deduplicated rows into {schema_name}.{table_name}: {e}")
+                        except Exception:
                             pg_count = 0
                         finally:
                             try:
@@ -329,7 +321,6 @@ async def merge_databases(request: Request):
                 continue
 
             # Non-Postgres sources are not supported in this Postgres-only flow
-            print(f"Skipping non-Postgres source {db_name}; only proj_... schema names are supported")
             continue
 
         final_table_counts = {}
@@ -426,26 +417,19 @@ async def delete_database(db_name: str, request: Request, db: Session = Depends(
 
     try:
         # First, clean up file dependencies to avoid foreign key issues
-        deps_deleted = db.query(FileDependency).filter(
-            (FileDependency.child_file_id == file_rec.id) | 
-            (FileDependency.parent_file_id == file_rec.id)
+        db.query(FileDependency).filter(
+            (FileDependency.child_file_id == file_rec.id)
+            | (FileDependency.parent_file_id == file_rec.id)
         ).delete()
-        print(f"[DEBUG] Deleted {deps_deleted} file dependency records for file {file_rec.id}")
-        
+
         with engine.begin() as conn:
-            print(f"[DEBUG] Dropping schema {schema}")
             conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
-            print(f"[DEBUG] Schema {schema} dropped successfully")
 
         db.delete(file_rec)
         db.commit()
-        print(f"[DEBUG] File record {file_rec.id} deleted successfully")
         return JSONResponse({"message": f"File '{file_rec.filename}' and schema '{schema}' deleted"})
     except Exception as e:
         db.rollback()
-        print(f"[ERROR] Failed to delete file/schema {schema}: {str(e)}")
-        import traceback
-        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to delete file/schema: {str(e)}")
 
 

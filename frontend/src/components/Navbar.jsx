@@ -1,6 +1,6 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
-import { apiFetch } from "../api";
+import { apiFetch, api } from "../api";
 import "./Navbar.css";
 
 function Navbar({ showBack, onBack }) {
@@ -22,22 +22,15 @@ function Navbar({ showBack, onBack }) {
     if (savedKey) {
       setApiKey(savedKey);
     }
-    // Check authentication status
-    apiFetch("/api/me/")
-      .then((r) => {
-        if (r.ok) setIsAuth(true);
-        else setIsAuth(false);
-      })
-      .catch(() => setIsAuth(false));
-    // Listen for global auth changes (login/register/logout)
-    const handler = () => {
+    const checkAuth = () => {
       apiFetch("/api/me/")
-        .then((r) => {
-          if (r.ok) setIsAuth(true);
-          else setIsAuth(false);
-        })
+        .then((r) => setIsAuth(!!r.ok))
         .catch(() => setIsAuth(false));
     };
+
+    checkAuth();
+
+    const handler = () => checkAuth();
     window.addEventListener("auth-changed", handler);
     return () => window.removeEventListener("auth-changed", handler);
   }, []);
@@ -68,10 +61,10 @@ function Navbar({ showBack, onBack }) {
   const handleBack = onBack || (() => navigate("/"));
 
   return (
-    <nav className="navbar">
-      <div className="navbar-container">
+    <nav className="nav-bar">
+      <div className="nav-bar__inner">
         <button
-          className="sidebar-expand"
+          className="nav-toggle"
           aria-label="Toggle sidebar"
           onClick={() => {
             try {
@@ -85,18 +78,18 @@ function Navbar({ showBack, onBack }) {
           ☰
         </button>
         {shouldShowBack && (
-          <button className="navbar-back-button" onClick={handleBack}>
+          <button className="nav-back" onClick={handleBack}>
             ← Back
           </button>
         )}
         <div
-          className="navbar-brand"
+          className="nav-brand"
           onClick={() => navigate("/")}
           style={{ cursor: "pointer" }}
         >
           Qualitative Coding Tool
         </div>
-        <div className="navbar-api">
+        <div className="nav-actions">
           {showApiInput ? (
             <div className="api-input-group">
               <input
@@ -104,14 +97,14 @@ function Navbar({ showBack, onBack }) {
                 placeholder="Enter API Key"
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                className="api-input"
+                className="nav-input"
               />
-              <button onClick={handleSaveApiKey} className="api-save-btn">
+              <button onClick={handleSaveApiKey} className="nav-button">
                 Save
               </button>
               <button
                 onClick={() => setShowApiInput(false)}
-                className="api-cancel-btn"
+                className="nav-button nav-button--muted"
               >
                 Cancel
               </button>
@@ -119,14 +112,14 @@ function Navbar({ showBack, onBack }) {
           ) : (
             <button
               onClick={() => setShowApiInput(true)}
-              className="api-toggle-btn"
+              className="nav-button"
             >
               {apiKey ? "API Key Set" : "Set API Key"}
             </button>
           )}
           {isAuth ? (
             <button
-              className="logout-btn"
+              className="nav-logout"
               onClick={async () => {
                 try {
                   await apiFetch("/api/logout/", { method: "POST" });
@@ -148,7 +141,7 @@ function Navbar({ showBack, onBack }) {
             </button>
           ) : (
             <button
-              className="login-btn"
+              className="nav-button"
               onClick={() => {
                 navigate("/login");
               }}
@@ -157,7 +150,7 @@ function Navbar({ showBack, onBack }) {
             </button>
           )}
         </div>
-        {shouldShowBack && <div className="navbar-spacer"></div>}
+        {shouldShowBack && <div className="nav-spacer"></div>}
       </div>
     </nav>
   );

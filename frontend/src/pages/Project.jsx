@@ -169,8 +169,7 @@ export default function Project() {
         throw new Error("Failed to rename file");
       }
 
-      const data = await response.json();
-      console.log("File renamed:", data);
+      await response.json();
 
       // Refresh the project data
       const resp = await apiFetch("/api/projects/");
@@ -260,8 +259,7 @@ export default function Project() {
         throw new Error(errorMsg);
       }
 
-      const data = await response.json();
-      console.log("Databases merged:", data);
+      await response.json();
       setMergeSuccess("Databases merged successfully!");
       setSelectedDatabases([]);
       setMergeName("");

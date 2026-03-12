@@ -159,19 +159,7 @@ export default function ViewCoding() {
 
   useEffect(() => {
     if (parsedCoding.length > 0 && selectedCodedData) {
-      console.log(
-        "useEffect triggered: parsedCoding has",
-        parsedCoding.length,
-        "items",
-      );
       fetchPostContents(selectedCodedData);
-    } else {
-      console.log(
-        "useEffect not triggered: parsedCoding.length =",
-        parsedCoding.length,
-        "selectedCodedData =",
-        selectedCodedData,
-      );
     }
   }, [parsedCoding, selectedCodedData]);
 
@@ -200,13 +188,10 @@ export default function ViewCoding() {
   };
 
   const fetchPostContents = async (codedDataId) => {
-    console.log("fetchPostContents called with codedDataId:", codedDataId);
     try {
       // Find the selected coding file to get its parent files
       const selectedFile = availableCodedData.find((f) => f.id === codedDataId);
-      console.log("selectedFile:", selectedFile);
       if (!selectedFile || !selectedFile.metadata?.file?.parent_files) {
-        console.log("No selected file or parent files", selectedFile);
         return;
       }
 
@@ -214,27 +199,16 @@ export default function ViewCoding() {
       const parentDb = selectedFile.metadata.file.parent_files.find(
         (p) => p.type === "raw_data" || p.type === "filtered_data",
       );
-      console.log("parentDb:", parentDb);
 
       if (!parentDb) {
-        console.log(
-          "No parent database found",
-          selectedFile.metadata.file.parent_files,
-        );
         return;
       }
-
-      console.log("Found parent DB:", parentDb);
-      console.log("Schema name:", parentDb.schema_name);
-      console.log("Name:", parentDb.name);
 
       // Use schema_name if available, otherwise try to construct schema name from name
       const schemaName =
         parentDb.schema_name ||
         (parentDb.name.startsWith("proj_") ? parentDb.name : null);
-      console.log("Final schema name:", schemaName);
       if (!schemaName) {
-        console.log("No schema name available");
         return;
       }
 
@@ -242,16 +216,8 @@ export default function ViewCoding() {
       const postIds = [...new Set(parsedCoding.map((post) => post.postId))];
 
       if (postIds.length === 0) {
-        console.log("No post IDs found");
         return;
       }
-
-      console.log(
-        "Fetching contents for post IDs:",
-        postIds,
-        "in schema:",
-        schemaName,
-      );
 
       // Call the backend endpoint
       const resp = await apiFetch("/api/post-contents/", {
@@ -260,21 +226,13 @@ export default function ViewCoding() {
         body: JSON.stringify({ schema: schemaName, post_ids: postIds }),
         cache: "no-cache",
       });
-      console.log("API response status:", resp.status);
 
       if (!resp.ok) {
-        console.log("API call failed:", resp.status);
         const errorText = await resp.text();
-        console.log("Error response:", errorText);
         return;
       }
 
       const data = await resp.json();
-      console.log(
-        "Fetched post contents:",
-        Object.keys(data.contents || {}).length,
-        "posts",
-      );
       setPostContents(data.contents || {});
     } catch (error) {
       console.error("Error fetching post contents:", error);

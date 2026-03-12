@@ -1,0 +1,668 @@
+/* ==========================================================================
+   Colors & Typography
+   ========================================================================== */
+
+.bg-base {
+  background-color: #000000;
+  color: #ffffff;
+}
+
+.bg-surface {
+  background-color: #000000;
+}
+
+.bg-overlay {
+  background-color: rgba(0, 0, 0, 0.8);
+}
+
+.text-primary {
+  color: #ffffff;
+}
+
+.text-muted {
+  color: #cccccc;
+}
+
+.text-error {
+  color: #ff6666;
+}
+
+.heading-lg {
+  font-size: 2.5rem;
+  margin-bottom: 1rem;
+}
+
+.heading-md {
+  font-size: 2rem;
+  margin-bottom: 1rem;
+}
+
+.heading-sm {
+  font-size: 1.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.body-base {
+  font-size: 1rem;
+}
+
+.body-sm {
+  font-size: 0.9rem;
+}
+
+.text-center {
+  text-align: center;
+}
+
+.mt-md {
+  margin-top: 16px;
+}
+
+/* ==========================================================================
+   Layout primitives
+   ========================================================================== */
+
+.layout-page {
+  width: 100%;
+  min-height: 100vh;
+  padding: 40px 20px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.layout-card {
+  background-color: #000000;
+  border: 1px solid #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 4px 6px rgba(255, 255, 255, 0.1);
+}
+
+.layout-card--padded {
+  padding: 24px;
+}
+
+/* Let the card fill the layout-page width (e.g. projects list) */
+.layout-card--full-width {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.layout-flex-row {
+  display: flex;
+  flex-direction: row;
+}
+
+.layout-flex-col {
+  display: flex;
+  flex-direction: column;
+}
+
+.layout-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.layout-space-between {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.gap-sm {
+  gap: 8px;
+}
+
+.gap-md {
+  gap: 16px;
+}
+
+.gap-lg {
+  gap: 24px;
+}
+
+.panel {
+  background-color: #000000;
+  border: 2px solid #ffffff;
+  border-radius: 8px;
+}
+
+.panel-header {
+  margin-bottom: 1rem;
+}
+
+.panel-body {
+  padding: 16px 0;
+}
+
+.panel-footer {
+  margin-top: 1rem;
+}
+
+/* App shell */
+
+.app-shell {
+  width: 100%;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-shell__content {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  width: 100%;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.app-shell__sidebar {
+  position: relative;
+  width: 150px;
+  min-width: 150px;
+  background-color: #000000;
+  border-right: 1px solid #ffffff;
+  padding: 10px 8px;
+  box-sizing: border-box;
+  height: calc(100vh - 56px - 32px);
+}
+
+.app-shell__main {
+  flex: 1;
+  padding: 8px 12px;
+  box-sizing: border-box;
+  min-height: calc(100vh - 56px - 32px);
+}
+
+/* ==========================================================================
+   Navigation & Sidebar
+   ========================================================================== */
+
+.nav-bar {
+  min-height: 60px;
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  background-color: #000000;
+  border-bottom: 1px solid #ffffff;
+  padding: 0.5rem 1rem;
+}
+
+.nav-bar__inner {
+  max-width: 1200px;
+  margin: 0;
+  display: flex;
+  gap: 8px;
+  padding: 0 8px;
+}
+
+.nav-back {
+  background-color: #ffffff;
+  color: #000000;
+  border: none;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background-color 0.2s, color 0.2s;
+  margin-right: 8px;
+}
+
+.nav-back:hover {
+  background-color: #e0e0e0;
+}
+
+.nav-brand {
+  font-size: 1.25rem;
+  font-weight: 400;
+  color: #ffffff;
+  text-align: center;
+  padding: 0 8px;
+}
+
+.nav-spacer {
+  width: 48px;
+}
+
+.nav-actions {
+  display: flex;
+  align-items: center;
+  position: absolute;
+  right: 12px;
+  gap: 8px;
+}
+
+.nav-toggle {
+  background-color: transparent;
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 6px 8px;
+  margin-right: 12px;
+  font-size: 14px;
+  cursor: pointer;
+  border-radius: 4px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.nav-toggle:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.nav-input {
+  padding: 4px 8px;
+  border: 1px solid #ffffff;
+  border-radius: 4px;
+  background-color: #000000;
+  color: #ffffff;
+  font-size: 14px;
+  width: 200px;
+}
+
+.nav-button {
+  background-color: #ffffff;
+  color: #000000;
+  border: none;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.nav-button:hover {
+  background-color: #e0e0e0;
+}
+
+.nav-button--muted {
+  background-color: #666666;
+  color: #ffffff;
+}
+
+.nav-button--muted:hover {
+  background-color: #555555;
+}
+
+.nav-logout {
+  background-color: transparent;
+  color: #ffffff;
+  border: 1px solid #ffffff;
+  padding: 0 12px;
+  margin-left: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: 4px;
+  height: 36px;
+  min-width: 72px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.nav-logout:hover {
+  background-color: #ffffff;
+  color: #000000;
+}
+
+.sidebar {
+  composes: app-shell__sidebar;
+}
+
+.sidebar__header {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.sidebar__close {
+  display: block;
+  margin-bottom: 12px;
+  color: #ffffff;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.sidebar__button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #ffffff;
+  background: transparent;
+  border: none;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+}
+
+.sidebar__button:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+/* ==========================================================================
+   Buttons & Tabs
+   ========================================================================== */
+
+.btn {
+  background-color: #000000;
+  color: #ffffff;
+  border: 1px solid #ffffff;
+  padding: 10px 16px;
+  font-size: 14px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-primary {
+  border-width: 2px;
+  font-weight: 600;
+}
+
+.btn-secondary {
+  background-color: transparent;
+}
+
+.btn-danger {
+  background-color: #e74c3c;
+  border-color: #e74c3c;
+  color: #ffffff;
+}
+
+.btn-danger:hover {
+  background-color: #c0392b;
+}
+
+.btn-small {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.btn-large {
+  padding: 12px 20px;
+  font-size: 16px;
+}
+
+.tab {
+  background-color: #000000;
+  color: #ffffff;
+  border: 2px solid #ffffff;
+  padding: 10px 14px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background-color 0.12s, color 0.12s;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tab--selected {
+  background-color: #ffffff;
+  color: #000000;
+}
+
+/* ==========================================================================
+   Selectors & Lists
+   ========================================================================== */
+
+.selector-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 20px;
+  padding: 15px;
+  border: 2px solid #ffffff;
+  border-radius: 8px;
+  background-color: #000000;
+}
+
+.selector-button {
+  background-color: #000000;
+  color: #ffffff;
+  border: 1px solid #ffffff;
+  padding: 10px 20px;
+  font-size: 16px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.selector-button:hover,
+.selector-button--active {
+  background-color: #ffffff;
+  color: #000000;
+}
+
+/* ==========================================================================
+   Tables
+   ========================================================================== */
+
+.table-shell {
+  background-color: #000000;
+  border: 1px solid #ffffff;
+  padding: 2rem;
+  border-radius: 4px;
+}
+
+.table-section {
+  margin-bottom: 2rem;
+}
+
+.table-section__title {
+  color: #ffffff;
+  font-size: 1.1rem;
+  margin: 0 0 1rem 0;
+}
+
+.table-wrapper {
+  overflow-x: auto;
+  border: 1px solid #ffffff;
+  border-radius: 4px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  background-color: #000000;
+  color: #ffffff;
+}
+
+.table__th {
+  background-color: #000000;
+  color: #ffffff;
+  padding: 0.75rem;
+  text-align: left;
+  border-bottom: 2px solid #ffffff;
+  font-weight: 500;
+}
+
+.table__td {
+  padding: 0.75rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+}
+
+.table__row--hover:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.table__row--clickable {
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.table__row--clickable:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.truncate-cell {
+  max-width: 300px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ==========================================================================
+   Forms
+   ========================================================================== */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.form__group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.form__label {
+  color: #ffffff;
+  font-weight: 400;
+  font-size: 1rem;
+}
+
+.form__input,
+.form__textarea {
+  color: #ffffff;
+  padding: 0.75rem;
+  border: 1px solid #ffffff;
+  border-radius: 4px;
+  background-color: #1a1a1a;
+  font-size: 1rem;
+}
+
+.form__textarea {
+  resize: vertical;
+}
+
+.form__helper {
+  color: #cccccc;
+  font-size: 13px;
+  margin-top: 6px;
+}
+
+.form__actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+/* ==========================================================================
+   Alerts & Messages
+   ========================================================================== */
+
+.alert {
+  padding: 12px 16px;
+  border-radius: 6px;
+  margin-bottom: 20px;
+  font-size: 0.95rem;
+}
+
+.alert--error {
+  color: #ff6666;
+  border: 1px solid #ff6666;
+  background-color: rgba(255, 102, 102, 0.1);
+}
+
+.alert--success {
+  color: #00aa00;
+  border: 1px solid #00aa00;
+  background-color: rgba(0, 255, 0, 0.1);
+}
+
+.alert--info {
+  color: #cccccc;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.empty-state {
+  color: #cccccc;
+  padding: 1rem;
+  text-align: center;
+  font-style: italic;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+/* ==========================================================================
+   Modals
+   ========================================================================== */
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal {
+  background-color: #000000;
+  border: 2px solid #ffffff;
+  border-radius: 8px;
+  max-width: 1100px;
+  width: 85%;
+  height: 85vh;
+  overflow-y: auto;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+.modal__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid #ffffff;
+}
+
+.modal__title {
+  color: #ffffff;
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.modal__body {
+  padding: 1.5rem;
+}
+
+.modal__close {
+  background: none;
+  border: none;
+  color: #ffffff;
+  font-size: 1.25rem;
+  cursor: pointer;
+  padding: 0;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: background-color 0.2s;
+}
+
+.modal__close:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+

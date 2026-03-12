@@ -77,13 +77,6 @@ export default function PromptManager({
     }
     const nextNumber = savedPrompts.length + 1;
     const promptName = `Prompt ${nextNumber}`;
-
-    // Log the row that will be created for debugging and fetch user id
-    const debugRow = {
-      promptname: promptName,
-      prompt: newPromptContent.trim(),
-      type: "filter",
-    };
     // Attempt to get authenticated user id for debugging and include it in POST
     let fetchedUserId = null;
     api
@@ -91,16 +84,11 @@ export default function PromptManager({
       .then((meRes) => {
         const userId = meRes?.data?.id || meRes?.data?.sub || null;
         fetchedUserId = userId;
-        console.log("Creating prompt row (with user):", {
-          ...debugRow,
-          userId,
-        });
       })
       .catch((meErr) => {
         const uidMsg =
           meErr?.response?.data?.detail || meErr?.message || "unauthenticated";
         console.warn("Could not fetch /api/me:", uidMsg);
-        console.log("Creating prompt row:", debugRow);
       })
       .finally(() => {
         const form = new FormData();

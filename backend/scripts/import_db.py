@@ -11,31 +11,29 @@ except Exception as exc:
         print("Failed", exc)
         raise exc
 
-def decompress_zst_file(file_path, chunk_size=16384): 
+def decompress_zst_file(file_path, chunk_size=16384):
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if line:
                     yield line
         return
     except UnicodeDecodeError:
-        pass  
-    
-    try:
-        dctx = zstd.ZstdDecompressor(max_window_size=2**31)
-        
-        with open(file_path, 'rb') as ifh:
-            reader = dctx.stream_reader(ifh, read_size=chunk_size)
-            text_buffer = io.TextIOWrapper(reader, encoding='utf-8', errors='ignore')
-            
-            for line in text_buffer:
-                line = line.strip()
-                if line:
-                    yield line
-    except Exception as e:
-        print(f"Error decompressing {file_path}: {e}")
-        return
+        try:
+            dctx = zstd.ZstdDecompressor(max_window_size=2**31)
+            with open(file_path, "rb") as ifh:
+                reader = dctx.stream_reader(ifh, read_size=chunk_size)
+                text_buffer = io.TextIOWrapper(
+                    reader, encoding="utf-8", errors="ignore"
+                )
+                for line in text_buffer:
+                    line = line.strip()
+                    if line:
+                        yield line
+        except Exception as e:
+            print(f"Error decompressing {file_path}: {e}")
+            return
 
 def stream_zst_to_postgres(file_path: str, schema_name: str, data_type: str, subreddit_filter=None, batch_size: int = 1000) -> dict:
     """Stream a .zst file into a Postgres schema's submissions/comments tables.

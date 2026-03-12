@@ -15,10 +15,7 @@ def list_prompts(request: Request, prompt_type: str = None, db: Session = Depend
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    try:
-        q = db.query(Prompt).filter(Prompt.user_id == user_id)
-    except Exception:
-        q = db.query(Prompt).filter(Prompt.user_id == user_id)
+    q = db.query(Prompt).filter(Prompt.user_id == user_id)
 
     if prompt_type:
         q = q.filter(Prompt.type == prompt_type)
@@ -40,11 +37,6 @@ def list_prompts(request: Request, prompt_type: str = None, db: Session = Depend
 @router.post("/prompts/")
 async def create_prompt(request: Request, db: Session = Depends(get_db)):
     """Create a new prompt."""
-    try:
-        raw_body = await request.body()
-    except Exception:
-        raw_body = b""
-
     content_type = (request.headers.get("content-type") or "").lower()
     data = {}
     try:
@@ -62,22 +54,7 @@ async def create_prompt(request: Request, db: Session = Depends(get_db)):
     ptype = data.get("type")
     user_id = data.get("user_id")
 
-    missing = [k for k, v in [("display_name", display_name), ("prompt", prompt_val), ("type", ptype)] if not (v or (isinstance(v, str) and v == "")) and v is None]
     if not display_name or not prompt_val or not ptype:
-        try:
-            _ct = request.headers.get("content-type")
-            _auth = request.headers.get("authorization")
-            _cookie = request.headers.get("cookie")
-            print("[create_prompt] Missing fields. content-type:", _ct)
-            print("[create_prompt] Parsed data:", data)
-            snippet = raw_body[:4000]
-            try:
-                print("[create_prompt] Raw body snippet:", snippet.decode(errors="replace"))
-            except Exception:
-                print("[create_prompt] Raw body (bytes):", repr(snippet))
-            print("[create_prompt] Authorization present:", bool(_auth), " Cookie present:", bool(_cookie))
-        except Exception:
-            pass
         raise HTTPException(status_code=400, detail="Missing required fields: display_name, prompt, type")
 
     if not user_id:

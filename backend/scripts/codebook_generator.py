@@ -11,14 +11,13 @@ MODEL_5 = "nvidia/nemotron-3-nano-30b-a3b:free"
 MODEL_6 = "qwen/qwen3-235b-a22b-thinking-2507"
 MODEL_7 = "openai/gpt-oss-120b:free"
 MAX_RETRIES = 3
-INITIAL_RETRY_DELAY = 2  
+INITIAL_RETRY_DELAY = 2
+
 
 def get_client(system_prompt: str, user_prompt: str, api_key: str, MODEL: str) -> str:
-    print(f"[get_client] Making API call to model: {MODEL}")
     if not api_key:
         raise ValueError("OpenRouter API key is required")
     for attempt in range(1, MAX_RETRIES + 1):
-        print(f"[get_client] Attempt {attempt}/{MAX_RETRIES}")
         try:
             client = OpenAI(
                 api_key=api_key,
@@ -34,17 +33,13 @@ def get_client(system_prompt: str, user_prompt: str, api_key: str, MODEL: str) -
                 timeout=300, 
                 extra_body={"transforms": ["middle-out"]}
             )
-            print(f"[get_client] API call completed successfully")
             return response.choices[0].message.content
         except KeyboardInterrupt:
-            print("\nkeyboard interrupt")
             raise
         except Exception as e:
-            print(f"[get_client] API call failed (attempt {attempt}/{MAX_RETRIES}): {type(e).__name__}: {e}")
             if attempt == MAX_RETRIES:
                 raise
             wait_time = INITIAL_RETRY_DELAY * (2 ** (attempt - 1))
-            print(f"[get_client] Retrying in {wait_time}s...")
             time.sleep(wait_time)
 
 def generate_codebook(posts_content: str, api_key: str, custom_prompt: str = "", MODEL: str = MODEL_1) -> tuple[str, str, str]:

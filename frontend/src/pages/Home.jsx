@@ -100,127 +100,41 @@ export default function Home() {
   };
 
   return (
-    <div className="home-container">
-      <div className="form-wrapper">
+    <div className="layout-page">
+      <div className="layout-card layout-card--padded layout-card--full-width">
         {/* Header removed - page begins with projects list */}
 
         {/* Projects List */}
-        <div
-          style={{
-            padding: "24px",
-          }}
-        >
-          <h2
-            style={{
-              textAlign: "center",
-              color: "#ffffff",
-              marginBottom: "20px",
-            }}
-          >
-            Projects
-          </h2>
+        <div>
+          <h2 className="heading-md text-center">Projects</h2>
 
-          {loading && (
-            <div
-              style={{ textAlign: "center", color: "#ffffff", padding: "40px" }}
-            >
-              Loading projects...
-            </div>
-          )}
+          {loading && <div className="alert alert--info text-center">Loading projects...</div>}
 
-          {error && (
-            <div
-              style={{
-                textAlign: "center",
-                color: "#ff6666",
-                padding: "20px",
-                backgroundColor: "#000000",
-                border: "1px solid #ff6666",
-                borderRadius: "6px",
-                marginBottom: "20px",
-              }}
-            >
-              Error: {error}
-            </div>
-          )}
+          {error && <div className="alert alert--error text-center">Error: {error}</div>}
 
           {!loading && !error && projects.length === 0 && (
-            <div
-              style={{
-                textAlign: "center",
-                color: "#ffffff",
-                padding: "40px",
-                fontSize: "1.1em",
-              }}
-            >
+            <div className="empty-state">
               No projects yet. Create your first project to get started!
             </div>
           )}
 
           {!loading && projects.length > 0 && (
-            <div
-              style={{ display: "flex", flexDirection: "column", gap: "16px" }}
-            >
+            <div className="layout-flex-col gap-md">
               {projects.map((p) => (
                 <div
                   key={p.id}
-                  style={{
-                    backgroundColor: "#000000",
-                    border: "1px solid #ffffff",
-                    borderRadius: "8px",
-                    padding: "20px",
-                    transition: "all 0.2s ease",
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.borderColor = "#cccccc";
-                    e.currentTarget.style.boxShadow =
-                      "0 4px 12px rgba(255, 255, 255, 0.1)";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.borderColor = "#ffffff";
-                    e.currentTarget.style.boxShadow = "none";
-                  }}
+                  className="layout-card layout-card--padded"
                 >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "flex-start",
-                      gap: "20px",
-                    }}
-                  >
+                  <div className="layout-flex-row layout-space-between gap-md">
                     <div style={{ flex: 1 }}>
-                      <div
-                        style={{
-                          backgroundColor: "#000000",
-                          borderRadius: "12px",
-                          marginBottom: "24px",
-                        }}
-                      >
-                        <h3 style={{ color: "#ffffff", marginBottom: "12px" }}>
-                          {p.projectname}
-                        </h3>
+                      <div>
+                        <h3 className="heading-sm">{p.projectname}</h3>
                         {p.description && (
-                          <div
-                            style={{
-                              color: "#ffffff",
-                              fontSize: "1em",
-                              lineHeight: 1.4,
-                              marginBottom: "12px",
-                            }}
-                          >
+                          <div className="body-base">
                             {p.description}
                           </div>
                         )}
-                        <div
-                          style={{
-                            display: "flex",
-                            gap: "16px",
-                            alignItems: "center",
-                            fontSize: "0.9em",
-                            color: "#ffffff",
-                          }}
-                        >
+                        <div className="layout-flex-row gap-md body-sm">
                           {p.created_at && (
                             <div>
                               Created: {new Date(p.created_at).toLocaleString()}
@@ -234,18 +148,11 @@ export default function Home() {
                         </div>
                       </div>
                     </div>
-                    <div style={{ display: "flex", alignItems: "center" }}>
+                    <div className="layout-center">
                       <button
-                        className="project-tab"
+                        className="btn btn-primary btn-large"
                         onClick={() => navigate(`/project/${p.id}`)}
                         aria-label={`View project ${p.projectname}`}
-                        style={{
-                          padding: "12px 20px",
-                          fontSize: 14,
-                          fontWeight: "bold",
-                          textAlign: "center",
-                          color: "#ffffff",
-                        }}
                       >
                         View Project
                       </button>
@@ -258,20 +165,11 @@ export default function Home() {
         </div>
 
         {!showForm && (
-          <div
-            style={{ display: "flex", justifyContent: "center", marginTop: 16 }}
-          >
+          <div className="layout-center mt-md">
             <button
-              className="project-tab"
+              className="btn btn-primary btn-large"
               onClick={handleCreateClick}
               aria-label="Create New Project"
-              style={{
-                padding: "12px 20px",
-                fontSize: 16,
-                fontWeight: "bold",
-                textAlign: "center",
-                color: "#ffffff",
-              }}
             >
               Create New Project
             </button>
@@ -280,106 +178,53 @@ export default function Home() {
 
         {/* Create Project Form (rendered at bottom when requested) */}
         {showForm && (
-          <div
-            style={{
-              backgroundColor: "#000000",
-              border: "2px solid #ffffff",
-              borderRadius: "12px",
-              padding: "24px",
-              marginTop: "24px",
-            }}
-          >
-            <h2 style={{ margin: "0 0 20px 0", color: "#ffffff" }}>
-              Create New Project
-            </h2>
+          <div className="panel mt-md layout-card--padded">
+            <h2 className="heading-md">Create New Project</h2>
             <form onSubmit={handleSubmit}>
-              <div style={{ marginBottom: "16px" }}>
-                <label
-                  style={{
-                    display: "block",
-                    marginBottom: "8px",
-                    color: "#ffffff",
-                    fontWeight: "bold",
-                  }}
-                >
+              <div className="form__group">
+                <label className="form__label">
                   Project Name *
                 </label>
                 <input
-                  className="form-input"
+                  className="form__input"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Enter project name"
-                  style={{
-                    width: "100%",
-                    padding: "12px",
-                    fontSize: "16px",
-                  }}
                 />
               </div>
-              <div style={{ marginBottom: "20px" }}>
-                <label
-                  style={{
-                    display: "block",
-                    marginBottom: "8px",
-                    color: "#ffffff",
-                    fontWeight: "bold",
-                  }}
-                >
+              <div className="form__group">
+                <label className="form__label">
                   Description
                 </label>
                 <textarea
-                  className="form-input"
+                  className="form__textarea"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="Enter project description (optional)"
-                  style={{
-                    width: "100%",
-                    minHeight: "80px",
-                    resize: "vertical",
-                    padding: "12px",
-                    fontSize: "16px",
-                  }}
                 />
               </div>
-              <div
-                style={{ display: "flex", gap: "12px", alignItems: "center" }}
-              >
+              <div className="form__actions">
                 <button
                   type="submit"
-                  className="project-tab"
-                  style={{
-                    padding: "12px 24px",
-                    fontSize: 16,
-                    color: "#ffffff",
-                  }}
+                  className="btn btn-primary btn-large"
                 >
                   Create Project
                 </button>
                 <button
                   type="button"
-                  className="project-tab"
+                  className="btn btn-secondary btn-large"
                   onClick={handleCancel}
-                  style={{
-                    padding: "12px 24px",
-                    fontSize: 16,
-                    color: "#ffffff",
-                  }}
                 >
                   Cancel
                 </button>
               </div>
               {message && (
                 <div
-                  style={{
-                    marginTop: "16px",
-                    padding: "12px",
-                    borderRadius: "6px",
-                    backgroundColor: message.includes("Error")
-                      ? "#330000"
-                      : "#003300",
-                    border: `1px solid ${message.includes("Error") ? "#ff6666" : "#66ff66"}`,
-                    color: message.includes("Error") ? "#ffcccc" : "#ccffcc",
-                  }}
+                  className={`alert ${
+                    message.includes("Error")
+                      ? "alert--error"
+                      : "alert--success"
+                  }`}
                 >
                   {message}
                 </div>

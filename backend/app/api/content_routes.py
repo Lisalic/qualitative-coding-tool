@@ -41,7 +41,6 @@ async def save_comparison(
                 dm.session.rollback()
                 raise
 
-            # Add dependencies if parent_file_ids provided
             if parent_file_ids:
                 try:
                     parent_ids = json.loads(parent_file_ids) if isinstance(parent_file_ids, str) else parent_file_ids
@@ -52,7 +51,6 @@ async def save_comparison(
                 except Exception:
                     dm.session.rollback()
 
-            # If project_id provided, verify ownership and link
             if project_id is not None:
                 try:
                     proj = dm.session.query(Project).filter(Project.id == project_id).first()
@@ -82,7 +80,6 @@ async def save_comparison(
     except HTTPException:
         raise
     except Exception as exc:
-        import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(exc))
 

@@ -12,7 +12,6 @@ export default function Import() {
 
   const handleUploadSuccess = (data) => {
     setUploadData(data);
-    // Optionally navigate to data view or show success message
   };
 
   const handleViewData = () => {

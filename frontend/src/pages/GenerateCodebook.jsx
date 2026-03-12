@@ -258,7 +258,6 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
               if (fetchedUserId) form.append("user_id", fetchedUserId);
 
               const res = await api.post("/api/prompts/", form);
-              console.log("Saved prompt response:", res);
               const saved = res && res.data ? res.data : null;
               const label =
                 (saved &&
