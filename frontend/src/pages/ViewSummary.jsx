@@ -73,32 +73,30 @@ export default function ViewSummary() {
 
   return (
     <div className="layout-page">
-      <div className="layout-card layout-card--padded" style={{ width: "100%", maxWidth: 900 }}>
-        <div className="panel panel-body">
-          <div className="layout-flex-col gap-sm" style={{ marginBottom: 16 }}>
-            <div style={{ width: "100%" }}>
-              <SelectionList
-                className="selector-strip"
-                buttonClass="selector-button"
-                items={available}
-                selectedId={selected}
-                onSelect={(id) => setSelected(id)}
-                emptyMessage="No summaries available"
-              />
-            </div>
+      <div className="layout-card layout-card--padded layout-card--full-width">
+        <div className="layout-flex-col gap-sm" style={{ marginBottom: 16 }}>
+          <div style={{ width: "100%" }}>
+            <SelectionList
+              className="selector-strip"
+              buttonClass="selector-button"
+              items={available}
+              selectedId={selected}
+              onSelect={(id) => setSelected(id)}
+              emptyMessage="No summaries available"
+            />
+          </div>
 
-            <div className="layout-space-between">
-              <h2 className="heading-md">
-                {selectedName || "Select a summary"}
-              </h2>
-            </div>
+          <div className="layout-space-between">
+            <h2 className="heading-md">
+              {selectedName || "Select a summary"}
+            </h2>
+          </div>
 
-            {loading && <div className="alert alert--info">Loading...</div>}
-            {error && <div className="alert alert--error">{error}</div>}
+          {loading && <div className="alert alert--info">Loading...</div>}
+          {error && <div className="alert alert--error">{error}</div>}
 
-            <div className="body-base text-primary">
-              <ReactMarkdown>{content}</ReactMarkdown>
-            </div>
+          <div className="body-base text-primary">
+            <ReactMarkdown>{content}</ReactMarkdown>
           </div>
         </div>
       </div>
