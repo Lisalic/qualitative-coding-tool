@@ -358,8 +358,17 @@ export default function ApplyCodebook() {
       <div className="home-container">
         <div className="page-layout">
           <div className="left-section">
-            <div className="form-wrapper">
-              <h1>Apply Codebook</h1>
+            <div className="file-upload">
+              <h1
+                style={{
+                  textAlign: "center",
+                  fontSize: "28px",
+                  fontWeight: "600",
+                  margin: "0 0 10px 0",
+                }}
+              >
+                Apply Codebook
+              </h1>
 
               <div className="action-buttons">
                 <button onClick={handleViewCoding} className="view-button">

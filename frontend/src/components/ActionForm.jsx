@@ -114,7 +114,7 @@ export default function ActionForm({
                 />
                 <label
                   htmlFor={`${field.id}-${option.value}`}
-                  className="radio-option"
+                  className="radio-label"
                 >
                   {option.label}
                 </label>
@@ -142,7 +142,7 @@ export default function ActionForm({
   };
 
   return (
-    <div className="form-wrapper">
+    <div className="action-form-wrapper">
       <form onSubmit={handleSubmit} className="action-form">
         {fields.map((field) => {
           if (field.type === "title") {
