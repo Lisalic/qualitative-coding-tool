@@ -195,9 +195,14 @@ def _run_chunked_filter(content_type: str, filter_prompt: str, content: str, api
     total_chunks = len(chunks)
     
     if total_chunks > MAX_CHUNKS:
-        _log_ai("CHUNKING", f"Content requires {total_chunks} chunks, limiting to {MAX_CHUNKS} (sampling evenly)")
-        indices = [int(i * (total_chunks - 1) / (MAX_CHUNKS - 1)) for i in range(MAX_CHUNKS)]
-        chunks = [chunks[i] for i in indices]
+        # When MAX_CHUNKS is 1, just take the first chunk to avoid division by zero.
+        if MAX_CHUNKS <= 1:
+            _log_ai("CHUNKING", f"Content requires {total_chunks} chunks, limiting to 1 (first chunk only)")
+            chunks = [chunks[0]]
+        else:
+            _log_ai("CHUNKING", f"Content requires {total_chunks} chunks, limiting to {MAX_CHUNKS} (sampling evenly)")
+            indices = [int(i * (total_chunks - 1) / (MAX_CHUNKS - 1)) for i in range(MAX_CHUNKS)]
+            chunks = [chunks[i] for i in indices]
     else:
         _log_ai("CHUNKING", f"Split into {total_chunks} chunk(s)")
     
