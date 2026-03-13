@@ -18,7 +18,7 @@ MODEL_CONTEXT_LIMITS = {
     "stepfun": 80_000 * 4,   
 }
 
-MAX_CHUNKS = 3
+MAX_CHUNKS = 1
 
 ENTRY_SEPARATOR = "\n---\n"
 

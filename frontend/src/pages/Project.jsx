@@ -275,8 +275,8 @@ export default function Project() {
   };
 
   return (
-    <div className="home-container">
-      <div className="form-wrapper">
+    <div className="layout-page">
+      <div className="layout-card layout-card--padded layout-card--full-width">
         {/* Project Header */}
         <div
           style={{
