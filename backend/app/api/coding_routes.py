@@ -3,32 +3,146 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 import json
+import traceback
 
-from .utils import get_user_id_from_request, engine
-from app.database import get_db, File, FileDependency, Project, SessionLocal
+from .utils import get_user_id_from_request, engine, parse_codebook_to_json
+from app.database import get_db, File, FileDependency
 from app.databasemanager import DatabaseManager
 
 router = APIRouter()
 
 
+def _resolve_coding_file_record(db: Session, coded_id: str | None) -> File | None:
+    if not coded_id:
+        return (
+            db.query(File)
+            .filter(File.file_type.in_(["coding", "coding_comparison"]))
+            .order_by(File.created_at.desc())
+            .first()
+        )
+
+    file_rec = (
+        db.query(File)
+        .filter(
+            File.file_type.in_(["coding", "coding_comparison"]),
+            File.schemaname == coded_id,
+        )
+        .first()
+    )
+    if file_rec:
+        return file_rec
+
+    file_rec = (
+        db.query(File)
+        .filter(
+            File.file_type.in_(["coding", "coding_comparison"]),
+            File.filename == coded_id,
+        )
+        .first()
+    )
+    if file_rec:
+        return file_rec
+
+    try:
+        fid = int(coded_id)
+    except Exception:
+        return None
+
+    return (
+        db.query(File)
+        .filter(File.file_type.in_(["coding", "coding_comparison"]), File.id == fid)
+        .first()
+    )
+
+
+def _assemble_posts_content(schema: str) -> str:
+    assembled_rows: list[str] = []
+
+    with engine.connect() as conn:
+        submissions_table = f"{schema}.submissions"
+        submissions_exists = conn.execute(
+            text("SELECT to_regclass(:tbl)"),
+            {"tbl": submissions_table},
+        ).scalar()
+        if submissions_exists:
+            rows = conn.execute(
+                text(f'SELECT id, title, selftext FROM "{schema}"."submissions"')
+            ).fetchall()
+            for row in rows:
+                data = row._mapping
+                assembled_rows.append(
+                    f"POST_ID: {data.get('id', '')}\n"
+                    f"Title: {(data.get('title') or '')}\n"
+                    f"{(data.get('selftext') or '')}"
+                )
+
+        comments_table = f"{schema}.comments"
+        comments_exists = conn.execute(
+            text("SELECT to_regclass(:tbl)"),
+            {"tbl": comments_table},
+        ).scalar()
+        if comments_exists:
+            rows = conn.execute(
+                text(f'SELECT id, body FROM "{schema}"."comments"')
+            ).fetchall()
+            for row in rows:
+                data = row._mapping
+                assembled_rows.append(
+                    f"POST_ID: {data.get('id', '')}\n"
+                    f"{(data.get('body') or '')}"
+                )
+
+    return "\n\n".join(assembled_rows).strip()
+
+
+def _resolve_codebook_schema(db: Session, codebook_value: str) -> str | None:
+    raw_value = (codebook_value or "").strip()
+    if not raw_value:
+        return None
+
+    if raw_value.startswith("proj_"):
+        return raw_value
+
+    try:
+        file_id = int(raw_value)
+    except Exception:
+        return None
+
+    file_rec = (
+        db.query(File)
+        .filter(
+            File.id == file_id,
+            File.file_type.in_(["codebook", "codebook_comparison"]),
+        )
+        .first()
+    )
+    return file_rec.schemaname if file_rec else None
+
+
+def _load_content_store_text(schema: str | None) -> str:
+    if not schema:
+        return ""
+
+    with engine.connect() as conn:
+        table_exists = conn.execute(
+            text("SELECT to_regclass(:tbl)"),
+            {"tbl": f"{schema}.content_store"},
+        ).scalar()
+        if not table_exists:
+            return ""
+
+        row = conn.execute(
+            text(f'SELECT file_text FROM "{schema}".content_store LIMIT 1')
+        ).fetchone()
+        return (row[0] if row else "") or ""
+
+
 @router.get("/coded-data")
 async def get_coded_data_query(coded_id: str = None, db: Session = Depends(get_db)):
     """Return coded data stored in a File record with file_type='coding' or 'coding_comparison'.
+    Also includes codebook content/tree from the coding schema's `codebook` table when present.
     """
-    file_rec = None
-    if coded_id:
-        file_rec = db.query(File).filter(File.file_type.in_(['coding', 'coding_comparison']), File.schemaname == coded_id).first()
-        if not file_rec:
-            file_rec = db.query(File).filter(File.file_type.in_(['coding', 'coding_comparison']), File.filename == coded_id).first()
-        if not file_rec:
-            try:
-                fid = int(coded_id)
-            except Exception:
-                file_rec = None
-            else:
-                file_rec = db.query(File).filter(File.file_type.in_(['coding', 'coding_comparison']), File.id == fid).first()
-    else:
-        file_rec = db.query(File).filter(File.file_type.in_(['coding', 'coding_comparison'])).order_by(File.created_at.desc()).first()
+    file_rec = _resolve_coding_file_record(db, coded_id)
 
     if file_rec:
         schema = file_rec.schemaname
@@ -40,8 +154,31 @@ async def get_coded_data_query(coded_id: str = None, db: Session = Depends(get_d
                 res = conn.execute(text(f'SELECT file_text FROM "{schema}".content_store LIMIT 1'))
                 row = res.fetchone()
                 if row:
+                    codebook_text = ""
+                    codebook_tree = []
+                    codebook_tbl_exists = conn.execute(
+                        text("SELECT to_regclass(:tbl)"),
+                        {"tbl": f"{schema}.codebook"},
+                    ).scalar()
+                    if codebook_tbl_exists:
+                        cb_res = conn.execute(
+                            text(f'SELECT codebook_text FROM "{schema}".codebook LIMIT 1')
+                        )
+                        cb_row = cb_res.fetchone()
+                        codebook_text = (cb_row[0] if cb_row else "") or ""
+                        if codebook_text:
+                            try:
+                                parsed_text = parse_codebook_to_json(codebook_text)
+                                parsed_obj = json.loads(parsed_text)
+                                if isinstance(parsed_obj, list):
+                                    codebook_tree = parsed_obj
+                            except Exception:
+                                codebook_tree = []
+
                     return JSONResponse({
                         "coded_data": row[0],
+                        "codebook_text": codebook_text,
+                        "codebook_tree": codebook_tree,
                         "systemprompt": file_rec.systemprompt,
                         "userprompt": file_rec.userprompt
                     })
@@ -110,7 +247,16 @@ async def save_project_coded_data(request: Request, schema_name: str = Form(None
 
 
 @router.post("/apply-codebook/")
-async def apply_codebook(request: Request, database: str = Form(...), codebook: str = Form(...), methodology: str = Form(""), report_name: str = Form(None), api_key: str = Form(...), model: str = Form("")):
+async def apply_codebook(
+    request: Request,
+    database: str = Form(...),
+    codebook: str = Form(...),
+    methodology: str = Form(""),
+    report_name: str = Form(None),
+    api_key: str = Form(...),
+    model: str = Form(""),
+    db: Session = Depends(get_db),
+):
     """Open the Postgres schema provided by `database`, read `submissions.title`/`selftext`
     and `comments.body`, assemble them into a single string, print it to stdout and
     return a preview in the response.
@@ -127,88 +273,11 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
     if not schema or not schema.startswith('proj_'):
         return JSONResponse({"error": "This endpoint expects a proj_<id> schema name"}, status_code=400)
 
-    assembled = ""
     try:
-        with engine.connect() as conn:
-            # Submissions
-            subs_tbl = f"{schema}.submissions"
-            subs_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": subs_tbl}).scalar()
-            if subs_exists:
-                rows = conn.execute(text(f'SELECT * FROM "{schema}"."submissions" LIMIT 100')).fetchall()  # Limit to 100 posts for AI processing
-                for r in rows:
-                    try:
-                        post_id = r._mapping.get('id')
-                        title = r._mapping.get('title')
-                        selftext = r._mapping.get('selftext')
-                    except Exception:
-                        post_id = r[0] if len(r) > 0 else ""
-                        title = r[1] if len(r) > 1 else ""
-                        selftext = r[2] if len(r) > 2 else ""
-                    assembled += f"POST_ID: {post_id}\nTitle: {title or ''}\n{selftext or ''}\n\n"
-            # submissions table missing — proceed with whatever content was found
+        assembled = _assemble_posts_content(schema)
 
-            # Comments
-            comm_tbl = f"{schema}.comments"
-            comm_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": comm_tbl}).scalar()
-            if comm_exists:
-                rows = conn.execute(text(f'SELECT * FROM "{schema}"."comments" LIMIT 50')).fetchall()  # Limit comments too
-                for r in rows:
-                    try:
-                        comment_id = r._mapping.get('id')
-                        body = r._mapping.get('body')
-                    except Exception:
-                        comment_id = r[0] if len(r) > 0 else ""
-                        body = r[1] if len(r) > 1 else ""
-                    assembled += f"POST_ID: {comment_id}\n{body or ''}\n\n"
-            # comments table missing — proceed
-
-
-        cb_schema_raw = (codebook or "").strip()
-        codebook_text = ""
-        try:
-            # provided codebook identifier
-
-            resolved_schema = None
-            if cb_schema_raw and cb_schema_raw.startswith('proj_'):
-                resolved_schema = cb_schema_raw
-            else:
-                # Try to interpret the provided value as a File.id (integer) and resolve schemaname
-                try:
-                    fid = int(cb_schema_raw)
-                    
-                    # First, let's see what codebook files exist
-                    db_sess = SessionLocal()
-                    try:
-                        all_codebooks = db_sess.query(File).filter(File.file_type.in_(['codebook', 'codebook_comparison'])).all()
-                        f = db_sess.query(File).filter(File.id == fid, File.file_type.in_(['codebook', 'codebook_comparison'])).first()
-                        if f:
-                            resolved_schema = f.schemaname
-                        else:
-                            # Try without file_type filter to see if it exists as a different type
-                            any_file = db_sess.query(File).filter(File.id == fid).first()
-                            if any_file:
-                                # file exists but not a codebook
-                                resolved_schema = None
-                    finally:
-                        try:
-                            db_sess.close()
-                        except Exception:
-                            pass
-                except Exception:
-                    resolved_schema = None
-
-            if resolved_schema:
-                # query the codebook content
-                with engine.connect() as conn:
-                    tbl_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": f"{resolved_schema}.content_store"}).scalar()
-                    if tbl_exists:
-                        res = conn.execute(text(f'SELECT file_text FROM "{resolved_schema}".content_store LIMIT 1'))
-                        row = res.fetchone()
-                        codebook_text = row[0] if row else ""
-        except Exception as e:
-            print(f"Exception during codebook resolution: {e}")
-            import traceback
-            traceback.print_exc()
+        resolved_codebook_schema = _resolve_codebook_schema(db, codebook)
+        codebook_text = _load_content_store_text(resolved_codebook_schema)
 
         # Attempt classification using the provided codebook and API key
         classification_output = ""
@@ -244,8 +313,11 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
                 with engine.begin() as conn:
                     conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{new_schema}"'))
                     conn.execute(text(f'CREATE TABLE IF NOT EXISTS "{new_schema}".content_store (file_text text)'))
+                    conn.execute(text(f'CREATE TABLE IF NOT EXISTS "{new_schema}".codebook (codebook_text text)'))
                     conn.execute(text(f'TRUNCATE TABLE "{new_schema}".content_store'))
+                    conn.execute(text(f'TRUNCATE TABLE "{new_schema}".codebook'))
                     conn.execute(text(f'INSERT INTO "{new_schema}".content_store (file_text) VALUES (:file_text)'), {"file_text": classification_output})
+                    conn.execute(text(f'INSERT INTO "{new_schema}".codebook (codebook_text) VALUES (:codebook_text)'), {"codebook_text": codebook_text})
 
                     # create file row and table metadata
                     with DatabaseManager() as dm:
@@ -257,7 +329,22 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
                         if db_file:
                             dep = FileDependency(child_file_id=file_rec.id, parent_file_id=db_file.id)
                             dm.session.add(dep)
-                        cb_file = dm.session.query(File).filter((File.schemaname == codebook) | (File.filename == codebook), File.user_id == user_id).first()
+                        cb_file = None
+                        if resolved_codebook_schema:
+                            cb_file = (
+                                dm.session.query(File)
+                                .filter(
+                                    File.schemaname == resolved_codebook_schema,
+                                    File.user_id == user_id,
+                                )
+                                .first()
+                            )
+                        if not cb_file and codebook:
+                            cb_file = (
+                                dm.session.query(File)
+                                .filter(File.filename == codebook, File.user_id == user_id)
+                                .first()
+                            )
                         if cb_file:
                             dep = FileDependency(child_file_id=file_rec.id, parent_file_id=cb_file.id)
                             dm.session.add(dep)
@@ -270,6 +357,7 @@ async def apply_codebook(request: Request, database: str = Form(...), codebook: 
                                     file_rec.projects.append(proj)
                             dm.session.flush()
                         dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name='content_store', row_count=1)
+                        dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name='codebook', row_count=1)
             except Exception as e:
                     print(f"Failed to persist classification project/schema: {e}")
         

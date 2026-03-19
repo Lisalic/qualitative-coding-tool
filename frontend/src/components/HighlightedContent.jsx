@@ -1,11 +1,127 @@
 import { useState, useEffect, useRef } from "react";
+import { normalizeEvidenceText } from "../lib/codingUtils";
+
+const escapeRegExp = (value) =>
+  String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const buildNotesByCodeLookup = (codeEvidence) =>
+  (codeEvidence || []).reduce((acc, entry) => {
+    const code = String(entry?.code || "").trim();
+    const notes = String(entry?.notes || "").trim();
+    if (!code || !notes) return acc;
+
+    if (!acc[code]) acc[code] = new Set();
+    acc[code].add(notes);
+    return acc;
+  }, {});
+
+const addIntervalToSegment = (segment, interval) => {
+  const code = String(interval?.code || "").trim();
+  if (!code) return;
+
+  segment.codes.add(code);
+
+  const notes = String(interval?.notes || "").trim();
+  if (!notes) return;
+
+  if (!segment.notesByCode.has(code)) {
+    segment.notesByCode.set(code, new Set());
+  }
+  segment.notesByCode.get(code).add(notes);
+};
+
+const buildEvidenceIntervals = (content, codeEvidence) => {
+  const intervals = [];
+
+  (codeEvidence || [])
+    .filter(({ evidence, code }) => evidence && code)
+    .forEach(({ code, evidence, notes }) => {
+      const cleanEvidence = normalizeEvidenceText(evidence);
+      if (!cleanEvidence) return;
+
+      const cleanNotes = String(notes || "").trim();
+
+      let foundAny = false;
+      let searchIndex = 0;
+      while (true) {
+        const index = content.indexOf(cleanEvidence, searchIndex);
+        if (index === -1) break;
+
+        foundAny = true;
+        intervals.push({
+          start: index,
+          end: index + cleanEvidence.length,
+          code,
+          evidence: cleanEvidence,
+          notes: cleanNotes,
+          length: cleanEvidence.length,
+        });
+        searchIndex = index + 1;
+      }
+
+      if (!foundAny) {
+        const relaxedPattern = escapeRegExp(cleanEvidence).replace(
+          /\s+/g,
+          "\\\\s+",
+        );
+        const relaxedRegex = new RegExp(relaxedPattern, "gi");
+        let match;
+        while ((match = relaxedRegex.exec(content)) !== null) {
+          intervals.push({
+            start: match.index,
+            end: match.index + match[0].length,
+            code,
+            evidence: cleanEvidence,
+            notes: cleanNotes,
+            length: match[0].length,
+          });
+          if (match.index === relaxedRegex.lastIndex) {
+            relaxedRegex.lastIndex += 1;
+          }
+        }
+      }
+    });
+
+  return intervals;
+};
+
+const mergeIntervalsToSegments = (intervals) => {
+  if (!intervals.length) return [];
+
+  const sorted = [...intervals].sort((a, b) => a.start - b.start);
+  const segments = [];
+
+  sorted.forEach((interval) => {
+    const overlapping = segments.find(
+      (segment) => segment.start < interval.end && segment.end > interval.start,
+    );
+
+    if (overlapping) {
+      overlapping.start = Math.min(overlapping.start, interval.start);
+      overlapping.end = Math.max(overlapping.end, interval.end);
+      addIntervalToSegment(overlapping, interval);
+      return;
+    }
+
+    const segment = {
+      start: interval.start,
+      end: interval.end,
+      codes: new Set(),
+      notesByCode: new Map(),
+    };
+    addIntervalToSegment(segment, interval);
+    segments.push(segment);
+  });
+
+  return segments;
+};
 
 // Component for highlighted content with margin brackets
 const HighlightedContent = ({ content, codeEvidence, getCodeColor }) => {
   const containerRef = useRef(null);
   const marginRef = useRef(null);
   const [lines, setLines] = useState([]);
-  const [tooltip, setTooltip] = useState(null); // { codes: [...], x, y }
+  const [tooltip, setTooltip] = useState(null); // { codes: [...], notesByCode: { [code]: string[] }, x, y }
 
   const calculateLines = () => {
     if (!containerRef.current) return;
@@ -55,8 +171,8 @@ const HighlightedContent = ({ content, codeEvidence, getCodeColor }) => {
     return () => window.removeEventListener("scroll", hide, true);
   }, [tooltip]);
 
-  const showCodeTooltip = (e, codes) => {
-    setTooltip({ codes, x: e.clientX, y: e.clientY });
+  const showCodeTooltip = (e, codes, notesByCode = {}) => {
+    setTooltip({ codes, notesByCode, x: e.clientX, y: e.clientY });
   };
 
   const moveTooltip = (e) => {
@@ -69,55 +185,12 @@ const HighlightedContent = ({ content, codeEvidence, getCodeColor }) => {
 
   if (!content || !codeEvidence.length) return <span>{content}</span>;
 
-  // Find all evidence matches with their positions
-  const intervals = [];
-  codeEvidence
-    .filter(({ evidence }) => evidence)
-    .forEach(({ code, evidence }) => {
-      const cleanEvidence = evidence
-        .replace(/^["']|["']$/g, "")
-        .replace(/\s+/g, " ")
-        .trim();
-
-      let searchIndex = 0;
-      while (true) {
-        const index = content.indexOf(cleanEvidence, searchIndex);
-        if (index === -1) break;
-
-        intervals.push({
-          start: index,
-          end: index + cleanEvidence.length,
-          code,
-          evidence: cleanEvidence,
-          length: cleanEvidence.length,
-        });
-        searchIndex = index + 1;
-      }
-    });
+  const intervals = buildEvidenceIntervals(content, codeEvidence);
 
   if (intervals.length === 0) return <span>{content}</span>;
 
-  // Sort intervals by start position
-  intervals.sort((a, b) => a.start - b.start);
-
-  // Group overlapping intervals by their text segment
-  const segments = [];
-  intervals.forEach((interval) => {
-    const overlapping = segments.find(
-      (seg) => seg.start < interval.end && seg.end > interval.start,
-    );
-    if (overlapping) {
-      overlapping.start = Math.min(overlapping.start, interval.start);
-      overlapping.end = Math.max(overlapping.end, interval.end);
-      overlapping.codes.add(interval.code);
-    } else {
-      segments.push({
-        start: interval.start,
-        end: interval.end,
-        codes: new Set([interval.code]),
-      });
-    }
-  });
+  const segments = mergeIntervalsToSegments(intervals);
+  const notesByCodeLookup = buildNotesByCodeLookup(codeEvidence);
 
   // Build the content with coded spans
   const elements = [];
@@ -134,6 +207,19 @@ const HighlightedContent = ({ content, codeEvidence, getCodeColor }) => {
 
     const segmentText = content.slice(segment.start, segment.end);
     const codes = Array.from(segment.codes);
+    const notesByCode = codes.reduce((acc, code) => {
+      const notesFromSegment = segment.notesByCode.get(code);
+      if (notesFromSegment && notesFromSegment.size > 0) {
+        acc[code] = Array.from(notesFromSegment);
+        return acc;
+      }
+
+      if (notesByCodeLookup[code] && notesByCodeLookup[code].size > 0) {
+        acc[code] = Array.from(notesByCodeLookup[code]);
+      }
+
+      return acc;
+    }, {});
 
     elements.push(
       <span
@@ -148,7 +234,7 @@ const HighlightedContent = ({ content, codeEvidence, getCodeColor }) => {
           padding: "1px 2px",
           cursor: "pointer",
         }}
-        onMouseEnter={(e) => showCodeTooltip(e, codes)}
+        onMouseEnter={(e) => showCodeTooltip(e, codes, notesByCode)}
         onMouseMove={moveTooltip}
         onMouseLeave={hideTooltip}
       >
@@ -192,7 +278,16 @@ const HighlightedContent = ({ content, codeEvidence, getCodeColor }) => {
                 borderRadius: "2px",
                 cursor: "pointer",
               }}
-              onMouseEnter={(e) => showCodeTooltip(e, [line.code])}
+              onMouseEnter={(e) =>
+                showCodeTooltip(
+                  e,
+                  [line.code],
+                  notesByCodeLookup[line.code] &&
+                    notesByCodeLookup[line.code].size > 0
+                    ? { [line.code]: Array.from(notesByCodeLookup[line.code]) }
+                    : {},
+                )
+              }
               onMouseMove={moveTooltip}
               onMouseLeave={hideTooltip}
             />
@@ -222,19 +317,55 @@ const HighlightedContent = ({ content, codeEvidence, getCodeColor }) => {
           {tooltip.codes.map((code) => (
             <div
               key={code}
-              style={{ display: "flex", alignItems: "center", marginBottom: 4 }}
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                marginBottom: 8,
+                flexDirection: "column",
+                gap: 4,
+              }}
             >
-              <div
-                style={{
-                  width: 10,
-                  height: 10,
-                  borderRadius: 2,
-                  marginRight: 8,
-                  flexShrink: 0,
-                  backgroundColor: getCodeColor(code),
-                }}
-              />
-              <span style={{ fontWeight: 600 }}>{code}</span>
+              <div style={{ display: "flex", alignItems: "center" }}>
+                <div
+                  style={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: 2,
+                    marginRight: 8,
+                    flexShrink: 0,
+                    backgroundColor: getCodeColor(code),
+                  }}
+                />
+                <span style={{ fontWeight: 600 }}>{code}</span>
+              </div>
+              {Array.isArray(tooltip.notesByCode?.[code]) &&
+                tooltip.notesByCode[code].length > 0 && (
+                  <div
+                    style={{
+                      marginLeft: 18,
+                      fontSize: 12,
+                      color: "#d0d0d0",
+                      lineHeight: 1.35,
+                      maxWidth: 260,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontWeight: 700,
+                        fontSize: 11,
+                        color: "#9b9b9b",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.35px",
+                        marginBottom: 2,
+                      }}
+                    >
+                      Notes
+                    </div>
+                    {tooltip.notesByCode[code].map((note, index) => (
+                      <div key={`${code}-tooltip-note-${index}`}>{note}</div>
+                    ))}
+                  </div>
+                )}
             </div>
           ))}
         </div>

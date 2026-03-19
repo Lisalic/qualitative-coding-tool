@@ -1,16 +1,14 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "react-router-dom";
 import { apiFetch } from "../api";
 import SelectionList from "../components/SelectionList";
-import HighlightedContent from "../components/HighlightedContent";
 import CodingTableView from "../components/CodingTableView";
 import "../styles/Data.css";
 import "../styles/DataTable.css";
 import MarkdownView from "../components/MarkdownView";
 import {
   getCodeColor,
-  getUniqueCodes,
-  getFilteredCoding,
+  formatCodingData,
   parseCodingData,
 } from "../lib/codingUtils";
 
@@ -27,9 +25,14 @@ export default function ViewCoding() {
   const [codedDataContent, setCodedDataContent] = useState("");
   const [loading, setLoading] = useState(false);
   const [parsedCoding, setParsedCoding] = useState([]);
+  const [codebookTree, setCodebookTree] = useState([]);
   const [postContents, setPostContents] = useState({});
   const [viewMode, setViewMode] = useState("text"); // "text" or "table"
   const [selectedFilterCodes, setSelectedFilterCodes] = useState([]);
+  const [tableSaveState, setTableSaveState] = useState({
+    status: "idle",
+    message: "",
+  });
 
   const fetchAvailableCodedData = async () => {
     try {
@@ -45,7 +48,7 @@ export default function ViewCoding() {
               f.file_type === "coding" || f.file_type === "coding_comparison",
           )
           .map((f) => ({
-            id: String(f.id),
+            id: f.schema_name || String(f.id),
             name: f.display_name || f.schema_name || String(f.id),
             display_name: f.display_name,
             description: f.description || null,
@@ -57,7 +60,11 @@ export default function ViewCoding() {
         // If caller provided a preselected coded data via location.state, respect it.
         const pre = location?.state?.selectedCodedData;
         if (pre) {
-          const match = codingFiles.find((it) => it.id === pre);
+          const match = codingFiles.find(
+            (it) =>
+              String(it.id) === String(pre) ||
+              String(it?.metadata?.file?.id) === String(pre),
+          );
           if (match) {
             setSelectedCodedData(match.id);
             setSelectedCodedDataName(
@@ -121,10 +128,14 @@ export default function ViewCoding() {
       const data = await response.json();
       if (data.coded_data) {
         setCodedDataContent(data.coded_data);
+        setCodebookTree(
+          Array.isArray(data.codebook_tree) ? data.codebook_tree : [],
+        );
         setSystemPrompt(data.systemprompt || "");
         setUserPrompt(data.userprompt || "");
       } else {
         setCodedDataContent("");
+        setCodebookTree([]);
         setSystemPrompt("");
         setUserPrompt("");
       }
@@ -136,7 +147,6 @@ export default function ViewCoding() {
   };
 
   useEffect(() => {
-    fetchAvailableCodedData();
     fetchProjects();
   }, []);
 
@@ -152,6 +162,27 @@ export default function ViewCoding() {
   }, [selectedCodedData]);
 
   useEffect(() => {
+    setCodedDataContent("");
+    setCodebookTree([]);
+    setSystemPrompt("");
+    setUserPrompt("");
+    setParsedCoding([]);
+    setPostContents({});
+    setSelectedFilterCodes([]);
+    setTableSaveState({ status: "idle", message: "" });
+  }, [selectedCodedData]);
+
+  useEffect(() => {
+    if (tableSaveState.status !== "success") return;
+    const timeoutId = setTimeout(() => {
+      setTableSaveState((prev) =>
+        prev.status === "success" ? { status: "idle", message: "" } : prev,
+      );
+    }, 2400);
+    return () => clearTimeout(timeoutId);
+  }, [tableSaveState.status]);
+
+  useEffect(() => {
     if (codedDataContent && selectedCodedData) {
       setParsedCoding(parseCodingData(codedDataContent));
     }
@@ -162,16 +193,6 @@ export default function ViewCoding() {
       fetchPostContents(selectedCodedData);
     }
   }, [parsedCoding, selectedCodedData]);
-
-  // Hide tooltip on scroll to prevent detached positioning
-  useEffect(() => {
-    const handleScroll = () => {
-      setTooltip({ show: false, content: [], x: 0, y: 0 });
-    };
-
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
 
   const fetchProjects = async () => {
     try {
@@ -244,6 +265,77 @@ export default function ViewCoding() {
     const sel = availableCodedData.find((cd) => cd.id === codedDataId);
     setSelectedCodedDataName(sel?.display_name || sel?.name || codedDataId);
   };
+
+  const getSelectedCodingSchema = (codedId = selectedCodedData) => {
+    const selectedItem = availableCodedData.find(
+      (item) => String(item.id) === String(codedId),
+    );
+
+    const schemaFromMetadata = selectedItem?.metadata?.schema;
+    if (schemaFromMetadata) return schemaFromMetadata;
+
+    if (typeof codedId === "string" && codedId.startsWith("proj_")) {
+      return codedId;
+    }
+
+    return null;
+  };
+
+  const handleTableEntrySave = async (nextParsedCoding) => {
+    const schemaName = getSelectedCodingSchema();
+    if (!schemaName) {
+      const message = "Unable to resolve coding schema for save.";
+      setTableSaveState({ status: "error", message });
+      return { ok: false, error: message };
+    }
+
+    const formattedContent = formatCodingData(nextParsedCoding);
+    if (!formattedContent) {
+      const message = "Cannot save an empty coding table.";
+      setTableSaveState({ status: "error", message });
+      return { ok: false, error: message };
+    }
+
+    setTableSaveState({ status: "saving", message: "Saving entry..." });
+
+    try {
+      const formData = new FormData();
+      formData.append("schema_name", schemaName);
+      formData.append("content", formattedContent);
+      if (selectedCodedDataName?.trim()) {
+        formData.append("display_name", selectedCodedDataName.trim());
+      }
+
+      const response = await apiFetch("/api/save-file-coded-data/", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        let message = "Failed to save coding entry.";
+        try {
+          const payload = await response.json();
+          message = payload?.error || payload?.message || message;
+        } catch {
+          const textPayload = await response.text();
+          if (textPayload) message = textPayload;
+        }
+        setTableSaveState({ status: "error", message });
+        return { ok: false, error: message };
+      }
+
+      setCodedDataContent(formattedContent);
+      setParsedCoding(nextParsedCoding);
+      setTableSaveState({ status: "success", message: "Entry saved." });
+      return { ok: true };
+    } catch (error) {
+      const message = error?.message || "Failed to save coding entry.";
+      setTableSaveState({ status: "error", message });
+      return { ok: false, error: message };
+    }
+  };
+
+  const selectedCodingSchema = getSelectedCodingSchema();
 
   return (
     <>
@@ -318,7 +410,7 @@ export default function ViewCoding() {
                 saveUrl={"/api/save-file-coded-data/"}
                 saveIdFieldName={"schema_name"}
                 saveAsProject={true}
-                projectSchema={selectedCodedData}
+                projectSchema={selectedCodingSchema || selectedCodedData}
                 systemPrompt={systemPrompt}
                 userPrompt={userPrompt}
                 onSaved={(resp) => {
@@ -339,17 +431,13 @@ export default function ViewCoding() {
             ) : (
               <CodingTableView
                 parsedCoding={parsedCoding}
+                codebookTree={codebookTree}
                 postContents={postContents}
                 selectedFilterCodes={selectedFilterCodes}
                 setSelectedFilterCodes={setSelectedFilterCodes}
                 getCodeColor={getCodeColor}
-                highlightContent={(content, codeEvidence) => (
-                  <HighlightedContent
-                    content={content}
-                    codeEvidence={codeEvidence}
-                    getCodeColor={getCodeColor}
-                  />
-                )}
+                onSaveParsedCoding={handleTableEntrySave}
+                saveState={tableSaveState}
               />
             )
           ) : (
