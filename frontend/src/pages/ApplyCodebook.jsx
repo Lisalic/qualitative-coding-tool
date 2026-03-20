@@ -123,6 +123,25 @@ export default function ApplyCodebook() {
     navigate("/coding-view");
   };
 
+  const parseApplyCodebookError = async (response) => {
+    try {
+      const payload = await response.json();
+      if (payload?.error) return String(payload.error);
+      if (payload?.detail) {
+        return typeof payload.detail === "string"
+          ? payload.detail
+          : JSON.stringify(payload.detail);
+      }
+      return JSON.stringify(payload);
+    } catch {
+      try {
+        const textPayload = await response.text();
+        if (textPayload) return textPayload;
+      } catch {}
+      return `HTTP error! status: ${response.status}`;
+    }
+  };
+
   const handleSubmit = async (formData) => {
     const savedApiKey = localStorage.getItem("apiKey");
     if (!savedApiKey) {
@@ -172,10 +191,15 @@ export default function ApplyCodebook() {
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorMsg = await parseApplyCodebookError(response);
+        throw new Error(errorMsg || `HTTP error! status: ${response.status}`);
       }
 
       const data = await response.json();
+      if (data?.error) {
+        setError(String(data.error));
+        return;
+      }
       setResult(data);
     } catch (err) {
       setError(err.message);

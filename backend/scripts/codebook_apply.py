@@ -15,11 +15,13 @@ CODE_EVIDENCE_LINE_RE = re.compile(
     r"^\s*CODE\s*:\s*(.+?)\s*(?:-|–|—)\s*EVIDENCE\s*:\s*(.+?)\s*$",
     re.IGNORECASE,
 )
+CODE_LINE_RE = re.compile(r"^\s*CODE\s*:\s*(.+?)\s*$", re.IGNORECASE)
+EVIDENCE_LINE_RE = re.compile(r"^\s*EVIDENCE\s*:\s*(.+?)\s*$", re.IGNORECASE)
 MARKDOWN_HEADER_RE = re.compile(r"^\s*#{1,6}\s*")
 HORIZONTAL_RULE_RE = re.compile(r"^\s*(?:-{3,}|\*{3,}|_{3,})\s*$")
 MARKDOWN_FENCE_RE = re.compile(r"^\s*```")
 LEADING_LABEL_BULLET_RE = re.compile(
-    r"^\s*[-*+]\s*(?=(?:POST[\s_-]*ID|CODE)\s*:)",
+    r"^\s*[-*+]\s*(?=(?:POST[\s_-]*ID|CODE|EVIDENCE)\s*:)",
     re.IGNORECASE,
 )
 QUOTED_EVIDENCE_BLOCK_RE = re.compile(r'^"[^"\n]+"(?:§"[^"\n]+")*$')
@@ -120,18 +122,35 @@ def _format_evidence_segments(evidence_segments: list[str]) -> str:
     return "§".join(formatted)
 
 
+def _is_valid_evidence_block(evidence_block: str) -> bool:
+    raw_block = (evidence_block or "").strip()
+    if not raw_block:
+        return False
+    if not QUOTED_EVIDENCE_BLOCK_RE.fullmatch(raw_block):
+        return False
+    return bool(_split_evidence_snippets(raw_block))
+
+
 def _extract_structured_records(raw_text: str) -> list[tuple[str, list[tuple[str, list[str]]]]]:
     lines = _preprocess_output_lines(raw_text)
     records: list[tuple[str, list[tuple[str, list[str]]]]] = []
     current_post_id: str | None = None
     current_entries: list[tuple[str, list[str]]] = []
+    pending_code: str | None = None
 
     def flush_current() -> None:
-        nonlocal current_post_id, current_entries
+        nonlocal current_post_id, current_entries, pending_code
         if current_post_id and current_entries:
             records.append((current_post_id, current_entries))
         current_post_id = None
         current_entries = []
+        pending_code = None
+
+    def append_entry(code_value: str, evidence_value: str) -> None:
+        code_name = _clean_inline_text(code_value)
+        evidence_segments = _split_evidence_snippets(evidence_value)
+        if code_name and evidence_segments:
+            current_entries.append((code_name, evidence_segments))
 
     for line in lines:
         post_match = POST_ID_LINE_RE.match(line)
@@ -146,10 +165,19 @@ def _extract_structured_records(raw_text: str) -> list[tuple[str, list[tuple[str
 
         code_evidence_match = CODE_EVIDENCE_LINE_RE.match(line)
         if code_evidence_match:
-            code_name = _clean_inline_text(code_evidence_match.group(1))
-            evidence_segments = _split_evidence_snippets(code_evidence_match.group(2))
-            if code_name and evidence_segments:
-                current_entries.append((code_name, evidence_segments))
+            append_entry(code_evidence_match.group(1), code_evidence_match.group(2))
+            pending_code = None
+            continue
+
+        code_match = CODE_LINE_RE.match(line)
+        if code_match:
+            pending_code = _clean_inline_text(code_match.group(1))
+            continue
+
+        evidence_match = EVIDENCE_LINE_RE.match(line)
+        if evidence_match and pending_code:
+            append_entry(pending_code, evidence_match.group(1))
+            pending_code = None
 
     flush_current()
     return records
@@ -164,7 +192,8 @@ def normalize_coding_output(raw_text: str) -> str:
         for code_name, evidence_segments in entries:
             evidence_text = _format_evidence_segments(evidence_segments)
             if evidence_text:
-                out_lines.append(f"CODE: {code_name} - EVIDENCE: {evidence_text}")
+                out_lines.append(f"CODE: {code_name}")
+                out_lines.append(f"EVIDENCE: {evidence_text}")
         out_lines.append("")
 
     return "\n".join(out_lines).strip()
@@ -177,10 +206,13 @@ def validate_coding_output(normalized_text: str) -> bool:
 
     saw_post = False
     current_post_has_code = False
+    pending_code = False
 
     for line in lines:
         post_match = POST_ID_LINE_RE.match(line)
         if post_match:
+            if pending_code:
+                return False
             if saw_post and not current_post_has_code:
                 return False
             post_id = _clean_inline_text(post_match.group(1))
@@ -193,23 +225,39 @@ def validate_coding_output(normalized_text: str) -> bool:
         if not saw_post:
             return False
 
-        code_match = CODE_EVIDENCE_LINE_RE.match(line)
-        if not code_match:
-            return False
+        one_line_match = CODE_EVIDENCE_LINE_RE.match(line)
+        if one_line_match:
+            code_name = _clean_inline_text(one_line_match.group(1))
+            evidence_block = one_line_match.group(2)
+            if not code_name or not _is_valid_evidence_block(evidence_block):
+                return False
+            current_post_has_code = True
+            pending_code = False
+            continue
 
-        code_name = _clean_inline_text(code_match.group(1))
-        evidence_block = (code_match.group(2) or "").strip()
+        code_line_match = CODE_LINE_RE.match(line)
+        if code_line_match:
+            code_name = _clean_inline_text(code_line_match.group(1))
+            if not code_name or pending_code:
+                return False
+            pending_code = True
+            continue
 
-        if not code_name or not evidence_block:
-            return False
-        if not QUOTED_EVIDENCE_BLOCK_RE.fullmatch(evidence_block):
-            return False
+        evidence_line_match = EVIDENCE_LINE_RE.match(line)
+        if evidence_line_match:
+            if not pending_code:
+                return False
+            evidence_block = evidence_line_match.group(1)
+            if not _is_valid_evidence_block(evidence_block):
+                return False
+            current_post_has_code = True
+            pending_code = False
+            continue
 
-        evidence_segments = _split_evidence_snippets(evidence_block)
-        if not evidence_segments:
-            return False
+        return False
 
-        current_post_has_code = True
+    if pending_code:
+        return False
 
     if saw_post and not current_post_has_code:
         return False
@@ -220,31 +268,40 @@ def classify_posts(codebook: str, posts_content: str, methodology: str, api_key:
     
     print("Starting codebook application process...")
     
-    system_prompt = """
-    You are a qualitative data coder.
+    system_prompt = (
+        "You are a qualitative data coder.\n"
+        "Apply CODEBOOK to POSTS CONTENT using METHODOLOGY.\n"
+        "Return plain text only in this exact format:\n"
+        "POST_ID: <exact_post_id_from_input>\n"
+        "CODE: <exact_code_name_from_codebook>\n"
+        "EVIDENCE: \"<exact_snippet>\"§\"<exact_snippet>\"\n"
+        "CODE: <exact_code_name_from_codebook>\n"
+        "EVIDENCE: \"<exact_snippet>\"§\"<exact_snippet>\"\n"
 
-    Apply codes from CODEBOOK to POSTS CONTENT using METHODOLOGY guidance.
+        "POST_ID: <exact_post_id_from_input>\n"
+        "CODE: <exact_code_name_from_codebook>\n"
+        "EVIDENCE: \"<exact_snippet>\"§\"<exact_snippet>\"\n"
+        
+        "POST_ID: <exact_post_id_from_input>\n"
+        "CODE: <exact_code_name_from_codebook>\n"
+        "EVIDENCE: \"<exact_snippet>\"§\"<exact_snippet>\"\n"
 
-    Output plain text only in this exact structure:
-    POST_ID: <exact_post_id_from_input>
-    CODE: <exact_code_name_from_codebook> - EVIDENCE: "<exact_snippet>"§"<exact_snippet>"
 
-    Rules:
-    - Use only POST_ID values that appear in POSTS CONTENT.
-    - Use exact code names from CODEBOOK.
-    - Include one or more CODE lines per included post.
-    - Evidence snippets must be exact contiguous substrings copied from source content.
-    - If only one snippet exists, still keep it quoted.
-    - If multiple snippets exist for one code, separate only with §.
-    - Do not output markdown, bullets, headings, code fences, or explanation text.
-    - Omit posts with no applicable codes.
-    """
+        "Rules:\n"
+        "- Use only POST_ID values that appear in POSTS CONTENT.\n"
+        "- Use only exact code names from CODEBOOK WITHOUT code family name.\n"
+        "- For each included post, output one or more CODE EVIDENCE pairs.\n"
+        "- EVIDENCE snippets must be exact contiguous substrings copied from source content.\n"
+        "- Keep each snippet quoted; use § only between snippets for the same code.\n"
+        "- Do not output markdown, bullets, headings, code fences, or explanation text.\n"
+        "- Omit posts with no applicable codes."
+        "- Apply CODEBOOK on as many posts as possible based on evidence in the content"
+    )
     
     user_prompt = (
-        "Apply CODEBOOK to POSTS CONTENT and return the coding report in the required format. "
-        "Use as many relevant codes per post as supported by evidence. "
-        "Every evidence snippet must be in double quotes and multiple snippets must use §. "
-        "Return plain text only. "
+        "Apply CODEBOOK to POSTS CONTENT and return only the required format. "
+        "Use as many relevant codes per post as evidence supports. "
+        "Each evidence snippet must be quoted; use § only between snippets for one code. "
         f"\n\nCODEBOOK:\n{codebook}\n\nPOSTS CONTENT:\n{posts_content}\n\nMETHODOLOGY:\n{methodology}"
     )
     

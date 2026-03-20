@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 import json
 import traceback
+import secrets
 
 from .utils import get_user_id_from_request, engine, parse_codebook_to_json
 from app.database import get_db, File, FileDependency
@@ -71,8 +72,8 @@ def _assemble_posts_content(schema: str) -> str:
             for row in rows:
                 data = row._mapping
                 assembled_rows.append(
-                    f"POST_ID: {data.get('id', '')}\n"
-                    f"Title: {(data.get('title') or '')}\n"
+                    f"POST_ID: {data.get('id', '')}  "
+                    f"Title: {(data.get('title') or '')}  "
                     f"{(data.get('selftext') or '')}"
                 )
 
@@ -88,7 +89,7 @@ def _assemble_posts_content(schema: str) -> str:
             for row in rows:
                 data = row._mapping
                 assembled_rows.append(
-                    f"POST_ID: {data.get('id', '')}\n"
+                    f"POST_ID: {data.get('id', '')}  "
                     f"{(data.get('body') or '')}"
                 )
 
@@ -135,6 +136,37 @@ def _load_content_store_text(schema: str | None) -> str:
             text(f'SELECT file_text FROM "{schema}".content_store LIMIT 1')
         ).fetchone()
         return (row[0] if row else "") or ""
+
+
+def _load_codebook_snapshot(schema: str | None) -> tuple[bool, str]:
+    if not schema:
+        return False, ""
+
+    with engine.connect() as conn:
+        table_exists = conn.execute(
+            text("SELECT to_regclass(:tbl)"),
+            {"tbl": f"{schema}.codebook"},
+        ).scalar()
+        if not table_exists:
+            return False, ""
+
+        row = conn.execute(
+            text(f'SELECT codebook_text FROM "{schema}".codebook LIMIT 1')
+        ).fetchone()
+        return True, (row[0] if row else "") or ""
+
+
+def _generate_unique_schema_name(prefix: str = "proj") -> str:
+    for _ in range(12):
+        candidate = f"{prefix}_{secrets.token_hex(6)}"
+        with engine.connect() as conn:
+            exists = conn.execute(
+                text("SELECT to_regnamespace(:schema_name)"),
+                {"schema_name": candidate},
+            ).scalar()
+        if not exists:
+            return candidate
+    raise RuntimeError("Failed to allocate unique schema name")
 
 
 @router.get("/coded-data")
@@ -246,6 +278,198 @@ async def save_project_coded_data(request: Request, schema_name: str = Form(None
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@router.post("/save-file-coded-data-duplicate/")
+async def save_project_coded_data_duplicate(
+    request: Request,
+    source_schema_name: str = Form(None),
+    content: str = Form(None),
+    display_name: str = Form(None),
+    db: Session = Depends(get_db),
+):
+    """Duplicate coding data into a new schema and file record.
+    Accepts JSON or form-data with source_schema_name, content, and display_name.
+    """
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        ctype = (request.headers.get("content-type") or "").lower()
+        if "application/json" in ctype:
+            body = await request.json()
+            source_schema_name = body.get("source_schema_name")
+            content = body.get("content")
+            display_name = body.get("display_name")
+        else:
+            form = await request.form()
+            if source_schema_name is None:
+                source_schema_name = form.get("source_schema_name")
+            if content is None:
+                content = form.get("content")
+            if display_name is None:
+                display_name = form.get("display_name")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid request body")
+
+    if not source_schema_name or not content or not display_name:
+        raise HTTPException(
+            status_code=400,
+            detail="source_schema_name, content, and display_name are required",
+        )
+
+    source_schema = source_schema_name.strip()
+    target_display_name = display_name.strip()
+    if not source_schema or not target_display_name:
+        raise HTTPException(
+            status_code=400,
+            detail="source_schema_name and display_name cannot be empty",
+        )
+
+    source_file = (
+        db.query(File)
+        .filter(
+            File.schemaname == source_schema,
+            File.user_id == user_id,
+            File.file_type.in_(["coding", "coding_comparison"]),
+        )
+        .first()
+    )
+    if not source_file:
+        raise HTTPException(
+            status_code=404,
+            detail="Source coding file not found or you do not have permission",
+        )
+
+    try:
+        source_codebook_exists, copied_codebook_text = _load_codebook_snapshot(
+            source_schema
+        )
+        new_schema = _generate_unique_schema_name("proj")
+        source_file_type = source_file.file_type or "coding"
+        source_system_prompt = source_file.systemprompt
+        source_user_prompt = source_file.userprompt
+        source_file_id = source_file.id
+
+        with engine.begin() as conn:
+            conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{new_schema}"'))
+            conn.execute(
+                text(
+                    f'CREATE TABLE IF NOT EXISTS "{new_schema}".content_store (file_text text)'
+                )
+            )
+            conn.execute(text(f'TRUNCATE TABLE "{new_schema}".content_store'))
+            conn.execute(
+                text(
+                    f'INSERT INTO "{new_schema}".content_store (file_text) VALUES (:file_text)'
+                ),
+                {"file_text": content},
+            )
+
+            if source_codebook_exists:
+                conn.execute(
+                    text(
+                        f'CREATE TABLE IF NOT EXISTS "{new_schema}".codebook (codebook_text text)'
+                    )
+                )
+                conn.execute(text(f'TRUNCATE TABLE "{new_schema}".codebook'))
+                conn.execute(
+                    text(
+                        f'INSERT INTO "{new_schema}".codebook (codebook_text) VALUES (:codebook_text)'
+                    ),
+                    {"codebook_text": copied_codebook_text},
+                )
+
+        with DatabaseManager() as dm:
+            file_rec = File(
+                user_id=user_id,
+                filename=target_display_name,
+                schemaname=new_schema,
+                file_type=source_file_type,
+                systemprompt=source_system_prompt,
+                userprompt=source_user_prompt,
+            )
+            dm.session.add(file_rec)
+            dm.session.flush()
+
+            source_file_in_dm = (
+                dm.session.query(File)
+                .filter(File.id == source_file_id, File.user_id == user_id)
+                .first()
+            )
+
+            for project in (source_file_in_dm.projects if source_file_in_dm else []):
+                if project not in file_rec.projects:
+                    file_rec.projects.append(project)
+
+            copied_parent_ids: set[int] = set()
+            source_parent_dependencies = (
+                dm.session.query(FileDependency)
+                .filter(FileDependency.child_file_id == source_file_id)
+                .all()
+            )
+
+            for parent_dependency in source_parent_dependencies:
+                parent_file = (
+                    dm.session.query(File)
+                    .filter(
+                        File.id == parent_dependency.parent_file_id,
+                        File.user_id == user_id,
+                    )
+                    .first()
+                )
+                if not parent_file:
+                    continue
+
+                parent_file_id = parent_file.id
+                if parent_file_id in copied_parent_ids:
+                    continue
+
+                dm.session.add(
+                    FileDependency(
+                        child_file_id=file_rec.id,
+                        parent_file_id=parent_file_id,
+                    )
+                )
+                copied_parent_ids.add(parent_file_id)
+
+            if source_file_id not in copied_parent_ids:
+                dm.session.add(
+                    FileDependency(
+                        child_file_id=file_rec.id,
+                        parent_file_id=source_file_id,
+                    )
+                )
+
+            dm.session.flush()
+
+            dm.file_tables.add_table_metadata(
+                file_id=file_rec.id,
+                table_name="content_store",
+                row_count=1,
+            )
+            if source_codebook_exists:
+                dm.file_tables.add_table_metadata(
+                    file_id=file_rec.id,
+                    table_name="codebook",
+                    row_count=1,
+                )
+
+            new_file_id = file_rec.id
+
+        return JSONResponse(
+            {
+                "message": "File coded data duplicated",
+                "id": str(new_file_id),
+                "schema_name": new_schema,
+                "filename": target_display_name,
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @router.post("/apply-codebook/")
 async def apply_codebook(
     request: Request,
@@ -279,27 +503,39 @@ async def apply_codebook(
         resolved_codebook_schema = _resolve_codebook_schema(db, codebook)
         codebook_text = _load_content_store_text(resolved_codebook_schema)
 
+        if not codebook_text:
+            return JSONResponse(
+                {"error": "Cannot apply codebook: codebook not found or empty"},
+                status_code=400,
+            )
+        if not api_key:
+            return JSONResponse(
+                {"error": "Cannot apply codebook: api_key not provided"},
+                status_code=400,
+            )
+
         # Attempt classification using the provided codebook and API key
         classification_output = ""
         system_prompt = ""
         user_prompt = ""
         try:
-            if codebook_text and api_key:
-                # call into classification routine
-                result = classify_posts(codebook_text, assembled, methodology or "", api_key, model)
-                classification_output, system_prompt, user_prompt = result
-            else:
-                error_msg = []
-                if not codebook_text:
-                    error_msg.append("codebook not found or empty")
-                if not api_key:
-                    error_msg.append("api_key not provided")
-                classification_output = f"Cannot apply codebook: {', '.join(error_msg)}"
+            # call into classification routine
+            result = classify_posts(
+                codebook_text,
+                assembled,
+                methodology or "",
+                api_key,
+                model,
+            )
+            classification_output, system_prompt, user_prompt = result
         except Exception as e:
             print(f"Exception during classification: {e}")
             import traceback
             traceback.print_exc()
-            classification_output = f"API request error: {str(e)}"
+            return JSONResponse(
+                {"error": f"API request error: {str(e)}"},
+                status_code=502,
+            )
 
         # resolve auth (optional)
         user_id = get_user_id_from_request(request)

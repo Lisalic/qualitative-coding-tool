@@ -1,8 +1,13 @@
 // Utility functions for coding operations
 
 const POST_ID_LINE_RE = /^(?:POST[\s_-]*ID)\s*:\s*(.+)$/i;
+const POST_ID_CODE_EVIDENCE_LINE_RE =
+  /^(?:POST[\s_-]*ID)\s*:\s*(.+?)\s*(?:-|–|—)?\s*CODE\s*:\s*(.+?)\s*(?:-|–|—)\s*EVIDENCE\s*:\s*(.+?)(?:\s*(?:-|–|—)\s*NOTES\s*:\s*(.+))?$/i;
 const CODE_EVIDENCE_LINE_RE =
   /^CODE\s*:\s*(.+?)\s*(?:-|–|—)\s*EVIDENCE\s*:\s*(.+?)(?:\s*(?:-|–|—)\s*NOTES\s*:\s*(.+))?$/i;
+const CODE_LINE_RE = /^CODE\s*:\s*(.+)$/i;
+const EVIDENCE_LINE_RE = /^EVIDENCE\s*:\s*(.+)$/i;
+const NOTES_LINE_RE = /^NOTES\s*:\s*(.+)$/i;
 const QUOTED_EVIDENCE_RE = /"([^"\n]+)"/g;
 
 const cleanInlineText = (value) => {
@@ -36,40 +41,53 @@ const preprocessCodingLines = (content) => {
     .filter((line) => !/^(?:-{3,}|\*{3,}|_{3,})$/.test(line))
     .map((line) => line.replace(/^#{1,6}\s*/, ""))
     .map((line) =>
-      line.replace(/^\s*[-*+]\s*(?=(?:POST[\s_-]*ID|CODE)\s*:)/i, ""),
+      line.replace(
+        /^\s*[-*+]\s*(?=(?:POST[\s_-]*ID|CODE|EVIDENCE|NOTES)\s*:)/i,
+        "",
+      ),
     )
     .map(cleanInlineText)
     .filter(Boolean)
-    .filter((line) => /^(?:POST[\s_-]*ID|CODE)\s*:/i.test(line));
+    .filter((line) => /^(?:POST[\s_-]*ID|CODE|EVIDENCE|NOTES)\s*:/i.test(line));
 };
 
-const splitEvidenceSnippets = (evidenceText) =>
-  (() => {
-    const raw = String(evidenceText || "");
-    const quotedMatches = Array.from(raw.matchAll(QUOTED_EVIDENCE_RE)).map(
-      (m) => normalizeEvidenceText(m[1]),
-    );
-    if (quotedMatches.length > 0) {
-      return quotedMatches.filter(Boolean);
-    }
-
-    return raw
-      .split("§")
-      .map((snippet) => normalizeEvidenceText(snippet))
-      .filter(Boolean);
-  })();
-
-const formatEvidenceBlock = (value) => {
-  const raw = String(value || "");
+const splitEvidenceSnippets = (evidenceText) => {
+  const raw = String(evidenceText || "");
   const quotedMatches = Array.from(raw.matchAll(QUOTED_EVIDENCE_RE)).map((m) =>
     normalizeEvidenceText(m[1]),
   );
 
-  const segments = (
-    quotedMatches.length > 0
-      ? quotedMatches
-      : raw.split("§").map((snippet) => normalizeEvidenceText(snippet))
-  )
+  if (quotedMatches.length > 0) {
+    return quotedMatches.filter(Boolean);
+  }
+
+  return raw
+    .split("§")
+    .map((snippet) => normalizeEvidenceText(snippet))
+    .filter(Boolean);
+};
+
+const appendCodeEvidenceEntries = (
+  targetCodeEvidence,
+  codeValue,
+  evidenceValue,
+  notesValue = "",
+) => {
+  const code = cleanInlineText(codeValue);
+  const evidenceSnippets = splitEvidenceSnippets(evidenceValue);
+  const notes = cleanInlineText(notesValue);
+
+  if (!code || evidenceSnippets.length === 0) return;
+
+  evidenceSnippets.forEach((evidence) => {
+    targetCodeEvidence.push(
+      notes ? { code, evidence, notes } : { code, evidence },
+    );
+  });
+};
+
+const formatEvidenceBlock = (value) => {
+  const segments = splitEvidenceSnippets(value)
     .map((segment) => segment.replace(/"/g, "'"))
     .filter(Boolean);
 
@@ -131,6 +149,8 @@ export const parseCodingData = (content) => {
 
   const parsed = [];
   let currentPost = null;
+  let pendingCode = "";
+  let pendingNotes = "";
 
   const flushCurrentPost = () => {
     if (
@@ -141,9 +161,38 @@ export const parseCodingData = (content) => {
       parsed.push(currentPost);
     }
     currentPost = null;
+    pendingCode = "";
+    pendingNotes = "";
   };
 
   for (const line of lines) {
+    const inlinePostCodeEvidenceMatch = line.match(
+      POST_ID_CODE_EVIDENCE_LINE_RE,
+    );
+    if (inlinePostCodeEvidenceMatch) {
+      flushCurrentPost();
+
+      const postId = cleanInlineText(inlinePostCodeEvidenceMatch[1]);
+
+      if (!postId) continue;
+
+      currentPost = {
+        postId,
+        codeEvidence: [],
+      };
+
+      appendCodeEvidenceEntries(
+        currentPost.codeEvidence,
+        inlinePostCodeEvidenceMatch[2],
+        inlinePostCodeEvidenceMatch[3],
+        inlinePostCodeEvidenceMatch[4],
+      );
+
+      pendingCode = "";
+      pendingNotes = "";
+      continue;
+    }
+
     const postMatch = line.match(POST_ID_LINE_RE);
     if (postMatch) {
       flushCurrentPost();
@@ -162,16 +211,40 @@ export const parseCodingData = (content) => {
 
     const codeEvidenceMatch = line.match(CODE_EVIDENCE_LINE_RE);
     if (codeEvidenceMatch) {
-      const code = cleanInlineText(codeEvidenceMatch[1]);
-      const evidenceSnippets = splitEvidenceSnippets(codeEvidenceMatch[2]);
-      const notes = cleanInlineText(codeEvidenceMatch[3]);
-      if (code && evidenceSnippets.length > 0) {
-        evidenceSnippets.forEach((evidence) => {
-          currentPost.codeEvidence.push(
-            notes ? { code, evidence, notes } : { code, evidence },
-          );
-        });
-      }
+      appendCodeEvidenceEntries(
+        currentPost.codeEvidence,
+        codeEvidenceMatch[1],
+        codeEvidenceMatch[2],
+        codeEvidenceMatch[3],
+      );
+      pendingCode = "";
+      pendingNotes = "";
+      continue;
+    }
+
+    const codeOnlyMatch = line.match(CODE_LINE_RE);
+    if (codeOnlyMatch) {
+      pendingCode = cleanInlineText(codeOnlyMatch[1]);
+      pendingNotes = "";
+      continue;
+    }
+
+    const notesOnlyMatch = line.match(NOTES_LINE_RE);
+    if (notesOnlyMatch && pendingCode) {
+      pendingNotes = cleanInlineText(notesOnlyMatch[1]);
+      continue;
+    }
+
+    const evidenceOnlyMatch = line.match(EVIDENCE_LINE_RE);
+    if (evidenceOnlyMatch && pendingCode) {
+      appendCodeEvidenceEntries(
+        currentPost.codeEvidence,
+        pendingCode,
+        evidenceOnlyMatch[1],
+        pendingNotes,
+      );
+      pendingCode = "";
+      pendingNotes = "";
     }
   }
 
@@ -198,16 +271,20 @@ export const formatCodingData = (parsedCoding) => {
         const evidence = formatEvidenceBlock(entry?.evidence);
         const notes = cleanInlineText(entry?.notes);
         if (!code || !evidence) return null;
-        return notes
-          ? `CODE: ${code} - EVIDENCE: ${evidence} - NOTES: ${notes}`
-          : `CODE: ${code} - EVIDENCE: ${evidence}`;
+        return { code, evidence, notes };
       })
       .filter(Boolean);
 
     if (!postId || formattedEntries.length === 0) return;
 
     outLines.push(`POST_ID: ${postId}`);
-    outLines.push(...formattedEntries);
+    formattedEntries.forEach(({ code, evidence, notes }) => {
+      outLines.push(`CODE: ${code}`);
+      if (notes) {
+        outLines.push(`NOTES: ${notes}`);
+      }
+      outLines.push(`EVIDENCE: ${evidence}`);
+    });
     outLines.push("");
   });
 

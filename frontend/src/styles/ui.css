@@ -327,7 +327,16 @@
   color: #ffffff;
   background: transparent;
   border: none;
+  border-radius: 4px;
+  padding: 4px;
   cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.sidebar__close:hover,
+.sidebar__close:focus-visible {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
 }
 
 .sidebar__button {
@@ -342,10 +351,13 @@
   cursor: pointer;
   width: 100%;
   text-align: left;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
-.sidebar__button:hover {
+.sidebar__button:hover,
+.sidebar__button:focus-visible {
   background-color: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
 }
 
 /* ==========================================================================

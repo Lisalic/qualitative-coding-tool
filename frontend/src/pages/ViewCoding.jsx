@@ -12,6 +12,115 @@ import {
   parseCodingData,
 } from "../lib/codingUtils";
 
+const cloneParsedCodingRows = (rows = []) =>
+  (Array.isArray(rows) ? rows : []).map((row) => ({
+    postId: String(row?.postId || ""),
+    codeEvidence: (Array.isArray(row?.codeEvidence)
+      ? row.codeEvidence
+      : []
+    ).map((entry) => ({
+      code: String(entry?.code || ""),
+      evidence: String(entry?.evidence || ""),
+      notes: String(entry?.notes || ""),
+    })),
+  }));
+
+const normalizeParsedCodingRows = (rows = []) => {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return { ok: false, error: "Cannot save an empty coding table." };
+  }
+
+  const normalizedRows = [];
+
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    const row = rows[rowIndex];
+    const postId = String(row?.postId || "").trim();
+
+    if (!postId) {
+      return {
+        ok: false,
+        error: `Entry ${rowIndex + 1} is missing a Post ID.`,
+      };
+    }
+
+    const codeEvidenceInput = Array.isArray(row?.codeEvidence)
+      ? row.codeEvidence
+      : [];
+
+    if (codeEvidenceInput.length === 0) {
+      return {
+        ok: false,
+        error: `Entry ${rowIndex + 1} must include at least one code and evidence pair.`,
+      };
+    }
+
+    const normalizedCodeEvidence = [];
+
+    for (
+      let entryIndex = 0;
+      entryIndex < codeEvidenceInput.length;
+      entryIndex += 1
+    ) {
+      const entry = codeEvidenceInput[entryIndex] || {};
+      const code = String(entry?.code || "").trim();
+      const evidence = String(entry?.evidence || "").trim();
+      const notes = String(entry?.notes || "").trim();
+
+      if (!code && !evidence && !notes) continue;
+
+      if (!code || !evidence) {
+        return {
+          ok: false,
+          error: `Entry ${rowIndex + 1}, code/evidence row ${entryIndex + 1} must include both code and evidence.`,
+        };
+      }
+
+      normalizedCodeEvidence.push(
+        notes
+          ? {
+              code,
+              evidence,
+              notes,
+            }
+          : {
+              code,
+              evidence,
+            },
+      );
+    }
+
+    if (normalizedCodeEvidence.length === 0) {
+      return {
+        ok: false,
+        error: `Entry ${rowIndex + 1} must include at least one complete code and evidence pair.`,
+      };
+    }
+
+    normalizedRows.push({
+      postId,
+      codeEvidence: normalizedCodeEvidence,
+    });
+  }
+
+  return { ok: true, rows: normalizedRows };
+};
+
+const extractApiErrorMessage = async (response, fallbackMessage) => {
+  let message = fallbackMessage;
+  try {
+    const payload = await response.json();
+    message = payload?.error || payload?.detail || payload?.message || message;
+  } catch {
+    try {
+      const textPayload = await response.text();
+      if (textPayload) message = textPayload;
+    } catch {
+      // keep fallback message
+    }
+  }
+  return String(message || fallbackMessage);
+};
+
 export default function ViewCoding() {
   const location = useLocation();
   const [availableCodedData, setAvailableCodedData] = useState([]);
@@ -33,6 +142,9 @@ export default function ViewCoding() {
     status: "idle",
     message: "",
   });
+  const [isTableEditMode, setIsTableEditMode] = useState(false);
+  const [tableDraftParsedCoding, setTableDraftParsedCoding] = useState([]);
+  const [tableEditName, setTableEditName] = useState("");
 
   const fetchAvailableCodedData = async () => {
     try {
@@ -167,10 +279,27 @@ export default function ViewCoding() {
     setSystemPrompt("");
     setUserPrompt("");
     setParsedCoding([]);
+    setIsTableEditMode(false);
+    setTableDraftParsedCoding([]);
+    setTableEditName("");
     setPostContents({});
     setSelectedFilterCodes([]);
     setTableSaveState({ status: "idle", message: "" });
   }, [selectedCodedData]);
+
+  useEffect(() => {
+    if (isTableEditMode) return;
+    setTableEditName(selectedCodedDataName || "");
+  }, [selectedCodedDataName, isTableEditMode]);
+
+  useEffect(() => {
+    if (viewMode === "table") return;
+    if (!isTableEditMode) return;
+    setIsTableEditMode(false);
+    setTableDraftParsedCoding([]);
+    setTableEditName(selectedCodedDataName || "");
+    setTableSaveState({ status: "idle", message: "" });
+  }, [viewMode, isTableEditMode, selectedCodedDataName]);
 
   useEffect(() => {
     if (tableSaveState.status !== "success") return;
@@ -281,30 +410,70 @@ export default function ViewCoding() {
     return null;
   };
 
-  const handleTableEntrySave = async (nextParsedCoding) => {
+  const beginTableEditMode = () => {
+    setTableDraftParsedCoding(cloneParsedCodingRows(parsedCoding));
+    setTableEditName(selectedCodedDataName || selectedCodedData || "");
+    setTableSaveState({ status: "idle", message: "" });
+    setIsTableEditMode(true);
+  };
+
+  const cancelTableEditMode = () => {
+    setIsTableEditMode(false);
+    setTableDraftParsedCoding([]);
+    setTableEditName(selectedCodedDataName || "");
+    setTableSaveState({ status: "idle", message: "" });
+  };
+
+  const prepareTableSavePayload = () => {
+    const trimmedName = String(tableEditName || "").trim();
+    if (!trimmedName) {
+      return { ok: false, error: "Name is required." };
+    }
+
+    const normalizeResult = normalizeParsedCodingRows(tableDraftParsedCoding);
+    if (!normalizeResult.ok) {
+      return normalizeResult;
+    }
+
+    const formattedContent = formatCodingData(normalizeResult.rows);
+    if (!formattedContent) {
+      return { ok: false, error: "Cannot save an empty coding table." };
+    }
+
+    return {
+      ok: true,
+      name: trimmedName,
+      rows: normalizeResult.rows,
+      formattedContent,
+    };
+  };
+
+  const handleTableSaveOverwrite = async () => {
     const schemaName = getSelectedCodingSchema();
     if (!schemaName) {
-      const message = "Unable to resolve coding schema for save.";
+      const message = "Unable to resolve coding schema for overwrite.";
       setTableSaveState({ status: "error", message });
-      return { ok: false, error: message };
+      return;
     }
 
-    const formattedContent = formatCodingData(nextParsedCoding);
-    if (!formattedContent) {
-      const message = "Cannot save an empty coding table.";
+    const payload = prepareTableSavePayload();
+    if (!payload.ok) {
+      const message =
+        payload.error || "Unable to prepare coding data for save.";
       setTableSaveState({ status: "error", message });
-      return { ok: false, error: message };
+      return;
     }
 
-    setTableSaveState({ status: "saving", message: "Saving entry..." });
+    setTableSaveState({
+      status: "saving",
+      message: "Saving and overwriting current schema...",
+    });
 
     try {
       const formData = new FormData();
       formData.append("schema_name", schemaName);
-      formData.append("content", formattedContent);
-      if (selectedCodedDataName?.trim()) {
-        formData.append("display_name", selectedCodedDataName.trim());
-      }
+      formData.append("content", payload.formattedContent);
+      formData.append("display_name", payload.name);
 
       const response = await apiFetch("/api/save-file-coded-data/", {
         method: "POST",
@@ -312,26 +481,92 @@ export default function ViewCoding() {
       });
 
       if (!response.ok) {
-        let message = "Failed to save coding entry.";
-        try {
-          const payload = await response.json();
-          message = payload?.error || payload?.message || message;
-        } catch {
-          const textPayload = await response.text();
-          if (textPayload) message = textPayload;
-        }
+        const message = await extractApiErrorMessage(
+          response,
+          "Failed to save and overwrite coding data.",
+        );
         setTableSaveState({ status: "error", message });
-        return { ok: false, error: message };
+        return;
       }
 
-      setCodedDataContent(formattedContent);
-      setParsedCoding(nextParsedCoding);
-      setTableSaveState({ status: "success", message: "Entry saved." });
-      return { ok: true };
+      setCodedDataContent(payload.formattedContent);
+      setParsedCoding(payload.rows);
+      setSelectedCodedDataName(payload.name);
+      setIsTableEditMode(false);
+      setTableDraftParsedCoding([]);
+      setTableEditName(payload.name);
+      setTableSaveState({
+        status: "success",
+        message: "Saved and overwrote current schema.",
+      });
+      fetchAvailableCodedData();
     } catch (error) {
-      const message = error?.message || "Failed to save coding entry.";
+      const message =
+        error?.message || "Failed to save and overwrite coding data.";
       setTableSaveState({ status: "error", message });
-      return { ok: false, error: message };
+    }
+  };
+
+  const handleTableSaveDuplicate = async () => {
+    const schemaName = getSelectedCodingSchema();
+    if (!schemaName) {
+      const message = "Unable to resolve coding schema for duplicate save.";
+      setTableSaveState({ status: "error", message });
+      return;
+    }
+
+    const payload = prepareTableSavePayload();
+    if (!payload.ok) {
+      const message =
+        payload.error || "Unable to prepare coding data for save.";
+      setTableSaveState({ status: "error", message });
+      return;
+    }
+
+    setTableSaveState({
+      status: "saving",
+      message: "Saving and duplicating into a new schema...",
+    });
+
+    try {
+      const formData = new FormData();
+      formData.append("source_schema_name", schemaName);
+      formData.append("content", payload.formattedContent);
+      formData.append("display_name", payload.name);
+
+      const response = await apiFetch("/api/save-file-coded-data-duplicate/", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const message = await extractApiErrorMessage(
+          response,
+          "Failed to save and duplicate coding data.",
+        );
+        setTableSaveState({ status: "error", message });
+        return;
+      }
+
+      let responsePayload = null;
+      try {
+        responsePayload = await response.json();
+      } catch {
+        responsePayload = null;
+      }
+
+      setIsTableEditMode(false);
+      setTableDraftParsedCoding([]);
+      setTableEditName(selectedCodedDataName || "");
+      setTableSaveState({
+        status: "success",
+        message: `Saved and duplicated as ${responsePayload?.filename || payload.name}.`,
+      });
+      fetchAvailableCodedData();
+    } catch (error) {
+      const message =
+        error?.message || "Failed to save and duplicate coding data.";
+      setTableSaveState({ status: "error", message });
     }
   };
 
@@ -390,6 +625,35 @@ export default function ViewCoding() {
               </button>
             </div>
           )}
+          {selectedCodedData && viewMode === "table" && (
+            <div
+              style={{
+                marginBottom: "16px",
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: "8px",
+              }}
+            >
+              {isTableEditMode ? (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={cancelTableEditMode}
+                  disabled={tableSaveState.status === "saving"}
+                >
+                  Cancel Edit
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={beginTableEditMode}
+                >
+                  Edit
+                </button>
+              )}
+            </div>
+          )}
           {selectedCodedData ? (
             viewMode === "text" ? (
               <MarkdownView
@@ -429,16 +693,70 @@ export default function ViewCoding() {
                 emptyLabel="View Coding"
               />
             ) : (
-              <CodingTableView
-                parsedCoding={parsedCoding}
-                codebookTree={codebookTree}
-                postContents={postContents}
-                selectedFilterCodes={selectedFilterCodes}
-                setSelectedFilterCodes={setSelectedFilterCodes}
-                getCodeColor={getCodeColor}
-                onSaveParsedCoding={handleTableEntrySave}
-                saveState={tableSaveState}
-              />
+              <>
+                <CodingTableView
+                  parsedCoding={parsedCoding}
+                  editableParsedCoding={tableDraftParsedCoding}
+                  isEditMode={isTableEditMode}
+                  onParsedCodingChange={setTableDraftParsedCoding}
+                  codebookTree={codebookTree}
+                  postContents={postContents}
+                  selectedFilterCodes={selectedFilterCodes}
+                  setSelectedFilterCodes={setSelectedFilterCodes}
+                  getCodeColor={getCodeColor}
+                  saveState={tableSaveState}
+                />
+
+                {isTableEditMode && (
+                  <div
+                    style={{
+                      marginTop: "16px",
+                      border: "1px solid rgba(255, 255, 255, 0.3)",
+                      borderRadius: "8px",
+                      padding: "12px",
+                    }}
+                  >
+                    <div
+                      className="form__group"
+                      style={{ marginBottom: "12px" }}
+                    >
+                      <label className="form__label">Name</label>
+                      <input
+                        type="text"
+                        className="form__input"
+                        value={tableEditName}
+                        onChange={(e) => setTableEditName(e.target.value)}
+                        disabled={tableSaveState.status === "saving"}
+                      />
+                    </div>
+
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "flex-end",
+                        gap: "8px",
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={handleTableSaveDuplicate}
+                        disabled={tableSaveState.status === "saving"}
+                      >
+                        Save and Duplicate
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={handleTableSaveOverwrite}
+                        disabled={tableSaveState.status === "saving"}
+                      >
+                        Save and Overwrite
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
             )
           ) : (
             <div style={{ color: "#888", padding: 20 }}>

@@ -1,4 +1,4 @@
-import React, { useMemo, useCallback, useState } from "react";
+import React, { useMemo, useCallback } from "react";
 import CodeLegend from "./CodeLegend";
 import HighlightedContent from "./HighlightedContent";
 import {
@@ -10,20 +10,16 @@ import {
 // Component for the table view of coding data
 const CodingTableView = ({
   parsedCoding,
+  editableParsedCoding,
+  isEditMode,
+  onParsedCodingChange,
   codebookTree,
   postContents,
   selectedFilterCodes,
   setSelectedFilterCodes,
   getCodeColor,
-  onSaveParsedCoding,
   saveState,
 }) => {
-  const [editingSourceIndex, setEditingSourceIndex] = useState(null);
-  const [draftPostId, setDraftPostId] = useState("");
-  const [draftCodeEvidence, setDraftCodeEvidence] = useState([]);
-  const [rowError, setRowError] = useState("");
-  const [isSavingRow, setIsSavingRow] = useState(false);
-
   const handleCodeToggle = useCallback(
     (code) => {
       setSelectedFilterCodes((prev) =>
@@ -67,8 +63,11 @@ const CodingTableView = ({
   );
 
   const filteredCoding = useMemo(
-    () => getFilteredCoding(parsedCoding, selectedFilterCodes),
-    [parsedCoding, selectedFilterCodes],
+    () =>
+      isEditMode
+        ? parsedCoding
+        : getFilteredCoding(parsedCoding, selectedFilterCodes),
+    [parsedCoding, selectedFilterCodes, isEditMode],
   );
 
   const rowsForRender = useMemo(
@@ -76,125 +75,109 @@ const CodingTableView = ({
       filteredCoding
         .map((item, filteredIndex) => {
           const sourceIndex = parsedCoding.indexOf(item);
+          const editableItem =
+            Array.isArray(editableParsedCoding) && sourceIndex >= 0
+              ? editableParsedCoding[sourceIndex]
+              : null;
           return {
             item,
+            editableItem,
             sourceIndex,
             rowKey: `${sourceIndex}-${filteredIndex}`,
           };
         })
         .filter((row) => row.sourceIndex >= 0),
-    [filteredCoding, parsedCoding],
+    [filteredCoding, parsedCoding, editableParsedCoding],
   );
 
-  const resetEditorState = useCallback(() => {
-    setEditingSourceIndex(null);
-    setDraftPostId("");
-    setDraftCodeEvidence([]);
-    setRowError("");
-    setIsSavingRow(false);
-  }, []);
-
-  const startRowEdit = useCallback((sourceIndex, item) => {
-    setEditingSourceIndex(sourceIndex);
-    setDraftPostId(item?.postId || "");
-    setDraftCodeEvidence(
-      Array.isArray(item?.codeEvidence)
-        ? item.codeEvidence.map((entry) => ({
-            code: entry?.code || "",
-            evidence: entry?.evidence || "",
-            notes: entry?.notes || "",
-          }))
-        : [],
-    );
-    setRowError("");
-  }, []);
-
-  const updateDraftEntry = useCallback((index, field, value) => {
-    setDraftCodeEvidence((prev) =>
-      prev.map((entry, entryIndex) =>
-        entryIndex === index ? { ...entry, [field]: value } : entry,
-      ),
-    );
-  }, []);
-
-  const removeDraftEntry = useCallback((index) => {
-    setDraftCodeEvidence((prev) => prev.filter((_, i) => i !== index));
-  }, []);
-
-  const addDraftEntry = useCallback(() => {
-    setDraftCodeEvidence((prev) => [
-      ...prev,
-      { code: "", evidence: "", notes: "" },
-    ]);
-  }, []);
-
-  const handleSaveEntry = useCallback(async () => {
-    if (editingSourceIndex === null) return;
-
-    const normalizedPostId = String(draftPostId || "").trim();
-    const normalizedCodeEvidence = draftCodeEvidence
-      .map((entry) => ({
-        code: String(entry?.code || "").trim(),
-        evidence: String(entry?.evidence || "").trim(),
-        notes: String(entry?.notes || "").trim(),
-      }))
-      .filter((entry) => entry.code && entry.evidence)
-      .map((entry) =>
-        entry.notes
-          ? entry
-          : {
-              code: entry.code,
-              evidence: entry.evidence,
-            },
+  const updateRowPostId = useCallback(
+    (sourceIndex, value) => {
+      if (!isEditMode || typeof onParsedCodingChange !== "function") return;
+      const currentRows = Array.isArray(editableParsedCoding)
+        ? editableParsedCoding
+        : [];
+      onParsedCodingChange(
+        currentRows.map((row, index) =>
+          index === sourceIndex
+            ? {
+                ...row,
+                postId: value,
+              }
+            : row,
+        ),
       );
+    },
+    [isEditMode, onParsedCodingChange, editableParsedCoding],
+  );
 
-    if (!normalizedPostId) {
-      setRowError("Post ID is required.");
-      return;
-    }
+  const updateRowCodeEvidenceField = useCallback(
+    (sourceIndex, entryIndex, field, value) => {
+      if (!isEditMode || typeof onParsedCodingChange !== "function") return;
+      const currentRows = Array.isArray(editableParsedCoding)
+        ? editableParsedCoding
+        : [];
+      onParsedCodingChange(
+        currentRows.map((row, index) => {
+          if (index !== sourceIndex) return row;
+          const nextCodeEvidence = (
+            Array.isArray(row?.codeEvidence) ? row.codeEvidence : []
+          ).map((entry, idx) =>
+            idx === entryIndex ? { ...entry, [field]: value } : entry,
+          );
+          return {
+            ...row,
+            codeEvidence: nextCodeEvidence,
+          };
+        }),
+      );
+    },
+    [isEditMode, onParsedCodingChange, editableParsedCoding],
+  );
 
-    if (normalizedCodeEvidence.length === 0) {
-      setRowError("Add at least one code with evidence before saving.");
-      return;
-    }
+  const addRowCodeEvidence = useCallback(
+    (sourceIndex) => {
+      if (!isEditMode || typeof onParsedCodingChange !== "function") return;
+      const currentRows = Array.isArray(editableParsedCoding)
+        ? editableParsedCoding
+        : [];
+      onParsedCodingChange(
+        currentRows.map((row, index) =>
+          index === sourceIndex
+            ? {
+                ...row,
+                codeEvidence: [
+                  ...(Array.isArray(row?.codeEvidence) ? row.codeEvidence : []),
+                  { code: "", evidence: "", notes: "" },
+                ],
+              }
+            : row,
+        ),
+      );
+    },
+    [isEditMode, onParsedCodingChange, editableParsedCoding],
+  );
 
-    if (typeof onSaveParsedCoding !== "function") {
-      setRowError("Save handler is unavailable.");
-      return;
-    }
-
-    const nextParsedCoding = parsedCoding.map((row, index) =>
-      index === editingSourceIndex
-        ? {
-            postId: normalizedPostId,
-            codeEvidence: normalizedCodeEvidence,
-          }
-        : row,
-    );
-
-    setIsSavingRow(true);
-    setRowError("");
-
-    try {
-      const result = await onSaveParsedCoding(nextParsedCoding);
-      if (result?.ok) {
-        resetEditorState();
-        return;
-      }
-      setRowError(result?.error || "Failed to save entry.");
-    } catch (error) {
-      setRowError(error?.message || "Failed to save entry.");
-    } finally {
-      setIsSavingRow(false);
-    }
-  }, [
-    editingSourceIndex,
-    draftPostId,
-    draftCodeEvidence,
-    onSaveParsedCoding,
-    parsedCoding,
-    resetEditorState,
-  ]);
+  const removeRowCodeEvidence = useCallback(
+    (sourceIndex, entryIndex) => {
+      if (!isEditMode || typeof onParsedCodingChange !== "function") return;
+      const currentRows = Array.isArray(editableParsedCoding)
+        ? editableParsedCoding
+        : [];
+      onParsedCodingChange(
+        currentRows.map((row, index) => {
+          if (index !== sourceIndex) return row;
+          const codeEvidence = Array.isArray(row?.codeEvidence)
+            ? row.codeEvidence
+            : [];
+          return {
+            ...row,
+            codeEvidence: codeEvidence.filter((_, idx) => idx !== entryIndex),
+          };
+        }),
+      );
+    },
+    [isEditMode, onParsedCodingChange, editableParsedCoding],
+  );
 
   return (
     <div>
@@ -214,7 +197,7 @@ const CodingTableView = ({
         </div>
       )}
 
-      {selectedFilterCodes.length > 0 && (
+      {selectedFilterCodes.length > 0 && !isEditMode && (
         <div className="body-sm text-primary" style={{ marginBottom: "10px" }}>
           <strong>Filtering by codes:</strong> {selectedFilterCodes.join(", ")}{" "}
           <button
@@ -249,212 +232,212 @@ const CodingTableView = ({
                 <th className="table__th">Title</th>
                 <th className="table__th">Content</th>
                 <th className="table__th">Codes Applied</th>
-                <th className="table__th" style={{ width: "130px" }}>
-                  Actions
-                </th>
               </tr>
             </thead>
             <tbody>
-              {rowsForRender.map(({ item, sourceIndex, rowKey }) => {
-                const filteredCodeEvidence =
-                  selectedFilterCodes.length > 0
-                    ? item.codeEvidence.filter((ev) =>
-                        selectedFilterCodes.includes(ev.code),
-                      )
-                    : item.codeEvidence;
+              {rowsForRender.map(
+                ({ item, editableItem, sourceIndex, rowKey }) => {
+                  const readOnlyCodeEvidence =
+                    !isEditMode && selectedFilterCodes.length > 0
+                      ? item.codeEvidence.filter((ev) =>
+                          selectedFilterCodes.includes(ev.code),
+                        )
+                      : item.codeEvidence;
 
-                const notesByCode = filteredCodeEvidence.reduce(
-                  (acc, entry) => {
-                    const code = String(entry?.code || "").trim();
-                    const notes = String(entry?.notes || "").trim();
-                    if (!code || !notes) return acc;
-                    if (!acc[code]) acc[code] = new Set();
-                    acc[code].add(notes);
-                    return acc;
-                  },
-                  {},
-                );
+                  const editCodeEvidence = Array.isArray(
+                    editableItem?.codeEvidence,
+                  )
+                    ? editableItem.codeEvidence
+                    : [];
 
-                const postData = getPostDataById(postContents, item.postId);
-                const postTitle = postData?.title || "Title not found";
-                const postContent = postData?.content;
-                const isEditingThisRow = editingSourceIndex === sourceIndex;
-                const codeDatalistId = `code-options-${rowKey}`;
+                  const notesByCode = readOnlyCodeEvidence.reduce(
+                    (acc, entry) => {
+                      const code = String(entry?.code || "").trim();
+                      const notes = String(entry?.notes || "").trim();
+                      if (!code || !notes) return acc;
+                      if (!acc[code]) acc[code] = new Set();
+                      acc[code].add(notes);
+                      return acc;
+                    },
+                    {},
+                  );
 
-                return (
-                  <React.Fragment key={rowKey}>
-                    <tr
-                      className="table__row--hover"
-                      style={
-                        isEditingThisRow
-                          ? { backgroundColor: "rgba(255, 255, 255, 0.05)" }
-                          : undefined
-                      }
-                    >
-                      <td
-                        className="table__td"
-                        style={{ verticalAlign: "top", maxWidth: "250px" }}
-                      >
-                        {item.postId}
-                      </td>
-                      <td
-                        className="table__td"
-                        style={{ verticalAlign: "top", maxWidth: "125px" }}
-                      >
-                        <div
-                          style={{
-                            whiteSpace: "pre-wrap",
-                            wordWrap: "break-word",
-                          }}
+                  const postData = getPostDataById(postContents, item.postId);
+                  const postTitle = postData?.title || "Title not found";
+                  const postContent = postData?.content;
+                  const codeDatalistId = `code-options-${rowKey}`;
+                  const editCodes = Array.from(
+                    new Set(
+                      editCodeEvidence
+                        .map((entry) => String(entry?.code || "").trim())
+                        .filter(Boolean),
+                    ),
+                  );
+
+                  return (
+                    <React.Fragment key={rowKey}>
+                      <tr className="table__row--hover">
+                        <td
+                          className="table__td"
+                          style={{ verticalAlign: "top", maxWidth: "250px" }}
                         >
-                          {postTitle}
-                        </div>
-                      </td>
-                      <td
-                        className="table__td"
-                        style={{ verticalAlign: "top", maxWidth: "400px" }}
-                      >
-                        <div
-                          style={{
-                            whiteSpace: "pre-wrap",
-                            wordWrap: "break-word",
-                          }}
-                        >
-                          {postContent ? (
-                            <div
-                              style={{
-                                whiteSpace: "pre-wrap",
-                                wordWrap: "break-word",
-                              }}
-                            >
-                              <HighlightedContent
-                                content={postContent}
-                                codeEvidence={filteredCodeEvidence}
-                                getCodeColor={getCodeColor}
-                              />
-                            </div>
+                          {isEditMode ? (
+                            <input
+                              type="text"
+                              className="form__input"
+                              value={editableItem?.postId || ""}
+                              onChange={(e) =>
+                                updateRowPostId(sourceIndex, e.target.value)
+                              }
+                              disabled={saveState?.status === "saving"}
+                            />
                           ) : (
-                            "Content not found"
+                            item.postId
                           )}
-                        </div>
-                      </td>
-                      <td
-                        className="table__td"
-                        style={{ verticalAlign: "top", maxWidth: "175px" }}
-                      >
-                        {filteredCodeEvidence.length > 0 ? (
-                          <div>
-                            {[
-                              ...new Set(
-                                filteredCodeEvidence.map(({ code }) => code),
-                              ),
-                            ].map((code) => {
-                              const notesForCode = notesByCode[code]
-                                ? Array.from(notesByCode[code])
-                                : [];
-
-                              return (
-                                <div
-                                  key={code}
-                                  className="code-badge-container"
-                                >
-                                  <div
-                                    className="code-badge"
-                                    data-has-notes={
-                                      notesForCode.length > 0 ? "true" : "false"
-                                    }
-                                    style={{
-                                      backgroundColor: getCodeColor(code),
-                                    }}
-                                  >
-                                    {code}
-                                  </div>
-
-                                  {notesForCode.length > 0 && (
-                                    <div
-                                      className="code-notes-tooltip"
-                                      role="tooltip"
-                                    >
-                                      <div className="code-notes-tooltip__title">
-                                        Researcher Notes
-                                      </div>
-                                      {notesForCode.map((note, idx) => (
-                                        <div
-                                          key={`${code}-note-${idx}`}
-                                          className="code-notes-tooltip__line"
-                                        >
-                                          {note}
-                                        </div>
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ) : (
-                          <span className="text-muted">No codes applied</span>
-                        )}
-                      </td>
-                      <td
-                        className="table__td"
-                        style={{ verticalAlign: "top" }}
-                      >
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-small"
-                          onClick={() => startRowEdit(sourceIndex, item)}
-                          disabled={isSavingRow}
+                        </td>
+                        <td
+                          className="table__td"
+                          style={{ verticalAlign: "top", maxWidth: "125px" }}
                         >
-                          {isEditingThisRow ? "Editing" : "Edit Entry"}
-                        </button>
-                      </td>
-                    </tr>
-
-                    {isEditingThisRow && (
-                      <tr>
-                        <td className="table__td" colSpan={5}>
                           <div
                             style={{
-                              border: "1px solid rgba(255, 255, 255, 0.2)",
-                              borderRadius: "6px",
-                              padding: "12px",
-                              backgroundColor: "rgba(255, 255, 255, 0.03)",
+                              whiteSpace: "pre-wrap",
+                              wordWrap: "break-word",
                             }}
                           >
+                            {postTitle}
+                          </div>
+                        </td>
+                        <td
+                          className="table__td"
+                          style={{ verticalAlign: "top", maxWidth: "400px" }}
+                        >
+                          <div
+                            style={{
+                              whiteSpace: "pre-wrap",
+                              wordWrap: "break-word",
+                            }}
+                          >
+                            {postContent ? (
+                              <div
+                                style={{
+                                  whiteSpace: "pre-wrap",
+                                  wordWrap: "break-word",
+                                }}
+                              >
+                                <HighlightedContent
+                                  content={postContent}
+                                  codeEvidence={readOnlyCodeEvidence}
+                                  getCodeColor={getCodeColor}
+                                />
+                              </div>
+                            ) : (
+                              "Content not found"
+                            )}
+                          </div>
+                        </td>
+                        <td
+                          className="table__td"
+                          style={{ verticalAlign: "top", maxWidth: "175px" }}
+                        >
+                          {isEditMode ? (
+                            <div>
+                              {editCodes.length > 0 ? (
+                                editCodes.map((code) => (
+                                  <div
+                                    key={`${rowKey}-edit-code-${code}`}
+                                    className="code-badge-container"
+                                  >
+                                    <div
+                                      className="code-badge"
+                                      style={{
+                                        backgroundColor: getCodeColor(code),
+                                      }}
+                                    >
+                                      {code}
+                                    </div>
+                                  </div>
+                                ))
+                              ) : (
+                                <span className="text-muted">
+                                  No codes configured
+                                </span>
+                              )}
+                            </div>
+                          ) : readOnlyCodeEvidence.length > 0 ? (
+                            <div>
+                              {[
+                                ...new Set(
+                                  readOnlyCodeEvidence.map(({ code }) => code),
+                                ),
+                              ].map((code) => {
+                                const notesForCode = notesByCode[code]
+                                  ? Array.from(notesByCode[code])
+                                  : [];
+
+                                return (
+                                  <div
+                                    key={code}
+                                    className="code-badge-container"
+                                  >
+                                    <div
+                                      className="code-badge"
+                                      data-has-notes={
+                                        notesForCode.length > 0
+                                          ? "true"
+                                          : "false"
+                                      }
+                                      style={{
+                                        backgroundColor: getCodeColor(code),
+                                      }}
+                                    >
+                                      {code}
+                                    </div>
+
+                                    {notesForCode.length > 0 && (
+                                      <div
+                                        className="code-notes-tooltip"
+                                        role="tooltip"
+                                      >
+                                        <div className="code-notes-tooltip__title">
+                                          Researcher Notes
+                                        </div>
+                                        {notesForCode.map((note, idx) => (
+                                          <div
+                                            key={`${code}-note-${idx}`}
+                                            className="code-notes-tooltip__line"
+                                          >
+                                            {note}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <span className="text-muted">No codes applied</span>
+                          )}
+                        </td>
+                      </tr>
+
+                      {isEditMode && (
+                        <tr>
+                          <td className="table__td" colSpan={4}>
                             <div
                               style={{
-                                display: "flex",
-                                justifyContent: "space-between",
-                                alignItems: "center",
-                                marginBottom: "10px",
+                                border: "1px solid rgba(255, 255, 255, 0.15)",
+                                borderRadius: "6px",
+                                padding: "12px",
+                                backgroundColor: "rgba(255, 255, 255, 0.03)",
                               }}
                             >
-                              <strong>Edit Entry</strong>
-                              <span className="text-muted">{item.postId}</span>
-                            </div>
-
-                            <div
-                              className="form__group"
-                              style={{ marginBottom: "12px" }}
-                            >
-                              <label className="form__label">Post ID</label>
-                              <input
-                                type="text"
-                                className="form__input"
-                                value={draftPostId}
-                                onChange={(e) => setDraftPostId(e.target.value)}
-                                disabled={isSavingRow}
-                              />
-                            </div>
-
-                            <div className="form__group">
-                              <label className="form__label">
-                                Codes and Evidence
-                              </label>
-                              <div className="form__helper">
-                                Search code names by typing in the code
-                                dropdown.
+                              <div
+                                className="form__helper"
+                                style={{ marginTop: 0 }}
+                              >
+                                Search code names by typing in the code field.
                               </div>
                               <datalist id={codeDatalistId}>
                                 {codeFieldOptions.map((codeOption) => (
@@ -464,6 +447,7 @@ const CodingTableView = ({
                                   />
                                 ))}
                               </datalist>
+
                               <div
                                 style={{
                                   display: "flex",
@@ -471,9 +455,9 @@ const CodingTableView = ({
                                   gap: "8px",
                                 }}
                               >
-                                {draftCodeEvidence.map((entry, draftIndex) => (
+                                {editCodeEvidence.map((entry, entryIndex) => (
                                   <div
-                                    key={`${rowKey}-entry-${draftIndex}`}
+                                    key={`${rowKey}-entry-${entryIndex}`}
                                     style={{
                                       border:
                                         "1px solid rgba(255, 255, 255, 0.15)",
@@ -491,59 +475,68 @@ const CodingTableView = ({
                                       list={codeDatalistId}
                                       className="form__input"
                                       placeholder="Search/select code"
-                                      value={entry.code}
+                                      value={entry?.code || ""}
                                       onChange={(e) =>
-                                        updateDraftEntry(
-                                          draftIndex,
+                                        updateRowCodeEvidenceField(
+                                          sourceIndex,
+                                          entryIndex,
                                           "code",
                                           e.target.value,
                                         )
                                       }
-                                      disabled={isSavingRow}
+                                      disabled={saveState?.status === "saving"}
                                     />
+
                                     <textarea
                                       className="form__input"
                                       rows={2}
                                       placeholder="Evidence (use § or quotes for multiple snippets)"
-                                      value={entry.evidence}
+                                      value={entry?.evidence || ""}
                                       onChange={(e) =>
-                                        updateDraftEntry(
-                                          draftIndex,
+                                        updateRowCodeEvidenceField(
+                                          sourceIndex,
+                                          entryIndex,
                                           "evidence",
                                           e.target.value,
                                         )
                                       }
-                                      disabled={isSavingRow}
+                                      disabled={saveState?.status === "saving"}
                                       style={{
                                         resize: "vertical",
                                         minHeight: "68px",
                                       }}
                                     />
+
                                     <textarea
                                       className="form__input"
                                       rows={2}
                                       placeholder="Researcher notes (shown on hover)"
-                                      value={entry.notes || ""}
+                                      value={entry?.notes || ""}
                                       onChange={(e) =>
-                                        updateDraftEntry(
-                                          draftIndex,
+                                        updateRowCodeEvidenceField(
+                                          sourceIndex,
+                                          entryIndex,
                                           "notes",
                                           e.target.value,
                                         )
                                       }
-                                      disabled={isSavingRow}
+                                      disabled={saveState?.status === "saving"}
                                       style={{
                                         resize: "vertical",
                                         minHeight: "68px",
                                       }}
                                     />
+
                                     <button
                                       type="button"
                                       className="btn btn-secondary btn-small"
                                       onClick={() =>
-                                        removeDraftEntry(draftIndex)
+                                        removeRowCodeEvidence(
+                                          sourceIndex,
+                                          entryIndex,
+                                        )
                                       }
-                                      disabled={isSavingRow}
+                                      disabled={saveState?.status === "saving"}
                                     >
                                       Remove
                                     </button>
@@ -553,55 +546,23 @@ const CodingTableView = ({
                                 <button
                                   type="button"
                                   className="btn btn-secondary btn-small"
-                                  onClick={addDraftEntry}
-                                  disabled={isSavingRow}
+                                  onClick={() =>
+                                    addRowCodeEvidence(sourceIndex)
+                                  }
+                                  disabled={saveState?.status === "saving"}
                                   style={{ width: "fit-content" }}
                                 >
                                   + Add code/evidence
                                 </button>
                               </div>
                             </div>
-
-                            {rowError && (
-                              <div
-                                className="error-message"
-                                style={{ marginTop: "10px" }}
-                              >
-                                {rowError}
-                              </div>
-                            )}
-
-                            <div
-                              style={{
-                                display: "flex",
-                                gap: "8px",
-                                marginTop: "12px",
-                              }}
-                            >
-                              <button
-                                type="button"
-                                className="btn btn-primary btn-small"
-                                onClick={handleSaveEntry}
-                                disabled={isSavingRow}
-                              >
-                                {isSavingRow ? "Saving..." : "Save Entry"}
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-secondary btn-small"
-                                onClick={resetEditorState}
-                                disabled={isSavingRow}
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </React.Fragment>
-                );
-              })}
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                },
+              )}
             </tbody>
           </table>
         </div>
