@@ -27,6 +27,7 @@ export default function ApplyCodebook() {
   const [saveMessageType, setSaveMessageType] = useState("success");
   // No default model: require explicit user selection
   const [model, setModel] = useState("");
+  const [samplePercentage, setSamplePercentage] = useState(100);
 
   useEffect(() => {
     fetchCodebooks();
@@ -75,7 +76,6 @@ export default function ApplyCodebook() {
           metadata: p,
         }));
         setDatabases(normalized);
-        if (!database && normalized.length > 0) setDatabase(normalized[0].name);
         return;
       }
 
@@ -89,9 +89,6 @@ export default function ApplyCodebook() {
         metadata: p,
       }));
       setDatabases(normalized);
-      if (!database && normalized.length > 0) {
-        setDatabase(normalized[0].name);
-      }
     } catch (err) {
       console.error("Error fetching databases:", err);
     }
@@ -179,6 +176,14 @@ export default function ApplyCodebook() {
       requestData.append("methodology", formData.methodology);
       // Use the model selected in the form (if provided) to avoid relying on component defaults
       if (formData.model) requestData.append("model", formData.model);
+      requestData.append(
+        "sample_percentage",
+        String(
+          Number.isFinite(Number(formData.samplePercentage))
+            ? Number(formData.samplePercentage)
+            : samplePercentage,
+        ),
+      );
       if (formData.description)
         requestData.append("description", formData.description);
       if (selectedProject) {
@@ -222,14 +227,34 @@ export default function ApplyCodebook() {
     return item.replace(".db", "");
   };
 
+  const getSelectedRecordCount = () => {
+    const selected = getAvailableDatabases().find((item) => {
+      const value = typeof item === "string" ? item : item.name;
+      return value === database;
+    });
+    const tables = selected?.metadata?.tables || [];
+    if (!Array.isArray(tables) || tables.length === 0) return 0;
+
+    const hasRelevantTables = tables.some(
+      (t) => t?.table_name === "submissions" || t?.table_name === "comments",
+    );
+
+    return tables.reduce((sum, t) => {
+      const tableName = t?.table_name;
+      if (
+        hasRelevantTables &&
+        tableName !== "submissions" &&
+        tableName !== "comments"
+      ) {
+        return sum;
+      }
+      return sum + (Number(t?.row_count) || 0);
+    }, 0);
+  };
+
   const handleDatabaseTypeChange = (type) => {
     setDatabaseType(type);
-    const available = getAvailableDatabases();
-    if (available.length > 0) {
-      const val =
-        typeof available[0] === "object" ? available[0].name : available[0];
-      setDatabase(val);
-    }
+    setDatabase("");
   };
 
   const fields = [
@@ -249,6 +274,8 @@ export default function ApplyCodebook() {
       label: "Select Database",
       type: "select",
       value: database,
+      onChange: (v) => setDatabase(v),
+      placeholder: "Select a database",
       options: getAvailableDatabases().map((item) => ({
         value: typeof item === "string" ? item : item.name,
         label: getDisplayName(item),
@@ -358,6 +385,49 @@ export default function ApplyCodebook() {
       value: model,
       onChange: (v) => setModel(v),
       options: [{ value: "", label: "-- select model --" }, ...AI_MODELS],
+    },
+    {
+      id: "samplePercentage",
+      label: "Sample Size",
+      type: "custom",
+      render: () => (
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <input
+              type="range"
+              min={1}
+              max={100}
+              step={1}
+              value={samplePercentage}
+              onChange={(e) => setSamplePercentage(Number(e.target.value))}
+              className="slider-input"
+              disabled={loading || !database}
+            />
+            <span
+              style={{
+                minWidth: "70px",
+                textAlign: "right",
+                fontWeight: 600,
+                color: "#ffffff",
+                fontFamily: "system-ui, -apple-system, sans-serif",
+              }}
+            >
+              {database ? `${samplePercentage}%` : ""}
+            </span>
+          </div>
+          <div style={{ marginTop: "6px", fontSize: "0.85em", color: "#999" }}>
+            {!database
+              ? "Select a database to see sampled record counts."
+              : (() => {
+                  const totalCount = getSelectedRecordCount();
+                  const sampleCount = Math.ceil(
+                    (totalCount * samplePercentage) / 100,
+                  );
+                  return `${sampleCount} of ${totalCount} records will be selected randomly.`;
+                })()}
+          </div>
+        </div>
+      ),
     },
     {
       id: "report_name",

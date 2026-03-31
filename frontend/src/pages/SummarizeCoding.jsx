@@ -214,7 +214,7 @@ export default function SummarizeCoding() {
                   padding: 12,
                   backgroundColor: "#1a1a1a",
                   color: "#fff",
-                  border: "1px solid #555",
+                  border: "1px solid #ffffff",
                   borderRadius: 4,
                   fontFamily: "inherit",
                   resize: "vertical",
@@ -243,8 +243,8 @@ export default function SummarizeCoding() {
               style={{
                 marginTop: 8,
                 padding: 16,
-                backgroundColor: "#1a1a1a",
-                border: "1px solid #555",
+                backgroundColor: "#000000",
+                border: "1px solid #ffffff",
                 borderRadius: 8,
                 maxHeight: 600,
                 overflow: "auto",
@@ -261,9 +261,10 @@ export default function SummarizeCoding() {
               style={{
                 marginTop: 12,
                 padding: 12,
-                background: "#0f0f0f",
-                border: "1px solid #333",
+                background: "#000000",
+                border: "2px solid #ffffff",
                 borderRadius: 8,
+                boxShadow: "0 4px 6px rgba(255, 255, 255, 0.1)",
               }}
             >
               <h4 style={{ margin: "0 0 8px 0" }}>Save Summary</h4>

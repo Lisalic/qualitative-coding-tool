@@ -176,11 +176,12 @@ async def save_project_codebook(request: Request, schema_name: str = Form(...), 
 
 
 @router.post("/generate-codebook/")
-async def generate_codebook(request: Request, database: str = Form("original"), api_key: str = Form(...), prompt: str = Form(""), name: str = Form(...), description: str = Form(None), project_id: int = Form(None), model: str = Form("")):
+async def generate_codebook(request: Request, database: str = Form("original"), api_key: str = Form(...), prompt: str = Form(""), name: str = Form(...), description: str = Form(None), project_id: int = Form(None), model: str = Form(""), sample_percentage: float = Form(100.0)):
     from .utils import engine, MODEL_1
     from scripts.codebook_generator import generate_codebook
     import asyncio
     import inspect
+    import math
 
     schema = (database or "").strip()
 
@@ -188,13 +189,23 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
         return JSONResponse({"error": "This endpoint currently expects a proj_<id> schema name"}, status_code=400)
 
     try:
+        sample_percentage = max(0.0, min(100.0, float(sample_percentage)))
         assembled = ""
         with engine.connect() as conn:
             # Check submissions table
             subs_tbl = f"{schema}.submissions"
             subs_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": subs_tbl}).scalar()
             if subs_exists:
-                rows = conn.execute(text(f'SELECT * FROM "{schema}"."submissions"')).fetchall()
+                subs_total = int(conn.execute(text(f'SELECT COUNT(*) FROM "{schema}"."submissions"')).scalar() or 0)
+                subs_limit = math.ceil((subs_total * sample_percentage) / 100.0)
+                rows = []
+                if subs_limit > 0:
+                    rows = conn.execute(
+                        text(
+                            f'SELECT title, selftext FROM "{schema}"."submissions" ORDER BY RANDOM() LIMIT :sample_limit'
+                        ),
+                        {"sample_limit": subs_limit},
+                    ).fetchall()
                 for r in rows:
                     try:
                         title = r._mapping.get('title')
@@ -210,7 +221,16 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
             comm_tbl = f"{schema}.comments"
             comm_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": comm_tbl}).scalar()
             if comm_exists:
-                rows = conn.execute(text(f'SELECT * FROM "{schema}"."comments"')).fetchall()
+                comm_total = int(conn.execute(text(f'SELECT COUNT(*) FROM "{schema}"."comments"')).scalar() or 0)
+                comm_limit = math.ceil((comm_total * sample_percentage) / 100.0)
+                rows = []
+                if comm_limit > 0:
+                    rows = conn.execute(
+                        text(
+                            f'SELECT body FROM "{schema}"."comments" ORDER BY RANDOM() LIMIT :sample_limit'
+                        ),
+                        {"sample_limit": comm_limit},
+                    ).fetchall()
                 for r in rows:
                     try:
                         body = r._mapping.get('body')
@@ -220,6 +240,14 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
             else:
                 print(f"[DEBUG] generate_codebook: comments table not found in schema {schema}")
 
+
+        if not assembled.strip():
+            return JSONResponse(
+                {
+                    "error": "No records were sampled from the selected database. Increase sample size above 0%."
+                },
+                status_code=400,
+            )
 
         try:
             print("[INFO] generate_codebook: calling generate_codebook function")

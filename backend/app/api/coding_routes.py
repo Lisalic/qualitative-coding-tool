@@ -5,6 +5,7 @@ from sqlalchemy import text
 import json
 import traceback
 import secrets
+import math
 
 from .utils import get_user_id_from_request, engine, parse_codebook_to_json
 from app.database import get_db, File, FileDependency
@@ -56,8 +57,9 @@ def _resolve_coding_file_record(db: Session, coded_id: str | None) -> File | Non
     )
 
 
-def _assemble_posts_content(schema: str) -> str:
+def _assemble_posts_content(schema: str, sample_percentage: float = 100.0) -> str:
     assembled_rows: list[str] = []
+    sample_percentage = max(1.0, min(100.0, float(sample_percentage)))
 
     with engine.connect() as conn:
         submissions_table = f"{schema}.submissions"
@@ -66,9 +68,23 @@ def _assemble_posts_content(schema: str) -> str:
             {"tbl": submissions_table},
         ).scalar()
         if submissions_exists:
-            rows = conn.execute(
-                text(f'SELECT id, title, selftext FROM "{schema}"."submissions"')
-            ).fetchall()
+            submissions_total = int(
+                conn.execute(
+                    text(f'SELECT COUNT(*) FROM "{schema}"."submissions"')
+                ).scalar()
+                or 0
+            )
+            submissions_limit = math.ceil(
+                (submissions_total * sample_percentage) / 100.0
+            )
+            rows = []
+            if submissions_limit > 0:
+                rows = conn.execute(
+                    text(
+                        f'SELECT id, title, selftext FROM "{schema}"."submissions" ORDER BY RANDOM() LIMIT :sample_limit'
+                    ),
+                    {"sample_limit": submissions_limit},
+                ).fetchall()
             for row in rows:
                 data = row._mapping
                 assembled_rows.append(
@@ -83,9 +99,21 @@ def _assemble_posts_content(schema: str) -> str:
             {"tbl": comments_table},
         ).scalar()
         if comments_exists:
-            rows = conn.execute(
-                text(f'SELECT id, body FROM "{schema}"."comments"')
-            ).fetchall()
+            comments_total = int(
+                conn.execute(
+                    text(f'SELECT COUNT(*) FROM "{schema}"."comments"')
+                ).scalar()
+                or 0
+            )
+            comments_limit = math.ceil((comments_total * sample_percentage) / 100.0)
+            rows = []
+            if comments_limit > 0:
+                rows = conn.execute(
+                    text(
+                        f'SELECT id, body FROM "{schema}"."comments" ORDER BY RANDOM() LIMIT :sample_limit'
+                    ),
+                    {"sample_limit": comments_limit},
+                ).fetchall()
             for row in rows:
                 data = row._mapping
                 assembled_rows.append(
@@ -479,6 +507,7 @@ async def apply_codebook(
     report_name: str = Form(None),
     api_key: str = Form(...),
     model: str = Form(""),
+    sample_percentage: float = Form(100.0),
     db: Session = Depends(get_db),
 ):
     """Open the Postgres schema provided by `database`, read `submissions.title`/`selftext`
@@ -498,7 +527,7 @@ async def apply_codebook(
         return JSONResponse({"error": "This endpoint expects a proj_<id> schema name"}, status_code=400)
 
     try:
-        assembled = _assemble_posts_content(schema)
+        assembled = _assemble_posts_content(schema, sample_percentage)
 
         resolved_codebook_schema = _resolve_codebook_schema(db, codebook)
         codebook_text = _load_content_store_text(resolved_codebook_schema)

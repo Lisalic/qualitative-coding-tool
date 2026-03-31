@@ -26,6 +26,7 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
   const [saveMessageType, setSaveMessageType] = useState("success");
   // No default model: require explicit user selection
   const [model, setModel] = useState("");
+  const [samplePercentage, setSamplePercentage] = useState(100);
 
   useEffect(() => {
     fetchDatabases();
@@ -56,10 +57,6 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
 
       const combined = [...projectOptions];
       setDatabases(combined);
-      // Set default database if none selected
-      if (!database && combined.length > 0) {
-        setDatabase(combined[0].value);
-      }
     } catch (err) {
       console.error("Error fetching databases:", err);
     }
@@ -77,9 +74,6 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
           meta: p,
         }));
         setFilteredDatabases(projectOptions);
-        if (databaseType === "filtered" && (!database || database === "")) {
-          if (projectOptions.length > 0) setDatabase(projectOptions[0].value);
-        }
         return;
       }
 
@@ -107,12 +101,33 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
     return "";
   };
 
+  const getSelectedRecordCount = () => {
+    const selected = getAvailableDatabases().find(
+      (item) => (item.value || item) === database,
+    );
+    const tables = selected?.meta?.tables || [];
+    if (!Array.isArray(tables) || tables.length === 0) return 0;
+
+    const hasRelevantTables = tables.some(
+      (t) => t?.table_name === "submissions" || t?.table_name === "comments",
+    );
+
+    return tables.reduce((sum, t) => {
+      const tableName = t?.table_name;
+      if (
+        hasRelevantTables &&
+        tableName !== "submissions" &&
+        tableName !== "comments"
+      ) {
+        return sum;
+      }
+      return sum + (Number(t?.row_count) || 0);
+    }, 0);
+  };
+
   const handleDatabaseTypeChange = (type) => {
     setDatabaseType(type);
-    const available = getAvailableDatabases();
-    if (available.length > 0) {
-      setDatabase(available[0].value || available[0]);
-    }
+    setDatabase("");
   };
 
   const handleViewCodebook = (codebookId) => {
@@ -141,6 +156,14 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
       if (formData.prompt) requestData.append("prompt", formData.prompt);
       // Use the model selected in the form (if provided) to avoid relying on component defaults
       if (formData.model) requestData.append("model", formData.model);
+      requestData.append(
+        "sample_percentage",
+        String(
+          Number.isFinite(Number(formData.samplePercentage))
+            ? Number(formData.samplePercentage)
+            : samplePercentage,
+        ),
+      );
 
       if (selectedProject) {
         requestData.append("project_id", selectedProject);
@@ -196,6 +219,8 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
       label: "Select Database",
       type: "select",
       value: database,
+      onChange: (v) => setDatabase(v),
+      placeholder: "Select a database",
       options: getAvailableDatabases().map((item) => ({
         value: item.value || item,
         label: item.label || getDisplayName(item),
@@ -296,6 +321,49 @@ Research Context: These are excerpts from [e.g., reddit stories about bullying].
       value: model,
       onChange: (v) => setModel(v),
       options: [{ value: "", label: "-- select model --" }, ...AI_MODELS],
+    },
+    {
+      id: "samplePercentage",
+      label: "Sample Size",
+      type: "custom",
+      render: () => (
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <input
+              type="range"
+              min={1}
+              max={100}
+              step={1}
+              value={samplePercentage}
+              onChange={(e) => setSamplePercentage(Number(e.target.value))}
+              className="slider-input"
+              disabled={loading || !database}
+            />
+            <span
+              style={{
+                minWidth: "70px",
+                textAlign: "right",
+                fontWeight: 600,
+                color: "#ffffff",
+                fontFamily: "system-ui, -apple-system, sans-serif",
+              }}
+            >
+              {database ? `${samplePercentage}%` : ""}
+            </span>
+          </div>
+          <div style={{ marginTop: "6px", fontSize: "0.85em", color: "#999" }}>
+            {!database
+              ? "Select a database to see sampled record counts."
+              : (() => {
+                  const totalCount = getSelectedRecordCount();
+                  const sampleCount = Math.ceil(
+                    (totalCount * samplePercentage) / 100,
+                  );
+                  return `${sampleCount} of ${totalCount} records will be selected randomly.`;
+                })()}
+          </div>
+        </div>
+      ),
     },
     {
       id: "name",
