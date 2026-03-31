@@ -39,8 +39,8 @@ jobs:
         with:
           name: python-app
           path: |
-            .
-            !antenv/
+            backend/
+            !backend/antenv/
 
       # 🚫 Opting Out of Oryx Build
       # If you prefer to disable the Oryx build process during deployment, follow these steps:
@@ -60,6 +60,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: python-app
+          path: .
       
       - name: Login to Azure
         uses: azure/login@v2
