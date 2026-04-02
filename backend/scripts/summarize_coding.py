@@ -1,6 +1,6 @@
 import os
 import json
-from scripts.codebook_generator import get_client, MODEL_3
+from backend.scripts.codebook_generator import get_client, MODEL_3
 
 def summarize_coding(coding_data: str, user_prompt: str = "", api_key: str = "", model: str = "") -> str:
     """Summarize a coding output using qualitative coding techniques."""

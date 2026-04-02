@@ -9,10 +9,10 @@ import traceback
 import pandas as pd
 from typing import Optional
 
-from .utils import get_user_id_from_request, engine, SessionLocal
-from app.database import get_db, File, FileTable, FileDependency, Project
-from app.databasemanager import DatabaseManager
-from scripts.filter_db import filter_posts_with_ai, filter_comments_with_ai, AIFilterError
+from backend.app.api.utils import get_user_id_from_request, engine, SessionLocal
+from backend.app.database import get_db, File, FileTable, FileDependency, Project
+from backend.app.databasemanager import DatabaseManager
+from backend.scripts.filter_db import filter_posts_with_ai, filter_comments_with_ai, AIFilterError
 
 router = APIRouter()
 

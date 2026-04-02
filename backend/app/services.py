@@ -3,12 +3,12 @@ import sqlite3
 import pandas as pd
 from sqlalchemy import text
 try:
-    from app.database import engine
-    from app.databasemanager import DatabaseManager
+    from backend.app.database import engine
+    from backend.app.databasemanager import DatabaseManager
 except Exception as exc:
     try:
-        from backend.app.database import engine
-        from backend.app.databasemanager import DatabaseManager
+        from app.database import engine
+        from app.databasemanager import DatabaseManager
     except Exception:
         print("Failed", exc)
         raise exc

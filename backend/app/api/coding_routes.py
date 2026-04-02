@@ -7,9 +7,9 @@ import traceback
 import secrets
 import math
 
-from .utils import get_user_id_from_request, engine, parse_codebook_to_json
-from app.database import get_db, File, FileDependency
-from app.databasemanager import DatabaseManager
+from backend.app.api.utils import get_user_id_from_request, engine, parse_codebook_to_json
+from backend.app.database import get_db, File, FileDependency
+from backend.app.databasemanager import DatabaseManager
 
 router = APIRouter()
 
@@ -683,7 +683,7 @@ async def compare_codings(request: Request, coding_a: str = Form(...), coding_b:
 @router.post("/summarize-coding/")
 async def summarize_coding(request: Request, coding: str = Form(...), api_key: str = Form(...), model: str = Form(None), prompt: str = Form("")):
     """Summarize a coding output stored in Postgres schema by calling the LLM and return the summary."""
-    from scripts.summarize_coding import summarize_coding as summarize_coding_function
+    from backend.scripts.summarize_coding import summarize_coding as summarize_coding_function
 
     print("[summarize-coding] Endpoint called")
     schema = (coding or "").strip()

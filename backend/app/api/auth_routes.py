@@ -3,10 +3,10 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from .utils import get_user_id_from_request, _hash_password, _verify_password
-from app.database import get_db, User
-from app.auth import create_access_token
-from app.config import settings
+from backend.app.api.utils import get_user_id_from_request, _hash_password, _verify_password
+from backend.app.database import get_db, User
+from backend.app.auth import create_access_token
+from backend.app.config import settings
 
 router = APIRouter()
 

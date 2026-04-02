@@ -10,10 +10,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 import pandas as pd
 
-from .utils import get_user_id_from_request, get_database_metadata
-from app.database import get_db, User, Prompt, Project, File, FileTable, FileDependency, engine, SessionLocal
-from app.databasemanager import DatabaseManager
-from scripts.import_db import stream_zst_to_postgres
+from backend.app.api.utils import get_user_id_from_request, get_database_metadata
+from backend.app.database import get_db, User, Prompt, Project, File, FileTable, FileDependency, engine, SessionLocal
+from backend.app.databasemanager import DatabaseManager
+from backend.scripts.import_db import stream_zst_to_postgres
 
 router = APIRouter()
 

@@ -1,4 +1,10 @@
-from app.database import engine
+from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from backend.app.database import engine
 from sqlalchemy import text
 
 with engine.connect() as conn:

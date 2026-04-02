@@ -6,10 +6,10 @@ import json
 import secrets
 import traceback
 
-from .utils import get_user_id_from_request, engine
-from app.database import get_db, File, FileDependency, Project
-from app.databasemanager import DatabaseManager
-from scripts.display_codebook import parse_codebook_to_json
+from backend.app.api.utils import get_user_id_from_request, engine
+from backend.app.database import get_db, File, FileDependency, Project
+from backend.app.databasemanager import DatabaseManager
+from backend.scripts.display_codebook import parse_codebook_to_json
 
 router = APIRouter()
 
@@ -178,7 +178,7 @@ async def save_project_codebook(request: Request, schema_name: str = Form(...), 
 @router.post("/generate-codebook/")
 async def generate_codebook(request: Request, database: str = Form("original"), api_key: str = Form(...), prompt: str = Form(""), name: str = Form(...), description: str = Form(None), project_id: int = Form(None), model: str = Form(""), sample_percentage: float = Form(100.0)):
     from .utils import engine, MODEL_1
-    from scripts.codebook_generator import generate_codebook
+    from backend.scripts.codebook_generator import generate_codebook
     import asyncio
     import inspect
     import math

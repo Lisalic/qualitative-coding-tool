@@ -4,9 +4,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 import json
 
-from .utils import get_user_id_from_request
-from app.database import get_db, Project, File, FileTable, FileDependency
-from app.databasemanager import DatabaseManager
+from backend.app.api.utils import get_user_id_from_request
+from backend.app.database import get_db, Project, File, FileTable, FileDependency
+from backend.app.databasemanager import DatabaseManager
 
 router = APIRouter()
 

@@ -24,14 +24,23 @@ jobs:
         with:
           python-version: '3.14'
 
-      # 📦 Send raw code to Azure. 
-      # We removed the local 'pip install' step. We rely on Azure's Oryx engine 
-      # to build the environment and install dependencies on the server.
+      # Send the repo root to Azure so the `backend/` package exists on disk for `from backend.app...` imports.
+      # Dependency install is handled by Azure Oryx (SCM_DO_BUILD_DURING_DEPLOYMENT) on the server, not in this job.
+      # Exclude any local venv dirs if present (e.g. optional local `antenv` under backend/).
       - name: Upload artifact for deployment jobs
         uses: actions/upload-artifact@v4
         with:
           name: python-app
-          path: backend/
+          path: |
+            .
+            !antenv/
+            !backend/antenv/
+
+      # 🚫 Opting Out of Oryx Build
+      # If you prefer to disable the Oryx build process during deployment, follow these steps:
+      # 1. Remove the SCM_DO_BUILD_DURING_DEPLOYMENT app setting from your Azure App Service Environment variables.
+      # 2. Refer to sample workflows for alternative deployment strategies: https://github.com/Azure/actions-workflow-samples/tree/master/AppService
+
 
   deploy:
     runs-on: ubuntu-latest
@@ -46,7 +55,7 @@ jobs:
         with:
           name: python-app
           path: .
-      
+
       - name: Login to Azure
         uses: azure/login@v2
         with:
@@ -54,6 +63,9 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_5ADE32A7826F4249871428D2B93463EC }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_963CF0ED07C84B4D99ACEAD85D921A78 }}
 
+      # Azure startup command (App Service Configuration > General settings): run from artifact/repo root, e.g.
+      #   python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
+      # On Linux App Service, prefer the platform port when set: --port $PORT
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v3
         id: deploy-to-webapp

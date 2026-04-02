@@ -1,13 +1,13 @@
 from fastapi import APIRouter
 
-from .auth_routes import router as auth_router
-from .file_routes import router as file_router
-from .prompt_routes import router as prompt_router
-from .codebook_routes import router as codebook_router
-from .coding_routes import router as coding_router
-from .data_routes import router as data_router
-from .project_routes import router as project_router
-from .content_routes import router as content_router
+from backend.app.api.auth_routes import router as auth_router
+from backend.app.api.file_routes import router as file_router
+from backend.app.api.prompt_routes import router as prompt_router
+from backend.app.api.codebook_routes import router as codebook_router
+from backend.app.api.coding_routes import router as coding_router
+from backend.app.api.data_routes import router as data_router
+from backend.app.api.project_routes import router as project_router
+from backend.app.api.content_routes import router as content_router
 
 router = APIRouter()
 

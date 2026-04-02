@@ -2,8 +2,8 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
-from .utils import get_user_id_from_request
-from app.database import get_db, Prompt, User
+from backend.app.api.utils import get_user_id_from_request
+from backend.app.database import get_db, Prompt, User
 
 router = APIRouter()
 

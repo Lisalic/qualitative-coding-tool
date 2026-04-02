@@ -5,10 +5,10 @@ import hashlib
 import base64
 from typing import Dict, Any
 try:
-    from app.config import settings
-except:
+    from backend.app.config import settings
+except Exception:
     try:
-        from backend.app.config import settings
+        from app.config import settings
     except Exception as exc:
         print("Failed", exc)
         raise exc
