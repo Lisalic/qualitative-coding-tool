@@ -1,9 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { apiFetch } from "../api";
-import ReactMarkdown from "react-markdown";
-import { AI_MODELS } from "../lib/constants";
+import CompareDualSelectPanel from "../components/compare/CompareDualSelectPanel";
+import CompareModelPromptPanel from "../components/compare/CompareModelPromptPanel";
+import CompareResultPanel from "../components/compare/CompareResultPanel";
 import "../styles/Home.css";
+
+const EXAMPLE_PROMPT =
+  "Please provide a detailed comparison focusing on:\n- Key differences in coding approaches\n- Overlapping themes and codes\n- Unique insights from each codebook\n- Recommendations for merging or refining the codebooks";
 
 export default function CompareCodebook() {
   const location = useLocation();
@@ -13,12 +17,8 @@ export default function CompareCodebook() {
   const [loading, setLoading] = useState(false);
   const [comparison, setComparison] = useState("");
   const [error, setError] = useState("");
-  // No default model: require explicit user selection
   const [model, setModel] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [saveMessage, setSaveMessage] = useState("");
   const [projects, setProjects] = useState([]);
-  const [selectedProject, setSelectedProject] = useState("");
   const [additionalPrompt, setAdditionalPrompt] = useState("");
 
   useEffect(() => {
@@ -33,7 +33,6 @@ export default function CompareCodebook() {
         }));
         setCodebooks(list);
         if (a) {
-          // If codebook A is pre-selected (via navigation state), optionally set a default for B
           const availableForB = list.filter((item) => item.value !== a);
           if (availableForB.length > 0 && !b) {
             setB(availableForB[0].value);
@@ -99,101 +98,25 @@ export default function CompareCodebook() {
 
         <form onSubmit={submitCompare}>
           <div className="compare-layout-row">
-            <div className="compare-layout-column">
-              <div className="compare-panel-card">
-                <div className="compare-panel-header">
-                  <h2 className="compare-panel-title">Select codebooks</h2>
-                </div>
-                <div className="compare-form-group">
-                  <label className="compare-label">Codebook A</label>
-                  <select
-                    className="form-input"
-                    value={a}
-                    onChange={(e) => setA(e.target.value)}
-                  >
-                    <option value="">Select a codebook</option>
-                    {codebooks.map((it) => (
-                      <option key={it.value} value={it.value}>
-                        {it.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+            <CompareDualSelectPanel
+              panelTitle="Select codebooks"
+              labelA="Codebook A"
+              labelB="Codebook B"
+              placeholderOption="Select a codebook"
+              options={codebooks}
+              valueA={a}
+              valueB={b}
+              onChangeA={setA}
+              onChangeB={setB}
+            />
 
-                <div className="compare-form-group">
-                  <label className="compare-label">Codebook B</label>
-                  <select
-                    className="form-input"
-                    value={b}
-                    onChange={(e) => setB(e.target.value)}
-                  >
-                    <option value="">Select a codebook</option>
-                    {codebooks.map((it) => (
-                      <option key={it.value} value={it.value}>
-                        {it.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            <div className="compare-layout-column">
-              <div className="compare-panel-card">
-                <div className="compare-panel-header">
-                  <h2 className="compare-panel-title">Model & instructions</h2>
-                </div>
-
-                <div className="compare-form-group compare-model-select">
-                  <label className="compare-label">Model</label>
-                  <select
-                    className="form-input form-input-model"
-                    value={model}
-                    onChange={(e) => setModel(e.target.value)}
-                  >
-                    <option value="">Select a model</option>
-                    {AI_MODELS.map((modelOption) => (
-                      <option
-                        key={modelOption.value}
-                        value={modelOption.value}
-                      >
-                        {modelOption.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="compare-form-group">
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      marginBottom: 4,
-                    }}
-                  >
-                    <label className="compare-label">Prompt (optional)</label>
-                    <button
-                      className="project-tab prompt-example-btn"
-                      type="button"
-                      onClick={() =>
-                        setAdditionalPrompt(
-                          "Please provide a detailed comparison focusing on:\n- Key differences in coding approaches\n- Overlapping themes and codes\n- Unique insights from each codebook\n- Recommendations for merging or refining the codebooks",
-                        )
-                      }
-                    >
-                      Load Example Prompt
-                    </button>
-                  </div>
-                  <textarea
-                    value={additionalPrompt}
-                    onChange={(e) => setAdditionalPrompt(e.target.value)}
-                    placeholder="Enter any specific instructions for the comparison..."
-                    className="compare-textarea"
-                  />
-                </div>
-              </div>
-            </div>
+            <CompareModelPromptPanel
+              model={model}
+              onModelChange={setModel}
+              additionalPrompt={additionalPrompt}
+              onAdditionalPromptChange={setAdditionalPrompt}
+              examplePromptText={EXAMPLE_PROMPT}
+            />
           </div>
 
           <div className="compare-actions-bar">
@@ -218,104 +141,14 @@ export default function CompareCodebook() {
           </div>
         )}
 
-        {comparison !== "" && (
-          <div className="compare-layout-column compare-layout-column--results">
-            <div className="compare-panel-card">
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  marginBottom: 12,
-                }}
-              >
-                <h2 className="compare-panel-title">Comparison result</h2>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button
-                    className="project-tab"
-                    onClick={() => {
-                      if (navigator.clipboard && comparison) {
-                        navigator.clipboard.writeText(comparison).catch(() => {});
-                      }
-                    }}
-                  >
-                    Copy
-                  </button>
-                  <button
-                    className="project-tab"
-                    onClick={async () => {
-                      // Save comparison
-                      setSaveMessage("");
-                      const labelA =
-                        (codebooks.find((it) => it.value === a) || {}).label ||
-                        a;
-                      const labelB =
-                        (codebooks.find((it) => it.value === b) || {}).label ||
-                        b;
-                      const title = `Comparison: ${labelA} vs ${labelB}`;
-                      const description = `Compared ${labelA} and ${labelB}`;
-                      const form = new FormData();
-                      form.append("content", comparison);
-                      form.append("title", title);
-                      form.append("description", description);
-                      form.append("file_type", "codebook_comparison");
-                      if (selectedProject)
-                        form.append("project_id", String(selectedProject));
-                      try {
-                        setSaving(true);
-                        const resp = await apiFetch("/api/save-comparison/", {
-                          method: "POST",
-                          body: form,
-                        });
-                        if (!resp.ok) {
-                          const d = await resp.json().catch(() => ({}));
-                          throw new Error(d.detail || `HTTP ${resp.status}`);
-                        }
-                        const d = await resp.json();
-                        setSaveMessage(d.message || "Saved");
-                      } catch (err) {
-                        setSaveMessage(String(err));
-                      } finally {
-                        setSaving(false);
-                      }
-                    }}
-                    disabled={saving}
-                  >
-                    {saving ? "Saving..." : "Save"}
-                  </button>
-                </div>
-              </div>
-
-              {projects.length > 0 && (
-                <div style={{ marginBottom: 8 }}>
-                  <label style={{ color: "#ccc", marginRight: 8 }}>
-                    Save to project:
-                  </label>
-                  <select
-                    className="form-input"
-                    value={selectedProject}
-                    onChange={(e) => setSelectedProject(e.target.value)}
-                  >
-                    <option value="">Select a project</option>
-                    {projects.map((pr) => (
-                      <option key={pr.id} value={pr.id}>
-                        {pr.projectname}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              {saveMessage && (
-                <div style={{ marginBottom: 8, color: "#ccffcc" }}>
-                  {saveMessage}
-                </div>
-              )}
-              <div className="comparison-output">
-                <ReactMarkdown>{comparison}</ReactMarkdown>
-              </div>
-            </div>
-          </div>
-        )}
+        <CompareResultPanel
+          comparison={comparison}
+          fileType="codebook_comparison"
+          valueA={a}
+          valueB={b}
+          options={codebooks}
+          projects={projects}
+        />
       </div>
     </div>
   );
