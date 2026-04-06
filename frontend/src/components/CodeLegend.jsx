@@ -108,7 +108,7 @@ const CodeLegend = ({
         width: "100%",
       }}
     >
-      <h4 style={{ margin: "0 0 10px 0", color: "#fff" }}>Legend</h4>
+      <h4 style={{ margin: "0 0 10px 0", color: "#fff" }}>Codes</h4>
 
       {hasTreeLegend ? (
         <div>
