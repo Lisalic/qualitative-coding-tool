@@ -1,14 +1,14 @@
 from fastapi import APIRouter, HTTPException, Depends, Request, Form
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, select
 import json
 import secrets
 import traceback
 
-from backend.app.api.utils import get_user_id_from_request, engine
-from backend.app.database import get_db, File, FileDependency, Project
-from backend.app.databasemanager import DatabaseManager
+from backend.app.api.utils import get_user_id_from_request
+from backend.app.database import get_db, File, FileDependency, Project, async_engine, engine
+from backend.app.databasemanager import AsyncDatabaseManager
 from backend.scripts.display_codebook import parse_codebook_to_json
 
 router = APIRouter()
@@ -274,47 +274,45 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
             unique_id = secrets.token_hex(6)
             new_schema = f"proj_{unique_id}"
 
-            with engine.begin() as conn:
-                conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{new_schema}"'))
-                conn.execute(text(f'CREATE TABLE IF NOT EXISTS "{new_schema}".content_store (file_text text)'))
-                conn.execute(text(f'TRUNCATE TABLE "{new_schema}".content_store'))
-                conn.execute(text(f'INSERT INTO "{new_schema}".content_store (file_text) VALUES (:file_text)'), {"file_text": codebook_text})
+            async with async_engine.begin() as conn:
+                await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{new_schema}"'))
+                await conn.execute(text(f'CREATE TABLE IF NOT EXISTS "{new_schema}".content_store (file_text text)'))
+                await conn.execute(text(f'TRUNCATE TABLE "{new_schema}".content_store'))
+                await conn.execute(text(f'INSERT INTO "{new_schema}".content_store (file_text) VALUES (:file_text)'), {"file_text": codebook_text})
 
             # Persist provided description (do not append agreement percent)
             final_description = (description or "").strip() if description is not None else None
             if final_description == "":
                 final_description = None
 
-            # create file record and file_tables metadata
-            with DatabaseManager() as dm:
+            async with AsyncDatabaseManager() as dm:
                 file_rec = File(user_id=user_id, filename=name, schemaname=new_schema, file_type='codebook', description=final_description, systemprompt=system_prompt, userprompt=user_prompt)
                 dm.session.add(file_rec)
-                dm.session.flush()
-                # Add dependency for the source database
-                parent_file = dm.session.query(File).filter(File.schemaname == schema, File.user_id == user_id).first()
+                await dm.session.flush()
+                pf = await dm.session.execute(
+                    select(File).where(File.schemaname == schema, File.user_id == user_id)
+                )
+                parent_file = pf.scalar_one_or_none()
                 if parent_file:
                     dep = FileDependency(child_file_id=file_rec.id, parent_file_id=parent_file.id)
                     dm.session.add(dep)
-                    dm.session.flush()
-                dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name='content_store', row_count=1)
+                    await dm.session.flush()
+                await dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name='content_store', row_count=1)
 
-                # If a project_id was provided, ensure ownership and link the file to the project
                 if project_id is not None:
                     try:
-                        proj = dm.session.query(Project).filter(Project.id == project_id).first()
+                        pr = await dm.session.execute(select(Project).where(Project.id == project_id))
+                        proj = pr.scalar_one_or_none()
                         if proj is None:
                             raise HTTPException(status_code=404, detail="Project not found")
-                        # ensure the project belongs to the authenticated user
                         if proj.user_id != user_id:
                             raise HTTPException(status_code=403, detail="Forbidden: project does not belong to user")
-                        # create association
                         file_rec.projects.append(proj)
-                        dm.session.flush()
+                        await dm.session.flush()
                     except HTTPException:
                         raise
                     except Exception:
-                        # If anything goes wrong with linking, roll back and continue without linking
-                        dm.session.rollback()
+                        await dm.session.rollback()
 
             resp_payload = {
                 "codebook": codebook_text,
