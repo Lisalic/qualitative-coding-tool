@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends, Request, Form, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, select as sa_select
 import json
 import re
 import secrets
@@ -9,9 +9,18 @@ import traceback
 import pandas as pd
 from typing import Optional
 
-from backend.app.api.utils import get_user_id_from_request, engine, SessionLocal
-from backend.app.database import get_db, File, FileTable, FileDependency, Project
-from backend.app.databasemanager import DatabaseManager
+from backend.app.api.utils import get_user_id_from_request
+
+from backend.app.database import (
+    get_db,
+    File,
+    FileTable,
+    FileDependency,
+    Project,
+    async_engine,
+    engine,
+)
+from backend.app.databasemanager import AsyncDatabaseManager
 from backend.scripts.filter_db import filter_posts_with_ai, filter_comments_with_ai, AIFilterError
 
 router = APIRouter()
@@ -522,7 +531,7 @@ async def filter_data(
         
         if user_id:
             try:
-                with DatabaseManager() as dm:
+                async with AsyncDatabaseManager() as dm:
                     file_rec = File(
                         user_id=user_id,
                         filename=name or new_schema,
@@ -533,32 +542,32 @@ async def filter_data(
                         description=description or None
                     )
                     dm.session.add(file_rec)
-                    dm.session.flush()
-                    
-                    # Link to source file
-                    source_file = dm.session.query(File).filter(
-                        File.schemaname == schema,
-                        File.user_id == user_id
-                    ).first()
+                    await dm.session.flush()
+
+                    sf = await dm.session.execute(
+                        sa_select(File).where(
+                            File.schemaname == schema,
+                            File.user_id == user_id,
+                        )
+                    )
+                    source_file = sf.scalar_one_or_none()
                     if source_file:
                         dep = FileDependency(child_file_id=file_rec.id, parent_file_id=source_file.id)
                         dm.session.add(dep)
-                    
-                    # Add table metadata
-                    dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name='submissions', row_count=inserted_subs)
-                    dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name='comments', row_count=inserted_comments)
-                    
-                    # Attach to project if specified
+
+                    await dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name='submissions', row_count=inserted_subs)
+                    await dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name='comments', row_count=inserted_comments)
+
                     if project_id:
                         try:
                             pid = int(project_id)
-                            proj = dm.session.get(Project, pid)
+                            proj = await dm.session.get(Project, pid)
                             if proj:
                                 file_rec.projects.append(proj)
                         except (ValueError, TypeError):
                             pass
-                    
-                    dm.session.flush()
+
+                    await dm.session.flush()
                     _log("META", "File metadata saved", {"file_id": file_rec.id})
             except Exception as e:
                 _log("META_ERROR", f"Failed to save metadata: {e}")
@@ -603,16 +612,17 @@ async def get_comments_for_submission(submission_id: str, database: str = Query(
         return JSONResponse({"error": "This endpoint expects a proj_<id> schema name in 'database'"}, status_code=400)
 
     try:
-        with engine.connect() as conn:
-            # Verify comments table exists in the schema
+        async with async_engine.connect() as conn:
             tbl = f"{schema}.comments"
-            tbl_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": tbl}).scalar()
+            tbl_exists = (
+                await conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": tbl})
+            ).scalar()
             if not tbl_exists:
                 return JSONResponse({"error": f"Comments table not found in schema {schema}"}, status_code=404)
 
-            # Fetch rows where link_id matches submission_id
             q = text(f'SELECT * FROM "{schema}"."comments" WHERE link_id = :link ORDER BY created_utc ASC')
-            rows = conn.execute(q, {"link": submission_id}).fetchall()
+            result = await conn.execute(q, {"link": submission_id})
+            rows = result.fetchall()
             comments = [dict(r._mapping) for r in rows]
 
             return JSONResponse({"comments": comments})
@@ -623,10 +633,7 @@ async def get_comments_for_submission(submission_id: str, database: str = Query(
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 @router.post("/post-contents/")
-async def get_post_contents(
-    request: Request,
-    db: Session = Depends(get_db)
-):
+async def get_post_contents(request: Request):
     try:
         data = await request.json()
         schema_name = data.get("schema")
@@ -635,19 +642,17 @@ async def get_post_contents(
         if not schema_name or not post_ids:
             raise HTTPException(status_code=400, detail="schema and post_ids are required")
 
-        # Query the database for the posts
-        with engine.connect() as conn:
-            # Build the query
+        async with async_engine.connect() as conn:
             placeholders = ", ".join([f":id_{i}" for i in range(len(post_ids))])
             params = {f"id_{i}": pid for i, pid in enumerate(post_ids)}
-            
+
             query = f"""
             SELECT id, title, selftext
             FROM "{schema_name}".submissions
             WHERE id IN ({placeholders})
             """
-            
-            result = conn.execute(text(query), params)
+
+            result = await conn.execute(text(query), params)
             posts = {}
             for row in result:
                 post_id = str(row[0])

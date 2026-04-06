@@ -2,53 +2,12 @@ import os
 import sqlite3
 import hashlib
 import binascii
-import secrets
 from fastapi import Request
-from sqlalchemy.orm import Session
-from sqlalchemy import text
 
 try:
-    from backend.app.database import get_db, User, Prompt, Project, File, FileTable, engine, SessionLocal
-    from backend.app.databasemanager import DatabaseManager
-    from backend.app.auth import create_access_token, decode_access_token
-    from backend.app.config import settings
-
-    from backend.scripts.import_db import stream_zst_to_postgres
-    from backend.scripts.filter_db import filter_posts_with_ai, filter_comments_with_ai
-    from backend.scripts.codebook_generator import (
-        generate_codebook as generate_codebook_function,
-        compare_agreement as compare_agreement_function,
-        get_client as codebook_get_client,
-        MODEL_1,
-        MODEL_2,
-        MODEL_3,
-    )
-    from backend.scripts.codebook_apply import classify_posts
-    from backend.scripts.display_codebook import parse_codebook_to_json
-    from backend.app.services import migrate_sqlite_file
+    from backend.app.auth import decode_access_token
 except Exception:
-    try:
-        from app.database import get_db, User, Prompt, Project, File, FileTable, engine, SessionLocal
-        from app.databasemanager import DatabaseManager
-        from app.auth import create_access_token, decode_access_token
-        from app.config import settings
-
-        from scripts.import_db import stream_zst_to_postgres
-        from scripts.filter_db import filter_posts_with_ai, filter_comments_with_ai
-        from scripts.codebook_generator import (
-            generate_codebook as generate_codebook_function,
-            compare_agreement as compare_agreement_function,
-            get_client as codebook_get_client,
-            MODEL_1,
-            MODEL_2,
-            MODEL_3,
-        )
-        from scripts.codebook_apply import classify_posts
-        from scripts.display_codebook import parse_codebook_to_json
-        from app.services import migrate_sqlite_file
-    except Exception as exc:
-        print("Failed", exc)
-        raise exc
+    from app.auth import decode_access_token
 
 
 def get_user_id_from_request(request: Request):
