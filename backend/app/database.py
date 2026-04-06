@@ -1,5 +1,7 @@
 import os
+import re
 from pathlib import Path
+from typing import AsyncGenerator, Any
 
 from sqlalchemy import (
     Column,
@@ -9,10 +11,14 @@ from sqlalchemy import (
     DateTime,
     Table,
     create_engine,
-    UUID,
 )
 from sqlalchemy.orm import relationship, sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from sqlalchemy.sql import func
 from dotenv import load_dotenv
 import uuid
@@ -35,9 +41,53 @@ if not DATABASE_URL:
     else:
         DATABASE_URL = f"postgresql://{pg_user}@{pg_host}:{pg_port}/{pg_db}"
 
-# Create SQLAlchemy engine and session factory
+
+def _sync_url_to_asyncpg(sync_url: str) -> tuple[str, dict[str, Any]]:
+    """Build a SQLAlchemy asyncpg URL from any sync Postgres URL.
+
+    asyncpg does not understand libpq ``sslmode=`` query parameters. If present,
+    they are stripped and mapped to connect_args['ssl'] when possible.
+    """
+    u = sync_url.strip()
+    u = re.sub(r"^postgresql\+[^:/]+://", "postgresql://", u, count=1)
+    if u.startswith("postgres://"):
+        u = "postgresql://" + u[len("postgres://") :]
+    if not u.startswith("postgresql://"):
+        u = "postgresql://" + u.split("://", 1)[-1]
+
+    connect_args: dict[str, Any] = {}
+    ssl_match = re.search(r"[?&]sslmode=([^&]*)", u, re.I)
+    if ssl_match:
+        mode = (ssl_match.group(1) or "").lower()
+        if mode in ("require", "verify-ca", "verify-full", "prefer", "allow"):
+            connect_args["ssl"] = True
+        elif mode == "disable":
+            connect_args["ssl"] = False
+        u = re.sub(r"[?&]sslmode=[^&]*", "", u)
+        u = re.sub(r"\?&", "?", u).rstrip("?&")
+
+    async_url = "postgresql+asyncpg://" + u[len("postgresql://") :]
+    return async_url, connect_args
+
+
+ASYNC_DATABASE_URL, _async_connect_args = _sync_url_to_asyncpg(DATABASE_URL)
+
+# Create SQLAlchemy engine and session factory (sync — scripts and incremental migration)
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+
+async_engine = create_async_engine(
+    ASYNC_DATABASE_URL,
+    pool_pre_ping=True,
+    connect_args=_async_connect_args,
+)
+AsyncSessionLocal = async_sessionmaker(
+    async_engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autoflush=False,
+    autocommit=False,
+)
 
 Base = declarative_base()
 
@@ -49,6 +99,16 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
+    """Async session for FastAPI; callers commit/rollback explicitly (matches get_db)."""
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise
 
 
 # Association table for many-to-many between projects and files
@@ -137,10 +197,3 @@ class Prompt(Base):
     type = Column(String)
 
     user = relationship("User", back_populates="prompts")
-
-
-try:
-    Base.metadata.create_all(bind=engine)
-except Exception as _err:
-    print("Warning: could not create DB tables:", _err)
- 

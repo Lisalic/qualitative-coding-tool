@@ -1,10 +1,11 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.utils import get_user_id_from_request, _hash_password, _verify_password
-from backend.app.database import get_db, User
+from backend.app.database import get_async_db, User
 from backend.app.auth import create_access_token
 from backend.app.config import settings
 
@@ -22,8 +23,9 @@ class LoginRequest(BaseModel):
 
 
 @router.post("/login/")
-def login(payload: LoginRequest, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == payload.email).first()
+async def login(payload: LoginRequest, db: AsyncSession = Depends(get_async_db)):
+    r = await db.execute(select(User).where(User.email == payload.email))
+    user = r.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
@@ -38,8 +40,9 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/register/")
-def register(payload: RegisterRequest, db: Session = Depends(get_db)):
-    existing = db.query(User).filter(User.email == payload.email).first()
+async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_async_db)):
+    r = await db.execute(select(User).where(User.email == payload.email))
+    existing = r.scalar_one_or_none()
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
 
@@ -48,10 +51,10 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
     user = User(email=payload.email, password=hashed)
     db.add(user)
     try:
-        db.commit()
-        db.refresh(user)
+        await db.commit()
+        await db.refresh(user)
     except Exception as exc:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(status_code=500, detail=str(exc))
 
     token = create_access_token({"sub": str(user.id), "email": user.email})
@@ -62,12 +65,13 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
 
 
 @router.get("/me/")
-def me(request: Request, db: Session = Depends(get_db)):
+async def me(request: Request, db: AsyncSession = Depends(get_async_db)):
     user_id = get_user_id_from_request(request)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    user = db.query(User).filter(User.id == user_id).first()
+    r = await db.execute(select(User).where(User.id == user_id))
+    user = r.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
 
@@ -75,7 +79,7 @@ def me(request: Request, db: Session = Depends(get_db)):
 
 
 @router.post("/logout/")
-def logout():
+async def logout():
     resp = JSONResponse({"message": "Logged out"})
     resp.set_cookie("access_token", "", httponly=True, samesite="lax", max_age=0)
     return resp
