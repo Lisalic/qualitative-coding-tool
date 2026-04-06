@@ -8,7 +8,7 @@ export default function ApplyCodebook() {
 
   return (
     <div className="home-container">
-      <div className="page-layout">
+      <div className="tool-page-layout">
         <div className="left-section">
           <ApplyCodebookPanel
             methodology={methodology}

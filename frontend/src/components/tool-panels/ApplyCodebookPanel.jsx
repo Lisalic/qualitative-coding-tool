@@ -277,16 +277,7 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
 
   return (
     <div className="file-upload">
-      <h1
-        style={{
-          textAlign: "center",
-          fontSize: "28px",
-          fontWeight: "600",
-          margin: "0 0 10px 0",
-        }}
-      >
-        Apply Codebook
-      </h1>
+      <h1 className="tool-page-title">Apply Codebook</h1>
 
       <div className="action-buttons">
         <button type="button" onClick={handleViewCoding} className="view-button">

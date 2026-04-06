@@ -93,8 +93,8 @@ export default function CompareCodebook() {
 
   return (
     <div className="home-container">
-      <div style={{ width: "100%", maxWidth: 1200, padding: 20 }}>
-        <h1 style={{ textAlign: "center", marginBottom: 24 }}>Compare Codebook</h1>
+      <div className="compare-page">
+        <h1 className="tool-page-title">Compare Codebook</h1>
 
         <form onSubmit={submitCompare}>
           <div className="compare-layout-row">
@@ -121,14 +121,9 @@ export default function CompareCodebook() {
 
           <div className="compare-actions-bar">
             <button
-              className="project-tab"
+              className="project-tab compare-submit-btn"
               type="submit"
               disabled={loading}
-              style={{
-                padding: "10px 28px",
-                fontSize: "16px",
-                borderWidth: 2,
-              }}
             >
               {loading ? "Comparing..." : "Compare"}
             </button>
@@ -136,9 +131,7 @@ export default function CompareCodebook() {
         </form>
 
         {error && (
-          <div className="alert alert--error" style={{ marginTop: 16 }}>
-            {error}
-          </div>
+          <div className="alert alert--error compare-page-alert">{error}</div>
         )}
 
         <CompareResultPanel

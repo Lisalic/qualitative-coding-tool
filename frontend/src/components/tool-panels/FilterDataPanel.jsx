@@ -237,16 +237,7 @@ export default function FilterDataPanel({
 
   return (
     <div className="file-upload">
-      <h1
-        style={{
-          textAlign: "center",
-          fontSize: "28px",
-          fontWeight: "600",
-          margin: "0 0 10px 0",
-        }}
-      >
-        Apply Filter
-      </h1>
+      <h1 className="tool-page-title">Apply Filter</h1>
       <div className="action-buttons">
         <button
           type="button"

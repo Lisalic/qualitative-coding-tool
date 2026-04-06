@@ -15,7 +15,7 @@ export default function Filter() {
             onFilterPromptChange={setFilterPrompt}
           />
         </div>
-        <div className="prompt-manager-section">
+        <div className="manager-section">
           <PromptManager
             onLoadPrompt={setFilterPrompt}
             currentPrompt={filterPrompt}

@@ -53,16 +53,9 @@ export default function CompareResultPanel({
   return (
     <div className="compare-layout-column compare-layout-column--results">
       <div className="compare-panel-card">
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: 12,
-          }}
-        >
+        <div className="compare-result-header">
           <h2 className="compare-panel-title">Comparison result</h2>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div className="compare-result-actions">
             <button
               type="button"
               className="project-tab"
@@ -86,8 +79,8 @@ export default function CompareResultPanel({
         </div>
 
         {projects.length > 0 && (
-          <div style={{ marginBottom: 8 }}>
-            <label style={{ color: "#ccc", marginRight: 8 }}>
+          <div className="compare-save-project-row">
+            <label className="compare-save-project-label">
               Save to project:
             </label>
             <select
@@ -105,7 +98,7 @@ export default function CompareResultPanel({
           </div>
         )}
         {saveMessage && (
-          <div style={{ marginBottom: 8, color: "#ccffcc" }}>{saveMessage}</div>
+          <div className="compare-save-message">{saveMessage}</div>
         )}
         <div className="comparison-output">
           <ReactMarkdown>{comparison}</ReactMarkdown>
