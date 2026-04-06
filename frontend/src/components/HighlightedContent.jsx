@@ -139,12 +139,13 @@ const HighlightedContent = ({ content, codeEvidence, getCodeColor }) => {
       const top = rect.top - containerRect.top;
       const height = rect.height;
 
+      const stripeStep = 5;
       codes.forEach((code, index) => {
         newLines.push({
           code,
           top,
           height,
-          left: index * 8,
+          left: index * stripeStep,
           color: getCodeColor(code),
         });
       });
@@ -256,13 +257,13 @@ const HighlightedContent = ({ content, codeEvidence, getCodeColor }) => {
         ref={containerRef}
         style={{ display: "flex", position: "relative" }}
       >
-        <div className="text-area" style={{ flex: 1, padding: "10px" }}>
+        <div className="text-area" style={{ flex: 1, padding: "8px 6px 8px 8px" }}>
           {elements}
         </div>
         <div
           className="coding-margin"
           ref={marginRef}
-          style={{ width: "60px", position: "relative", marginLeft: "10px" }}
+          style={{ width: "28px", position: "relative", marginLeft: "4px", flexShrink: 0 }}
         >
           {lines.map((line, idx) => (
             <div
@@ -270,7 +271,7 @@ const HighlightedContent = ({ content, codeEvidence, getCodeColor }) => {
               className="margin-line"
               style={{
                 position: "absolute",
-                width: "4px",
+                width: "3px",
                 height: `${line.height}px`,
                 top: `${line.top}px`,
                 left: `${line.left}px`,
