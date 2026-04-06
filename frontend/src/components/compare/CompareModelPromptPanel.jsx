@@ -32,14 +32,7 @@ export default function CompareModelPromptPanel({
         </div>
 
         <div className="compare-form-group">
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              marginBottom: 4,
-            }}
-          >
+          <div className="compare-prompt-label-row">
             <label className="compare-label">Prompt (optional)</label>
             <button
               className="project-tab prompt-example-btn"

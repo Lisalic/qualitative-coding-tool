@@ -688,8 +688,66 @@
 }
 
 /* ==========================================================================
-   Compare pages layout
+   Compare pages layout (Compare Coding & Compare Codebook — shared chrome)
    ========================================================================== */
+
+.compare-page {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+.compare-page .tool-page-title {
+  margin-bottom: 24px;
+}
+
+.compare-submit-btn {
+  padding: 10px 28px;
+  font-size: 16px;
+  border-width: 2px;
+}
+
+.compare-page-alert {
+  margin-top: 16px;
+}
+
+.compare-prompt-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.compare-result-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.compare-result-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.compare-save-project-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.compare-save-project-label {
+  color: #cccccc;
+}
+
+.compare-save-message {
+  margin-bottom: 8px;
+  color: #ccffcc;
+}
 
 .compare-layout-row {
   display: flex;
@@ -725,6 +783,8 @@
 .compare-panel-title {
   margin: 0;
   font-size: 1.1rem;
+  font-weight: 600;
+  color: #ffffff;
 }
 
 .compare-form-group {

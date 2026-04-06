@@ -42,7 +42,10 @@ function readStoredColumnVisibility() {
 }
 
 function normalizeColumnVisibility(raw) {
-  const merged = { ...DEFAULT_COLUMN_VISIBILITY, ...raw };
+  const merged = {
+    ...DEFAULT_COLUMN_VISIBILITY,
+    ...(raw && typeof raw === "object" ? raw : {}),
+  };
   const visibleCount = TABLE_COLUMNS.filter((c) => merged[c.id]).length;
   if (visibleCount === 0) return { ...DEFAULT_COLUMN_VISIBILITY };
   return merged;
