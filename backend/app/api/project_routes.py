@@ -1,12 +1,12 @@
 from fastapi import APIRouter, HTTPException, Depends, Request, Form, Query
 from fastapi.responses import JSONResponse
-from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import text, select
 import json
 
 from backend.app.api.utils import get_user_id_from_request
 from backend.app.database import get_db, Project, File, FileTable, FileDependency
-from backend.app.databasemanager import DatabaseManager
+from backend.app.databasemanager import AsyncDatabaseManager
 
 router = APIRouter()
 
@@ -113,26 +113,33 @@ def update_project(request: Request, project_id: int = Form(...), name: str = Fo
 
 
 @router.get("/projects/")
-def list_projects(request: Request):
+async def list_projects(request: Request):
     """List user's projects."""
     user_id = get_user_id_from_request(request)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    with DatabaseManager() as dm:
-        rows = dm.projects.get_all_for_user(user_id)
+    async with AsyncDatabaseManager() as dm:
+        stmt = (
+            select(Project)
+            .where(Project.user_id == user_id)
+            .options(selectinload(Project.files))
+        )
+        res = await dm.session.execute(stmt)
+        rows = res.scalars().unique().all()
         result = []
         for r in rows:
-            # Include associated files (databases) for each project
             files = []
             try:
                 for f in getattr(r, "files", []) or []:
-                    # Query parent files
                     parent_files = []
                     try:
-                        deps = dm.session.query(FileDependency).filter(FileDependency.child_file_id == f.id).all()
+                        deps_r = await dm.session.execute(
+                            select(FileDependency).where(FileDependency.child_file_id == f.id)
+                        )
+                        deps = deps_r.scalars().all()
                         for d in deps:
-                            parent_file = dm.session.query(File).filter(File.id == d.parent_file_id).first()
+                            parent_file = await dm.session.get(File, d.parent_file_id)
                             if parent_file:
                                 parent_files.append({
                                     "id": str(parent_file.id),

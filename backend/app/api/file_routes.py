@@ -1,4 +1,5 @@
 import os
+import asyncio
 import tempfile
 import traceback
 import json
@@ -7,12 +8,23 @@ from pathlib import Path
 from fastapi import APIRouter, File as FastAPIFile, HTTPException, UploadFile, Form, Query, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, select, or_
 import pandas as pd
 
 from backend.app.api.utils import get_user_id_from_request, get_database_metadata
-from backend.app.database import get_db, User, Prompt, Project, File, FileTable, FileDependency, engine, SessionLocal
-from backend.app.databasemanager import DatabaseManager
+from backend.app.database import (
+    get_db,
+    User,
+    Prompt,
+    Project,
+    File,
+    FileTable,
+    FileDependency,
+    engine,
+    AsyncSessionLocal,
+    async_engine,
+)
+from backend.app.databasemanager import AsyncDatabaseManager
 from backend.scripts.import_db import stream_zst_to_postgres
 
 router = APIRouter()
@@ -73,30 +85,31 @@ async def upload_zst_file(
     inserted_counts = {"submissions": 0, "comments": 0}
 
     try:
-        with DatabaseManager() as dm:
+        async with AsyncDatabaseManager() as dm:
             file_rec = File(user_id=user_id, filename=base_name, schemaname=schema_name, file_type="raw_data", description=(description or None))
             dm.session.add(file_rec)
             try:
-                dm.session.flush()
+                await dm.session.flush()
             except Exception:
-                dm.session.rollback()
+                await dm.session.rollback()
                 raise
             if project_id is not None:
                 try:
-                    proj = dm.session.query(Project).filter(Project.id == project_id).first()
+                    pr = await dm.session.execute(select(Project).where(Project.id == project_id))
+                    proj = pr.scalar_one_or_none()
                     if proj is None:
                         raise HTTPException(status_code=404, detail="Project not found")
                     if proj.user_id != user_id:
                         raise HTTPException(status_code=403, detail="Forbidden: project does not belong to user")
                     file_rec.projects.append(proj)
-                    dm.session.flush()
+                    await dm.session.flush()
                 except HTTPException:
                     raise
                 except Exception:
-                    dm.session.rollback()
-            with engine.begin() as conn:
-                conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
-                conn.execute(text(f'''
+                    await dm.session.rollback()
+            async with async_engine.begin() as conn:
+                await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
+                await conn.execute(text(f'''
                 CREATE TABLE IF NOT EXISTS "{schema_name}"."submissions" (
                     id TEXT PRIMARY KEY,
                     subreddit TEXT,
@@ -113,7 +126,7 @@ async def upload_zst_file(
                     ) STORED
                 )
                 '''))
-                conn.execute(text(f'''
+                await conn.execute(text(f'''
                 CREATE TABLE IF NOT EXISTS "{schema_name}"."comments" (
                     id TEXT PRIMARY KEY,
                     subreddit TEXT,
@@ -130,20 +143,26 @@ async def upload_zst_file(
                     ) STORED
                 )
                 '''))
-                # Add indexes on word_count
-                conn.execute(text(f'CREATE INDEX IF NOT EXISTS idx_{schema_name}_submissions_word_count ON "{schema_name}"."submissions" (word_count)'))
-                conn.execute(text(f'CREATE INDEX IF NOT EXISTS idx_{schema_name}_comments_word_count ON "{schema_name}"."comments" (word_count)'))
+                await conn.execute(text(f'CREATE INDEX IF NOT EXISTS idx_{schema_name}_submissions_word_count ON "{schema_name}"."submissions" (word_count)'))
+                await conn.execute(text(f'CREATE INDEX IF NOT EXISTS idx_{schema_name}_comments_word_count ON "{schema_name}"."comments" (word_count)'))
 
-            inserted_counts = stream_zst_to_postgres(tmp_path, schema_name, import_data_type, subreddit_filter=subreddit_list, batch_size=1000)
+            inserted_counts = await asyncio.to_thread(
+                stream_zst_to_postgres,
+                tmp_path,
+                schema_name,
+                import_data_type,
+                subreddit_list,
+                1000,
+            )
 
             if inserted_counts.get('submissions', 0) > 0:
-                dm.file_tables.add_table_metadata(
+                await dm.file_tables.add_table_metadata(
                     file_id=file_rec.id,
                     table_name='submissions',
                     row_count=inserted_counts.get('submissions', 0)
                 )
             if inserted_counts.get('comments', 0) > 0:
-                dm.file_tables.add_table_metadata(
+                await dm.file_tables.add_table_metadata(
                     file_id=file_rec.id,
                     table_name='comments',
                     row_count=inserted_counts.get('comments', 0)
@@ -207,27 +226,23 @@ async def merge_databases(request: Request):
     if not user_id:
         raise HTTPException(status_code=401, detail="Authentication required to merge databases")
 
-    db_check = SessionLocal()
-    try:
-        existing = db_check.query(File).filter(
-            File.user_id == user_id,
-        ).filter(
-            (File.filename == name) | (File.schemaname == name)
-        ).first()
+    async with AsyncSessionLocal() as db_check:
+        chk = await db_check.execute(
+            select(File).where(
+                File.user_id == user_id,
+                or_(File.filename == name, File.schemaname == name),
+            )
+        )
+        existing = chk.scalar_one_or_none()
         if existing:
             raise HTTPException(status_code=400, detail=f"A file with name '{name}' already exists")
-    finally:
-        try:
-            db_check.close()
-        except Exception:
-            pass
 
     unique_id = secrets.token_hex(6)
     schema_name = f"proj_{unique_id}"
 
     try:
-        with engine.begin() as conn:
-            conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
+        async with async_engine.begin() as conn:
+            await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
 
         total_rows = 0
         tables_written = {}
@@ -348,39 +363,42 @@ async def merge_databases(request: Request):
                 pass
             return JSONResponse({"message": "No rows found in selected databases; nothing migrated", "database": name, "total_submissions": 0, "total_comments": 0, "file_migrated": False})
 
-        with DatabaseManager() as dm:
+        async with AsyncDatabaseManager() as dm:
             file_rec = File(user_id=user_id, filename=name, schemaname=schema_name, file_type='raw_data', description=(description or None))
             dm.session.add(file_rec)
             try:
-                dm.session.flush()
+                await dm.session.flush()
             except Exception:
-                dm.session.rollback()
+                await dm.session.rollback()
                 raise
-            # Add dependencies for merged databases
             for schema in db_list:
-                parent_file = dm.session.query(File).filter(File.schemaname == schema, File.user_id == user_id).first()
+                pf = await dm.session.execute(
+                    select(File).where(File.schemaname == schema, File.user_id == user_id)
+                )
+                parent_file = pf.scalar_one_or_none()
                 if parent_file:
                     dep = FileDependency(child_file_id=file_rec.id, parent_file_id=parent_file.id)
                     dm.session.add(dep)
             try:
-                dm.session.flush()
+                await dm.session.flush()
             except Exception:
-                dm.session.rollback()
+                await dm.session.rollback()
             for tbl, cnt in final_table_counts.items():
-                dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name=tbl, row_count=cnt)
+                await dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name=tbl, row_count=cnt)
             if project_id is not None:
                 try:
-                    proj = dm.session.query(Project).filter(Project.id == project_id).first()
+                    pr = await dm.session.execute(select(Project).where(Project.id == project_id))
+                    proj = pr.scalar_one_or_none()
                     if proj is None:
                         raise HTTPException(status_code=404, detail="Project not found")
                     if proj.user_id != user_id:
                         raise HTTPException(status_code=403, detail="Forbidden: project does not belong to user")
                     file_rec.projects.append(proj)
-                    dm.session.flush()
+                    await dm.session.flush()
                 except HTTPException:
                     raise
                 except Exception:
-                    dm.session.rollback()
+                    await dm.session.rollback()
 
         return JSONResponse({
                 "message": f"Merged into file schema '{schema_name}'",
