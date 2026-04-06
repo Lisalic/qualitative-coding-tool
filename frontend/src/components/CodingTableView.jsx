@@ -1,4 +1,4 @@
-import React, { useMemo, useCallback } from "react";
+import React, { useMemo, useCallback, useState } from "react";
 import CodeLegend from "./CodeLegend";
 import HighlightedContent from "./HighlightedContent";
 import {
@@ -6,6 +6,50 @@ import {
   getFilteredCoding,
   getPostDataById,
 } from "../lib/codingUtils";
+
+const TABLE_COLUMN_STORAGE_KEY = "viewCoding.tableColumnVisibility";
+
+const TABLE_COLUMNS = [
+  { id: "postId", label: "Post ID" },
+  { id: "title", label: "Title" },
+  { id: "content", label: "Content" },
+  { id: "codesApplied", label: "Codes Applied" },
+];
+
+const DEFAULT_COLUMN_VISIBILITY = {
+  postId: false,
+  title: true,
+  content: true,
+  codesApplied: true,
+};
+
+function readStoredColumnVisibility() {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(TABLE_COLUMN_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const allowed = new Set(TABLE_COLUMNS.map((c) => c.id));
+    const next = { ...DEFAULT_COLUMN_VISIBILITY };
+    for (const [key, val] of Object.entries(parsed)) {
+      if (allowed.has(key) && typeof val === "boolean") next[key] = val;
+    }
+    return next;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeColumnVisibility(raw) {
+  const merged = {
+    ...DEFAULT_COLUMN_VISIBILITY,
+    ...(raw && typeof raw === "object" ? raw : {}),
+  };
+  const visibleCount = TABLE_COLUMNS.filter((c) => merged[c.id]).length;
+  if (visibleCount === 0) return { ...DEFAULT_COLUMN_VISIBILITY };
+  return merged;
+}
 
 // Component for the table view of coding data
 const CodingTableView = ({
@@ -179,6 +223,29 @@ const CodingTableView = ({
     [isEditMode, onParsedCodingChange, editableParsedCoding],
   );
 
+  const [columnVisibility, setColumnVisibility] = useState(() =>
+    normalizeColumnVisibility(readStoredColumnVisibility() || {}),
+  );
+
+  const visibleColumnCount = useMemo(
+    () => TABLE_COLUMNS.filter((c) => columnVisibility[c.id]).length,
+    [columnVisibility],
+  );
+
+  const toggleColumnVisibility = useCallback((columnId) => {
+    setColumnVisibility((prev) => {
+      const next = { ...prev, [columnId]: !prev[columnId] };
+      const count = TABLE_COLUMNS.filter((c) => next[c.id]).length;
+      if (count === 0) return prev;
+      try {
+        localStorage.setItem(TABLE_COLUMN_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // ignore quota / private mode
+      }
+      return next;
+    });
+  }, []);
+
   return (
     <div>
       {saveState?.status === "saving" && (
@@ -225,13 +292,50 @@ const CodingTableView = ({
         />
 
         <div className="table-wrapper">
+          <div
+            className="body-sm text-primary"
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              gap: "12px 16px",
+              marginBottom: "12px",
+            }}
+          >
+            <span style={{ fontWeight: 600 }}>Columns</span>
+            {TABLE_COLUMNS.map(({ id, label }) => (
+              <label
+                key={id}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  cursor:
+                    columnVisibility[id] && visibleColumnCount === 1
+                      ? "not-allowed"
+                      : "pointer",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={columnVisibility[id]}
+                  onChange={() => toggleColumnVisibility(id)}
+                  disabled={columnVisibility[id] && visibleColumnCount === 1}
+                />
+                {label}
+              </label>
+            ))}
+          </div>
           <table className="table">
             <thead>
               <tr>
-                <th className="table__th">Post ID</th>
-                <th className="table__th">Title</th>
-                <th className="table__th">Content</th>
-                <th className="table__th">Codes Applied</th>
+                {TABLE_COLUMNS.map(({ id, label }) =>
+                  columnVisibility[id] ? (
+                    <th key={id} className="table__th">
+                      {label}
+                    </th>
+                  ) : null,
+                )}
               </tr>
             </thead>
             <tbody>
@@ -277,154 +381,181 @@ const CodingTableView = ({
                   return (
                     <React.Fragment key={rowKey}>
                       <tr className="table__row--hover">
-                        <td
-                          className="table__td"
-                          style={{ verticalAlign: "top", maxWidth: "250px" }}
-                        >
-                          {isEditMode ? (
-                            <input
-                              type="text"
-                              className="form__input"
-                              value={editableItem?.postId || ""}
-                              onChange={(e) =>
-                                updateRowPostId(sourceIndex, e.target.value)
-                              }
-                              disabled={saveState?.status === "saving"}
-                            />
-                          ) : (
-                            item.postId
-                          )}
-                        </td>
-                        <td
-                          className="table__td"
-                          style={{ verticalAlign: "top", maxWidth: "125px" }}
-                        >
-                          <div
+                        {columnVisibility.postId && (
+                          <td
+                            className="table__td"
                             style={{
-                              whiteSpace: "pre-wrap",
-                              wordWrap: "break-word",
+                              verticalAlign: "top",
+                              maxWidth: "250px",
                             }}
                           >
-                            {postTitle}
-                          </div>
-                        </td>
-                        <td
-                          className="table__td"
-                          style={{ verticalAlign: "top", maxWidth: "400px" }}
-                        >
-                          <div
-                            style={{
-                              whiteSpace: "pre-wrap",
-                              wordWrap: "break-word",
-                            }}
-                          >
-                            {postContent ? (
-                              <div
-                                style={{
-                                  whiteSpace: "pre-wrap",
-                                  wordWrap: "break-word",
-                                }}
-                              >
-                                <HighlightedContent
-                                  content={postContent}
-                                  codeEvidence={readOnlyCodeEvidence}
-                                  getCodeColor={getCodeColor}
-                                />
-                              </div>
+                            {isEditMode ? (
+                              <input
+                                type="text"
+                                className="form__input"
+                                value={editableItem?.postId || ""}
+                                onChange={(e) =>
+                                  updateRowPostId(sourceIndex, e.target.value)
+                                }
+                                disabled={saveState?.status === "saving"}
+                              />
                             ) : (
-                              "Content not found"
+                              item.postId
                             )}
-                          </div>
-                        </td>
-                        <td
-                          className="table__td"
-                          style={{ verticalAlign: "top", maxWidth: "175px" }}
-                        >
-                          {isEditMode ? (
-                            <div>
-                              {editCodes.length > 0 ? (
-                                editCodes.map((code) => (
-                                  <div
-                                    key={`${rowKey}-edit-code-${code}`}
-                                    className="code-badge-container"
-                                  >
-                                    <div
-                                      className="code-badge"
-                                      style={{
-                                        backgroundColor: getCodeColor(code),
-                                      }}
-                                    >
-                                      {code}
-                                    </div>
-                                  </div>
-                                ))
+                          </td>
+                        )}
+                        {columnVisibility.title && (
+                          <td
+                            className="table__td"
+                            style={{
+                              verticalAlign: "top",
+                              maxWidth: "125px",
+                            }}
+                          >
+                            <div
+                              style={{
+                                whiteSpace: "pre-wrap",
+                                wordWrap: "break-word",
+                              }}
+                            >
+                              {postTitle}
+                            </div>
+                          </td>
+                        )}
+                        {columnVisibility.content && (
+                          <td
+                            className="table__td"
+                            style={{
+                              verticalAlign: "top",
+                              maxWidth: "400px",
+                            }}
+                          >
+                            <div
+                              style={{
+                                whiteSpace: "pre-wrap",
+                                wordWrap: "break-word",
+                              }}
+                            >
+                              {postContent ? (
+                                <div
+                                  style={{
+                                    whiteSpace: "pre-wrap",
+                                    wordWrap: "break-word",
+                                  }}
+                                >
+                                  <HighlightedContent
+                                    content={postContent}
+                                    codeEvidence={readOnlyCodeEvidence}
+                                    getCodeColor={getCodeColor}
+                                  />
+                                </div>
                               ) : (
-                                <span className="text-muted">
-                                  No codes configured
-                                </span>
+                                "Content not found"
                               )}
                             </div>
-                          ) : readOnlyCodeEvidence.length > 0 ? (
-                            <div>
-                              {[
-                                ...new Set(
-                                  readOnlyCodeEvidence.map(({ code }) => code),
-                                ),
-                              ].map((code) => {
-                                const notesForCode = notesByCode[code]
-                                  ? Array.from(notesByCode[code])
-                                  : [];
-
-                                return (
-                                  <div
-                                    key={code}
-                                    className="code-badge-container"
-                                  >
+                          </td>
+                        )}
+                        {columnVisibility.codesApplied && (
+                          <td
+                            className="table__td"
+                            style={{
+                              verticalAlign: "top",
+                              maxWidth: "175px",
+                            }}
+                          >
+                            {isEditMode ? (
+                              <div>
+                                {editCodes.length > 0 ? (
+                                  editCodes.map((code) => (
                                     <div
-                                      className="code-badge"
-                                      data-has-notes={
-                                        notesForCode.length > 0
-                                          ? "true"
-                                          : "false"
-                                      }
-                                      style={{
-                                        backgroundColor: getCodeColor(code),
-                                      }}
+                                      key={`${rowKey}-edit-code-${code}`}
+                                      className="code-badge-container"
                                     >
-                                      {code}
-                                    </div>
-
-                                    {notesForCode.length > 0 && (
                                       <div
-                                        className="code-notes-tooltip"
-                                        role="tooltip"
+                                        className="code-badge"
+                                        style={{
+                                          backgroundColor: getCodeColor(code),
+                                        }}
                                       >
-                                        <div className="code-notes-tooltip__title">
-                                          Researcher Notes
-                                        </div>
-                                        {notesForCode.map((note, idx) => (
-                                          <div
-                                            key={`${code}-note-${idx}`}
-                                            className="code-notes-tooltip__line"
-                                          >
-                                            {note}
-                                          </div>
-                                        ))}
+                                        {code}
                                       </div>
-                                    )}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          ) : (
-                            <span className="text-muted">No codes applied</span>
-                          )}
-                        </td>
+                                    </div>
+                                  ))
+                                ) : (
+                                  <span className="text-muted">
+                                    No codes configured
+                                  </span>
+                                )}
+                              </div>
+                            ) : readOnlyCodeEvidence.length > 0 ? (
+                              <div>
+                                {[
+                                  ...new Set(
+                                    readOnlyCodeEvidence.map(
+                                      ({ code }) => code,
+                                    ),
+                                  ),
+                                ].map((code) => {
+                                  const notesForCode = notesByCode[code]
+                                    ? Array.from(notesByCode[code])
+                                    : [];
+
+                                  return (
+                                    <div
+                                      key={code}
+                                      className="code-badge-container"
+                                    >
+                                      <div
+                                        className="code-badge"
+                                        data-has-notes={
+                                          notesForCode.length > 0
+                                            ? "true"
+                                            : "false"
+                                        }
+                                        style={{
+                                          backgroundColor: getCodeColor(code),
+                                        }}
+                                      >
+                                        {code}
+                                      </div>
+
+                                      {notesForCode.length > 0 && (
+                                        <div
+                                          className="code-notes-tooltip"
+                                          role="tooltip"
+                                        >
+                                          <div className="code-notes-tooltip__title">
+                                            Researcher Notes
+                                          </div>
+                                          {notesForCode.map((note, idx) => (
+                                            <div
+                                              key={`${code}-note-${idx}`}
+                                              className="code-notes-tooltip__line"
+                                            >
+                                              {note}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <span className="text-muted">
+                                No codes applied
+                              </span>
+                            )}
+                          </td>
+                        )}
                       </tr>
 
                       {isEditMode && (
                         <tr>
-                          <td className="table__td" colSpan={4}>
+                          <td
+                            className="table__td"
+                            colSpan={visibleColumnCount}
+                          >
                             <div
                               style={{
                                 border: "1px solid rgba(255, 255, 255, 0.15)",
@@ -433,6 +564,26 @@ const CodingTableView = ({
                                 backgroundColor: "rgba(255, 255, 255, 0.03)",
                               }}
                             >
+                              {!columnVisibility.postId && (
+                                <div
+                                  className="form__group"
+                                  style={{ marginBottom: "12px" }}
+                                >
+                                  <label className="form__label">Post ID</label>
+                                  <input
+                                    type="text"
+                                    className="form__input"
+                                    value={editableItem?.postId || ""}
+                                    onChange={(e) =>
+                                      updateRowPostId(
+                                        sourceIndex,
+                                        e.target.value,
+                                      )
+                                    }
+                                    disabled={saveState?.status === "saving"}
+                                  />
+                                </div>
+                              )}
                               <div
                                 className="form__helper"
                                 style={{ marginTop: 0 }}
