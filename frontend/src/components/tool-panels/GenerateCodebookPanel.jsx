@@ -7,7 +7,6 @@ import SamplePercentageSlider from "../forms/SamplePercentageSlider";
 import PromptTextareaWithActions from "../forms/PromptTextareaWithActions";
 import { AI_MODELS } from "../../lib/constants";
 import "../../styles/Home.css";
-import "../../styles/Data.css";
 
 const EXAMPLE_PROMPT = `You are a codebook generator. Read representative dataset excerpts and propose a concise codebook of [topic]. Keep entries concise and focused; do not add unrelated commentary.
 Research Context: These are excerpts from [e.g., reddit stories about bullying]. Specific Focus: Please generate codes specifically related to [e.g., retrospective bullying experiences.]`;
@@ -211,16 +210,7 @@ export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
 
   return (
     <div className="file-upload">
-      <h1
-        style={{
-          textAlign: "center",
-          fontSize: "28px",
-          fontWeight: "600",
-          margin: "0 0 10px 0",
-        }}
-      >
-        Generate Codebook
-      </h1>
+      <h1 className="tool-page-title">Generate Codebook</h1>
 
       <div className="action-buttons">
         <button type="button" onClick={handleViewCodebook} className="view-button">

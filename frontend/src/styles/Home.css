@@ -164,6 +164,39 @@
   line-height: 1.5;
 }
 
+/* Two-column tool pages: Filter, Generate Codebook, Apply Codebook */
+.tool-page-layout .manager-section {
+  min-width: 0;
+}
+
+.tool-page-layout .manager-section .prompt-manager {
+  flex: 1;
+  margin: 0;
+  border: 2px solid #ffffff;
+  border-radius: 8px;
+  background-color: #000000;
+  padding: 20px;
+}
+
+.tool-page-layout .left-section > .file-upload {
+  background-color: #000000;
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 2rem;
+  font-size: 1rem;
+  flex-shrink: 0;
+  border: 2px solid #ffffff;
+  box-shadow: 0 4px 6px rgba(255, 255, 255, 0.1);
+}
+
+.tool-page-title {
+  text-align: center;
+  font-size: 28px;
+  font-weight: 600;
+  margin: 0 0 10px 0;
+  color: #ffffff;
+}
+
 .action-form .form-group {
   display: flex;
   flex-direction: column;
@@ -990,29 +1023,13 @@ input[type="radio"]:disabled + .radio-label {
   padding: 0;
 }
 
-.prompt-manager-section {
-  /* Take ~25% of available width */
-  flex: 1;
-  min-width: 0;
-}
-
-.prompt-manager-section .prompt-manager {
-  flex: 1;
-  margin: 0;
-  border: 2px solid #ffffff;
-  border-radius: 8px;
-  background-color: #000000;
-  padding: 20px;
-}
-
 @media (max-width: 1024px) {
   .filter-layout {
     flex-direction: column;
     gap: 20px;
   }
 
-  .filter-section,
-  .prompt-manager-section {
+  .filter-section {
     flex: none;
   }
 }
