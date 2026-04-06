@@ -283,13 +283,24 @@ const CodingTableView = ({
           alignItems: "start",
         }}
       >
-        <CodeLegend
-          codes={uniqueCodes}
-          codebookTree={codebookTree}
-          selectedFilterCodes={selectedFilterCodes}
-          onCodeToggle={handleCodeToggle}
-          getCodeColor={getCodeColor}
-        />
+        <div
+          style={{
+            position: "sticky",
+            top: "80px",
+            alignSelf: "start",
+            zIndex: 2,
+            maxHeight: "calc(100vh - 96px)",
+            overflowY: "auto",
+          }}
+        >
+          <CodeLegend
+            codes={uniqueCodes}
+            codebookTree={codebookTree}
+            selectedFilterCodes={selectedFilterCodes}
+            onCodeToggle={handleCodeToggle}
+            getCodeColor={getCodeColor}
+          />
+        </div>
 
         <div className="table-wrapper">
           <div
