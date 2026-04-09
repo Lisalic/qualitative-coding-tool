@@ -2,6 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { useState, useEffect, useCallback } from "react";
 import { apiFetch } from "../../api";
 import FormShell from "../forms/FormShell";
+import DatabaseSourceFields from "../forms/DatabaseSourceFields";
 import PromptTextareaWithActions from "../forms/PromptTextareaWithActions";
 import MinWordsField from "../forms/MinWordsField";
 import SamplePercentageSlider from "../forms/SamplePercentageSlider";
@@ -20,7 +21,9 @@ export default function FilterDataPanel({
   const [saveMessageType, setSaveMessageType] = useState("success");
   const [loading, setLoading] = useState(false);
   const [database, setDatabase] = useState("");
+  const [databaseType, setDatabaseType] = useState("unfiltered");
   const [databases, setDatabases] = useState([]);
+  const [filteredDatabases, setFilteredDatabases] = useState([]);
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
   const [name, setName] = useState("");
@@ -36,6 +39,7 @@ export default function FilterDataPanel({
 
   useEffect(() => {
     fetchDatabases();
+    fetchFilteredDatabases();
   }, []);
 
   useEffect(() => {
@@ -116,6 +120,39 @@ export default function FilterDataPanel({
     } catch (err) {
       console.error("Error fetching databases:", err);
     }
+  };
+
+  const fetchFilteredDatabases = async () => {
+    try {
+      const projResp = await apiFetch("/api/my-files/?file_type=filtered_data");
+      if (projResp.ok) {
+        const projData = await projResp.json();
+        const projectsList = projData.projects || [];
+        const projectOptions = projectsList.map((p) => ({
+          value: p.schema_name,
+          label: p.display_name || p.schema_name,
+          meta: p,
+        }));
+        setFilteredDatabases(projectOptions);
+        return;
+      }
+
+      setFilteredDatabases([]);
+    } catch (err) {
+      console.error("Error fetching filtered databases:", err);
+    }
+  };
+
+  const getAvailableDatabases = () => {
+    if (databaseType === "filtered") {
+      return filteredDatabases;
+    }
+    return databases;
+  };
+
+  const handleDatabaseTypeChange = (type) => {
+    setDatabaseType(type);
+    setDatabase("");
   };
 
   const validateForm = () => {
@@ -245,6 +282,16 @@ export default function FilterDataPanel({
   const counts = getCurrentCounts();
   const minWordsCaption = `${counts.submissions + counts.comments} records match (${counts.submissions} submissions, ${counts.comments} comments)`;
 
+  const databaseOptions = getAvailableDatabases().map((item) => ({
+    value: item.value || item,
+    label: item.label || String(item.value || item),
+  }));
+
+  const projectOptions = (projects || []).map((p) => ({
+    value: String(p.id),
+    label: p.projectname,
+  }));
+
   return (
     <div className="file-upload">
       <h1 className="tool-page-title">Apply Filter</h1>
@@ -269,49 +316,19 @@ export default function FilterDataPanel({
         result={message && message.startsWith("✓") ? message : null}
         resultTitle="Filter Result"
       >
-        <div className="form-group">
-          <label htmlFor="database">Select Database</label>
-          <select
-            id="database"
-            value={database}
-            onChange={(e) => setDatabase(e.target.value)}
-            className="form-input"
-            disabled={loading}
-          >
-            {!database && (
-              <option value="" disabled>
-                Select a database
-              </option>
-            )}
-            {databases.map((d) => (
-              <option key={d.value} value={d.value}>
-                {d.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="form-group">
-          <label htmlFor="project_id">Select Project</label>
-          <select
-            id="project_id"
-            value={selectedProject}
-            onChange={(e) => setSelectedProject(e.target.value)}
-            className="form-input"
-            disabled={loading}
-          >
-            {!selectedProject && (
-              <option value="" disabled>
-                Select a project
-              </option>
-            )}
-            {projects.map((p) => (
-              <option key={p.id} value={String(p.id)}>
-                {p.projectname}
-              </option>
-            ))}
-          </select>
-        </div>
+        <DatabaseSourceFields
+          radioName="filter-database-type"
+          databaseType={databaseType}
+          onDatabaseTypeChange={handleDatabaseTypeChange}
+          database={database}
+          onDatabaseChange={setDatabase}
+          databaseOptions={databaseOptions}
+          databasePlaceholder="Select a database"
+          selectedProject={selectedProject}
+          onProjectChange={setSelectedProject}
+          projectOptions={projectOptions}
+          disabled={loading}
+        />
 
         <div className="form-group">
           <label htmlFor="name">Filtered Database Name</label>
