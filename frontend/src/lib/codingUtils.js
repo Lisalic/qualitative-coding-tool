@@ -29,6 +29,56 @@ export const normalizeEvidenceText = (value) =>
     .replace(/^['"]|['"]$/g, "")
     .trim();
 
+/** Deep clone codebook tree (family_name, content, codes[].code_name, codes[].content). */
+export const cloneCodebookTree = (tree) => {
+  if (!Array.isArray(tree)) return [];
+  return tree.map((family) => ({
+    family_name:
+      typeof family?.family_name === "string" ? family.family_name : "",
+    content: typeof family?.content === "string" ? family.content : "",
+    codes: (Array.isArray(family?.codes) ? family.codes : []).map((code) => ({
+      code_name: typeof code?.code_name === "string" ? code.code_name : "",
+      content: typeof code?.content === "string" ? code.content : "",
+    })),
+  }));
+};
+
+/**
+ * Serialize tree to markdown matching backend/scripts/display_codebook.py parse_codebook_to_json input.
+ */
+export const serializeCodebookTreeToText = (tree) => {
+  if (!Array.isArray(tree) || tree.length === 0) return "";
+
+  const lines = [];
+  for (const family of tree) {
+    const fname = String(family?.family_name ?? "").trim() || "Unnamed family";
+    lines.push(`### Code Family: ${fname}`);
+
+    const fc = String(family?.content ?? "").trimEnd();
+    if (fc) {
+      for (const part of fc.split("\n")) {
+        lines.push(part);
+      }
+    }
+
+    const codes = Array.isArray(family?.codes) ? family.codes : [];
+    for (const code of codes) {
+      const cname = String(code?.code_name ?? "").trim();
+      lines.push(`#### Code Name: ${cname}`);
+      const cc = String(code?.content ?? "").trimEnd();
+      if (cc) {
+        for (const part of cc.split("\n")) {
+          lines.push(part);
+        }
+      }
+    }
+
+    lines.push("");
+  }
+
+  return lines.join("\n").trim();
+};
+
 const preprocessCodingLines = (content) => {
   if (typeof content !== "string") return [];
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useLocation } from "react-router-dom";
 import { apiFetch } from "../api";
 import SelectionList from "../components/SelectionList";
@@ -10,6 +10,8 @@ import {
   getCodeColor,
   formatCodingData,
   parseCodingData,
+  cloneCodebookTree,
+  serializeCodebookTreeToText,
 } from "../lib/codingUtils";
 
 const cloneParsedCodingRows = (rows = []) =>
@@ -144,6 +146,7 @@ export default function ViewCoding() {
   });
   const [isTableEditMode, setIsTableEditMode] = useState(false);
   const [tableDraftParsedCoding, setTableDraftParsedCoding] = useState([]);
+  const [tableDraftCodebookTree, setTableDraftCodebookTree] = useState([]);
   const [tableEditName, setTableEditName] = useState("");
 
   const fetchAvailableCodedData = async () => {
@@ -281,6 +284,7 @@ export default function ViewCoding() {
     setParsedCoding([]);
     setIsTableEditMode(false);
     setTableDraftParsedCoding([]);
+    setTableDraftCodebookTree([]);
     setTableEditName("");
     setPostContents({});
     setSelectedFilterCodes([]);
@@ -297,6 +301,7 @@ export default function ViewCoding() {
     if (!isTableEditMode) return;
     setIsTableEditMode(false);
     setTableDraftParsedCoding([]);
+    setTableDraftCodebookTree([]);
     setTableEditName(selectedCodedDataName || "");
     setTableSaveState({ status: "idle", message: "" });
   }, [viewMode, isTableEditMode, selectedCodedDataName]);
@@ -412,6 +417,7 @@ export default function ViewCoding() {
 
   const beginTableEditMode = () => {
     setTableDraftParsedCoding(cloneParsedCodingRows(parsedCoding));
+    setTableDraftCodebookTree(cloneCodebookTree(codebookTree));
     setTableEditName(selectedCodedDataName || selectedCodedData || "");
     setTableSaveState({ status: "idle", message: "" });
     setIsTableEditMode(true);
@@ -420,9 +426,27 @@ export default function ViewCoding() {
   const cancelTableEditMode = () => {
     setIsTableEditMode(false);
     setTableDraftParsedCoding([]);
+    setTableDraftCodebookTree([]);
     setTableEditName(selectedCodedDataName || "");
     setTableSaveState({ status: "idle", message: "" });
   };
+
+  const propagateCodingRowCodeRename = useCallback((oldName, newName) => {
+    if (!oldName || !newName || oldName === newName) return;
+    setTableDraftParsedCoding((rows) =>
+      (Array.isArray(rows) ? rows : []).map((row) => ({
+        ...row,
+        codeEvidence: (Array.isArray(row?.codeEvidence)
+          ? row.codeEvidence
+          : []
+        ).map((entry) =>
+          String(entry?.code || "").trim() === oldName
+            ? { ...entry, code: newName }
+            : entry,
+        ),
+      })),
+    );
+  }, []);
 
   const prepareTableSavePayload = () => {
     const trimmedName = String(tableEditName || "").trim();
@@ -440,11 +464,16 @@ export default function ViewCoding() {
       return { ok: false, error: "Cannot save an empty coding table." };
     }
 
+    const codebookText = serializeCodebookTreeToText(
+      Array.isArray(tableDraftCodebookTree) ? tableDraftCodebookTree : [],
+    );
+
     return {
       ok: true,
       name: trimmedName,
       rows: normalizeResult.rows,
       formattedContent,
+      codebookText,
     };
   };
 
@@ -474,6 +503,7 @@ export default function ViewCoding() {
       formData.append("schema_name", schemaName);
       formData.append("content", payload.formattedContent);
       formData.append("display_name", payload.name);
+      formData.append("codebook_text", payload.codebookText ?? "");
 
       const response = await apiFetch("/api/save-file-coded-data/", {
         method: "POST",
@@ -491,9 +521,11 @@ export default function ViewCoding() {
 
       setCodedDataContent(payload.formattedContent);
       setParsedCoding(payload.rows);
+      setCodebookTree(cloneCodebookTree(tableDraftCodebookTree));
       setSelectedCodedDataName(payload.name);
       setIsTableEditMode(false);
       setTableDraftParsedCoding([]);
+      setTableDraftCodebookTree([]);
       setTableEditName(payload.name);
       setTableSaveState({
         status: "success",
@@ -533,6 +565,7 @@ export default function ViewCoding() {
       formData.append("source_schema_name", schemaName);
       formData.append("content", payload.formattedContent);
       formData.append("display_name", payload.name);
+      formData.append("codebook_text", payload.codebookText ?? "");
 
       const response = await apiFetch("/api/save-file-coded-data-duplicate/", {
         method: "POST",
@@ -555,14 +588,25 @@ export default function ViewCoding() {
         responsePayload = null;
       }
 
+      const savedCodebookTree = cloneCodebookTree(tableDraftCodebookTree);
       setIsTableEditMode(false);
       setTableDraftParsedCoding([]);
+      setTableDraftCodebookTree([]);
       setTableEditName(selectedCodedDataName || "");
       setTableSaveState({
         status: "success",
         message: `Saved and duplicated as ${responsePayload?.filename || payload.name}.`,
       });
       fetchAvailableCodedData();
+      if (responsePayload?.schema_name) {
+        setSelectedCodedData(responsePayload.schema_name);
+        setSelectedCodedDataName(
+          responsePayload.filename || payload.name || "",
+        );
+        setCodedDataContent(payload.formattedContent);
+        setParsedCoding(payload.rows);
+        setCodebookTree(savedCodebookTree);
+      }
     } catch (error) {
       const message =
         error?.message || "Failed to save and duplicate coding data.";
@@ -700,6 +744,9 @@ export default function ViewCoding() {
                   isEditMode={isTableEditMode}
                   onParsedCodingChange={setTableDraftParsedCoding}
                   codebookTree={codebookTree}
+                  editableCodebookTree={tableDraftCodebookTree}
+                  onEditableCodebookTreeChange={setTableDraftCodebookTree}
+                  onCodingRowCodeRename={propagateCodingRowCodeRename}
                   postContents={postContents}
                   selectedFilterCodes={selectedFilterCodes}
                   setSelectedFilterCodes={setSelectedFilterCodes}

@@ -186,6 +186,22 @@ def _load_codebook_snapshot(schema: str | None) -> tuple[bool, str]:
         return True, (row[0] if row else "") or ""
 
 
+async def _upsert_codebook_text_async(conn, schema: str, codebook_text: str) -> None:
+    """Create codebook table if needed and replace its single row."""
+    await conn.execute(
+        text(
+            f'CREATE TABLE IF NOT EXISTS "{schema}".codebook (codebook_text text)'
+        )
+    )
+    await conn.execute(text(f'TRUNCATE TABLE "{schema}".codebook'))
+    await conn.execute(
+        text(
+            f'INSERT INTO "{schema}".codebook (codebook_text) VALUES (:codebook_text)'
+        ),
+        {"codebook_text": codebook_text or ""},
+    )
+
+
 def _generate_unique_schema_name(prefix: str = "proj") -> str:
     for _ in range(12):
         candidate = f"{prefix}_{secrets.token_hex(6)}"
@@ -262,6 +278,9 @@ async def save_project_coded_data(request: Request, schema_name: str = Form(None
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
+    codebook_text_provided = False
+    codebook_text_value = ""
+
     # Support JSON body as well as form-data
     try:
         ctype = (request.headers.get("content-type") or "").lower()
@@ -270,6 +289,10 @@ async def save_project_coded_data(request: Request, schema_name: str = Form(None
             schema_name = body.get("schema_name")
             content = body.get("content")
             display_name = body.get("display_name")
+            if isinstance(body, dict) and "codebook_text" in body:
+                codebook_text_provided = True
+                raw_cb = body.get("codebook_text")
+                codebook_text_value = "" if raw_cb is None else str(raw_cb)
         else:
             form = await request.form()
             if schema_name is None:
@@ -277,6 +300,10 @@ async def save_project_coded_data(request: Request, schema_name: str = Form(None
             if content is None:
                 content = form.get("content")
             display_name = form.get("display_name") if "display_name" in form else None
+            if "codebook_text" in form:
+                codebook_text_provided = True
+                raw_cb = form.get("codebook_text")
+                codebook_text_value = "" if raw_cb is None else str(raw_cb)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid request body")
 
@@ -284,7 +311,15 @@ async def save_project_coded_data(request: Request, schema_name: str = Form(None
         raise HTTPException(status_code=400, detail="schema_name and content are required")
 
     schema = schema_name.strip()
-    file_rec = db.query(File).filter(File.schemaname == schema, File.user_id == user_id, File.file_type == 'coding').first()
+    file_rec = (
+        db.query(File)
+        .filter(
+            File.schemaname == schema,
+            File.user_id == user_id,
+            File.file_type.in_(["coding", "coding_comparison"]),
+        )
+        .first()
+    )
     if not file_rec:
         raise HTTPException(status_code=404, detail="File/project not found or you do not have permission")
 
@@ -294,6 +329,9 @@ async def save_project_coded_data(request: Request, schema_name: str = Form(None
             await conn.execute(text(f'CREATE TABLE IF NOT EXISTS "{schema}".content_store (file_text text)'))
             await conn.execute(text(f'TRUNCATE TABLE "{schema}".content_store'))
             await conn.execute(text(f'INSERT INTO "{schema}".content_store (file_text) VALUES (:file_text)'), {"file_text": content})
+
+            if codebook_text_provided:
+                await _upsert_codebook_text_async(conn, schema, codebook_text_value)
 
         if display_name:
             file_rec.filename = display_name
@@ -323,6 +361,9 @@ async def save_project_coded_data_duplicate(
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
+    codebook_text_provided = False
+    codebook_text_value = ""
+
     try:
         ctype = (request.headers.get("content-type") or "").lower()
         if "application/json" in ctype:
@@ -330,6 +371,10 @@ async def save_project_coded_data_duplicate(
             source_schema_name = body.get("source_schema_name")
             content = body.get("content")
             display_name = body.get("display_name")
+            if isinstance(body, dict) and "codebook_text" in body:
+                codebook_text_provided = True
+                raw_cb = body.get("codebook_text")
+                codebook_text_value = "" if raw_cb is None else str(raw_cb)
         else:
             form = await request.form()
             if source_schema_name is None:
@@ -338,6 +383,10 @@ async def save_project_coded_data_duplicate(
                 content = form.get("content")
             if display_name is None:
                 display_name = form.get("display_name")
+            if "codebook_text" in form:
+                codebook_text_provided = True
+                raw_cb = form.get("codebook_text")
+                codebook_text_value = "" if raw_cb is None else str(raw_cb)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid request body")
 
@@ -371,14 +420,22 @@ async def save_project_coded_data_duplicate(
         )
 
     try:
-        source_codebook_exists, copied_codebook_text = _load_codebook_snapshot(
-            source_schema
-        )
+        source_codebook_exists, copied_codebook_text = (False, "")
+        if not codebook_text_provided:
+            source_codebook_exists, copied_codebook_text = _load_codebook_snapshot(
+                source_schema
+            )
+
         new_schema = _generate_unique_schema_name("proj")
         source_file_type = source_file.file_type or "coding"
         source_system_prompt = source_file.systemprompt
         source_user_prompt = source_file.userprompt
         source_file_id = source_file.id
+
+        write_codebook = codebook_text_provided or source_codebook_exists
+        codebook_payload = (
+            codebook_text_value if codebook_text_provided else copied_codebook_text
+        )
 
         async with async_engine.begin() as conn:
             await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{new_schema}"'))
@@ -395,19 +452,8 @@ async def save_project_coded_data_duplicate(
                 {"file_text": content},
             )
 
-            if source_codebook_exists:
-                await conn.execute(
-                    text(
-                        f'CREATE TABLE IF NOT EXISTS "{new_schema}".codebook (codebook_text text)'
-                    )
-                )
-                await conn.execute(text(f'TRUNCATE TABLE "{new_schema}".codebook'))
-                await conn.execute(
-                    text(
-                        f'INSERT INTO "{new_schema}".codebook (codebook_text) VALUES (:codebook_text)'
-                    ),
-                    {"codebook_text": copied_codebook_text},
-                )
+            if write_codebook:
+                await _upsert_codebook_text_async(conn, new_schema, codebook_payload)
 
         async with AsyncDatabaseManager() as dm:
             file_rec = File(
@@ -476,7 +522,7 @@ async def save_project_coded_data_duplicate(
                 table_name="content_store",
                 row_count=1,
             )
-            if source_codebook_exists:
+            if write_codebook:
                 await dm.file_tables.add_table_metadata(
                     file_id=file_rec.id,
                     table_name="codebook",

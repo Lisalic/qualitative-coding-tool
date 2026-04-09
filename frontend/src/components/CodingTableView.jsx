@@ -58,6 +58,9 @@ const CodingTableView = ({
   isEditMode,
   onParsedCodingChange,
   codebookTree,
+  editableCodebookTree,
+  onEditableCodebookTreeChange,
+  onCodingRowCodeRename,
   postContents,
   selectedFilterCodes,
   setSelectedFilterCodes,
@@ -78,11 +81,16 @@ const CodingTableView = ({
     [parsedCoding],
   );
 
+  const effectiveCodebookTree =
+    isEditMode && Array.isArray(editableCodebookTree)
+      ? editableCodebookTree
+      : codebookTree;
+
   const codebookCodes = useMemo(() => {
-    if (!Array.isArray(codebookTree)) return [];
+    if (!Array.isArray(effectiveCodebookTree)) return [];
 
     const codes = [];
-    codebookTree.forEach((family) => {
+    effectiveCodebookTree.forEach((family) => {
       const familyCodes = Array.isArray(family?.codes) ? family.codes : [];
       familyCodes.forEach((entry) => {
         if (typeof entry === "string" && entry.trim()) {
@@ -96,7 +104,7 @@ const CodingTableView = ({
     });
 
     return Array.from(new Set(codes)).sort((a, b) => a.localeCompare(b));
-  }, [codebookTree]);
+  }, [effectiveCodebookTree]);
 
   const codeFieldOptions = useMemo(
     () =>
@@ -294,8 +302,12 @@ const CodingTableView = ({
           }}
         >
           <CodeLegend
-            codes={uniqueCodes}
             codebookTree={codebookTree}
+            isEditMode={isEditMode}
+            draftTree={editableCodebookTree}
+            onDraftTreeChange={onEditableCodebookTreeChange}
+            disabled={saveState?.status === "saving"}
+            onCodingRowCodeRename={onCodingRowCodeRename}
             selectedFilterCodes={selectedFilterCodes}
             onCodeToggle={handleCodeToggle}
             getCodeColor={getCodeColor}
