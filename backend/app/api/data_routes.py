@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import text, select as sa_select
 import json
+import math
 import re
 import secrets
 import traceback
@@ -278,26 +279,29 @@ async def filter_data(
     model: str = Form(""),
     project_id: str = Form(None),
     description: Optional[str] = Form(None),
-    min_words: int = Form(0)
+    min_words: int = Form(0),
+    sample_percentage: float = Form(100.0),
 ):
     """
     Filter posts/comments using AI and save results to a new database schema.
     
     Flow:
-    1. Fetch submissions/comments from source schema (filtered by min_words)
+    1. Fetch submissions/comments from source schema (filtered by min_words, then random sample per table)
     2. Send content to AI for filtering based on prompt
     3. Create new schema with filtered results
     4. Register file metadata for authenticated users
     """
     schema = (database or "").strip()
     filter_prompt = (prompt or "").strip()
-    
+    pct = max(1.0, min(100.0, float(sample_percentage)))
+
     _log("START", "Filter request received", {
         "schema": schema,
         "name": name,
         "model": model,
         "prompt_chars": len(filter_prompt),
-        "min_words": min_words
+        "min_words": min_words,
+        "sample_percentage": pct,
     })
 
     # Validation
@@ -310,42 +314,76 @@ async def filter_data(
         return JSONResponse({"error": "This endpoint expects a proj_<id> schema name in 'database'"}, status_code=400)
 
     try:
-        # ===== STEP 1: Fetch source data =====
+        # ===== STEP 1: Fetch source data (min_words filter, then random sample per table) =====
         submissions_text = ""
         comments_text = ""
         submission_count = 0
         comment_count = 0
-        
+        subs_eligible = 0
+        comm_eligible = 0
+
         with engine.connect() as conn:
             # Check table existence
             subs_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": f"{schema}.submissions"}).scalar()
             comm_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": f"{schema}.comments"}).scalar()
-            
+
             # Fetch submissions
             if subs_exists:
                 wc_expr = _word_count_expr(["title", "selftext"])
-                rows = conn.execute(
-                    text(f'SELECT id, title, selftext FROM "{schema}"."submissions" WHERE {wc_expr} >= :mw'),
-                    {"mw": min_words}
-                ).fetchall()
+                subs_eligible = int(
+                    conn.execute(
+                        text(
+                            f'SELECT COUNT(*) FROM "{schema}"."submissions" WHERE {wc_expr} >= :mw'
+                        ),
+                        {"mw": min_words},
+                    ).scalar()
+                    or 0
+                )
+                subs_limit = math.ceil((subs_eligible * pct) / 100.0)
+                rows = []
+                if subs_limit > 0:
+                    rows = conn.execute(
+                        text(
+                            f'SELECT id, title, selftext FROM "{schema}"."submissions" '
+                            f"WHERE {wc_expr} >= :mw ORDER BY RANDOM() LIMIT :lim"
+                        ),
+                        {"mw": min_words, "lim": subs_limit},
+                    ).fetchall()
                 submission_count = len(rows)
                 submissions_text = _build_content_for_ai(rows, "submission")
-            
+
             # Fetch comments
             if comm_exists:
                 wc_expr = _word_count_expr(["body"])
-                rows = conn.execute(
-                    text(f'SELECT id, body FROM "{schema}"."comments" WHERE {wc_expr} >= :mw'),
-                    {"mw": min_words}
-                ).fetchall()
+                comm_eligible = int(
+                    conn.execute(
+                        text(
+                            f'SELECT COUNT(*) FROM "{schema}"."comments" WHERE {wc_expr} >= :mw'
+                        ),
+                        {"mw": min_words},
+                    ).scalar()
+                    or 0
+                )
+                comm_limit = math.ceil((comm_eligible * pct) / 100.0)
+                rows = []
+                if comm_limit > 0:
+                    rows = conn.execute(
+                        text(
+                            f'SELECT id, body FROM "{schema}"."comments" '
+                            f"WHERE {wc_expr} >= :mw ORDER BY RANDOM() LIMIT :lim"
+                        ),
+                        {"mw": min_words, "lim": comm_limit},
+                    ).fetchall()
                 comment_count = len(rows)
                 comments_text = _build_content_for_ai(rows, "comment")
-        
+
         _log("DATA", "Source data fetched", {
-            "submissions": submission_count,
-            "comments": comment_count,
+            "submissions_sampled": submission_count,
+            "comments_sampled": comment_count,
+            "submissions_eligible": subs_eligible,
+            "comments_eligible": comm_eligible,
             "subs_chars": len(submissions_text),
-            "comm_chars": len(comments_text)
+            "comm_chars": len(comments_text),
         })
 
         # ===== STEP 2: AI Filtering =====

@@ -4,6 +4,7 @@ import { apiFetch } from "../../api";
 import FormShell from "../forms/FormShell";
 import PromptTextareaWithActions from "../forms/PromptTextareaWithActions";
 import MinWordsField from "../forms/MinWordsField";
+import SamplePercentageSlider from "../forms/SamplePercentageSlider";
 import { AI_MODELS } from "../../lib/constants";
 import "../../styles/Home.css";
 
@@ -26,6 +27,7 @@ export default function FilterDataPanel({
   const [description, setDescription] = useState("");
   const [model, setModel] = useState("");
   const [minWords, setMinWords] = useState(0);
+  const [samplePercentage, setSamplePercentage] = useState(100);
   const [wordCountRanges, setWordCountRanges] = useState({
     submissions: [],
     comments: [],
@@ -160,6 +162,14 @@ export default function FilterDataPanel({
     if (minWords > 0) {
       requestData.append("min_words", String(minWords));
     }
+    requestData.append(
+      "sample_percentage",
+      String(
+        Number.isFinite(Number(samplePercentage))
+          ? Number(samplePercentage)
+          : 100,
+      ),
+    );
     return requestData;
   };
 
@@ -370,6 +380,14 @@ export default function FilterDataPanel({
           disabled={loading}
           rangesLoading={rangesLoading}
           caption={minWordsCaption}
+        />
+
+        <SamplePercentageSlider
+          value={samplePercentage}
+          onChange={setSamplePercentage}
+          disabled={loading}
+          databaseSelected={Boolean(database)}
+          totalCount={counts.submissions + counts.comments}
         />
       </FormShell>
 
