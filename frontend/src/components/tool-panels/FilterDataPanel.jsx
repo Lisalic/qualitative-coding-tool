@@ -31,6 +31,7 @@ export default function FilterDataPanel({
   const [model, setModel] = useState("");
   const [minWords, setMinWords] = useState(0);
   const [samplePercentage, setSamplePercentage] = useState(100);
+  const [filterTags, setFilterTags] = useState("");
   const [wordCountRanges, setWordCountRanges] = useState({
     submissions: [],
     comments: [],
@@ -181,6 +182,9 @@ export default function FilterDataPanel({
     if (filterPrompt) {
       requestData.append("prompt", filterPrompt);
     }
+    if (filterTags && filterTags.trim()) {
+      requestData.append("filter_tags", filterTags.trim());
+    }
     if (model) {
       requestData.append("model", model);
     }
@@ -253,6 +257,13 @@ export default function FilterDataPanel({
       const data = JSON.parse(text);
 
       let resultMessage = `✓ ${data.message}`;
+      if (data.tag_filter) {
+        resultMessage += `\n\nTag expansion:\n${JSON.stringify(
+          data.tag_filter,
+          null,
+          2,
+        )}`;
+      }
       if (data.ai_response) {
         resultMessage += `\n\nAI Response:\n${JSON.stringify(
           data.ai_response,
@@ -262,6 +273,7 @@ export default function FilterDataPanel({
       }
       setMessage(resultMessage);
       onFilterPromptChange("");
+      setFilterTags("");
     } catch (err) {
       setMessage(`Error: ${err.message || "Filtering failed"}`);
     } finally {
@@ -368,6 +380,19 @@ export default function FilterDataPanel({
           disabled={loading}
           onSaveFeedback={handlePromptSaveFeedback}
         />
+
+        <div className="form-group">
+          <label htmlFor="filterTags">Tags (optional)</label>
+          <textarea
+            id="filterTags"
+            value={filterTags}
+            onChange={(e) => setFilterTags(e.target.value)}
+            placeholder="Comma-separated keywords (optional)."
+            rows={3}
+            className="form-input"
+            disabled={loading}
+          />
+        </div>
 
         <div className="form-group">
           <label htmlFor="model">AI Model</label>

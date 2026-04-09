@@ -23,6 +23,13 @@ from backend.app.database import (
 )
 from backend.app.databasemanager import AsyncDatabaseManager
 from backend.scripts.filter_db import filter_posts_with_ai, filter_comments_with_ai, AIFilterError
+from backend.scripts.tag_expansion import (
+    TagExpansionError,
+    comment_body_tag_predicate_sql,
+    expand_tags_via_openrouter,
+    parse_filter_tags_input,
+    submission_text_tag_predicate_sql,
+)
 
 router = APIRouter()
 
@@ -281,19 +288,39 @@ async def filter_data(
     description: Optional[str] = Form(None),
     min_words: int = Form(0),
     sample_percentage: float = Form(100.0),
+    filter_tags: Optional[str] = Form(None),
 ):
     """
     Filter posts/comments using AI and save results to a new database schema.
     
     Flow:
-    1. Fetch submissions/comments from source schema (filtered by min_words, then random sample per table)
-    2. Send content to AI for filtering based on prompt
-    3. Create new schema with filtered results
-    4. Register file metadata for authenticated users
+    1. Optionally expand filter_tags via OpenRouter, then restrict rows by keyword match on text.
+    2. Fetch submissions/comments from source schema (filtered by min_words, then random sample per table)
+    3. Send content to AI for filtering based on prompt (skipped when prompt is empty but tags were used)
+    4. Create new schema with filtered results
+    5. Register file metadata for authenticated users
     """
     schema = (database or "").strip()
     filter_prompt = (prompt or "").strip()
     pct = max(1.0, min(100.0, float(sample_percentage)))
+    user_tags_list = parse_filter_tags_input(filter_tags)
+    expanded_terms_sql: list[str] = []
+    original_tags_meta: list[str] = []
+    if user_tags_list:
+        try:
+            # Same `api_key` as AI filter: OpenRouter key from the client (user Set API key), not server env.
+            original_tags_meta, expanded_terms_sql = expand_tags_via_openrouter(
+                user_tags_list, api_key, model
+            )
+        except TagExpansionError as e:
+            code = e.code if e.code in (400, 401, 402, 403, 408, 429, 502, 503) else 502
+            _log("TAG_ERROR", f"Tag expansion failed (HTTP {code}): {e}")
+            return JSONResponse({"error": str(e)}, status_code=code)
+    has_tags = bool(user_tags_list)
+    use_ai_posts = (not has_tags) or bool(filter_prompt)
+    use_ai_comments = (not has_tags) or bool(filter_prompt)
+    sub_tag_sql, sub_tag_bind = submission_text_tag_predicate_sql(expanded_terms_sql)
+    com_tag_sql, com_tag_bind = comment_body_tag_predicate_sql(expanded_terms_sql)
 
     _log("START", "Filter request received", {
         "schema": schema,
@@ -302,6 +329,8 @@ async def filter_data(
         "prompt_chars": len(filter_prompt),
         "min_words": min_words,
         "sample_percentage": pct,
+        "has_tags": has_tags,
+        "expanded_term_count": len(expanded_terms_sql),
     })
 
     # Validation
@@ -314,13 +343,15 @@ async def filter_data(
         return JSONResponse({"error": "This endpoint expects a proj_<id> schema name in 'database'"}, status_code=400)
 
     try:
-        # ===== STEP 1: Fetch source data (min_words filter, then random sample per table) =====
+        # ===== STEP 1: Fetch source data (optional tag match, min_words, then random sample per table) =====
         submissions_text = ""
         comments_text = ""
         submission_count = 0
         comment_count = 0
         subs_eligible = 0
         comm_eligible = 0
+        sub_rows = []
+        comm_rows = []
 
         with engine.connect() as conn:
             # Check table existence
@@ -330,52 +361,60 @@ async def filter_data(
             # Fetch submissions
             if subs_exists:
                 wc_expr = _word_count_expr(["title", "selftext"])
+                subs_count_params = {"mw": min_words, **sub_tag_bind}
                 subs_eligible = int(
                     conn.execute(
                         text(
-                            f'SELECT COUNT(*) FROM "{schema}"."submissions" WHERE {wc_expr} >= :mw'
+                            f'SELECT COUNT(*) FROM "{schema}"."submissions" '
+                            f"WHERE {wc_expr} >= :mw{sub_tag_sql}"
                         ),
-                        {"mw": min_words},
+                        subs_count_params,
                     ).scalar()
                     or 0
                 )
                 subs_limit = math.ceil((subs_eligible * pct) / 100.0)
-                rows = []
                 if subs_limit > 0:
-                    rows = conn.execute(
+                    subs_cols = "id, title, selftext" if use_ai_posts else "id"
+                    sub_rows = conn.execute(
                         text(
-                            f'SELECT id, title, selftext FROM "{schema}"."submissions" '
-                            f"WHERE {wc_expr} >= :mw ORDER BY RANDOM() LIMIT :lim"
+                            f'SELECT {subs_cols} FROM "{schema}"."submissions" '
+                            f"WHERE {wc_expr} >= :mw{sub_tag_sql} ORDER BY RANDOM() LIMIT :lim"
                         ),
-                        {"mw": min_words, "lim": subs_limit},
+                        {**subs_count_params, "lim": subs_limit},
                     ).fetchall()
-                submission_count = len(rows)
-                submissions_text = _build_content_for_ai(rows, "submission")
+                submission_count = len(sub_rows)
+                submissions_text = (
+                    _build_content_for_ai(sub_rows, "submission") if use_ai_posts else ""
+                )
 
             # Fetch comments
             if comm_exists:
                 wc_expr = _word_count_expr(["body"])
+                comm_count_params = {"mw": min_words, **com_tag_bind}
                 comm_eligible = int(
                     conn.execute(
                         text(
-                            f'SELECT COUNT(*) FROM "{schema}"."comments" WHERE {wc_expr} >= :mw'
+                            f'SELECT COUNT(*) FROM "{schema}"."comments" '
+                            f"WHERE {wc_expr} >= :mw{com_tag_sql}"
                         ),
-                        {"mw": min_words},
+                        comm_count_params,
                     ).scalar()
                     or 0
                 )
                 comm_limit = math.ceil((comm_eligible * pct) / 100.0)
-                rows = []
                 if comm_limit > 0:
-                    rows = conn.execute(
+                    comm_cols = "id, body" if use_ai_comments else "id"
+                    comm_rows = conn.execute(
                         text(
-                            f'SELECT id, body FROM "{schema}"."comments" '
-                            f"WHERE {wc_expr} >= :mw ORDER BY RANDOM() LIMIT :lim"
+                            f'SELECT {comm_cols} FROM "{schema}"."comments" '
+                            f"WHERE {wc_expr} >= :mw{com_tag_sql} ORDER BY RANDOM() LIMIT :lim"
                         ),
-                        {"mw": min_words, "lim": comm_limit},
+                        {**comm_count_params, "lim": comm_limit},
                     ).fetchall()
-                comment_count = len(rows)
-                comments_text = _build_content_for_ai(rows, "comment")
+                comment_count = len(comm_rows)
+                comments_text = (
+                    _build_content_for_ai(comm_rows, "comment") if use_ai_comments else ""
+                )
 
         _log("DATA", "Source data fetched", {
             "submissions_sampled": submission_count,
@@ -386,14 +425,22 @@ async def filter_data(
             "comm_chars": len(comments_text),
         })
 
-        # ===== STEP 2: AI Filtering =====
+        # ===== STEP 2: AI Filtering (skipped when tags-only: keep all sampled rows) =====
         post_ids = []
         comment_ids = []
         system_prompt = ""
         user_prompt = ""
-        
+
+        if not use_ai_posts and sub_rows:
+            post_ids = [str(r._mapping["id"]) for r in sub_rows if r._mapping.get("id")]
+            _log("TAG_ONLY", "Skipping post AI filter; using tag-matched sample IDs", {"ids": len(post_ids)})
+
+        if not use_ai_comments and comm_rows:
+            comment_ids = [str(r._mapping["id"]) for r in comm_rows if r._mapping.get("id")]
+            _log("TAG_ONLY", "Skipping comment AI filter; using tag-matched sample IDs", {"ids": len(comment_ids)})
+
         # Filter submissions
-        if submissions_text:
+        if use_ai_posts and submissions_text:
             _log("AI", f"Sending {len(submissions_text):,} chars to AI for post filtering...")
             try:
                 result = filter_posts_with_ai(filter_prompt, submissions_text, api_key, model)
@@ -407,9 +454,9 @@ async def filter_data(
                 _log("AI_ERROR", f"Post filtering failed: {e}")
                 traceback.print_exc()
                 return JSONResponse({"error": f"AI filtering failed for posts: {e}"}, status_code=502)
-        
+
         # Filter comments
-        if comments_text:
+        if use_ai_comments and comments_text:
             _log("AI", f"Sending {len(comments_text):,} chars to AI for comment filtering...")
             try:
                 result = filter_comments_with_ai(filter_prompt, comments_text, api_key, model)
@@ -423,6 +470,14 @@ async def filter_data(
                 _log("AI_ERROR", f"Comment filtering failed: {e}")
                 traceback.print_exc()
                 return JSONResponse({"error": f"AI filtering failed for comments: {e}"}, status_code=502)
+
+        if has_tags and not filter_prompt:
+            tag_ctx = json.dumps(
+                {"original_tags": original_tags_meta, "expanded_terms": expanded_terms_sql},
+                ensure_ascii=False,
+            )
+            system_prompt = "Tag-based pre-filter only (no AI content criteria)."
+            user_prompt = tag_ctx[:8000] if len(tag_ctx) > 8000 else tag_ctx
         
         # Validate AI returned IDs
         if not isinstance(post_ids, list):
@@ -617,7 +672,7 @@ async def filter_data(
             "comments": inserted_comments
         })
 
-        return JSONResponse({
+        resp_body = {
             "message": "Database filtered and saved",
             "submissions_length": len(submissions_text),
             "comments_length": len(comments_text),
@@ -628,7 +683,13 @@ async def filter_data(
                 "schema_name": new_schema,
                 "filename": file_rec.filename
             } if file_rec else None,
-        })
+        }
+        if has_tags:
+            resp_body["tag_filter"] = {
+                "original_tags": original_tags_meta,
+                "expanded_terms": expanded_terms_sql,
+            }
+        return JSONResponse(resp_body)
 
     except Exception as exc:
         _log("FATAL", f"Unhandled error: {exc}")
