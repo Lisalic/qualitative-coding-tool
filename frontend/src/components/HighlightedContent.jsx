@@ -1,5 +1,8 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { normalizeEvidenceText } from "../lib/codingUtils";
+
+const SELECTION_CHANGE_DEBOUNCE_MS = 50;
 
 const escapeRegExp = (value) =>
   String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -116,17 +119,37 @@ const mergeIntervalsToSegments = (intervals) => {
   return segments;
 };
 
+/** Pixel rect at the end of the selection (last character). */
+function getSelectionEndClientRect(range) {
+  const clone = range.cloneRange();
+  clone.collapse(false);
+  const rects = clone.getClientRects();
+  if (rects.length > 0) {
+    return rects[rects.length - 1];
+  }
+  return clone.getBoundingClientRect();
+}
+
 // Narrow gutter for code stripes (was 28px; keep step proportional so several codes still fit)
 const CODING_MARGIN_WIDTH_PX = 18;
 const MARGIN_STRIPE_STEP_PX = 4;
 const MARGIN_STRIPE_WIDTH_PX = 2;
 
 // Component for highlighted content with margin brackets
-const HighlightedContent = ({ content, codeEvidence, getCodeColor }) => {
+const HighlightedContent = ({
+  content,
+  codeEvidence,
+  getCodeColor,
+  onAddCodeFromSelection,
+}) => {
   const containerRef = useRef(null);
+  const textAreaRef = useRef(null);
   const marginRef = useRef(null);
+  const selectionPopoverRef = useRef(null);
+  const selectionDebounceRef = useRef(null);
   const [lines, setLines] = useState([]);
   const [tooltip, setTooltip] = useState(null); // { codes: [...], notesByCode: { [code]: string[] }, x, y }
+  const [selectionPopover, setSelectionPopover] = useState(null); // { left, top, selectedText }
 
   const calculateLines = () => {
     if (!containerRef.current) return;
@@ -172,9 +195,105 @@ const HighlightedContent = ({ content, codeEvidence, getCodeColor }) => {
   useEffect(() => {
     if (!tooltip) return;
     const hide = () => setTooltip(null);
-    window.addEventListener("scroll", hide, true); // capture phase catches inner scrolls
+    window.addEventListener("scroll", hide, true);
     return () => window.removeEventListener("scroll", hide, true);
   }, [tooltip]);
+
+  const syncSelectionPopover = useCallback(() => {
+    if (!onAddCodeFromSelection || !textAreaRef.current) {
+      setSelectionPopover(null);
+      return;
+    }
+
+    const sel = typeof window !== "undefined" ? window.getSelection() : null;
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+      setSelectionPopover(null);
+      return;
+    }
+
+    const range = sel.getRangeAt(0);
+    const root = textAreaRef.current;
+    if (!root.contains(range.commonAncestorContainer)) {
+      setSelectionPopover(null);
+      return;
+    }
+
+    const selectedText = sel.toString();
+    if (!selectedText.trim()) {
+      setSelectionPopover(null);
+      return;
+    }
+
+    setTooltip(null);
+    const endRect = getSelectionEndClientRect(range);
+    setSelectionPopover({
+      left: endRect.left,
+      top: endRect.bottom + 6,
+      selectedText,
+    });
+  }, [onAddCodeFromSelection]);
+
+  useEffect(() => {
+    if (!onAddCodeFromSelection) {
+      setSelectionPopover(null);
+      return undefined;
+    }
+
+    const scheduleSync = () => {
+      if (selectionDebounceRef.current != null) {
+        clearTimeout(selectionDebounceRef.current);
+      }
+      selectionDebounceRef.current = window.setTimeout(() => {
+        selectionDebounceRef.current = null;
+        syncSelectionPopover();
+      }, SELECTION_CHANGE_DEBOUNCE_MS);
+    };
+
+    const onMouseUp = () => {
+      if (selectionDebounceRef.current != null) {
+        clearTimeout(selectionDebounceRef.current);
+        selectionDebounceRef.current = null;
+      }
+      syncSelectionPopover();
+    };
+
+    document.addEventListener("mouseup", onMouseUp);
+    document.addEventListener("selectionchange", scheduleSync);
+
+    return () => {
+      document.removeEventListener("mouseup", onMouseUp);
+      document.removeEventListener("selectionchange", scheduleSync);
+      if (selectionDebounceRef.current != null) {
+        clearTimeout(selectionDebounceRef.current);
+        selectionDebounceRef.current = null;
+      }
+    };
+  }, [onAddCodeFromSelection, syncSelectionPopover]);
+
+  useEffect(() => {
+    if (!selectionPopover) return;
+
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") setSelectionPopover(null);
+    };
+
+    const onScroll = () => setSelectionPopover(null);
+
+    const onMouseDownCapture = (e) => {
+      if (selectionPopoverRef.current?.contains(e.target)) return;
+      setSelectionPopover(null);
+    };
+
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("scroll", onScroll, true);
+    document.addEventListener("mousedown", onMouseDownCapture, true);
+
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("scroll", onScroll, true);
+      document.removeEventListener("mousedown", onMouseDownCapture, true);
+    };
+  }, [selectionPopover]);
 
   const showCodeTooltip = (e, codes, notesByCode = {}) => {
     setTooltip({ codes, notesByCode, x: e.clientX, y: e.clientY });
@@ -188,71 +307,89 @@ const HighlightedContent = ({ content, codeEvidence, getCodeColor }) => {
 
   const hideTooltip = () => setTooltip(null);
 
-  if (!content || !codeEvidence.length) return <span>{content}</span>;
-
-  const intervals = buildEvidenceIntervals(content, codeEvidence);
-
-  if (intervals.length === 0) return <span>{content}</span>;
-
-  const segments = mergeIntervalsToSegments(intervals);
   const notesByCodeLookup = buildNotesByCodeLookup(codeEvidence);
 
-  // Build the content with coded spans
-  const elements = [];
-  let lastEnd = 0;
+  let textAreaChildren;
+  if (!content) {
+    textAreaChildren = null;
+  } else if (!codeEvidence?.length) {
+    textAreaChildren = <span>{content}</span>;
+  } else {
+    const intervals = buildEvidenceIntervals(content, codeEvidence);
 
-  segments.forEach((segment, idx) => {
-    if (segment.start > lastEnd) {
-      elements.push(
-        <span key={`text-${idx}`}>
-          {content.slice(lastEnd, segment.start)}
-        </span>,
-      );
+    if (intervals.length === 0) {
+      textAreaChildren = <span>{content}</span>;
+    } else {
+      const segments = mergeIntervalsToSegments(intervals);
+      const elements = [];
+      let lastEnd = 0;
+
+      segments.forEach((segment, idx) => {
+        if (segment.start > lastEnd) {
+          elements.push(
+            <span key={`text-${idx}`}>
+              {content.slice(lastEnd, segment.start)}
+            </span>,
+          );
+        }
+
+        const segmentText = content.slice(segment.start, segment.end);
+        const codes = Array.from(segment.codes);
+        const notesByCode = codes.reduce((acc, code) => {
+          const notesFromSegment = segment.notesByCode.get(code);
+          if (notesFromSegment && notesFromSegment.size > 0) {
+            acc[code] = Array.from(notesFromSegment);
+            return acc;
+          }
+
+          if (notesByCodeLookup[code] && notesByCodeLookup[code].size > 0) {
+            acc[code] = Array.from(notesByCodeLookup[code]);
+          }
+
+          return acc;
+        }, {});
+
+        elements.push(
+          <span
+            key={`segment-${idx}`}
+            className="coded-span"
+            data-codes={codes.join(",")}
+            style={{
+              position: "relative",
+              backgroundColor: "#e0e0e0",
+              color: "#000000",
+              borderRadius: "2px",
+              padding: "1px 2px",
+              cursor: "pointer",
+            }}
+            onMouseEnter={(e) => showCodeTooltip(e, codes, notesByCode)}
+            onMouseMove={moveTooltip}
+            onMouseLeave={hideTooltip}
+          >
+            {segmentText}
+          </span>,
+        );
+
+        lastEnd = segment.end;
+      });
+
+      if (lastEnd < content.length) {
+        elements.push(<span key="remaining">{content.slice(lastEnd)}</span>);
+      }
+
+      textAreaChildren = elements;
     }
-
-    const segmentText = content.slice(segment.start, segment.end);
-    const codes = Array.from(segment.codes);
-    const notesByCode = codes.reduce((acc, code) => {
-      const notesFromSegment = segment.notesByCode.get(code);
-      if (notesFromSegment && notesFromSegment.size > 0) {
-        acc[code] = Array.from(notesFromSegment);
-        return acc;
-      }
-
-      if (notesByCodeLookup[code] && notesByCodeLookup[code].size > 0) {
-        acc[code] = Array.from(notesByCodeLookup[code]);
-      }
-
-      return acc;
-    }, {});
-
-    elements.push(
-      <span
-        key={`segment-${idx}`}
-        className="coded-span"
-        data-codes={codes.join(",")}
-        style={{
-          position: "relative",
-          backgroundColor: "#e0e0e0",
-          color: "#000000",
-          borderRadius: "2px",
-          padding: "1px 2px",
-          cursor: "pointer",
-        }}
-        onMouseEnter={(e) => showCodeTooltip(e, codes, notesByCode)}
-        onMouseMove={moveTooltip}
-        onMouseLeave={hideTooltip}
-      >
-        {segmentText}
-      </span>,
-    );
-
-    lastEnd = segment.end;
-  });
-
-  if (lastEnd < content.length) {
-    elements.push(<span key="remaining">{content.slice(lastEnd)}</span>);
   }
+
+  const handleAddCodeClick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!selectionPopover?.selectedText || !onAddCodeFromSelection) return;
+    const text = selectionPopover.selectedText;
+    onAddCodeFromSelection(text);
+    setSelectionPopover(null);
+    window.getSelection()?.removeAllRanges();
+  };
 
   return (
     <>
@@ -261,8 +398,12 @@ const HighlightedContent = ({ content, codeEvidence, getCodeColor }) => {
         ref={containerRef}
         style={{ display: "flex", position: "relative" }}
       >
-        <div className="text-area" style={{ flex: 1, padding: "8px 6px 8px 8px" }}>
-          {elements}
+        <div
+          className="text-area"
+          ref={textAreaRef}
+          style={{ flex: 1, padding: "8px 6px 8px 8px" }}
+        >
+          {textAreaChildren}
         </div>
         <div
           className="coding-margin"
@@ -380,6 +521,30 @@ const HighlightedContent = ({ content, codeEvidence, getCodeColor }) => {
           ))}
         </div>
       )}
+      {selectionPopover &&
+        onAddCodeFromSelection &&
+        createPortal(
+          <div
+            ref={selectionPopoverRef}
+            className="selection-add-code-popover"
+            style={{
+              left: selectionPopover.left,
+              top: selectionPopover.top,
+            }}
+            role="dialog"
+            aria-label="Add code from selection"
+          >
+            <button
+              type="button"
+              className="btn btn-primary btn-small selection-add-code-popover__button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={handleAddCodeClick}
+            >
+              Add code
+            </button>
+          </div>,
+          document.body,
+        )}
     </>
   );
 };

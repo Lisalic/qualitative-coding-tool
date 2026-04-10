@@ -43,6 +43,22 @@
   transform: translateY(0);
 }
 
+.selection-add-code-popover {
+  position: fixed;
+  z-index: 10001;
+  pointer-events: auto;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #2d2d2d 0%, #1f1f1f 100%);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.selection-add-code-popover__button {
+  white-space: nowrap;
+}
+
 .database-selector {
   display: flex;
   flex-wrap: wrap;

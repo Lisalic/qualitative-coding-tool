@@ -217,6 +217,31 @@ const CodingTableView = ({
     [isEditMode, onParsedCodingChange, editableParsedCoding],
   );
 
+  const appendCodeEvidenceWithText = useCallback(
+    (sourceIndex, evidenceText) => {
+      if (!isEditMode || typeof onParsedCodingChange !== "function") return;
+      const text = String(evidenceText ?? "");
+      if (!text.trim()) return;
+      const currentRows = Array.isArray(editableParsedCoding)
+        ? editableParsedCoding
+        : [];
+      onParsedCodingChange(
+        currentRows.map((row, index) =>
+          index === sourceIndex
+            ? {
+                ...row,
+                codeEvidence: [
+                  ...(Array.isArray(row?.codeEvidence) ? row.codeEvidence : []),
+                  { code: "", evidence: text, notes: "" },
+                ],
+              }
+            : row,
+        ),
+      );
+    },
+    [isEditMode, onParsedCodingChange, editableParsedCoding],
+  );
+
   const removeRowCodeEvidence = useCallback(
     (sourceIndex, entryIndex) => {
       if (!isEditMode || typeof onParsedCodingChange !== "function") return;
@@ -545,6 +570,15 @@ const CodingTableView = ({
                                     content={postContent}
                                     codeEvidence={readOnlyCodeEvidence}
                                     getCodeColor={getCodeColor}
+                                    onAddCodeFromSelection={
+                                      isEditMode
+                                        ? (text) =>
+                                            appendCodeEvidenceWithText(
+                                              sourceIndex,
+                                              text,
+                                            )
+                                        : undefined
+                                    }
                                   />
                                 </div>
                               ) : (
