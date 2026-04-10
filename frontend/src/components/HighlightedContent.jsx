@@ -116,6 +116,11 @@ const mergeIntervalsToSegments = (intervals) => {
   return segments;
 };
 
+// Narrow gutter for code stripes (was 28px; keep step proportional so several codes still fit)
+const CODING_MARGIN_WIDTH_PX = 18;
+const MARGIN_STRIPE_STEP_PX = 4;
+const MARGIN_STRIPE_WIDTH_PX = 2;
+
 // Component for highlighted content with margin brackets
 const HighlightedContent = ({ content, codeEvidence, getCodeColor }) => {
   const containerRef = useRef(null);
@@ -139,13 +144,12 @@ const HighlightedContent = ({ content, codeEvidence, getCodeColor }) => {
       const top = rect.top - containerRect.top;
       const height = rect.height;
 
-      const stripeStep = 5;
       codes.forEach((code, index) => {
         newLines.push({
           code,
           top,
           height,
-          left: index * stripeStep,
+          left: index * MARGIN_STRIPE_STEP_PX,
           color: getCodeColor(code),
         });
       });
@@ -263,7 +267,12 @@ const HighlightedContent = ({ content, codeEvidence, getCodeColor }) => {
         <div
           className="coding-margin"
           ref={marginRef}
-          style={{ width: "28px", position: "relative", marginLeft: "4px", flexShrink: 0 }}
+          style={{
+            width: `${CODING_MARGIN_WIDTH_PX}px`,
+            position: "relative",
+            marginLeft: "4px",
+            flexShrink: 0,
+          }}
         >
           {lines.map((line, idx) => (
             <div
@@ -271,12 +280,12 @@ const HighlightedContent = ({ content, codeEvidence, getCodeColor }) => {
               className="margin-line"
               style={{
                 position: "absolute",
-                width: "3px",
+                width: `${MARGIN_STRIPE_WIDTH_PX}px`,
                 height: `${line.height}px`,
                 top: `${line.top}px`,
                 left: `${line.left}px`,
                 backgroundColor: line.color,
-                borderRadius: "2px",
+                borderRadius: "1px",
                 cursor: "pointer",
               }}
               onMouseEnter={(e) =>

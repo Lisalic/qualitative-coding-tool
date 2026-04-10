@@ -901,3 +901,77 @@
   background-color: rgba(255, 255, 255, 0.08);
 }
 
+/* ==========================================================================
+   View Coding — table column picker
+   ========================================================================== */
+
+.column-picker-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.column-picker {
+  position: relative;
+  z-index: 5;
+}
+
+.column-picker__trigger {
+  display: inline-flex;
+  align-items: center;
+  font-weight: 600;
+  text-align: left;
+}
+
+.column-picker__panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 260px;
+  max-width: min(100vw - 24px, 320px);
+  padding: 12px 14px;
+  background-color: #000000;
+  border: 1px solid #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.column-picker__title {
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+}
+
+.column-picker__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.column-picker__row + .column-picker__row {
+  margin-top: 6px;
+}
+
+.column-picker__label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #ffffff;
+  font-size: 14px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.column-picker__label--disabled {
+  cursor: not-allowed;
+  opacity: 0.85;
+}
+
+.column-picker__checkbox {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  cursor: inherit;
+  accent-color: #ffffff;
+}

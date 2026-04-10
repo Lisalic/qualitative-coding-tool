@@ -1,4 +1,11 @@
-import React, { useMemo, useCallback, useState } from "react";
+import React, {
+  useMemo,
+  useCallback,
+  useState,
+  useEffect,
+  useRef,
+  useId,
+} from "react";
 import CodeLegend from "./CodeLegend";
 import HighlightedContent from "./HighlightedContent";
 import {
@@ -7,7 +14,8 @@ import {
   getPostDataById,
 } from "../lib/codingUtils";
 
-const TABLE_COLUMN_STORAGE_KEY = "viewCoding.tableColumnVisibility";
+/** v2: default hides Post ID column; bumps key so prior saved visibility does not override. */
+const TABLE_COLUMN_STORAGE_KEY = "viewCoding.tableColumnVisibility.v2";
 
 const TABLE_COLUMNS = [
   { id: "postId", label: "Post ID" },
@@ -235,14 +243,23 @@ const CodingTableView = ({
     normalizeColumnVisibility(readStoredColumnVisibility() || {}),
   );
 
+  const [columnPickerOpen, setColumnPickerOpen] = useState(false);
+  const columnPickerRef = useRef(null);
+  const columnPickerTriggerRef = useRef(null);
+  const columnPickerPanelId = useId();
+  const columnPickerHeadingId = useId();
+
   const visibleColumnCount = useMemo(
     () => TABLE_COLUMNS.filter((c) => columnVisibility[c.id]).length,
     [columnVisibility],
   );
 
-  const toggleColumnVisibility = useCallback((columnId) => {
+  const setColumnVisibilityAndPersist = useCallback((updater) => {
     setColumnVisibility((prev) => {
-      const next = { ...prev, [columnId]: !prev[columnId] };
+      const next =
+        typeof updater === "function"
+          ? updater(prev)
+          : { ...prev, ...updater };
       const count = TABLE_COLUMNS.filter((c) => next[c.id]).length;
       if (count === 0) return prev;
       try {
@@ -253,6 +270,41 @@ const CodingTableView = ({
       return next;
     });
   }, []);
+
+  const toggleColumnVisibility = useCallback(
+    (columnId) => {
+      setColumnVisibilityAndPersist((prev) => ({
+        ...prev,
+        [columnId]: !prev[columnId],
+      }));
+    },
+    [setColumnVisibilityAndPersist],
+  );
+
+  useEffect(() => {
+    if (!columnPickerOpen) return undefined;
+    const onPointerDown = (e) => {
+      if (
+        columnPickerRef.current &&
+        !columnPickerRef.current.contains(e.target)
+      ) {
+        setColumnPickerOpen(false);
+      }
+    };
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setColumnPickerOpen(false);
+        columnPickerTriggerRef.current?.focus();
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [columnPickerOpen]);
 
   return (
     <div>
@@ -315,39 +367,62 @@ const CodingTableView = ({
         </div>
 
         <div className="table-wrapper">
-          <div
-            className="body-sm text-primary"
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              alignItems: "center",
-              gap: "12px 16px",
-              marginBottom: "12px",
-            }}
-          >
-            <span style={{ fontWeight: 600 }}>Columns</span>
-            {TABLE_COLUMNS.map(({ id, label }) => (
-              <label
-                key={id}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  cursor:
-                    columnVisibility[id] && visibleColumnCount === 1
-                      ? "not-allowed"
-                      : "pointer",
-                }}
+          <div className="column-picker-toolbar">
+            <div className="column-picker" ref={columnPickerRef}>
+              <button
+                type="button"
+                ref={columnPickerTriggerRef}
+                className="btn btn-secondary btn-small column-picker__trigger"
+                aria-expanded={columnPickerOpen}
+                aria-haspopup="true"
+                aria-controls={columnPickerPanelId}
+                onClick={() => setColumnPickerOpen((o) => !o)}
               >
-                <input
-                  type="checkbox"
-                  checked={columnVisibility[id]}
-                  onChange={() => toggleColumnVisibility(id)}
-                  disabled={columnVisibility[id] && visibleColumnCount === 1}
-                />
-                {label}
-              </label>
-            ))}
+                Hide/Show Columns
+              </button>
+              {columnPickerOpen ? (
+                <div
+                  id={columnPickerPanelId}
+                  className="column-picker__panel"
+                  role="group"
+                  aria-labelledby={columnPickerHeadingId}
+                >
+                  <div
+                    className="column-picker__title"
+                    id={columnPickerHeadingId}
+                  >
+                    Show Columns
+                  </div>
+                  <ul className="column-picker__list">
+                    {TABLE_COLUMNS.map(({ id, label }) => {
+                      const isLastVisible =
+                        columnVisibility[id] && visibleColumnCount === 1;
+                      return (
+                        <li key={id} className="column-picker__row">
+                          <label
+                            className={`column-picker__label${isLastVisible ? " column-picker__label--disabled" : ""}`}
+                          >
+                            <input
+                              type="checkbox"
+                              className="column-picker__checkbox"
+                              checked={columnVisibility[id]}
+                              onChange={() => toggleColumnVisibility(id)}
+                              disabled={isLastVisible}
+                              title={
+                                isLastVisible
+                                  ? "At least one column must remain visible."
+                                  : undefined
+                              }
+                            />
+                            <span>{label}</span>
+                          </label>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
           </div>
           <table className="table">
             <thead>
