@@ -134,6 +134,7 @@ function getSelectionEndClientRect(range) {
 const CODING_MARGIN_WIDTH_PX = 18;
 const MARGIN_STRIPE_STEP_PX = 4;
 const MARGIN_STRIPE_WIDTH_PX = 2;
+const MAX_CODING_MARGIN_WIDTH_PX = 32;
 
 // Component for highlighted content with margin brackets
 const HighlightedContent = ({
@@ -148,6 +149,7 @@ const HighlightedContent = ({
   const selectionPopoverRef = useRef(null);
   const selectionDebounceRef = useRef(null);
   const [lines, setLines] = useState([]);
+  const [marginWidth, setMarginWidth] = useState(CODING_MARGIN_WIDTH_PX);
   const [tooltip, setTooltip] = useState(null); // { codes: [...], notesByCode: { [code]: string[] }, x, y }
   const [selectionPopover, setSelectionPopover] = useState(null); // { left, top, selectedText }
 
@@ -157,7 +159,7 @@ const HighlightedContent = ({
     const container = containerRef.current;
     const codedSpans = container.querySelectorAll(".coded-span");
 
-    const newLines = [];
+    const stripeCandidates = [];
 
     codedSpans.forEach((span) => {
       const codes = span.getAttribute("data-codes").split(",");
@@ -168,17 +170,57 @@ const HighlightedContent = ({
       const height = rect.height;
 
       codes.forEach((code, index) => {
-        newLines.push({
+        stripeCandidates.push({
           code,
           top,
           height,
-          left: index * MARGIN_STRIPE_STEP_PX,
           color: getCodeColor(code),
+          order: index,
         });
       });
     });
 
+    stripeCandidates.sort((a, b) => {
+      if (a.top !== b.top) return a.top - b.top;
+      if (a.height !== b.height) return b.height - a.height;
+      return a.order - b.order;
+    });
+
+    const laneBottoms = [];
+    const newLines = stripeCandidates.map((candidate) => {
+      const lineBottom = candidate.top + candidate.height;
+      let laneIndex = laneBottoms.findIndex(
+        (laneBottom) => laneBottom <= candidate.top,
+      );
+
+      if (laneIndex === -1) {
+        laneIndex = laneBottoms.length;
+        laneBottoms.push(lineBottom);
+      } else {
+        laneBottoms[laneIndex] = lineBottom;
+      }
+
+      return {
+        code: candidate.code,
+        top: candidate.top,
+        height: candidate.height,
+        left: laneIndex * MARGIN_STRIPE_STEP_PX,
+        color: candidate.color,
+      };
+    });
+
+    const laneCount = laneBottoms.length;
+    const requiredWidth =
+      laneCount > 0
+        ? (laneCount - 1) * MARGIN_STRIPE_STEP_PX + MARGIN_STRIPE_WIDTH_PX
+        : CODING_MARGIN_WIDTH_PX;
+    const boundedWidth = Math.min(
+      MAX_CODING_MARGIN_WIDTH_PX,
+      Math.max(CODING_MARGIN_WIDTH_PX, requiredWidth),
+    );
+
     setLines(newLines);
+    setMarginWidth(boundedWidth);
   };
 
   useEffect(() => {
@@ -409,7 +451,7 @@ const HighlightedContent = ({
           className="coding-margin"
           ref={marginRef}
           style={{
-            width: `${CODING_MARGIN_WIDTH_PX}px`,
+            width: `${marginWidth}px`,
             position: "relative",
             marginLeft: "4px",
             flexShrink: 0,
