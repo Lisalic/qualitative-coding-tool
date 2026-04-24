@@ -164,20 +164,6 @@
   line-height: 1.5;
 }
 
-/* Two-column tool pages: Filter, Generate Codebook, Apply Codebook */
-.tool-page-layout .manager-section {
-  min-width: 0;
-}
-
-.tool-page-layout .manager-section .prompt-manager {
-  flex: 1;
-  margin: 0;
-  border: 2px solid #ffffff;
-  border-radius: 8px;
-  background-color: #000000;
-  padding: 20px;
-}
-
 .tool-page-layout .left-section > .file-upload {
   background-color: #000000;
   padding: 20px;
@@ -445,6 +431,38 @@ input[type="radio"]:disabled + .radio-label {
 
 .prompt-manager-content {
   margin-top: 20px;
+}
+
+.prompt-manager-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+  padding: 1rem;
+}
+
+.prompt-manager-modal {
+  width: min(900px, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  background-color: #000000;
+  border: 2px solid #ffffff;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.prompt-manager-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.prompt-manager-modal-header h3 {
+  margin: 0;
 }
 
 .save-prompt-section {

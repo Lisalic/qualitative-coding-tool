@@ -3,9 +3,12 @@ import "../styles/Home.css";
 import { api } from "../api";
 
 export default function PromptManager({
+  isOpen = true,
+  onClose,
   onLoadPrompt,
   currentPrompt,
   promptType = "filter",
+  examplePrompt = "",
 }) {
   const [savedPrompts, setSavedPrompts] = useState([]);
   const [newPromptContent, setNewPromptContent] = useState("");
@@ -162,6 +165,7 @@ export default function PromptManager({
 
   const loadPrompt = (prompt) => {
     onLoadPrompt(prompt.prompt);
+    if (onClose) onClose();
   };
 
   const deletePrompt = (id) => {
@@ -182,9 +186,38 @@ export default function PromptManager({
       });
   };
 
+  if (!isOpen) return null;
+
+  const promptItems = [];
+  if (examplePrompt && examplePrompt.trim()) {
+    promptItems.push({
+      id: "__example_prompt__",
+      name: "Example prompt",
+      prompt: examplePrompt,
+      createdAt: null,
+      isExample: true,
+    });
+  }
+  promptItems.push(...savedPrompts.map((prompt) => ({ ...prompt, isExample: false })));
+
   return (
-    <div className="prompt-manager">
-      <div className="prompt-manager-content">
+    <div className="prompt-manager-modal-overlay" onClick={onClose}>
+      <div
+        className="prompt-manager prompt-manager-modal"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="prompt-manager-modal-header">
+          <h3>Saved Prompts</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="message-close-btn"
+            aria-label="Close prompt picker"
+          >
+            ×
+          </button>
+        </div>
+        <div className="prompt-manager-content">
         {message && (
           <div className={`prompt-message ${messageType}`}>
             <span>{message}</span>
@@ -200,14 +233,13 @@ export default function PromptManager({
         )}
 
         <div>
-          <h3 style={{ textAlign: "center" }}>Saved Prompts</h3>
-          {savedPrompts.length === 0 ? (
+          {promptItems.length === 0 ? (
             <p className="no-prompts">No saved prompts yet.</p>
           ) : (
             <div className="prompts-list">
-              {savedPrompts.map((prompt) => (
+              {promptItems.map((prompt) => (
                 <div key={prompt.id} className="prompt-item">
-                  {editingId === prompt.id ? (
+                  {!prompt.isExample && editingId === prompt.id ? (
                     <div className="prompt-edit">
                       <div className="form-group">
                         <label>Edit name</label>
@@ -253,10 +285,14 @@ export default function PromptManager({
                             ? `${prompt.prompt.substring(0, 100)}...`
                             : prompt.prompt}
                         </p>
-                        <small className="prompt-date">
-                          Saved:{" "}
-                          {new Date(prompt.createdAt).toLocaleDateString()}
-                        </small>
+                        {prompt.isExample ? (
+                          <small className="prompt-date">Built-in</small>
+                        ) : (
+                          <small className="prompt-date">
+                            Saved:{" "}
+                            {new Date(prompt.createdAt).toLocaleDateString()}
+                          </small>
+                        )}
                       </div>
                       <div className="prompt-actions">
                         <button
@@ -266,20 +302,24 @@ export default function PromptManager({
                         >
                           Load
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => startEdit(prompt)}
-                          className="load-prompt-btn"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => deletePrompt(prompt.id)}
-                          className="delete-prompt-btn"
-                        >
-                          Delete
-                        </button>
+                        {!prompt.isExample && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => startEdit(prompt)}
+                              className="load-prompt-btn"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => deletePrompt(prompt.id)}
+                              className="delete-prompt-btn"
+                            >
+                              Delete
+                            </button>
+                          </>
+                        )}
                       </div>
                     </>
                   )}
@@ -287,6 +327,7 @@ export default function PromptManager({
               ))}
             </div>
           )}
+        </div>
         </div>
       </div>
     </div>

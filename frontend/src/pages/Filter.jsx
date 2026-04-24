@@ -1,5 +1,4 @@
 import { useState } from "react";
-import PromptManager from "../components/PromptManager";
 import FilterDataPanel from "../components/tool-panels/FilterDataPanel";
 import "../styles/Home.css";
 
@@ -13,13 +12,6 @@ export default function Filter() {
           <FilterDataPanel
             filterPrompt={filterPrompt}
             onFilterPromptChange={setFilterPrompt}
-          />
-        </div>
-        <div className="manager-section">
-          <PromptManager
-            onLoadPrompt={setFilterPrompt}
-            currentPrompt={filterPrompt}
-            promptType="filter"
           />
         </div>
       </div>

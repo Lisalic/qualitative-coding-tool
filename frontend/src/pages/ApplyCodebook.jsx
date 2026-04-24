@@ -1,5 +1,4 @@
 import { useState } from "react";
-import PromptManager from "../components/PromptManager";
 import ApplyCodebookPanel from "../components/tool-panels/ApplyCodebookPanel";
 import "../styles/Home.css";
 
@@ -13,13 +12,6 @@ export default function ApplyCodebook() {
           <ApplyCodebookPanel
             methodology={methodology}
             onMethodologyChange={setMethodology}
-          />
-        </div>
-        <div className="manager-section">
-          <PromptManager
-            onLoadPrompt={setMethodology}
-            currentPrompt={methodology}
-            promptType="apply"
           />
         </div>
       </div>

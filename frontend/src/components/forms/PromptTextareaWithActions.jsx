@@ -1,3 +1,5 @@
+import { useState } from "react";
+import PromptManager from "../PromptManager";
 import { savePromptToLibrary } from "../../lib/savePromptToLibrary";
 import "../../styles/Home.css";
 
@@ -13,6 +15,13 @@ export default function PromptTextareaWithActions({
   disabled,
   onSaveFeedback,
 }) {
+  const [isPromptManagerOpen, setIsPromptManagerOpen] = useState(false);
+  const emitSaveFeedback = (payload) => {
+    if (typeof onSaveFeedback === "function") {
+      onSaveFeedback(payload);
+    }
+  };
+
   const handleSave = async () => {
     if (!value || !value.trim()) {
       alert("Please enter a prompt before saving");
@@ -23,7 +32,7 @@ export default function PromptTextareaWithActions({
         promptType,
         value,
       );
-      onSaveFeedback({ type: "success", message: `Saved: ${savedLabel}` });
+      emitSaveFeedback({ type: "success", message: `Saved: ${savedLabel}` });
       try {
         window.dispatchEvent(new Event("promptSaved"));
       } catch {
@@ -39,7 +48,7 @@ export default function PromptTextareaWithActions({
         err?.response?.data?.detail ||
         err?.message ||
         "Failed to save prompt";
-      onSaveFeedback({ type: "error", message: String(msg) });
+      emitSaveFeedback({ type: "error", message: String(msg) });
     }
   };
 
@@ -58,12 +67,12 @@ export default function PromptTextareaWithActions({
         </button>
         <button
           type="button"
-          onClick={() => onChange(exampleText)}
+          onClick={() => setIsPromptManagerOpen(true)}
           className="load-prompt-btn"
           disabled={disabled}
           style={{ marginLeft: "0.5rem" }}
         >
-          Load example prompt
+          Load prompt
         </button>
       </div>
       <textarea
@@ -74,6 +83,14 @@ export default function PromptTextareaWithActions({
         rows={rows}
         className="form-input"
         disabled={disabled}
+      />
+      <PromptManager
+        isOpen={isPromptManagerOpen}
+        onClose={() => setIsPromptManagerOpen(false)}
+        onLoadPrompt={onChange}
+        currentPrompt={value}
+        promptType={promptType}
+        examplePrompt={exampleText}
       />
     </div>
   );
