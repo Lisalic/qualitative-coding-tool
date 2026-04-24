@@ -1,115 +1,63 @@
-import React, {
-  useMemo,
-  useCallback,
-  useState,
-  useEffect,
-  useRef,
-  useId,
-} from "react";
+import React, { useCallback, useEffect, useRef } from "react";
 import CodeLegend from "./CodeLegend";
 import HighlightedContent from "./HighlightedContent";
+import ColumnPicker from "./CodingTableView/components/ColumnPicker";
+import CodingTableHeader from "./CodingTableView/components/CodingTableHeader";
+import CodingTableRow from "./CodingTableView/components/CodingTableRow";
+import CodingTableEditRow from "./CodingTableView/components/CodingTableEditRow";
+import useColumnSettings from "./CodingTableView/hooks/useColumnSettings";
+import useColumnResize from "./CodingTableView/hooks/useColumnResize";
+import useCodingTableData from "./CodingTableView/hooks/useCodingTableData";
 import {
-  getUniqueCodes,
-  getFilteredCoding,
-  getPostDataById,
-} from "../lib/codingUtils";
+  COLUMN_WIDTHS_MAX,
+  COLUMN_WIDTHS_MIN,
+} from "./CodingTableView/constants";
 
-/** v2: default hides Post ID column; bumps key so prior saved visibility does not override. */
-const TABLE_COLUMN_STORAGE_KEY = "viewCoding.tableColumnVisibility.v2";
-const TABLE_COLUMN_WIDTH_STORAGE_KEY = "viewCoding.tableColumnWidths.v1";
-
-const TABLE_COLUMNS = [
-  { id: "postId", label: "Post ID" },
-  { id: "title", label: "Title" },
-  { id: "content", label: "Content" },
-  { id: "codesApplied", label: "Codes Applied" },
-];
-
-const COLUMN_WIDTHS_DEFAULT = {
-  postId: 220,
-  title: 220,
-  content: 520,
-  codesApplied: 240,
-};
-
-const COLUMN_WIDTHS_MIN = {
-  postId: 120,
-  title: 150,
-  content: 260,
-  codesApplied: 170,
-};
-
-const COLUMN_WIDTHS_MAX = {
-  postId: 420,
-  title: 520,
-  content: 1100,
-  codesApplied: 580,
-};
-
-const DEFAULT_COLUMN_VISIBILITY = {
-  postId: false,
-  title: true,
-  content: true,
-  codesApplied: true,
-};
-
-function clampColumnWidth(columnId, width) {
-  const min = COLUMN_WIDTHS_MIN[columnId] ?? 120;
-  const max = COLUMN_WIDTHS_MAX[columnId] ?? 1200;
-  const numeric = Number(width);
-  if (!Number.isFinite(numeric)) return COLUMN_WIDTHS_DEFAULT[columnId] ?? min;
-  return Math.min(max, Math.max(min, numeric));
-}
-
-function normalizeColumnWidths(raw) {
-  const next = { ...COLUMN_WIDTHS_DEFAULT };
-  if (!raw || typeof raw !== "object") return next;
-  const allowed = new Set(TABLE_COLUMNS.map((c) => c.id));
-  for (const [key, value] of Object.entries(raw)) {
-    if (!allowed.has(key)) continue;
-    next[key] = clampColumnWidth(key, value);
-  }
-  return next;
-}
-
-function readStoredColumnWidths() {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(TABLE_COLUMN_WIDTH_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    return normalizeColumnWidths(parsed);
-  } catch {
+function fitVisibleColumnsToWidth(visibleIds, sourceWidths, targetWidth) {
+  if (!Array.isArray(visibleIds) || visibleIds.length === 0 || targetWidth <= 0) {
     return null;
   }
-}
 
-function readStoredColumnVisibility() {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(TABLE_COLUMN_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null) return null;
-    const allowed = new Set(TABLE_COLUMNS.map((c) => c.id));
-    const next = { ...DEFAULT_COLUMN_VISIBILITY };
-    for (const [key, val] of Object.entries(parsed)) {
-      if (allowed.has(key) && typeof val === "boolean") next[key] = val;
-    }
-    return next;
-  } catch {
-    return null;
+  const widths = {};
+  let sourceTotal = 0;
+  visibleIds.forEach((id) => {
+    const width = Math.max(COLUMN_WIDTHS_MIN[id] ?? 80, Number(sourceWidths[id]) || 0);
+    widths[id] = width;
+    sourceTotal += width;
+  });
+
+  if (sourceTotal <= 0) return null;
+  const scale = targetWidth / sourceTotal;
+  visibleIds.forEach((id) => {
+    const min = COLUMN_WIDTHS_MIN[id] ?? 80;
+    const max = COLUMN_WIDTHS_MAX[id] ?? 2000;
+    widths[id] = Math.min(max, Math.max(min, widths[id] * scale));
+  });
+
+  // Small correction pass to keep the sum equal to targetWidth.
+  let sum = visibleIds.reduce((acc, id) => acc + widths[id], 0);
+  let diff = targetWidth - sum;
+  const epsilon = 0.5;
+  let guard = 0;
+  while (Math.abs(diff) > epsilon && guard < 40) {
+    guard += 1;
+    const adjustable = visibleIds.filter((id) => {
+      const min = COLUMN_WIDTHS_MIN[id] ?? 80;
+      const max = COLUMN_WIDTHS_MAX[id] ?? 2000;
+      return diff > 0 ? widths[id] < max : widths[id] > min;
+    });
+    if (adjustable.length === 0) break;
+    const step = diff / adjustable.length;
+    adjustable.forEach((id) => {
+      const min = COLUMN_WIDTHS_MIN[id] ?? 80;
+      const max = COLUMN_WIDTHS_MAX[id] ?? 2000;
+      widths[id] = Math.min(max, Math.max(min, widths[id] + step));
+    });
+    sum = visibleIds.reduce((acc, id) => acc + widths[id], 0);
+    diff = targetWidth - sum;
   }
-}
 
-function normalizeColumnVisibility(raw) {
-  const merged = {
-    ...DEFAULT_COLUMN_VISIBILITY,
-    ...(raw && typeof raw === "object" ? raw : {}),
-  };
-  const visibleCount = TABLE_COLUMNS.filter((c) => merged[c.id]).length;
-  if (visibleCount === 0) return { ...DEFAULT_COLUMN_VISIBILITY };
-  return merged;
+  return widths;
 }
 
 // Component for the table view of coding data
@@ -128,6 +76,8 @@ const CodingTableView = ({
   getCodeColor,
   saveState,
 }) => {
+  const isResizingRef = useRef(false);
+  const latestWidthsRef = useRef({});
   const handleCodeToggle = useCallback(
     (code) => {
       setSelectedFilterCodes((prev) =>
@@ -137,364 +87,103 @@ const CodingTableView = ({
     [setSelectedFilterCodes],
   );
 
-  const uniqueCodes = useMemo(
-    () => getUniqueCodes(parsedCoding),
-    [parsedCoding],
-  );
+  const {
+    columnVisibility,
+    columnWidths,
+    setColumnWidths,
+    setColumnWidthsAndPersist,
+    visibleColumns,
+    visibleColumnCount,
+    toggleColumnVisibility,
+    getColumnCellStyle,
+  } = useColumnSettings();
 
-  const effectiveCodebookTree =
-    isEditMode && Array.isArray(editableCodebookTree)
-      ? editableCodebookTree
-      : codebookTree;
-
-  const codebookCodes = useMemo(() => {
-    if (!Array.isArray(effectiveCodebookTree)) return [];
-
-    const codes = [];
-    effectiveCodebookTree.forEach((family) => {
-      const familyCodes = Array.isArray(family?.codes) ? family.codes : [];
-      familyCodes.forEach((entry) => {
-        if (typeof entry === "string" && entry.trim()) {
-          codes.push(entry.trim());
-          return;
-        }
-        if (entry && typeof entry.code_name === "string" && entry.code_name) {
-          codes.push(entry.code_name.trim());
-        }
-      });
-    });
-
-    return Array.from(new Set(codes)).sort((a, b) => a.localeCompare(b));
-  }, [effectiveCodebookTree]);
-
-  const codeFieldOptions = useMemo(
-    () =>
-      Array.from(
-        new Set([...(uniqueCodes || []), ...(codebookCodes || [])]),
-      ).sort((a, b) => a.localeCompare(b)),
-    [uniqueCodes, codebookCodes],
-  );
-
-  const filteredCoding = useMemo(
-    () =>
-      isEditMode
-        ? parsedCoding
-        : getFilteredCoding(parsedCoding, selectedFilterCodes),
-    [parsedCoding, selectedFilterCodes, isEditMode],
-  );
-
-  const rowsForRender = useMemo(
-    () =>
-      filteredCoding
-        .map((item, filteredIndex) => {
-          const sourceIndex = parsedCoding.indexOf(item);
-          const editableItem =
-            Array.isArray(editableParsedCoding) && sourceIndex >= 0
-              ? editableParsedCoding[sourceIndex]
-              : null;
-          return {
-            item,
-            editableItem,
-            sourceIndex,
-            rowKey: `${sourceIndex}-${filteredIndex}`,
-          };
-        })
-        .filter((row) => row.sourceIndex >= 0),
-    [filteredCoding, parsedCoding, editableParsedCoding],
-  );
-
-  const updateRowPostId = useCallback(
-    (sourceIndex, value) => {
-      if (!isEditMode || typeof onParsedCodingChange !== "function") return;
-      const currentRows = Array.isArray(editableParsedCoding)
-        ? editableParsedCoding
-        : [];
-      onParsedCodingChange(
-        currentRows.map((row, index) =>
-          index === sourceIndex
-            ? {
-                ...row,
-                postId: value,
-              }
-            : row,
-        ),
-      );
+  const { startColumnResize } = useColumnResize({
+    columnWidths,
+    setColumnWidths,
+    setColumnWidthsAndPersist,
+    onResizeStateChange: (isResizing) => {
+      isResizingRef.current = isResizing;
     },
-    [isEditMode, onParsedCodingChange, editableParsedCoding],
-  );
+  });
+  const tableWrapperRef = useRef(null);
 
-  const updateRowCodeEvidenceField = useCallback(
-    (sourceIndex, entryIndex, field, value) => {
-      if (!isEditMode || typeof onParsedCodingChange !== "function") return;
-      const currentRows = Array.isArray(editableParsedCoding)
-        ? editableParsedCoding
-        : [];
-      onParsedCodingChange(
-        currentRows.map((row, index) => {
-          if (index !== sourceIndex) return row;
-          const nextCodeEvidence = (
-            Array.isArray(row?.codeEvidence) ? row.codeEvidence : []
-          ).map((entry, idx) =>
-            idx === entryIndex ? { ...entry, [field]: value } : entry,
-          );
-          return {
-            ...row,
-            codeEvidence: nextCodeEvidence,
-          };
-        }),
-      );
-    },
-    [isEditMode, onParsedCodingChange, editableParsedCoding],
-  );
+  useEffect(() => {
+    latestWidthsRef.current = columnWidths;
+  }, [columnWidths]);
 
-  const addRowCodeEvidence = useCallback(
-    (sourceIndex) => {
-      if (!isEditMode || typeof onParsedCodingChange !== "function") return;
-      const currentRows = Array.isArray(editableParsedCoding)
-        ? editableParsedCoding
-        : [];
-      onParsedCodingChange(
-        currentRows.map((row, index) =>
-          index === sourceIndex
-            ? {
-                ...row,
-                codeEvidence: [
-                  ...(Array.isArray(row?.codeEvidence) ? row.codeEvidence : []),
-                  { code: "", evidence: "", notes: "" },
-                ],
-              }
-            : row,
-        ),
-      );
-    },
-    [isEditMode, onParsedCodingChange, editableParsedCoding],
-  );
+  const {
+    codeFieldOptions,
+    rowsForRender,
+    updateRowPostId,
+    updateRowCodeEvidenceField,
+    addRowCodeEvidence,
+    appendCodeEvidenceWithText,
+    removeRowCodeEvidence,
+  } = useCodingTableData({
+    parsedCoding,
+    editableParsedCoding,
+    isEditMode,
+    onParsedCodingChange,
+    codebookTree,
+    editableCodebookTree,
+    selectedFilterCodes,
+    postContents,
+  });
 
-  const appendCodeEvidenceWithText = useCallback(
-    (sourceIndex, evidenceText) => {
-      if (!isEditMode || typeof onParsedCodingChange !== "function") return;
-      const text = String(evidenceText ?? "");
-      if (!text.trim()) return;
-      const currentRows = Array.isArray(editableParsedCoding)
-        ? editableParsedCoding
-        : [];
-      onParsedCodingChange(
-        currentRows.map((row, index) =>
-          index === sourceIndex
-            ? {
-                ...row,
-                codeEvidence: [
-                  ...(Array.isArray(row?.codeEvidence) ? row.codeEvidence : []),
-                  { code: "", evidence: text, notes: "" },
-                ],
-              }
-            : row,
-        ),
-      );
-    },
-    [isEditMode, onParsedCodingChange, editableParsedCoding],
-  );
-
-  const removeRowCodeEvidence = useCallback(
-    (sourceIndex, entryIndex) => {
-      if (!isEditMode || typeof onParsedCodingChange !== "function") return;
-      const currentRows = Array.isArray(editableParsedCoding)
-        ? editableParsedCoding
-        : [];
-      onParsedCodingChange(
-        currentRows.map((row, index) => {
-          if (index !== sourceIndex) return row;
-          const codeEvidence = Array.isArray(row?.codeEvidence)
-            ? row.codeEvidence
-            : [];
-          return {
-            ...row,
-            codeEvidence: codeEvidence.filter((_, idx) => idx !== entryIndex),
-          };
-        }),
-      );
-    },
-    [isEditMode, onParsedCodingChange, editableParsedCoding],
-  );
-
-  const [columnVisibility, setColumnVisibility] = useState(() =>
-    normalizeColumnVisibility(readStoredColumnVisibility() || {}),
-  );
-
-  const [columnPickerOpen, setColumnPickerOpen] = useState(false);
-  const [columnWidths, setColumnWidths] = useState(() =>
-    normalizeColumnWidths(readStoredColumnWidths()),
-  );
-  const columnPickerRef = useRef(null);
-  const columnPickerTriggerRef = useRef(null);
-  const resizeStateRef = useRef(null);
-  const columnPickerPanelId = useId();
-  const columnPickerHeadingId = useId();
-
-  const visibleColumnCount = useMemo(
-    () => TABLE_COLUMNS.filter((c) => columnVisibility[c.id]).length,
-    [columnVisibility],
-  );
-
-  const setColumnVisibilityAndPersist = useCallback((updater) => {
-    setColumnVisibility((prev) => {
-      const next =
-        typeof updater === "function"
-          ? updater(prev)
-          : { ...prev, ...updater };
-      const count = TABLE_COLUMNS.filter((c) => next[c.id]).length;
-      if (count === 0) return prev;
-      try {
-        localStorage.setItem(TABLE_COLUMN_STORAGE_KEY, JSON.stringify(next));
-      } catch {
-        // ignore quota / private mode
-      }
-      return next;
-    });
-  }, []);
-
-  const toggleColumnVisibility = useCallback(
-    (columnId) => {
-      setColumnVisibilityAndPersist((prev) => ({
-        ...prev,
-        [columnId]: !prev[columnId],
-      }));
-    },
-    [setColumnVisibilityAndPersist],
-  );
-
-  const setColumnWidthsAndPersist = useCallback((updater) => {
-    setColumnWidths((prev) => {
-      const nextCandidate =
-        typeof updater === "function" ? updater(prev) : { ...prev, ...updater };
-      const next = normalizeColumnWidths(nextCandidate);
-      try {
-        localStorage.setItem(
-          TABLE_COLUMN_WIDTH_STORAGE_KEY,
-          JSON.stringify(next),
-        );
-      } catch {
-        // ignore quota / private mode
-      }
-      return next;
-    });
-  }, []);
-
-  const getColumnCellStyle = useCallback(
-    (columnId) => {
-      const width = clampColumnWidth(columnId, columnWidths[columnId]);
-      return {
-        width: `${width}px`,
-        minWidth: `${COLUMN_WIDTHS_MIN[columnId]}px`,
-        maxWidth: `${COLUMN_WIDTHS_MAX[columnId]}px`,
-        verticalAlign: "top",
-      };
-    },
-    [columnWidths],
-  );
-
-  const commitColumnWidth = useCallback(
-    (columnId, width) => {
-      setColumnWidthsAndPersist((prev) => ({
-        ...prev,
-        [columnId]: clampColumnWidth(columnId, width),
-      }));
-    },
-    [setColumnWidthsAndPersist],
-  );
-
-  const startColumnResize = useCallback(
-    (event, columnId) => {
-      event.preventDefault();
-      const pointerId = event.pointerId;
-      const startX = event.clientX;
-      const startWidth = clampColumnWidth(columnId, columnWidths[columnId]);
-      resizeStateRef.current = { columnId, pointerId, startX, startWidth };
-      document.body.classList.add("column-resize-active");
-
-      const onPointerMove = (moveEvent) => {
-        const state = resizeStateRef.current;
-        if (!state || state.columnId !== columnId) return;
-        const delta = moveEvent.clientX - state.startX;
-        const nextWidth = clampColumnWidth(columnId, state.startWidth + delta);
-        setColumnWidths((prev) => ({
-          ...prev,
-          [columnId]: nextWidth,
-        }));
-      };
-
-      const onPointerEnd = (endEvent) => {
-        const state = resizeStateRef.current;
-        if (!state || state.columnId !== columnId) return;
-        if (state.pointerId !== undefined && endEvent.pointerId !== state.pointerId)
-          return;
-        const delta = endEvent.clientX - state.startX;
-        commitColumnWidth(columnId, state.startWidth + delta);
-        resizeStateRef.current = null;
-        document.body.classList.remove("column-resize-active");
-        document.removeEventListener("pointermove", onPointerMove);
-        document.removeEventListener("pointerup", onPointerEnd);
-        document.removeEventListener("pointercancel", onPointerEnd);
-      };
-
-      document.addEventListener("pointermove", onPointerMove);
-      document.addEventListener("pointerup", onPointerEnd);
-      document.addEventListener("pointercancel", onPointerEnd);
-    },
-    [columnWidths, commitColumnWidth],
+  const lastVisibleColumnIndex = visibleColumns.length - 1;
+  const getVisibleCellStyle = useCallback(
+    (columnId, index) => ({
+      ...getColumnCellStyle(columnId),
+      borderRight: index < lastVisibleColumnIndex ? "1px solid #ffffff" : "none",
+    }),
+    [getColumnCellStyle, lastVisibleColumnIndex],
   );
 
   useEffect(() => {
-    return () => {
-      document.body.classList.remove("column-resize-active");
+    const syncToParentWidth = () => {
+      if (isResizingRef.current) return;
+      const wrapperWidth = tableWrapperRef.current?.clientWidth;
+      if (!wrapperWidth || visibleColumns.length === 0) return;
+      const visibleIds = visibleColumns.map((col) => col.id);
+      const fitted = fitVisibleColumnsToWidth(
+        visibleIds,
+        latestWidthsRef.current,
+        wrapperWidth,
+      );
+      if (!fitted) return;
+      const hasMeaningfulDiff = visibleIds.some(
+        (id) => Math.abs((latestWidthsRef.current[id] || 0) - fitted[id]) > 0.5,
+      );
+      if (!hasMeaningfulDiff) return;
+      setColumnWidths((prev) => ({ ...prev, ...fitted }));
     };
-  }, []);
 
-  useEffect(() => {
-    if (!columnPickerOpen) return undefined;
-    const onPointerDown = (e) => {
-      if (
-        columnPickerRef.current &&
-        !columnPickerRef.current.contains(e.target)
-      ) {
-        setColumnPickerOpen(false);
-      }
-    };
-    const onKeyDown = (e) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setColumnPickerOpen(false);
-        columnPickerTriggerRef.current?.focus();
-      }
-    };
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [columnPickerOpen]);
+    syncToParentWidth();
+    window.addEventListener("resize", syncToParentWidth);
+    return () => window.removeEventListener("resize", syncToParentWidth);
+  }, [setColumnWidths, visibleColumns]);
 
   return (
     <div>
       {saveState?.status === "saving" && (
-        <div className="info-message" style={{ marginBottom: "10px" }}>
+        <div className="info-message coding-table__status-message">
           Saving coding changes...
         </div>
       )}
       {saveState?.status === "error" && saveState?.message && (
-        <div className="error-message" style={{ marginBottom: "10px" }}>
+        <div className="error-message coding-table__status-message">
           {saveState.message}
         </div>
       )}
       {saveState?.status === "success" && saveState?.message && (
-        <div className="success-message" style={{ marginBottom: "10px" }}>
+        <div className="success-message coding-table__status-message">
           {saveState.message}
         </div>
       )}
 
       {selectedFilterCodes.length > 0 && !isEditMode && (
-        <div className="body-sm text-primary" style={{ marginBottom: "10px" }}>
+        <div className="body-sm text-primary coding-table__status-message">
           <strong>Filtering by codes:</strong> {selectedFilterCodes.join(", ")}{" "}
           <button
             onClick={() => setSelectedFilterCodes([])}
@@ -504,24 +193,8 @@ const CodingTableView = ({
           </button>
         </div>
       )}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(260px, 320px) minmax(0, 1fr)",
-          gap: "16px",
-          alignItems: "start",
-        }}
-      >
-        <div
-          style={{
-            position: "sticky",
-            top: "80px",
-            alignSelf: "start",
-            zIndex: 2,
-            maxHeight: "calc(100vh - 96px)",
-            overflowY: "auto",
-          }}
-        >
+      <div className="coding-table-layout">
+        <div className="coding-table-layout__legend">
           <CodeLegend
             codebookTree={codebookTree}
             isEditMode={isEditMode}
@@ -535,461 +208,132 @@ const CodingTableView = ({
           />
         </div>
 
-        <div className="table-wrapper">
-          <div className="column-picker-toolbar">
-            <div className="column-picker" ref={columnPickerRef}>
-              <button
-                type="button"
-                ref={columnPickerTriggerRef}
-                className="btn btn-secondary btn-small column-picker__trigger"
-                aria-expanded={columnPickerOpen}
-                aria-haspopup="true"
-                aria-controls={columnPickerPanelId}
-                onClick={() => setColumnPickerOpen((o) => !o)}
-              >
-                Hide/Show Columns
-              </button>
-              {columnPickerOpen ? (
-                <div
-                  id={columnPickerPanelId}
-                  className="column-picker__panel"
-                  role="group"
-                  aria-labelledby={columnPickerHeadingId}
-                >
-                  <div
-                    className="column-picker__title"
-                    id={columnPickerHeadingId}
-                  >
-                    Show Columns
-                  </div>
-                  <ul className="column-picker__list">
-                    {TABLE_COLUMNS.map(({ id, label }) => {
-                      const isLastVisible =
-                        columnVisibility[id] && visibleColumnCount === 1;
-                      return (
-                        <li key={id} className="column-picker__row">
-                          <label
-                            className={`column-picker__label${isLastVisible ? " column-picker__label--disabled" : ""}`}
-                          >
-                            <input
-                              type="checkbox"
-                              className="column-picker__checkbox"
-                              checked={columnVisibility[id]}
-                              onChange={() => toggleColumnVisibility(id)}
-                              disabled={isLastVisible}
-                              title={
-                                isLastVisible
-                                  ? "At least one column must remain visible."
-                                  : undefined
-                              }
-                            />
-                            <span>{label}</span>
-                          </label>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              ) : null}
-            </div>
-          </div>
-          <table className="table table--resizable">
-            <thead>
-              <tr>
-                {TABLE_COLUMNS.map(({ id, label }) =>
-                  columnVisibility[id] ? (
-                    <th
-                      key={id}
-                      className="table__th table__th--resizable"
-                      style={getColumnCellStyle(id)}
-                    >
-                      <div className="table__th-content">{label}</div>
-                      <div
-                        className="table__column-resizer"
-                        role="separator"
-                        aria-orientation="vertical"
-                        aria-label={`Resize ${label} column`}
-                        tabIndex={0}
-                        onPointerDown={(event) => startColumnResize(event, id)}
-                      />
-                    </th>
-                  ) : null,
-                )}
-              </tr>
-            </thead>
+        <div className="table-wrapper" ref={tableWrapperRef}>
+          <ColumnPicker
+            columnVisibility={columnVisibility}
+            visibleColumnCount={visibleColumnCount}
+            toggleColumnVisibility={toggleColumnVisibility}
+          />
+          <table className="table table--resizable coding-table">
+            <colgroup>
+              {visibleColumns.map(({ id }) => (
+                <col key={`coding-col-${id}`} style={getColumnCellStyle(id)} />
+              ))}
+            </colgroup>
+            <CodingTableHeader
+              visibleColumns={visibleColumns}
+              getColumnCellStyle={getColumnCellStyle}
+              startColumnResize={startColumnResize}
+            />
             <tbody>
-              {rowsForRender.map(
-                ({ item, editableItem, sourceIndex, rowKey }) => {
-                  const readOnlyCodeEvidence =
-                    !isEditMode && selectedFilterCodes.length > 0
-                      ? item.codeEvidence.filter((ev) =>
-                          selectedFilterCodes.includes(ev.code),
-                        )
-                      : item.codeEvidence;
-
-                  const editCodeEvidence = Array.isArray(
-                    editableItem?.codeEvidence,
-                  )
-                    ? editableItem.codeEvidence
-                    : [];
-
-                  const notesByCode = readOnlyCodeEvidence.reduce(
-                    (acc, entry) => {
-                      const code = String(entry?.code || "").trim();
-                      const notes = String(entry?.notes || "").trim();
-                      if (!code || !notes) return acc;
-                      if (!acc[code]) acc[code] = new Set();
-                      acc[code].add(notes);
-                      return acc;
-                    },
-                    {},
-                  );
-
-                  const postData = getPostDataById(postContents, item.postId);
-                  const postTitle = postData?.title || "Title not found";
-                  const postContent = postData?.content;
-                  const codeDatalistId = `code-options-${rowKey}`;
-                  const editCodes = Array.from(
-                    new Set(
-                      editCodeEvidence
-                        .map((entry) => String(entry?.code || "").trim())
-                        .filter(Boolean),
-                    ),
-                  );
-
-                  return (
-                    <React.Fragment key={rowKey}>
-                      <tr className="table__row--hover">
-                        {columnVisibility.postId && (
-                          <td
-                            className="table__td"
-                            style={getColumnCellStyle("postId")}
-                          >
-                            {isEditMode ? (
+              {rowsForRender.map((row) => (
+                <React.Fragment key={row.rowKey}>
+                  {isEditMode ? (
+                    <tr className="table__row--hover">
+                      {visibleColumns.map(({ id }, index) => {
+                        if (id === "postId") {
+                          return (
+                            <td key={`${row.rowKey}-postId`} className="table__td" style={getVisibleCellStyle("postId", index)}>
                               <input
                                 type="text"
                                 className="form__input"
-                                value={editableItem?.postId || ""}
+                                value={row.editableItem?.postId || ""}
                                 onChange={(e) =>
-                                  updateRowPostId(sourceIndex, e.target.value)
+                                  updateRowPostId(row.sourceIndex, e.target.value)
                                 }
                                 disabled={saveState?.status === "saving"}
                               />
-                            ) : (
-                              item.postId
-                            )}
-                          </td>
-                        )}
-                        {columnVisibility.title && (
-                          <td
-                            className="table__td"
-                            style={getColumnCellStyle("title")}
-                          >
-                            <div
-                              style={{
-                                whiteSpace: "pre-wrap",
-                                wordWrap: "break-word",
-                              }}
+                            </td>
+                          );
+                        }
+                        if (id === "title") {
+                          return (
+                            <td key={`${row.rowKey}-title`} className="table__td" style={getVisibleCellStyle("title", index)}>
+                              <div className="table__cell-wrap">{row.postTitle}</div>
+                            </td>
+                          );
+                        }
+                        if (id === "content") {
+                          return (
+                            <td
+                              key={`${row.rowKey}-content`}
+                              className="table__td table__td--content"
+                              style={getVisibleCellStyle("content", index)}
                             >
-                              {postTitle}
-                            </div>
-                          </td>
-                        )}
-                        {columnVisibility.content && (
-                          <td
-                            className="table__td"
-                            style={getColumnCellStyle("content")}
-                          >
-                            <div
-                              style={{
-                                whiteSpace: "pre-wrap",
-                                wordWrap: "break-word",
-                              }}
+                              <div className="table__cell-wrap">
+                                {row.postContent ? (
+                                  <div className="table__cell-wrap">
+                                    <HighlightedContent
+                                      content={row.postContent}
+                                      codeEvidence={row.readOnlyCodeEvidence}
+                                      getCodeColor={getCodeColor}
+                                      onAddCodeFromSelection={(text) =>
+                                        appendCodeEvidenceWithText(row.sourceIndex, text)
+                                      }
+                                    />
+                                  </div>
+                                ) : (
+                                  "Content not found"
+                                )}
+                              </div>
+                            </td>
+                          );
+                        }
+                        if (id === "codesApplied") {
+                          return (
+                            <td
+                              key={`${row.rowKey}-codesApplied`}
+                              className="table__td table__td--codes"
+                              style={getVisibleCellStyle("codesApplied", index)}
                             >
-                              {postContent ? (
-                                <div
-                                  style={{
-                                    whiteSpace: "pre-wrap",
-                                    wordWrap: "break-word",
-                                  }}
-                                >
-                                  <HighlightedContent
-                                    content={postContent}
-                                    codeEvidence={readOnlyCodeEvidence}
-                                    getCodeColor={getCodeColor}
-                                    onAddCodeFromSelection={
-                                      isEditMode
-                                        ? (text) =>
-                                            appendCodeEvidenceWithText(
-                                              sourceIndex,
-                                              text,
-                                            )
-                                        : undefined
-                                    }
-                                  />
-                                </div>
-                              ) : (
-                                "Content not found"
-                              )}
-                            </div>
-                          </td>
-                        )}
-                        {columnVisibility.codesApplied && (
-                          <td
-                            className="table__td"
-                            style={getColumnCellStyle("codesApplied")}
-                          >
-                            {isEditMode ? (
-                              <div>
-                                {editCodes.length > 0 ? (
-                                  editCodes.map((code) => (
+                              <div className="table__codes-wrap">
+                                {row.editCodes.length > 0 ? (
+                                  row.editCodes.map((code) => (
                                     <div
-                                      key={`${rowKey}-edit-code-${code}`}
+                                      key={`${row.rowKey}-edit-code-${code}`}
                                       className="code-badge-container"
                                     >
                                       <div
                                         className="code-badge"
-                                        style={{
-                                          backgroundColor: getCodeColor(code),
-                                        }}
+                                        style={{ backgroundColor: getCodeColor(code) }}
                                       >
                                         {code}
                                       </div>
                                     </div>
                                   ))
                                 ) : (
-                                  <span className="text-muted">
-                                    No codes configured
-                                  </span>
+                                  <span className="text-muted">No codes configured</span>
                                 )}
                               </div>
-                            ) : readOnlyCodeEvidence.length > 0 ? (
-                              <div>
-                                {[
-                                  ...new Set(
-                                    readOnlyCodeEvidence.map(
-                                      ({ code }) => code,
-                                    ),
-                                  ),
-                                ].map((code) => {
-                                  const notesForCode = notesByCode[code]
-                                    ? Array.from(notesByCode[code])
-                                    : [];
-
-                                  return (
-                                    <div
-                                      key={code}
-                                      className="code-badge-container"
-                                    >
-                                      <div
-                                        className="code-badge"
-                                        data-has-notes={
-                                          notesForCode.length > 0
-                                            ? "true"
-                                            : "false"
-                                        }
-                                        style={{
-                                          backgroundColor: getCodeColor(code),
-                                        }}
-                                      >
-                                        {code}
-                                      </div>
-
-                                      {notesForCode.length > 0 && (
-                                        <div
-                                          className="code-notes-tooltip"
-                                          role="tooltip"
-                                        >
-                                          <div className="code-notes-tooltip__title">
-                                            Researcher Notes
-                                          </div>
-                                          {notesForCode.map((note, idx) => (
-                                            <div
-                                              key={`${code}-note-${idx}`}
-                                              className="code-notes-tooltip__line"
-                                            >
-                                              {note}
-                                            </div>
-                                          ))}
-                                        </div>
-                                      )}
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            ) : (
-                              <span className="text-muted">
-                                No codes applied
-                              </span>
-                            )}
-                          </td>
-                        )}
-                      </tr>
-
-                      {isEditMode && (
-                        <tr>
-                          <td
-                            className="table__td"
-                            colSpan={visibleColumnCount}
-                          >
-                            <div
-                              style={{
-                                border: "1px solid rgba(255, 255, 255, 0.15)",
-                                borderRadius: "6px",
-                                padding: "12px",
-                                backgroundColor: "rgba(255, 255, 255, 0.03)",
-                              }}
-                            >
-                              {!columnVisibility.postId && (
-                                <div
-                                  className="form__group"
-                                  style={{ marginBottom: "12px" }}
-                                >
-                                  <label className="form__label">Post ID</label>
-                                  <input
-                                    type="text"
-                                    className="form__input"
-                                    value={editableItem?.postId || ""}
-                                    onChange={(e) =>
-                                      updateRowPostId(
-                                        sourceIndex,
-                                        e.target.value,
-                                      )
-                                    }
-                                    disabled={saveState?.status === "saving"}
-                                  />
-                                </div>
-                              )}
-                              <div
-                                className="form__helper"
-                                style={{ marginTop: 0 }}
-                              >
-                                Search code names by typing in the code field.
-                              </div>
-                              <datalist id={codeDatalistId}>
-                                {codeFieldOptions.map((codeOption) => (
-                                  <option
-                                    key={`${codeDatalistId}-${codeOption}`}
-                                    value={codeOption}
-                                  />
-                                ))}
-                              </datalist>
-
-                              <div
-                                style={{
-                                  display: "flex",
-                                  flexDirection: "column",
-                                  gap: "8px",
-                                }}
-                              >
-                                {editCodeEvidence.map((entry, entryIndex) => (
-                                  <div
-                                    key={`${rowKey}-entry-${entryIndex}`}
-                                    style={{
-                                      border:
-                                        "1px solid rgba(255, 255, 255, 0.15)",
-                                      borderRadius: "6px",
-                                      padding: "10px",
-                                      display: "grid",
-                                      gridTemplateColumns:
-                                        "minmax(180px, 1fr) minmax(220px, 2fr) minmax(220px, 1.6fr) auto",
-                                      gap: "8px",
-                                      alignItems: "start",
-                                    }}
-                                  >
-                                    <input
-                                      type="text"
-                                      list={codeDatalistId}
-                                      className="form__input"
-                                      placeholder="Search/select code"
-                                      value={entry?.code || ""}
-                                      onChange={(e) =>
-                                        updateRowCodeEvidenceField(
-                                          sourceIndex,
-                                          entryIndex,
-                                          "code",
-                                          e.target.value,
-                                        )
-                                      }
-                                      disabled={saveState?.status === "saving"}
-                                    />
-
-                                    <textarea
-                                      className="form__input"
-                                      rows={2}
-                                      placeholder="Evidence (use § or quotes for multiple snippets)"
-                                      value={entry?.evidence || ""}
-                                      onChange={(e) =>
-                                        updateRowCodeEvidenceField(
-                                          sourceIndex,
-                                          entryIndex,
-                                          "evidence",
-                                          e.target.value,
-                                        )
-                                      }
-                                      disabled={saveState?.status === "saving"}
-                                      style={{
-                                        resize: "vertical",
-                                        minHeight: "68px",
-                                      }}
-                                    />
-
-                                    <textarea
-                                      className="form__input"
-                                      rows={2}
-                                      placeholder="Researcher notes (shown on hover)"
-                                      value={entry?.notes || ""}
-                                      onChange={(e) =>
-                                        updateRowCodeEvidenceField(
-                                          sourceIndex,
-                                          entryIndex,
-                                          "notes",
-                                          e.target.value,
-                                        )
-                                      }
-                                      disabled={saveState?.status === "saving"}
-                                      style={{
-                                        resize: "vertical",
-                                        minHeight: "68px",
-                                      }}
-                                    />
-
-                                    <button
-                                      type="button"
-                                      className="btn btn-secondary btn-small"
-                                      onClick={() =>
-                                        removeRowCodeEvidence(
-                                          sourceIndex,
-                                          entryIndex,
-                                        )
-                                      }
-                                      disabled={saveState?.status === "saving"}
-                                    >
-                                      Remove
-                                    </button>
-                                  </div>
-                                ))}
-
-                                <button
-                                  type="button"
-                                  className="btn btn-secondary btn-small"
-                                  onClick={() =>
-                                    addRowCodeEvidence(sourceIndex)
-                                  }
-                                  disabled={saveState?.status === "saving"}
-                                  style={{ width: "fit-content" }}
-                                >
-                                  + Add code/evidence
-                                </button>
-                              </div>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
-                  );
-                },
-              )}
+                            </td>
+                          );
+                        }
+                        return null;
+                      })}
+                    </tr>
+                  ) : (
+                    <CodingTableRow
+                      row={row}
+                      visibleColumns={visibleColumns}
+                      getColumnCellStyle={getColumnCellStyle}
+                      getCodeColor={getCodeColor}
+                    />
+                  )}
+                  {!isEditMode ? null : (
+                    <CodingTableEditRow
+                      row={row}
+                      columnVisibility={columnVisibility}
+                      visibleColumnCount={visibleColumnCount}
+                      codeFieldOptions={codeFieldOptions}
+                      saveStatus={saveState?.status}
+                      updateRowPostId={updateRowPostId}
+                      updateRowCodeEvidenceField={updateRowCodeEvidenceField}
+                      removeRowCodeEvidence={removeRowCodeEvidence}
+                      addRowCodeEvidence={addRowCodeEvidence}
+                    />
+                  )}
+                </React.Fragment>
+              ))}
             </tbody>
           </table>
         </div>
