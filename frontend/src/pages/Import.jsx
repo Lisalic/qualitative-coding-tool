@@ -5,7 +5,7 @@ import { useState } from "react";
 import "../styles/Home.css";
 import "../styles/Data.css";
 
-export default function Import() {
+export default function ImportPage() {
   const navigate = useNavigate();
   const [error, setError] = useState("");
   const [uploadData, setUploadData] = useState(null);

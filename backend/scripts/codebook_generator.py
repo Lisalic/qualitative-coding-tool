@@ -2,14 +2,16 @@ import time
 import re
 from openai import OpenAI
 
+from backend.app.ai_models import model_slug_at
+
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
-MODEL_1 = "arcee-ai/trinity-large-preview:free"
-MODEL_2 = "stepfun/step-3.5-flash:free"
-MODEL_3 = "z-ai/glm-4.5-air:free"
-MODEL_4 = "deepseek/deepseek-r1-0528:free"
-MODEL_5 = "nvidia/nemotron-3-nano-30b-a3b:free"
-MODEL_6 = "qwen/qwen3-235b-a22b-thinking-2507"
-MODEL_7 = "openai/gpt-oss-120b:free"
+MODEL_1 = model_slug_at(0)
+MODEL_2 = model_slug_at(1)
+MODEL_3 = model_slug_at(2)
+MODEL_4 = model_slug_at(3)
+MODEL_5 = model_slug_at(4)
+MODEL_6 = model_slug_at(5)
+MODEL_7 = model_slug_at(6)
 MAX_RETRIES = 3
 INITIAL_RETRY_DELAY = 2
 

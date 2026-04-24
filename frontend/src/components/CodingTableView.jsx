@@ -16,6 +16,7 @@ import {
 
 /** v2: default hides Post ID column; bumps key so prior saved visibility does not override. */
 const TABLE_COLUMN_STORAGE_KEY = "viewCoding.tableColumnVisibility.v2";
+const TABLE_COLUMN_WIDTH_STORAGE_KEY = "viewCoding.tableColumnWidths.v1";
 
 const TABLE_COLUMNS = [
   { id: "postId", label: "Post ID" },
@@ -24,12 +25,64 @@ const TABLE_COLUMNS = [
   { id: "codesApplied", label: "Codes Applied" },
 ];
 
+const COLUMN_WIDTHS_DEFAULT = {
+  postId: 220,
+  title: 220,
+  content: 520,
+  codesApplied: 240,
+};
+
+const COLUMN_WIDTHS_MIN = {
+  postId: 120,
+  title: 150,
+  content: 260,
+  codesApplied: 170,
+};
+
+const COLUMN_WIDTHS_MAX = {
+  postId: 420,
+  title: 520,
+  content: 1100,
+  codesApplied: 580,
+};
+
 const DEFAULT_COLUMN_VISIBILITY = {
   postId: false,
   title: true,
   content: true,
   codesApplied: true,
 };
+
+function clampColumnWidth(columnId, width) {
+  const min = COLUMN_WIDTHS_MIN[columnId] ?? 120;
+  const max = COLUMN_WIDTHS_MAX[columnId] ?? 1200;
+  const numeric = Number(width);
+  if (!Number.isFinite(numeric)) return COLUMN_WIDTHS_DEFAULT[columnId] ?? min;
+  return Math.min(max, Math.max(min, numeric));
+}
+
+function normalizeColumnWidths(raw) {
+  const next = { ...COLUMN_WIDTHS_DEFAULT };
+  if (!raw || typeof raw !== "object") return next;
+  const allowed = new Set(TABLE_COLUMNS.map((c) => c.id));
+  for (const [key, value] of Object.entries(raw)) {
+    if (!allowed.has(key)) continue;
+    next[key] = clampColumnWidth(key, value);
+  }
+  return next;
+}
+
+function readStoredColumnWidths() {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(TABLE_COLUMN_WIDTH_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return normalizeColumnWidths(parsed);
+  } catch {
+    return null;
+  }
+}
 
 function readStoredColumnVisibility() {
   if (typeof window === "undefined") return null;
@@ -269,8 +322,12 @@ const CodingTableView = ({
   );
 
   const [columnPickerOpen, setColumnPickerOpen] = useState(false);
+  const [columnWidths, setColumnWidths] = useState(() =>
+    normalizeColumnWidths(readStoredColumnWidths()),
+  );
   const columnPickerRef = useRef(null);
   const columnPickerTriggerRef = useRef(null);
+  const resizeStateRef = useRef(null);
   const columnPickerPanelId = useId();
   const columnPickerHeadingId = useId();
 
@@ -305,6 +362,93 @@ const CodingTableView = ({
     },
     [setColumnVisibilityAndPersist],
   );
+
+  const setColumnWidthsAndPersist = useCallback((updater) => {
+    setColumnWidths((prev) => {
+      const nextCandidate =
+        typeof updater === "function" ? updater(prev) : { ...prev, ...updater };
+      const next = normalizeColumnWidths(nextCandidate);
+      try {
+        localStorage.setItem(
+          TABLE_COLUMN_WIDTH_STORAGE_KEY,
+          JSON.stringify(next),
+        );
+      } catch {
+        // ignore quota / private mode
+      }
+      return next;
+    });
+  }, []);
+
+  const getColumnCellStyle = useCallback(
+    (columnId) => {
+      const width = clampColumnWidth(columnId, columnWidths[columnId]);
+      return {
+        width: `${width}px`,
+        minWidth: `${COLUMN_WIDTHS_MIN[columnId]}px`,
+        maxWidth: `${COLUMN_WIDTHS_MAX[columnId]}px`,
+        verticalAlign: "top",
+      };
+    },
+    [columnWidths],
+  );
+
+  const commitColumnWidth = useCallback(
+    (columnId, width) => {
+      setColumnWidthsAndPersist((prev) => ({
+        ...prev,
+        [columnId]: clampColumnWidth(columnId, width),
+      }));
+    },
+    [setColumnWidthsAndPersist],
+  );
+
+  const startColumnResize = useCallback(
+    (event, columnId) => {
+      event.preventDefault();
+      const pointerId = event.pointerId;
+      const startX = event.clientX;
+      const startWidth = clampColumnWidth(columnId, columnWidths[columnId]);
+      resizeStateRef.current = { columnId, pointerId, startX, startWidth };
+      document.body.classList.add("column-resize-active");
+
+      const onPointerMove = (moveEvent) => {
+        const state = resizeStateRef.current;
+        if (!state || state.columnId !== columnId) return;
+        const delta = moveEvent.clientX - state.startX;
+        const nextWidth = clampColumnWidth(columnId, state.startWidth + delta);
+        setColumnWidths((prev) => ({
+          ...prev,
+          [columnId]: nextWidth,
+        }));
+      };
+
+      const onPointerEnd = (endEvent) => {
+        const state = resizeStateRef.current;
+        if (!state || state.columnId !== columnId) return;
+        if (state.pointerId !== undefined && endEvent.pointerId !== state.pointerId)
+          return;
+        const delta = endEvent.clientX - state.startX;
+        commitColumnWidth(columnId, state.startWidth + delta);
+        resizeStateRef.current = null;
+        document.body.classList.remove("column-resize-active");
+        document.removeEventListener("pointermove", onPointerMove);
+        document.removeEventListener("pointerup", onPointerEnd);
+        document.removeEventListener("pointercancel", onPointerEnd);
+      };
+
+      document.addEventListener("pointermove", onPointerMove);
+      document.addEventListener("pointerup", onPointerEnd);
+      document.addEventListener("pointercancel", onPointerEnd);
+    },
+    [columnWidths, commitColumnWidth],
+  );
+
+  useEffect(() => {
+    return () => {
+      document.body.classList.remove("column-resize-active");
+    };
+  }, []);
 
   useEffect(() => {
     if (!columnPickerOpen) return undefined;
@@ -449,13 +593,25 @@ const CodingTableView = ({
               ) : null}
             </div>
           </div>
-          <table className="table">
+          <table className="table table--resizable">
             <thead>
               <tr>
                 {TABLE_COLUMNS.map(({ id, label }) =>
                   columnVisibility[id] ? (
-                    <th key={id} className="table__th">
-                      {label}
+                    <th
+                      key={id}
+                      className="table__th table__th--resizable"
+                      style={getColumnCellStyle(id)}
+                    >
+                      <div className="table__th-content">{label}</div>
+                      <div
+                        className="table__column-resizer"
+                        role="separator"
+                        aria-orientation="vertical"
+                        aria-label={`Resize ${label} column`}
+                        tabIndex={0}
+                        onPointerDown={(event) => startColumnResize(event, id)}
+                      />
                     </th>
                   ) : null,
                 )}
@@ -507,10 +663,7 @@ const CodingTableView = ({
                         {columnVisibility.postId && (
                           <td
                             className="table__td"
-                            style={{
-                              verticalAlign: "top",
-                              maxWidth: "250px",
-                            }}
+                            style={getColumnCellStyle("postId")}
                           >
                             {isEditMode ? (
                               <input
@@ -530,10 +683,7 @@ const CodingTableView = ({
                         {columnVisibility.title && (
                           <td
                             className="table__td"
-                            style={{
-                              verticalAlign: "top",
-                              maxWidth: "125px",
-                            }}
+                            style={getColumnCellStyle("title")}
                           >
                             <div
                               style={{
@@ -548,10 +698,7 @@ const CodingTableView = ({
                         {columnVisibility.content && (
                           <td
                             className="table__td"
-                            style={{
-                              verticalAlign: "top",
-                              maxWidth: "400px",
-                            }}
+                            style={getColumnCellStyle("content")}
                           >
                             <div
                               style={{
@@ -590,10 +737,7 @@ const CodingTableView = ({
                         {columnVisibility.codesApplied && (
                           <td
                             className="table__td"
-                            style={{
-                              verticalAlign: "top",
-                              maxWidth: "175px",
-                            }}
+                            style={getColumnCellStyle("codesApplied")}
                           >
                             {isEditMode ? (
                               <div>

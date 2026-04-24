@@ -1,15 +1,20 @@
 import { useNavigate } from "react-router-dom";
 import { useState, useEffect, useCallback } from "react";
-import { apiFetch } from "../../api";
+import { apiFetch, postForm } from "../../api";
 import FormShell from "../forms/FormShell";
 import DatabaseSourceFields from "../forms/DatabaseSourceFields";
 import PromptTextareaWithActions from "../forms/PromptTextareaWithActions";
 import MinWordsField from "../forms/MinWordsField";
 import SamplePercentageSlider from "../forms/SamplePercentageSlider";
 import { AI_MODELS } from "../../lib/constants";
+import {
+  EXAMPLE_PROMPTS,
+  MissingFieldsError,
+  buildFilterDataForm,
+} from "../../lib/apiContracts";
 import "../../styles/Home.css";
 
-const EXAMPLE_PROMPT = `Act as a qualitative research assistant tasked with cleaning raw data transcripts for analysis. For each input item, decide whether it should be kept or removed. Apply these rules: remove spam/automated posts, remove obvious duplicates, and remove non-topical noise. Keep authentic human discussion and on-topic content.`;
+const EXAMPLE_PROMPT = EXAMPLE_PROMPTS.filter;
 
 export default function FilterDataPanel({
   filterPrompt,
@@ -156,117 +161,55 @@ export default function FilterDataPanel({
     setDatabase("");
   };
 
-  const validateForm = () => {
-    const missing = [];
-    if (!database) missing.push("Database");
-    if (!selectedProject) missing.push("Project");
-    if (!name || !name.trim()) {
-      missing.push("Filtered Database Name");
-    }
-    if (!model || !model.trim()) {
-      missing.push("AI Model");
-    }
-    if (missing.length) {
-      return `Missing required fields: ${missing.join(", ")}`;
-    }
-    const savedApiKey = localStorage.getItem("apiKey");
-    if (!savedApiKey) {
-      return "API key not set. Please set your API key in the navbar.";
-    }
-    return null;
-  };
-
-  const buildRequestData = (apiKey) => {
-    const requestData = new FormData();
-    requestData.append("api_key", apiKey);
-    if (filterPrompt) {
-      requestData.append("prompt", filterPrompt);
-    }
-    if (filterTags && filterTags.trim()) {
-      requestData.append("filter_tags", filterTags.trim());
-    }
-    if (model) {
-      requestData.append("model", model);
-    }
-    if (name) {
-      requestData.append("name", name);
-    }
-    if (description) {
-      requestData.append("description", description);
-    }
-    if (database) {
-      requestData.append("database", database);
-    }
-    if (selectedProject) {
-      requestData.append("project_id", selectedProject);
-    }
-    if (minWords > 0) {
-      requestData.append("min_words", String(minWords));
-    }
-    requestData.append(
-      "sample_percentage",
-      String(
-        Number.isFinite(Number(samplePercentage))
-          ? Number(samplePercentage)
-          : 100,
-      ),
-    );
-    return requestData;
-  };
-
-  const parseErrorResponse = async (response) => {
-    const text = await response.text();
-    let errorMsg = `Filtering failed (HTTP ${response.status})`;
-    if (!text) return errorMsg;
-    try {
-      const errorData = JSON.parse(text);
-      if (typeof errorData.error === "string") return errorData.error;
-      if (typeof errorData.detail === "string") return errorData.detail;
-      return errorMsg;
-    } catch {
-      return text || errorMsg;
-    }
-  };
-
   const handleSubmit = async () => {
     setLoading(true);
     setMessage("");
 
     try {
-      const validationError = validateForm();
-      if (validationError) {
-        setMessage(`Error: ${validationError}`);
-        return;
-      }
-
       const savedApiKey = localStorage.getItem("apiKey");
-      const requestData = buildRequestData(savedApiKey);
-
-      const response = await apiFetch("/api/filter-data/", {
-        method: "POST",
-        body: requestData,
-      });
-
-      if (!response.ok) {
-        const errorMsg = await parseErrorResponse(response);
-        setMessage(`Error: ${errorMsg}`);
+      if (!savedApiKey) {
+        setMessage(
+          "Error: API key not set. Please set your API key in the navbar.",
+        );
         return;
       }
 
-      const text = await response.text();
-      const data = JSON.parse(text);
+      let requestData;
+      try {
+        requestData = buildFilterDataForm({
+          apiKey: savedApiKey,
+          database,
+          name,
+          model,
+          projectId: selectedProject || null,
+          prompt: filterPrompt,
+          description,
+          minWords,
+          samplePercentage,
+          filterTags,
+        });
+      } catch (err) {
+        if (err instanceof MissingFieldsError) {
+          setMessage(`Error: ${err.message}`);
+          return;
+        }
+        throw err;
+      }
 
-      let resultMessage = `✓ ${data.message}`;
-      if (data.tag_filter) {
+      const { ok, data, error } = await postForm(
+        "/api/filter-data/",
+        requestData,
+      );
+
+      if (!ok) {
+        setMessage(`Error: ${error || "Filtering failed"}`);
+        return;
+      }
+
+      let resultMessage = `✓ ${data?.message || "Database filtered and saved"}`;
+      if (data?.tag_filter) {
         resultMessage += `\n\nTag expansion:\n${JSON.stringify(
           data.tag_filter,
-          null,
-          2,
-        )}`;
-      }
-      if (data.ai_response) {
-        resultMessage += `\n\nAI Response:\n${JSON.stringify(
-          data.ai_response,
           null,
           2,
         )}`;
@@ -374,7 +317,7 @@ export default function FilterDataPanel({
           value={filterPrompt}
           onChange={onFilterPromptChange}
           placeholder="Enter your filter prompt..."
-          rows={5}
+          rows={3}
           promptType="filter"
           exampleText={EXAMPLE_PROMPT}
           disabled={loading}
@@ -382,7 +325,7 @@ export default function FilterDataPanel({
         />
 
         <div className="form-group">
-          <label htmlFor="filterTags">Tags (optional)</label>
+          <label htmlFor="filterTags">Keywords (optional)</label>
           <textarea
             id="filterTags"
             value={filterTags}

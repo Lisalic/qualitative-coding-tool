@@ -8,7 +8,16 @@ from sqlalchemy import text, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.utils import get_user_id_from_request
-from backend.app.database import get_db, get_async_db, Project, File, FileTable, FileDependency, async_engine
+from backend.app.database import (
+    get_db,
+    get_async_db,
+    Project,
+    File,
+    FileTable,
+    FileDependency,
+    async_engine,
+    async_link_file_to_project,
+)
 from backend.app.databasemanager import AsyncDatabaseManager
 
 router = APIRouter()
@@ -60,7 +69,7 @@ async def save_comparison(
                         raise HTTPException(status_code=404, detail="Project not found")
                     if proj.user_id != user_id:
                         raise HTTPException(status_code=403, detail="Forbidden: project does not belong to user")
-                    file_rec.projects.append(proj)
+                    await async_link_file_to_project(dm.session, file_rec.id, proj.id)
                     await dm.session.flush()
                 except HTTPException:
                     raise
@@ -126,7 +135,7 @@ async def save_summary(request: Request, content: str = Form(...), name: str = F
                         raise HTTPException(status_code=404, detail="Project not found")
                     if proj.user_id != user_id:
                         raise HTTPException(status_code=403, detail="Forbidden: project does not belong to user")
-                    file_rec.projects.append(proj)
+                    await async_link_file_to_project(dm.session, file_rec.id, proj.id)
                     await dm.session.flush()
                 except HTTPException:
                     raise

@@ -10,8 +10,10 @@ from typing import Any
 
 from openai import OpenAI
 
+from backend.scripts.openrouter_http import openrouter_user_message
+
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
-DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
+DEFAULT_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
 MAX_RETRIES = 3
 INITIAL_RETRY_DELAY = 2
 MAX_EXPANDED_TERMS = 50
@@ -183,7 +185,11 @@ def expand_tags_via_openrouter(
             last_error = e
             if attempt == MAX_RETRIES:
                 code = _extract_error_code(e)
-                msg = str(e)
+                msg = (
+                    openrouter_user_message(code, chosen)
+                    if code
+                    else str(e)
+                )
                 raise TagExpansionError(msg, code=code or 502) from e
             time.sleep(INITIAL_RETRY_DELAY * (2 ** (attempt - 1)))
 

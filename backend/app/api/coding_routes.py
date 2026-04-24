@@ -9,9 +9,24 @@ import secrets
 import math
 
 from backend.app.api.utils import get_user_id_from_request
-from backend.app.database import get_db, File, FileDependency, engine, async_engine
+from backend.app.api.schemas import (
+    ApplyCodebookRequest,
+    ApplyCodebookResponse,
+    GenerateCodebookFileInfo,
+    as_form,
+)
+from backend.app.database import (
+    get_db,
+    File,
+    FileDependency,
+    Project,
+    engine,
+    async_engine,
+    async_link_file_to_project,
+)
 from backend.scripts.display_codebook import parse_codebook_to_json
 from backend.app.databasemanager import AsyncDatabaseManager
+from backend.app.api import utils as api_utils_module
 
 router = APIRouter()
 
@@ -475,8 +490,7 @@ async def save_project_coded_data_duplicate(
             source_file_in_dm = sfdm.scalar_one_or_none()
 
             for project in (source_file_in_dm.projects if source_file_in_dm else []):
-                if project not in file_rec.projects:
-                    file_rec.projects.append(project)
+                await async_link_file_to_project(dm.session, file_rec.id, project.id)
 
             copied_parent_ids: set[int] = set()
             spd = await dm.session.execute(
@@ -545,33 +559,28 @@ async def save_project_coded_data_duplicate(
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@router.post("/apply-codebook/")
+@router.post("/apply-codebook/", response_model=ApplyCodebookResponse)
 async def apply_codebook(
     request: Request,
-    database: str = Form(...),
-    codebook: str = Form(...),
-    methodology: str = Form(""),
-    report_name: str = Form(None),
-    api_key: str = Form(...),
-    model: str = Form(""),
-    sample_percentage: float = Form(100.0),
+    payload: ApplyCodebookRequest = Depends(as_form(ApplyCodebookRequest)),
     db: Session = Depends(get_db),
 ):
-    """Open the Postgres schema provided by `database`, read `submissions.title`/`selftext`
-    and `comments.body`, assemble them into a single string, print it to stdout and
-    return a preview in the response.
+    """Classify a raw/filtered schema against a codebook and persist the output.
+
+    The ``codebook`` field accepts either a numeric File id or a
+    ``proj_<hex>`` schema name; this is enforced by
+    :class:`ApplyCodebookRequest`.
     """
-    from .utils import classify_posts
     import secrets
 
-    # apply-codebook endpoint invoked
-
-    schema = (database or "").strip()
-    if schema.endswith('.db'):
-        schema = schema[:-3]
-
-    if not schema or not schema.startswith('proj_'):
-        return JSONResponse({"error": "This endpoint expects a proj_<id> schema name"}, status_code=400)
+    schema = payload.database
+    api_key = payload.api_key
+    codebook = payload.codebook
+    methodology = payload.methodology or ""
+    report_name = payload.report_name
+    model = payload.model or ""
+    sample_percentage = payload.sample_percentage
+    project_id = payload.project_id
 
     try:
         assembled = await asyncio.to_thread(_assemble_posts_content, schema, sample_percentage)
@@ -580,14 +589,9 @@ async def apply_codebook(
         codebook_text = _load_content_store_text(resolved_codebook_schema)
 
         if not codebook_text:
-            return JSONResponse(
-                {"error": "Cannot apply codebook: codebook not found or empty"},
-                status_code=400,
-            )
-        if not api_key:
-            return JSONResponse(
-                {"error": "Cannot apply codebook: api_key not provided"},
-                status_code=400,
+            raise HTTPException(
+                status_code=404,
+                detail="Cannot apply codebook: codebook not found or empty",
             )
 
         # Attempt classification using the provided codebook and API key
@@ -596,28 +600,23 @@ async def apply_codebook(
         user_prompt = ""
         try:
             result = await asyncio.to_thread(
-                classify_posts,
+                api_utils_module.classify_posts,
                 codebook_text,
                 assembled,
-                methodology or "",
+                methodology,
                 api_key,
                 model,
             )
             classification_output, system_prompt, user_prompt = result
         except Exception as e:
             print(f"Exception during classification: {e}")
-            import traceback
             traceback.print_exc()
-            return JSONResponse(
-                {"error": f"API request error: {str(e)}"},
-                status_code=502,
-            )
+            raise HTTPException(status_code=502, detail=f"API request error: {str(e)}")
 
-        # resolve auth (optional)
         user_id = get_user_id_from_request(request)
+        file_rec_info: dict | None = None
         if user_id:
-            provided_name = (report_name or "").strip()
-            display_name = provided_name if provided_name else 'coding'
+            display_name = report_name.strip() or "coding"
 
             unique_id = secrets.token_hex(6)
             new_schema = f"proj_{unique_id}"
@@ -668,20 +667,55 @@ async def apply_codebook(
                     raw_file = raw_fr.scalar_one_or_none()
                     if raw_file:
                         for proj in raw_file.projects:
-                            if proj not in file_rec.projects:
-                                file_rec.projects.append(proj)
+                            await async_link_file_to_project(
+                                dm.session, file_rec.id, proj.id
+                            )
                         await dm.session.flush()
+
+                    if project_id is not None:
+                        pr = await dm.session.execute(
+                            select(Project).where(Project.id == project_id)
+                        )
+                        proj = pr.scalar_one_or_none()
+                        if proj is None:
+                            raise HTTPException(status_code=404, detail="Project not found")
+                        if proj.user_id != user_id:
+                            raise HTTPException(
+                                status_code=403,
+                                detail="Forbidden: project does not belong to user",
+                            )
+                        await async_link_file_to_project(
+                            dm.session, file_rec.id, proj.id
+                        )
+                        await dm.session.flush()
+
                     await dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name='content_store', row_count=1)
                     await dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name='codebook', row_count=1)
+                    file_rec_info = {
+                        "id": str(file_rec.id),
+                        "schema_name": new_schema,
+                        "filename": file_rec.filename,
+                    }
+            except HTTPException:
+                raise
             except Exception as e:
                 print(f"Failed to persist classification project/schema: {e}")
-        
+                traceback.print_exc()
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to persist classification: {e}",
+                )
 
-        return JSONResponse({"classification_output": classification_output})
+        return JSONResponse({
+            "classification_output": classification_output,
+            "file": file_rec_info,
+        })
+    except HTTPException:
+        raise
     except Exception as exc:
         print(f"Error reading schema {schema}: {exc}")
         traceback.print_exc()
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.post("/compare-codings/")

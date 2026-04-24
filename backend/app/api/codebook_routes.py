@@ -7,9 +7,24 @@ import secrets
 import traceback
 
 from backend.app.api.utils import get_user_id_from_request
-from backend.app.database import get_db, File, FileDependency, Project, async_engine, engine
+from backend.app.api.schemas import (
+    GenerateCodebookRequest,
+    GenerateCodebookResponse,
+    GenerateCodebookFileInfo,
+    as_form,
+)
+from backend.app.database import (
+    get_db,
+    File,
+    FileDependency,
+    Project,
+    async_engine,
+    engine,
+    async_link_file_to_project,
+)
 from backend.app.databasemanager import AsyncDatabaseManager
 from backend.scripts.display_codebook import parse_codebook_to_json
+from backend.scripts import codebook_generator as codebook_generator_module
 
 router = APIRouter()
 
@@ -175,21 +190,27 @@ async def save_project_codebook(request: Request, schema_name: str = Form(...), 
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@router.post("/generate-codebook/")
-async def generate_codebook(request: Request, database: str = Form("original"), api_key: str = Form(...), prompt: str = Form(""), name: str = Form(...), description: str = Form(None), project_id: int = Form(None), model: str = Form(""), sample_percentage: float = Form(100.0)):
-    from .utils import engine, MODEL_1
-    from backend.scripts.codebook_generator import generate_codebook
+@router.post("/generate-codebook/", response_model=GenerateCodebookResponse)
+async def generate_codebook(
+    request: Request,
+    payload: GenerateCodebookRequest = Depends(as_form(GenerateCodebookRequest)),
+):
+    """Sample a raw-data schema, ask the LLM to build a codebook, persist it."""
+    from .utils import MODEL_1
     import asyncio
     import inspect
     import math
 
-    schema = (database or "").strip()
-
-    if not schema.startswith('proj_'):
-        return JSONResponse({"error": "This endpoint currently expects a proj_<id> schema name"}, status_code=400)
+    schema = payload.database
+    api_key = payload.api_key
+    prompt = payload.prompt or ""
+    name = payload.name
+    description = payload.description
+    project_id = payload.project_id
+    model = payload.model or ""
+    sample_percentage = payload.sample_percentage
 
     try:
-        sample_percentage = max(0.0, min(100.0, float(sample_percentage)))
         assembled = ""
         with engine.connect() as conn:
             # Check submissions table
@@ -252,23 +273,24 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
         try:
             print("[INFO] generate_codebook: calling generate_codebook function")
             chosen_model = model or MODEL_1
-            result = generate_codebook(assembled, api_key, prompt, MODEL=chosen_model)
+            result = codebook_generator_module.generate_codebook(
+                assembled, api_key, prompt, MODEL=chosen_model
+            )
             if asyncio.iscoroutine(result) or inspect.isawaitable(result):
                 result = await result
             codebook_text, system_prompt, user_prompt = result
         except Exception as e:
             print(f"Error generating codebook for schema {schema}: {e}")
             traceback.print_exc()
-            return JSONResponse({"error": f"Generator failed: {e}"}, status_code=500)
+            raise HTTPException(status_code=502, detail=f"Generator failed: {e}")
 
         codebook_text = str(codebook_text or "")
 
-        # Persist into a new Postgres file schema and create metadata
+        user_id = get_user_id_from_request(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Authentication required to create file")
+
         try:
-            # Require authentication to create the codebook file
-            user_id = get_user_id_from_request(request)
-            if not user_id:
-                return JSONResponse({"error": "Authentication required to create file"}, status_code=401)
 
             # generate a unique schema name
             unique_id = secrets.token_hex(6)
@@ -300,19 +322,14 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
                 await dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name='content_store', row_count=1)
 
                 if project_id is not None:
-                    try:
-                        pr = await dm.session.execute(select(Project).where(Project.id == project_id))
-                        proj = pr.scalar_one_or_none()
-                        if proj is None:
-                            raise HTTPException(status_code=404, detail="Project not found")
-                        if proj.user_id != user_id:
-                            raise HTTPException(status_code=403, detail="Forbidden: project does not belong to user")
-                        file_rec.projects.append(proj)
-                        await dm.session.flush()
-                    except HTTPException:
-                        raise
-                    except Exception:
-                        await dm.session.rollback()
+                    pr = await dm.session.execute(select(Project).where(Project.id == project_id))
+                    proj = pr.scalar_one_or_none()
+                    if proj is None:
+                        raise HTTPException(status_code=404, detail="Project not found")
+                    if proj.user_id != user_id:
+                        raise HTTPException(status_code=403, detail="Forbidden: project does not belong to user")
+                    await async_link_file_to_project(dm.session, file_rec.id, proj.id)
+                    await dm.session.flush()
 
             resp_payload = {
                 "codebook": codebook_text,
@@ -320,14 +337,18 @@ async def generate_codebook(request: Request, database: str = Form("original"), 
             }
             return JSONResponse(resp_payload)
 
+        except HTTPException:
+            raise
         except Exception as exc:
             print(f"Error creating file/schema for generated codebook: {exc}")
             traceback.print_exc()
-            return JSONResponse({"error": str(exc)}, status_code=500)
+            raise HTTPException(status_code=500, detail=str(exc))
+    except HTTPException:
+        raise
     except Exception as exc:
         print(f"Error reading Postgres schema {schema}: {exc}")
         traceback.print_exc()
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.post("/compare-codebooks/")

@@ -10,7 +10,18 @@ import traceback
 import pandas as pd
 from typing import Optional
 
-from backend.app.api.utils import get_user_id_from_request
+from backend.app.api.utils import (
+    get_user_id_from_request,
+    normalize_schema,
+    is_proj_schema,
+)
+from backend.app.api.schemas import (
+    FilterDataRequest,
+    FilterDataResponse,
+    FilterDataFileInfo,
+    FilterDataTagInfo,
+    as_form,
+)
 
 from backend.app.database import (
     get_db,
@@ -20,13 +31,16 @@ from backend.app.database import (
     Project,
     async_engine,
     engine,
+    async_link_file_to_project,
 )
 from backend.app.databasemanager import AsyncDatabaseManager
-from backend.scripts.filter_db import filter_posts_with_ai, filter_comments_with_ai, AIFilterError
+from backend.scripts import filter_db as filter_db_module
+from backend.scripts.filter_db import AIFilterError
+from backend.scripts.openrouter_http import OPENROUTER_CLIENT_ERROR_CODES
+from backend.scripts import tag_expansion as tag_expansion_module
 from backend.scripts.tag_expansion import (
     TagExpansionError,
     comment_body_tag_predicate_sql,
-    expand_tags_via_openrouter,
     parse_filter_tags_input,
     submission_text_tag_predicate_sql,
 )
@@ -276,44 +290,128 @@ def _build_content_for_ai(rows: list, content_type: str) -> str:
     return "\n---\n".join(parts)
 
 
-@router.post("/filter-data/")
+def _create_submissions_table_for_filter(
+    conn,
+    new_schema: str,
+    source_schema: str,
+    source_has_submissions: bool,
+) -> None:
+    """Match source column layout (including extra columns from merges); fallback to builtin Reddit-style DDL."""
+    if source_has_submissions:
+        try:
+            conn.execute(
+                text(
+                    f'CREATE TABLE "{new_schema}"."submissions" ('
+                    f'LIKE "{source_schema}"."submissions" '
+                    "INCLUDING DEFAULTS INCLUDING GENERATED INCLUDING CONSTRAINTS INCLUDING INDEXES"
+                    f")"
+                )
+            )
+            return
+        except Exception as e:
+            _log("SCHEMA", f'submissions LIKE "{source_schema}" failed, using default DDL: {e}')
+    conn.execute(
+        text(
+            f'''
+                CREATE TABLE "{new_schema}"."submissions" (
+                    id TEXT PRIMARY KEY,
+                    subreddit TEXT,
+                    title TEXT,
+                    selftext TEXT,
+                    author TEXT,
+                    created_utc BIGINT,
+                    score INTEGER,
+                    num_comments INTEGER,
+                    word_count INTEGER GENERATED ALWAYS AS (
+                        CASE WHEN COALESCE(TRIM(title || ' ' || selftext), '') = '' THEN 0
+                        ELSE array_length(string_to_array(regexp_replace(TRIM(title || ' ' || selftext), '\\s+', ' ', 'g'), ' '), 1)
+                        END
+                    ) STORED
+                )
+            '''
+        )
+    )
+
+
+def _create_comments_table_for_filter(
+    conn,
+    new_schema: str,
+    source_schema: str,
+    source_has_comments: bool,
+) -> None:
+    if source_has_comments:
+        try:
+            conn.execute(
+                text(
+                    f'CREATE TABLE "{new_schema}"."comments" ('
+                    f'LIKE "{source_schema}"."comments" '
+                    "INCLUDING DEFAULTS INCLUDING GENERATED INCLUDING CONSTRAINTS INCLUDING INDEXES"
+                    f")"
+                )
+            )
+            return
+        except Exception as e:
+            _log("SCHEMA", f'comments LIKE "{source_schema}" failed, using default DDL: {e}')
+    conn.execute(
+        text(
+            f'''
+                CREATE TABLE "{new_schema}"."comments" (
+                    id TEXT PRIMARY KEY,
+                    subreddit TEXT,
+                    body TEXT,
+                    author TEXT,
+                    created_utc BIGINT,
+                    score INTEGER,
+                    link_id TEXT,
+                    parent_id TEXT,
+                    word_count INTEGER GENERATED ALWAYS AS (
+                        CASE WHEN COALESCE(TRIM(body), '') = '' THEN 0
+                        ELSE array_length(string_to_array(regexp_replace(TRIM(body), '\\s+', ' ', 'g'), ' '), 1)
+                        END
+                    ) STORED
+                )
+            '''
+        )
+    )
+
+
+@router.post("/filter-data/", response_model=FilterDataResponse)
 async def filter_data(
     request: Request,
-    api_key: str = Form(...),
-    prompt: Optional[str] = Form(None),
-    database: str = Form(None),
-    name: str = Form(...),
-    model: str = Form(""),
-    project_id: str = Form(None),
-    description: Optional[str] = Form(None),
-    min_words: int = Form(0),
-    sample_percentage: float = Form(100.0),
-    filter_tags: Optional[str] = Form(None),
+    payload: FilterDataRequest = Depends(as_form(FilterDataRequest)),
 ):
-    """
-    Filter posts/comments using AI and save results to a new database schema.
-    
+    """Filter posts/comments using AI and save results to a new Postgres schema.
+
     Flow:
-    1. Optionally expand filter_tags via OpenRouter, then restrict rows by keyword match on text.
-    2. Fetch submissions/comments from source schema (filtered by min_words, then random sample per table)
-    3. Send content to AI for filtering based on prompt (skipped when prompt is empty but tags were used)
-    4. Create new schema with filtered results
-    5. Register file metadata for authenticated users
+    1. Optionally expand ``filter_tags`` via OpenRouter, then restrict rows by
+       keyword match against submission/comment text.
+    2. Fetch submissions/comments from the source schema (filtered by
+       ``min_words``, then random-sampled per table using
+       ``sample_percentage``).
+    3. Send content to the AI for filtering based on ``prompt`` (skipped when
+       prompt is empty but tags were used).
+    4. Create a new ``proj_<hex>`` schema with the filtered results.
+    5. Register file metadata + parent dependency for the authenticated user.
     """
-    schema = (database or "").strip()
-    filter_prompt = (prompt or "").strip()
-    pct = max(1.0, min(100.0, float(sample_percentage)))
-    user_tags_list = parse_filter_tags_input(filter_tags)
+    api_key = payload.api_key
+    schema = payload.database
+    model = payload.model
+    name = payload.name
+    filter_prompt = (payload.prompt or "").strip()
+    pct = payload.sample_percentage
+    min_words = payload.min_words
+    user_tags_list = parse_filter_tags_input(payload.filter_tags)
     expanded_terms_sql: list[str] = []
     original_tags_meta: list[str] = []
     if user_tags_list:
         try:
-            # Same `api_key` as AI filter: OpenRouter key from the client (user Set API key), not server env.
-            original_tags_meta, expanded_terms_sql = expand_tags_via_openrouter(
-                user_tags_list, api_key, model
+            original_tags_meta, expanded_terms_sql = (
+                tag_expansion_module.expand_tags_via_openrouter(
+                    user_tags_list, api_key, model
+                )
             )
         except TagExpansionError as e:
-            code = e.code if e.code in (400, 401, 402, 403, 408, 429, 502, 503) else 502
+            code = e.code if e.code in OPENROUTER_CLIENT_ERROR_CODES else 502
             _log("TAG_ERROR", f"Tag expansion failed (HTTP {code}): {e}")
             return JSONResponse({"error": str(e)}, status_code=code)
     has_tags = bool(user_tags_list)
@@ -332,15 +430,6 @@ async def filter_data(
         "has_tags": has_tags,
         "expanded_term_count": len(expanded_terms_sql),
     })
-
-    # Validation
-    if not model or not model.strip():
-        _log("ERROR", "No model specified")
-        return JSONResponse({"error": "No model specified. Please select a model in the form."}, status_code=400)
-
-    if not schema or not schema.startswith('proj_'):
-        _log("ERROR", "Invalid schema - must start with proj_")
-        return JSONResponse({"error": "This endpoint expects a proj_<id> schema name in 'database'"}, status_code=400)
 
     try:
         # ===== STEP 1: Fetch source data (optional tag match, min_words, then random sample per table) =====
@@ -443,11 +532,13 @@ async def filter_data(
         if use_ai_posts and submissions_text:
             _log("AI", f"Sending {len(submissions_text):,} chars to AI for post filtering...")
             try:
-                result = filter_posts_with_ai(filter_prompt, submissions_text, api_key, model)
+                result = filter_db_module.filter_posts_with_ai(
+                    filter_prompt, submissions_text, api_key, model
+                )
                 post_ids, system_prompt, user_prompt = result
                 _log("AI", "Posts filtered", {"matched_ids": len(post_ids)})
             except AIFilterError as e:
-                code = e.code if e.code in (400, 401, 402, 403, 408, 429, 502, 503) else 502
+                code = e.code if e.code in OPENROUTER_CLIENT_ERROR_CODES else 502
                 _log("AI_ERROR", f"Post filtering failed (HTTP {code}): {e}")
                 return JSONResponse({"error": str(e)}, status_code=code)
             except Exception as e:
@@ -459,11 +550,13 @@ async def filter_data(
         if use_ai_comments and comments_text:
             _log("AI", f"Sending {len(comments_text):,} chars to AI for comment filtering...")
             try:
-                result = filter_comments_with_ai(filter_prompt, comments_text, api_key, model)
+                result = filter_db_module.filter_comments_with_ai(
+                    filter_prompt, comments_text, api_key, model
+                )
                 comment_ids, _, _ = result
                 _log("AI", "Comments filtered", {"matched_ids": len(comment_ids)})
             except AIFilterError as e:
-                code = e.code if e.code in (400, 401, 402, 403, 408, 429, 502, 503) else 502
+                code = e.code if e.code in OPENROUTER_CLIENT_ERROR_CODES else 502
                 _log("AI_ERROR", f"Comment filtering failed (HTTP {code}): {e}")
                 return JSONResponse({"error": str(e)}, status_code=code)
             except Exception as e:
@@ -499,44 +592,23 @@ async def filter_data(
         inserted_comments = 0
         
         with engine.begin() as conn:
-            # Create schema and tables
             conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{new_schema}"'))
-            conn.execute(text(f'''
-                CREATE TABLE IF NOT EXISTS "{new_schema}"."submissions" (
-                    id TEXT PRIMARY KEY,
-                    subreddit TEXT,
-                    title TEXT,
-                    selftext TEXT,
-                    author TEXT,
-                    created_utc BIGINT,
-                    score INTEGER,
-                    num_comments INTEGER,
-                    word_count INTEGER GENERATED ALWAYS AS (
-                        CASE WHEN COALESCE(TRIM(title || ' ' || selftext), '') = '' THEN 0
-                        ELSE array_length(string_to_array(regexp_replace(TRIM(title || ' ' || selftext), '\\s+', ' ', 'g'), ' '), 1)
-                        END
-                    ) STORED
+            _create_submissions_table_for_filter(
+                conn, new_schema, schema, bool(subs_exists)
+            )
+            _create_comments_table_for_filter(
+                conn, new_schema, schema, bool(comm_exists)
+            )
+            conn.execute(
+                text(
+                    f'CREATE INDEX IF NOT EXISTS idx_{new_schema}_subs_wc ON "{new_schema}"."submissions" (word_count)'
                 )
-            '''))
-            conn.execute(text(f'''
-                CREATE TABLE IF NOT EXISTS "{new_schema}"."comments" (
-                    id TEXT PRIMARY KEY,
-                    subreddit TEXT,
-                    body TEXT,
-                    author TEXT,
-                    created_utc BIGINT,
-                    score INTEGER,
-                    link_id TEXT,
-                    parent_id TEXT,
-                    word_count INTEGER GENERATED ALWAYS AS (
-                        CASE WHEN COALESCE(TRIM(body), '') = '' THEN 0
-                        ELSE array_length(string_to_array(regexp_replace(TRIM(body), '\\s+', ' ', 'g'), ' '), 1)
-                        END
-                    ) STORED
+            )
+            conn.execute(
+                text(
+                    f'CREATE INDEX IF NOT EXISTS idx_{new_schema}_comm_wc ON "{new_schema}"."comments" (word_count)'
                 )
-            '''))
-            conn.execute(text(f'CREATE INDEX IF NOT EXISTS idx_{new_schema}_subs_wc ON "{new_schema}"."submissions" (word_count)'))
-            conn.execute(text(f'CREATE INDEX IF NOT EXISTS idx_{new_schema}_comm_wc ON "{new_schema}"."comments" (word_count)'))
+            )
             
             _log("DB", "Schema created", {"schema": new_schema})
             
@@ -632,7 +704,7 @@ async def filter_data(
                         file_type='filtered_data',
                         systemprompt=system_prompt,
                         userprompt=user_prompt,
-                        description=description or None
+                        description=payload.description or None
                     )
                     dm.session.add(file_rec)
                     await dm.session.flush()
@@ -651,17 +723,23 @@ async def filter_data(
                     await dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name='submissions', row_count=inserted_subs)
                     await dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name='comments', row_count=inserted_comments)
 
-                    if project_id:
-                        try:
-                            pid = int(project_id)
-                            proj = await dm.session.get(Project, pid)
-                            if proj:
-                                file_rec.projects.append(proj)
-                        except (ValueError, TypeError):
-                            pass
+                    if payload.project_id is not None:
+                        proj = await dm.session.get(Project, payload.project_id)
+                        if proj is None:
+                            raise HTTPException(status_code=404, detail="Project not found")
+                        if proj.user_id != user_id:
+                            raise HTTPException(
+                                status_code=403,
+                                detail="Forbidden: project does not belong to user",
+                            )
+                        await async_link_file_to_project(
+                            dm.session, file_rec.id, proj.id
+                        )
 
                     await dm.session.flush()
                     _log("META", "File metadata saved", {"file_id": file_rec.id})
+            except HTTPException:
+                raise
             except Exception as e:
                 _log("META_ERROR", f"Failed to save metadata: {e}")
                 traceback.print_exc()
@@ -691,10 +769,12 @@ async def filter_data(
             }
         return JSONResponse(resp_body)
 
+    except HTTPException:
+        raise
     except Exception as exc:
         _log("FATAL", f"Unhandled error: {exc}")
         traceback.print_exc()
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.get("/comments/{submission_id}")

@@ -2,8 +2,10 @@ import re
 import time
 from openai import OpenAI
 
+from backend.app.ai_models import model_slug_at
+
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
-FREE_MODEL = "arcee-ai/trinity-large-preview:free"
+FREE_MODEL = model_slug_at(0)
 MAX_RETRIES = 3
 INITIAL_RETRY_DELAY = 2
 

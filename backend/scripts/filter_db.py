@@ -5,8 +5,10 @@ import re
 import datetime
 from openai import OpenAI
 
+from backend.scripts.openrouter_http import openrouter_user_message
+
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
-FREE_MODEL = "google/gemini-2.0-flash-exp:free"
+FREE_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
 MAX_RETRIES = 3
 INITIAL_RETRY_DELAY = 2
 
@@ -22,23 +24,20 @@ MAX_CHUNKS = 1
 
 ENTRY_SEPARATOR = "\n---\n"
 
-ERROR_MESSAGES = {
-    400: "Bad Request: The AI model is unreachable. Try another model.",
-    401: "Invalid API key: Your key is missing, disabled, or expired. Please check your API key.",
-    402: "Insufficient credits: Your account or API key needs more credits. Add more credits and retry.",
-    403: "Content flagged: Your chosen model requires moderation and your input was flagged.",
-    408: "Request timed out: This can happen with long inputs or heavy model load. Please try again.",
-    429: "Rate limited: Too many requests. Please wait and try again.",
-    502: "Model unavailable: Your chosen model is down or returned an invalid response. Try another model.",
-    503: "Service unavailable: No model provider is available right now. Please try again later.",
-}
-
 
 class AIFilterError(Exception):
     """Raised when AI filtering fails with a known error code."""
     def __init__(self, message: str, code: int = 0):
         self.code = code
         super().__init__(message)
+
+
+class _EmptyCompletionError(Exception):
+    """HTTP 200 but no usable assistant message — retry or fail with a clear message."""
+
+    def __init__(self, detail: str):
+        self.detail = detail
+        super().__init__(detail)
 
 
 def _extract_error_code(error: Exception) -> int:
@@ -52,11 +51,6 @@ def _extract_error_code(error: Exception) -> int:
     if hasattr(error, 'status_code'):
         return error.status_code
     return 0
-
-
-def _error_message_for_code(code: int) -> str:
-    """Get human-readable error message for an HTTP error code."""
-    return ERROR_MESSAGES.get(code, f"API error (code {code})")
 
 
 def _log_ai(stage: str, message: str, data: dict = None):
@@ -138,31 +132,68 @@ def get_client(system_prompt: str, user_prompt: str, api_key: str, model: str = 
                 api_key=api_key,
                 base_url=OPENROUTER_URL,
             )
-            response = client.chat.completions.create(
+            # middle-out can yield empty completions for some providers; omit on retries.
+            kwargs = dict(
                 model=model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
                 temperature=0.05,
-                timeout=300, 
-                extra_body={"transforms": ["middle-out"]}
+                timeout=300,
             )
+            if attempt == 1:
+                kwargs["extra_body"] = {"transforms": ["middle-out"]}
+
+            response = client.chat.completions.create(**kwargs)
+
             if not response.choices or not isinstance(response.choices, list) or len(response.choices) == 0:
-                raise ValueError(f"API returned no choices for model {model}")
-            if not response.choices[0].message or not response.choices[0].message.content:
-                raise ValueError(f"API returned empty message content for model {model}")
-            
-            content = response.choices[0].message.content
-            return content
-            
+                _log_ai(
+                    "EMPTY",
+                    "No choices in completion",
+                    {"model": model, "attempt": attempt},
+                )
+                raise _EmptyCompletionError("no choices")
+
+            choice0 = response.choices[0]
+            finish = getattr(choice0, "finish_reason", None)
+            msg = choice0.message if choice0 else None
+            raw_content = (msg.content or "") if msg else ""
+            if not msg or not raw_content.strip():
+                _log_ai(
+                    "EMPTY",
+                    "Empty assistant content",
+                    {"model": model, "attempt": attempt, "finish_reason": finish},
+                )
+                raise _EmptyCompletionError("empty content")
+
+            return raw_content
+
         except KeyboardInterrupt:
             raise
+        except AIFilterError:
+            raise
+        except _EmptyCompletionError:
+            if attempt == MAX_RETRIES:
+                msg = (
+                    "The model returned no usable output (empty reply). "
+                    "This often happens when a free model is overloaded or briefly unavailable—try another model or retry."
+                )
+                _log_ai("ERROR", msg, {"model": model})
+                raise AIFilterError(msg, code=502) from None
+            wait_time = INITIAL_RETRY_DELAY * (2 ** (attempt - 1))
+            _log_ai(
+                "RETRY",
+                f"Empty completion, attempt {attempt}/{MAX_RETRIES}",
+                {"wait": f"{wait_time}s", "model": model},
+            )
+            time.sleep(wait_time)
         except Exception as e:
             code = _extract_error_code(e)
             if attempt == MAX_RETRIES:
-                msg = _error_message_for_code(code) if code else str(e)
-                _log_ai("ERROR", f"All {MAX_RETRIES} attempts failed: {msg}")
+                msg = openrouter_user_message(code, model) if code else str(e)
+                extra = {"model": model, "http_code": code} if code else None
+                _log_ai("ERROR", f"All {MAX_RETRIES} attempts failed: {msg}", extra)
                 raise AIFilterError(msg, code=code)
             wait_time = INITIAL_RETRY_DELAY * (2 ** (attempt - 1))
             _log_ai("RETRY", f"Attempt {attempt}/{MAX_RETRIES} failed: {type(e).__name__}", {"wait": f"{wait_time}s"})

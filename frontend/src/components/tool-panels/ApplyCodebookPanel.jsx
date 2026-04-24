@@ -1,14 +1,19 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { apiFetch } from "../../api";
+import { apiFetch, postForm } from "../../api";
 import FormShell from "../forms/FormShell";
 import DatabaseSourceFields from "../forms/DatabaseSourceFields";
 import SamplePercentageSlider from "../forms/SamplePercentageSlider";
 import PromptTextareaWithActions from "../forms/PromptTextareaWithActions";
 import { AI_MODELS } from "../../lib/constants";
+import {
+  EXAMPLE_PROMPTS,
+  MissingFieldsError,
+  buildApplyCodebookForm,
+} from "../../lib/apiContracts";
 import "../../styles/Home.css";
 
-const EXAMPLE_PROMPT = `You are a coding assistant. Given a codebook and an input item, decide which code(s) from the codebook apply and provide a one-sentence justification. Focus on selecting the single best code when applicable; do not invent new codes. Keep responses concise.`;
+const EXAMPLE_PROMPT = EXAMPLE_PROMPTS.apply;
 
 export default function ApplyCodebookPanel({ methodology, onMethodologyChange }) {
   const navigate = useNavigate();
@@ -120,49 +125,14 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
     navigate("/coding-view");
   };
 
-  const parseApplyCodebookError = async (response) => {
-    try {
-      const payload = await response.json();
-      if (payload?.error) return String(payload.error);
-      if (payload?.detail) {
-        return typeof payload.detail === "string"
-          ? payload.detail
-          : JSON.stringify(payload.detail);
-      }
-      return JSON.stringify(payload);
-    } catch {
-      try {
-        const textPayload = await response.text();
-        if (textPayload) return textPayload;
-      } catch {
-        /* ignore */
-      }
-      return `HTTP error! status: ${response.status}`;
-    }
-  };
-
   const handleSubmit = async () => {
     const savedApiKey = localStorage.getItem("apiKey");
     if (!savedApiKey) {
       setError("Please set your API key in the navbar first.");
       return;
     }
-    if (!reportName || !reportName.trim()) {
-      setError(
-        "Please provide an output display name (report name) before applying the codebook.",
-      );
-      return;
-    }
-    if (!codebook || !codebook.trim()) {
-      setError("Please select a codebook before applying.");
-      return;
-    }
     if (codebooks.length === 0) {
       setError("No codebooks available. Please create a codebook first.");
-      return;
-    }
-    if (!database || !database.trim()) {
-      setError("Please select a database before applying.");
       return;
     }
     try {
@@ -170,39 +140,34 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
       setError(null);
       setResult(null);
 
-      const requestData = new FormData();
-      requestData.append("api_key", savedApiKey);
-      requestData.append("database", database);
-      requestData.append("report_name", reportName);
-      requestData.append("codebook", codebook);
-      requestData.append("methodology", methodology);
-      if (model) requestData.append("model", model);
-      requestData.append(
-        "sample_percentage",
-        String(
-          Number.isFinite(Number(samplePercentage))
-            ? Number(samplePercentage)
-            : 100,
-        ),
+      let requestData;
+      try {
+        requestData = buildApplyCodebookForm({
+          apiKey: savedApiKey,
+          database,
+          codebook,
+          reportName,
+          methodology,
+          model,
+          description,
+          projectId: selectedProject || null,
+          samplePercentage,
+        });
+      } catch (err) {
+        if (err instanceof MissingFieldsError) {
+          setError(err.message);
+          return;
+        }
+        throw err;
+      }
+
+      const { ok, data, error: postError } = await postForm(
+        "/api/apply-codebook/",
+        requestData,
       );
-      if (description) requestData.append("description", description);
-      if (selectedProject) {
-        requestData.append("project_id", selectedProject);
-      }
 
-      const response = await apiFetch("/api/apply-codebook/", {
-        method: "POST",
-        body: requestData,
-      });
-
-      if (!response.ok) {
-        const errorMsg = await parseApplyCodebookError(response);
-        throw new Error(errorMsg || `HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      if (data?.error) {
-        setError(String(data.error));
+      if (!ok) {
+        setError(postError || "Failed to apply codebook");
         return;
       }
       setResult(data);
@@ -337,7 +302,7 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
           value={methodology}
           onChange={onMethodologyChange}
           placeholder="Enter your coding methodology or leave blank..."
-          rows={4}
+          rows={2}
           promptType="apply"
           exampleText={EXAMPLE_PROMPT}
           disabled={loading}

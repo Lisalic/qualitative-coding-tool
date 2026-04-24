@@ -23,6 +23,7 @@ from backend.app.database import (
     engine,
     AsyncSessionLocal,
     async_engine,
+    async_link_file_to_project,
 )
 from backend.app.databasemanager import AsyncDatabaseManager
 from backend.scripts.import_db import stream_zst_to_postgres
@@ -101,12 +102,14 @@ async def upload_zst_file(
                         raise HTTPException(status_code=404, detail="Project not found")
                     if proj.user_id != user_id:
                         raise HTTPException(status_code=403, detail="Forbidden: project does not belong to user")
-                    file_rec.projects.append(proj)
+                    await async_link_file_to_project(dm.session, file_rec.id, proj.id)
                     await dm.session.flush()
                 except HTTPException:
                     raise
                 except Exception:
                     await dm.session.rollback()
+                    raise
+            await dm.session.commit()
             async with async_engine.begin() as conn:
                 await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
                 await conn.execute(text(f'''
@@ -177,6 +180,8 @@ async def upload_zst_file(
             })
             return JSONResponse(response_data)
 
+    except HTTPException:
+        raise
     except Exception as exc:
         import traceback
         traceback.print_exc()
@@ -393,7 +398,7 @@ async def merge_databases(request: Request):
                         raise HTTPException(status_code=404, detail="Project not found")
                     if proj.user_id != user_id:
                         raise HTTPException(status_code=403, detail="Forbidden: project does not belong to user")
-                    file_rec.projects.append(proj)
+                    await async_link_file_to_project(dm.session, file_rec.id, proj.id)
                     await dm.session.flush()
                 except HTTPException:
                     raise

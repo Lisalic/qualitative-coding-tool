@@ -6,7 +6,7 @@ import Navbar from "./components/Navbar";
 import AuthGate from "./components/AuthGate";
 import "./App.css";
 
-const Import = React.lazy(() => import("./pages/Import"));
+const ImportPage = React.lazy(() => import("./pages/Import"));
 const Filter = React.lazy(() => import("./pages/Filter"));
 const Data = React.lazy(() => import("./pages/Data"));
 const FilteredData = React.lazy(() => import("./pages/FilteredData"));
@@ -49,7 +49,7 @@ function App() {
                   path="/import"
                   element={
                     <ProtectedRoute>
-                      <Import />
+                      <ImportPage />
                     </ProtectedRoute>
                   }
                 />

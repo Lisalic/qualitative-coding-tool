@@ -1,8 +1,27 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import "../styles/FileUpload.css";
 import { apiFetch } from "../api";
 
+function formatApiErrorPayload(parsed, fallback) {
+  if (!parsed || typeof parsed !== "object") return fallback;
+  if (typeof parsed.error === "string") return parsed.error;
+  if (typeof parsed.detail === "string") return parsed.detail;
+  if (Array.isArray(parsed.detail)) {
+    const msg = parsed.detail
+      .map((d) => {
+        const loc = Array.isArray(d.loc) ? d.loc.slice(-1).join(".") : "";
+        return loc ? `${loc}: ${d.msg}` : d.msg;
+      })
+      .filter(Boolean)
+      .join("; ");
+    return msg || fallback;
+  }
+  return fallback;
+}
+
 export default function FileUpload({ onUploadSuccess, onView }) {
+  const navigate = useNavigate();
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -13,6 +32,8 @@ export default function FileUpload({ onUploadSuccess, onView }) {
   const [customName, setCustomName] = useState("");
   const [description, setDescription] = useState("");
   const [projects, setProjects] = useState([]);
+  const [projectsLoading, setProjectsLoading] = useState(true);
+  const [projectsError, setProjectsError] = useState("");
   const [selectedProject, setSelectedProject] = useState("");
 
   const handleFileChange = (e) => {
@@ -95,10 +116,10 @@ export default function FileUpload({ onUploadSuccess, onView }) {
 
       if (!response.ok) {
         const text = await response.text();
-        let errorMsg = "Upload failed";
+        let errorMsg = `Upload failed (HTTP ${response.status})`;
         try {
-          const errorData = JSON.parse(text);
-          errorMsg = errorData.detail || errorMsg;
+          const errorData = text ? JSON.parse(text) : null;
+          errorMsg = formatApiErrorPayload(errorData, text || errorMsg);
         } catch (e) {
           errorMsg = text || errorMsg;
         }
@@ -136,17 +157,40 @@ export default function FileUpload({ onUploadSuccess, onView }) {
   useEffect(() => {
     let mounted = true;
     async function loadProjects() {
+      setProjectsLoading(true);
+      setProjectsError("");
       try {
         const resp = await apiFetch("/api/projects/");
-        if (!resp.ok) return;
-        const text = await resp.text();
-        if (!text) return;
-        const data = JSON.parse(text);
-        if (mounted) {
-          setProjects(data.projects || []);
+        if (!mounted) return;
+        if (!resp.ok) {
+          const text = await resp.text();
+          let msg = `Could not load projects (HTTP ${resp.status})`;
+          try {
+            const d = text ? JSON.parse(text) : null;
+            msg = formatApiErrorPayload(d, msg);
+          } catch (_) {
+            if (text) msg = text;
+          }
+          setProjectsError(msg);
+          setProjects([]);
+          setProjectsLoading(false);
+          return;
         }
+        const text = await resp.text();
+        if (!text) {
+          setProjects([]);
+          setProjectsLoading(false);
+          return;
+        }
+        const data = JSON.parse(text);
+        setProjects(Array.isArray(data.projects) ? data.projects : []);
       } catch (e) {
-        // ignore
+        if (mounted) {
+          setProjectsError(e?.message || String(e));
+          setProjects([]);
+        }
+      } finally {
+        if (mounted) setProjectsLoading(false);
       }
     }
     loadProjects();
@@ -175,6 +219,33 @@ export default function FileUpload({ onUploadSuccess, onView }) {
       </div>
       <div className="form-wrapper">
         <h2>Upload Data</h2>
+        {projectsLoading && (
+          <p className="form-hint" style={{ marginBottom: "1rem" }}>
+            Loading projects…
+          </p>
+        )}
+        {projectsError && (
+          <p className="error-message" style={{ marginBottom: "1rem" }}>
+            {projectsError}
+          </p>
+        )}
+        {!projectsLoading &&
+          !projectsError &&
+          projects.length === 0 && (
+            <div className="form-hint" style={{ marginBottom: "1rem" }}>
+              <p style={{ margin: "0 0 0.75rem 0" }}>
+                You need at least one project before you can import data. Create
+                a project from the home page, then return here.
+              </p>
+              <button
+                type="button"
+                className="add-btn"
+                onClick={() => navigate("/")}
+              >
+                Go to home
+              </button>
+            </div>
+          )}
         <form onSubmit={handleSubmit}>
           <div className="form-group">
             <label htmlFor="zst-file">Upload .zst File</label>
@@ -194,7 +265,12 @@ export default function FileUpload({ onUploadSuccess, onView }) {
               id="project-select"
               value={selectedProject}
               onChange={(e) => setSelectedProject(e.target.value)}
-              disabled={loading || projects.length === 0}
+              disabled={
+                loading ||
+                projectsLoading ||
+                !!projectsError ||
+                projects.length === 0
+              }
               required
             >
               <option value="" disabled>
@@ -314,7 +390,16 @@ export default function FileUpload({ onUploadSuccess, onView }) {
             )}
           </div>
 
-          <button type="submit" disabled={loading} className="form-submit-btn">
+          <button
+            type="submit"
+            disabled={
+              loading ||
+              projectsLoading ||
+              !!projectsError ||
+              projects.length === 0
+            }
+            className="form-submit-btn"
+          >
             {loading ? "Processing..." : "Upload"}
           </button>
         </form>

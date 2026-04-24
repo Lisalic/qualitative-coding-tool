@@ -1,4 +1,5 @@
 import os
+import re
 import sqlite3
 import hashlib
 import binascii
@@ -8,6 +9,41 @@ try:
     from backend.app.auth import decode_access_token
 except Exception:
     from app.auth import decode_access_token
+
+# Re-export script-level symbols that legacy route code imports via
+# ``from .utils import ...``. Keeping them here (instead of moving the
+# imports into every route) means tests can monkeypatch
+# ``backend.app.api.utils.classify_posts`` / etc. without patching the
+# script modules directly.
+from backend.app.database import engine  # noqa: F401
+from backend.scripts.codebook_apply import classify_posts  # noqa: F401
+from backend.scripts.codebook_generator import (  # noqa: F401
+    MODEL_1,
+    MODEL_3,
+    get_client as codebook_get_client,
+)
+
+
+_PROJ_SCHEMA_RE = re.compile(r"^proj_[A-Za-z0-9_]+$")
+
+
+def normalize_schema(raw: str | None) -> str:
+    """Strip whitespace and a trailing ``.db`` from a schema name.
+
+    Returns an empty string for ``None`` so callers can use the usual
+    ``if not schema`` check before the structural ``proj_`` test.
+    """
+    if raw is None:
+        return ""
+    value = raw.strip()
+    if value.endswith(".db"):
+        value = value[:-3]
+    return value
+
+
+def is_proj_schema(name: str) -> bool:
+    """True when ``name`` matches the ``proj_<hex>`` schema convention."""
+    return bool(_PROJ_SCHEMA_RE.match(name or ""))
 
 
 def get_user_id_from_request(request: Request):

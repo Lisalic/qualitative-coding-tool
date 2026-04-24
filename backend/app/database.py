@@ -15,11 +15,13 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship, sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.ext.asyncio import (
+    AsyncAttrs,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
 from sqlalchemy.sql import func
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from dotenv import load_dotenv
 import uuid
 
@@ -89,7 +91,7 @@ AsyncSessionLocal = async_sessionmaker(
     autocommit=False,
 )
 
-Base = declarative_base()
+Base = declarative_base(cls=AsyncAttrs)
 
 
 def get_db():
@@ -118,6 +120,21 @@ project_files_table = Table(
     Column("project_id", Integer, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True),
     Column("file_id", Integer, ForeignKey("files.id", ondelete="CASCADE"), primary_key=True),
 )
+
+
+async def async_link_file_to_project(session: AsyncSession, file_id: int, project_id: int) -> None:
+    """Associate a file with a project via ``project_files`` (avoids ORM collection lazy IO in async)."""
+    stmt = (
+        pg_insert(project_files_table)
+        .values(project_id=project_id, file_id=file_id)
+        .on_conflict_do_nothing(
+            index_elements=[
+                project_files_table.c.project_id,
+                project_files_table.c.file_id,
+            ],
+        )
+    )
+    await session.execute(stmt)
 
 
 class User(Base):

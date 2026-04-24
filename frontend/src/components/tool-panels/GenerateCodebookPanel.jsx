@@ -1,15 +1,19 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { apiFetch } from "../../api";
+import { apiFetch, postForm } from "../../api";
 import FormShell from "../forms/FormShell";
 import DatabaseSourceFields from "../forms/DatabaseSourceFields";
 import SamplePercentageSlider from "../forms/SamplePercentageSlider";
 import PromptTextareaWithActions from "../forms/PromptTextareaWithActions";
 import { AI_MODELS } from "../../lib/constants";
+import {
+  EXAMPLE_PROMPTS,
+  MissingFieldsError,
+  buildGenerateCodebookForm,
+} from "../../lib/apiContracts";
 import "../../styles/Home.css";
 
-const EXAMPLE_PROMPT = `You are a codebook generator. Read representative dataset excerpts and propose a concise codebook of [topic]. Keep entries concise and focused; do not add unrelated commentary.
-Research Context: These are excerpts from [e.g., reddit stories about bullying]. Specific Focus: Please generate codes specifically related to [e.g., retrospective bullying experiences.]`;
+const EXAMPLE_PROMPT = EXAMPLE_PROMPTS.generate;
 
 export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
   const navigate = useNavigate();
@@ -142,45 +146,36 @@ export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
       setError(null);
       setResult(null);
 
-      const requestData = new FormData();
-      requestData.append("api_key", savedApiKey);
-      requestData.append("database", database);
-      if (prompt) requestData.append("prompt", prompt);
-      if (model) requestData.append("model", model);
-      requestData.append(
-        "sample_percentage",
-        String(
-          Number.isFinite(Number(samplePercentage))
-            ? Number(samplePercentage)
-            : 100,
-        ),
+      let requestData;
+      try {
+        requestData = buildGenerateCodebookForm({
+          apiKey: savedApiKey,
+          database,
+          name: codebookName,
+          model,
+          prompt,
+          description,
+          projectId: selectedProject || null,
+          samplePercentage,
+        });
+      } catch (err) {
+        if (err instanceof MissingFieldsError) {
+          setError(err.message);
+          return;
+        }
+        throw err;
+      }
+
+      const { ok, data, error: postError } = await postForm(
+        "/api/generate-codebook/",
+        requestData,
       );
 
-      if (selectedProject) {
-        requestData.append("project_id", selectedProject);
+      if (!ok) {
+        setError(postError || "Failed to generate codebook");
+        return;
       }
-
-      if (!codebookName || !codebookName.trim()) {
-        throw new Error("Please provide a name for the generated codebook");
-      }
-      requestData.append("name", codebookName.trim());
-      if (description) requestData.append("description", description);
-
-      const response = await apiFetch("/api/generate-codebook/", {
-        method: "POST",
-        body: requestData,
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      if (data.error) {
-        setError(data.error);
-      } else {
-        setResult(data.codebook);
-      }
+      setResult(data?.codebook ?? "");
     } catch (err) {
       if (err.name === "AbortError") {
         setError("Request timed out. Please try again.");
@@ -249,7 +244,7 @@ export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
           value={prompt}
           onChange={onPromptChange}
           placeholder="Enter a custom prompt to guide the codebook generation. Leave empty for default behavior."
-          rows={4}
+          rows={2}
           promptType="generate"
           exampleText={EXAMPLE_PROMPT}
           disabled={loading}
