@@ -9,12 +9,19 @@ venv/
 env/
 ENV/
 .env
+.env.*
+*.env
+*.secret
+*.secrets
 
 # Data
 *.db
 *.sqlite
 *.zst
 *.txt
+
+# Build
+Makefile
 
 # Node
 node_modules/
@@ -47,6 +54,15 @@ lerna-debug.log*
 Thumbs.db
 
 # Logs
+
+# Test artifacts
+.pytest_cache/
+.coverage
+coverage/
+htmlcov/
+.nyc_output/
+junit*.xml
+pytestdebug.log
 
 # Maintenance scripts 
 backend/scripts/update_database.py

@@ -158,7 +158,7 @@ export default function SummarizeCoding() {
                 </select>
               </div>
 
-              <div style={{ width: 320, minWidth: 200 }}>
+              <div style={{ width: 188, minWidth: 188 }}>
                 <label style={{ display: "block", marginBottom: 6 }}>
                   Model
                 </label>

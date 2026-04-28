@@ -152,7 +152,7 @@
 
 .app-shell__content {
   display: flex;
-  align-items: flex-start;
+  align-items: stretch;
   gap: 20px;
   width: 100%;
   padding: 0;
@@ -167,7 +167,7 @@
   border-right: 1px solid #ffffff;
   padding: 10px 8px;
   box-sizing: border-box;
-  height: calc(100vh - 56px - 32px);
+  min-height: calc(100vh - 56px - 32px);
 }
 
 .app-shell__main {
