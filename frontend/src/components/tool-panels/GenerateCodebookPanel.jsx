@@ -5,7 +5,7 @@ import FormShell from "../forms/FormShell";
 import DatabaseSourceFields from "../forms/DatabaseSourceFields";
 import SamplePercentageSlider from "../forms/SamplePercentageSlider";
 import PromptTextareaWithActions from "../forms/PromptTextareaWithActions";
-import { AI_MODELS } from "../../lib/constants";
+import AiModelFormGroup from "../AiModelFormGroup";
 import {
   EXAMPLE_PROMPTS,
   MissingFieldsError,
@@ -251,24 +251,12 @@ export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
           onSaveFeedback={handlePromptSaveFeedback}
         />
 
-        <div className="form-group">
-          <label htmlFor="model">AI Model</label>
-          <select
-            id="model"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            className="form-input"
-            disabled={loading}
-          >
-            {[{ value: "", label: "-- select model --" }, ...AI_MODELS].map(
-              (opt) => (
-                <option key={opt.value || "empty"} value={opt.value}>
-                  {opt.label}
-                </option>
-              ),
-            )}
-          </select>
-        </div>
+        <AiModelFormGroup
+          model={model}
+          onModelChange={setModel}
+          disabled={loading}
+          selectPlaceholder="dash"
+        />
 
         <SamplePercentageSlider
           value={samplePercentage}

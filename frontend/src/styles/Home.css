@@ -214,6 +214,52 @@
   margin-top: 6px;
 }
 
+.paid-model-pricing-notice {
+  margin: 0.35rem 0 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  color: #cccccc;
+  opacity: 0.95;
+}
+
+.ai-model-form-group__label-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 0.75rem;
+}
+
+.ai-model-price-filter {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.ai-model-price-filter__seg {
+  margin: 0;
+  padding: 0.15rem 0.4rem;
+  font-size: 0.6875rem;
+  line-height: 1.2;
+  font-family: inherit;
+  color: #ffffff;
+  background-color: transparent;
+  border: none;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.ai-model-price-filter__seg.is-active {
+  background-color: #ffffff;
+  color: #1a1a1a;
+}
+
+.ai-model-price-filter__seg:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .form-input:disabled {
   background-color: #0a0a0a;
   opacity: 0.6;

@@ -6,7 +6,7 @@ import DatabaseSourceFields from "../forms/DatabaseSourceFields";
 import PromptTextareaWithActions from "../forms/PromptTextareaWithActions";
 import MinWordsField from "../forms/MinWordsField";
 import SamplePercentageSlider from "../forms/SamplePercentageSlider";
-import { AI_MODELS } from "../../lib/constants";
+import AiModelFormGroup from "../AiModelFormGroup";
 import {
   EXAMPLE_PROMPTS,
   MissingFieldsError,
@@ -337,27 +337,12 @@ export default function FilterDataPanel({
           />
         </div>
 
-        <div className="form-group">
-          <label htmlFor="model">AI Model</label>
-          <select
-            id="model"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            className="form-input"
-            disabled={loading}
-          >
-            {!model && (
-              <option value="" disabled>
-                Select an AI model
-              </option>
-            )}
-            {AI_MODELS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        </div>
+        <AiModelFormGroup
+          model={model}
+          onModelChange={setModel}
+          disabled={loading}
+          selectPlaceholder="filter"
+        />
 
         <MinWordsField
           value={minWords}

@@ -1,4 +1,4 @@
-/** OpenRouter model slugs for tool panels (from ``shared/openrouter_models.json``). */
-import AI_MODELS from "../../../shared/openrouter_models.json";
+/** OpenRouter model slugs for tool panels from frontend constants. */
+import AI_MODELS from "../../constants/openrouter_models.json";
 
 export { AI_MODELS };

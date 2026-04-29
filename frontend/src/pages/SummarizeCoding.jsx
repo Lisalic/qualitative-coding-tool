@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { apiFetch } from "../api";
 import ReactMarkdown from "react-markdown";
-import { AI_MODELS } from "../lib/constants";
+import AiModelFormGroup from "../components/AiModelFormGroup";
 import "../styles/Home.css";
 
 export default function SummarizeCoding() {
@@ -159,21 +159,14 @@ export default function SummarizeCoding() {
               </div>
 
               <div style={{ width: 188, minWidth: 188 }}>
-                <label style={{ display: "block", marginBottom: 6 }}>
-                  Model
-                </label>
-                <select
-                  className="form-input"
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                >
-                  <option value="">-- select model --</option>
-                  {AI_MODELS.map((modelOption) => (
-                    <option key={modelOption.value} value={modelOption.value}>
-                      {modelOption.label}
-                    </option>
-                  ))}
-                </select>
+                <AiModelFormGroup
+                  className=""
+                  label="Model"
+                  labelStyle={{ display: "block", marginBottom: 6 }}
+                  model={model}
+                  onModelChange={setModel}
+                  selectPlaceholder="dash"
+                />
               </div>
             </div>
 
