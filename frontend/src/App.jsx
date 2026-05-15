@@ -28,7 +28,7 @@ const Register = React.lazy(() => import("./pages/Register"));
 
 function App() {
   return (
-    <Router>
+    <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <div className="app-shell bg-base">
         <Navbar />
         <main className="app-shell__content">

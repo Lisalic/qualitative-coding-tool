@@ -1,10 +1,10 @@
 import time
 import ast
-import json
 import re
 import datetime
 from openai import OpenAI
 
+from backend.app.ai_models import is_paid_model
 from backend.scripts.openrouter_http import openrouter_user_message
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
@@ -20,7 +20,7 @@ MODEL_CONTEXT_LIMITS = {
     "stepfun": 80_000 * 4,   
 }
 
-MAX_CHUNKS = 1
+MAX_BATCHES_FOR_FREE = 3
 
 ENTRY_SEPARATOR = "\n---\n"
 
@@ -78,33 +78,33 @@ def _estimate_context_limit(model: str) -> int:
     return MODEL_CONTEXT_LIMITS["default"]
 
 
-def _chunk_content(content: str, max_chars: int, separator: str = ENTRY_SEPARATOR) -> list[str]:
+def _batch_content(content: str, max_chars: int, separator: str = ENTRY_SEPARATOR) -> list[str]:
     """
-    Split content into chunks that fit within max_chars.
+    Split content into batches that fit within max_chars.
     Splits on separator boundaries to avoid cutting entries mid-way.
     """
     if len(content) <= max_chars:
         return [content]
     
     entries = content.split(separator)
-    chunks = []
-    current_chunk = []
+    batches = []
+    current_batch = []
     current_size = 0
     
     for entry in entries:
         entry_size = len(entry) + len(separator)
-        if current_size + entry_size > max_chars and current_chunk:
-            chunks.append(separator.join(current_chunk))
-            current_chunk = [entry]
+        if current_size + entry_size > max_chars and current_batch:
+            batches.append(separator.join(current_batch))
+            current_batch = [entry]
             current_size = entry_size
         else:
-            current_chunk.append(entry)
+            current_batch.append(entry)
             current_size += entry_size
     
-    if current_chunk:
-        chunks.append(separator.join(current_chunk))
+    if current_batch:
+        batches.append(separator.join(current_batch))
     
-    return chunks
+    return batches
 
 
 def _preview_response(response: str, max_len: int = 500) -> str:
@@ -200,74 +200,76 @@ def get_client(system_prompt: str, user_prompt: str, api_key: str, model: str = 
             time.sleep(wait_time)
 
 
-def _run_chunked_filter(content_type: str, filter_prompt: str, content: str, api_key: str, model: str, system_prompt: str) -> tuple[list, str]:
+def _run_batched_filter(content_type: str, filter_prompt: str, content: str, api_key: str, model: str, system_prompt: str) -> tuple[list, str]:
     """
-    Shared chunked filtering logic for both posts and comments.
+    Shared batched filtering logic for both posts and comments.
     
     Error policy:
-    - If chunk 1 fails → raise immediately (likely a config/auth problem)
-    - If chunk 2+ fails → stop processing, return results collected so far
+    - If batch 1 fails -> raise immediately (likely a config/auth problem)
+    - If batch 2+ fails -> stop processing, return results collected so far
     
     Returns:
         tuple: (list of IDs, last_user_prompt)
     """
     chosen_model = model or FREE_MODEL
+    paid_model = is_paid_model(chosen_model)
     context_limit = _estimate_context_limit(chosen_model)
     max_content_chars = context_limit - len(system_prompt) - len(filter_prompt) - 1000
     
     _log_ai(f"FILTER_{content_type.upper()}", f"Starting with {chosen_model}", {
         "content_chars": f"{len(content):,}",
         "context_limit": f"{context_limit:,}",
-        "max_per_chunk": f"{max_content_chars:,}"
+        "max_per_batch": f"{max_content_chars:,}"
     })
     
-    # Chunk if needed, limit to MAX_CHUNKS
-    chunks = _chunk_content(content, max_content_chars)
-    total_chunks = len(chunks)
-    
-    if total_chunks > MAX_CHUNKS:
-        # When MAX_CHUNKS is 1, just take the first chunk to avoid division by zero.
-        if MAX_CHUNKS <= 1:
-            _log_ai("CHUNKING", f"Content requires {total_chunks} chunks, limiting to 1 (first chunk only)")
-            chunks = [chunks[0]]
+    batches = _batch_content(content, max_content_chars)
+    total_batches = len(batches)
+
+    if not paid_model and total_batches > MAX_BATCHES_FOR_FREE:
+        if MAX_BATCHES_FOR_FREE <= 1:
+            _log_ai("BATCHING", f"Content requires {total_batches} batches, limiting to 1 (first batch only)")
+            batches = [batches[0]]
         else:
-            _log_ai("CHUNKING", f"Content requires {total_chunks} chunks, limiting to {MAX_CHUNKS} (sampling evenly)")
-            indices = [int(i * (total_chunks - 1) / (MAX_CHUNKS - 1)) for i in range(MAX_CHUNKS)]
-            chunks = [chunks[i] for i in indices]
+            _log_ai("BATCHING", f"Content requires {total_batches} batches, limiting to {MAX_BATCHES_FOR_FREE} (sampling evenly)")
+            indices = [int(i * (total_batches - 1) / (MAX_BATCHES_FOR_FREE - 1)) for i in range(MAX_BATCHES_FOR_FREE)]
+            batches = [batches[i] for i in indices]
     else:
-        _log_ai("CHUNKING", f"Split into {total_chunks} chunk(s)")
-    
+        _log_ai("BATCHING", f"Split into {total_batches} batch(es)")
+
+    if paid_model:
+        _log_ai("BATCH_POLICY", "Paid model: no max-batch cap applied")
+    else:
+        _log_ai("BATCH_POLICY", f"Free model: max {MAX_BATCHES_FOR_FREE} batches")
+
     all_ids = []
     last_user_prompt = ""
     label = "Posts" if content_type == "posts" else "Comments"
     
-    for i, chunk in enumerate(chunks):
+    for i, batch in enumerate(batches):
         if filter_prompt:
-            user_prompt = f"Filter criteria: {filter_prompt}\n\n{label} to analyze:\n{chunk}"
+            user_prompt = f"Filter criteria: {filter_prompt}\n\n{label} to analyze:\n{batch}"
         else:
-            user_prompt = f"Return ALL {content_type.lower()} IDs:\n{chunk}"
+            user_prompt = f"Return ALL {content_type.lower()} IDs:\n{batch}"
         last_user_prompt = user_prompt
         
-        _log_ai("CHUNK", f"Processing chunk {i+1}/{len(chunks)}", {"chars": f"{len(chunk):,}"})
+        _log_ai("BATCH", f"Processing batch {i+1}/{len(batches)}", {"chars": f"{len(batch):,}"})
         
         try:
             response = get_client(system_prompt, user_prompt, api_key, chosen_model)
             
-            _log_ai("RESPONSE", f"Chunk {i+1} response ({len(response)} chars):")
+            _log_ai("RESPONSE", f"Batch {i+1} response ({len(response)} chars):")
             print(f"    {_preview_response(response, 300)}")
             
-            chunk_ids = wrap_in_python_array(response)
-            _log_ai("CHUNK_RESULT", f"Chunk {i+1}: extracted {len(chunk_ids)} IDs")
-            all_ids.extend(chunk_ids)
+            batch_ids = wrap_in_python_array(response)
+            _log_ai("BATCH_RESULT", f"Batch {i+1}: extracted {len(batch_ids)} IDs")
+            all_ids.extend(batch_ids)
             
         except AIFilterError as e:
             if i == 0:
-                # First chunk failed — this is a fundamental problem, raise it
-                _log_ai("FATAL", f"Chunk 1 failed, aborting: {e}")
+                _log_ai("FATAL", f"Batch 1 failed, aborting: {e}")
                 raise
             else:
-                # Later chunk failed — stop but keep what we have
-                _log_ai("CHUNK_STOP", f"Chunk {i+1} failed, stopping with {len(all_ids)} IDs collected so far: {e}")
+                _log_ai("BATCH_STOP", f"Batch {i+1} failed, stopping with {len(all_ids)} IDs collected so far: {e}")
                 break
     
     unique_ids = list(dict.fromkeys(all_ids))
@@ -278,7 +280,7 @@ def _run_chunked_filter(content_type: str, filter_prompt: str, content: str, api
 
 def filter_posts_with_ai(filter_prompt: str, posts_content: str, api_key: str, model: str = "") -> tuple[list, str, str]:
     """
-    Use AI to filter posts. Raises AIFilterError on first-chunk failure.
+    Use AI to filter posts. Raises AIFilterError on first-batch failure.
     """
     system_prompt = """You are an expert content analyst. Your task is to filter posts and return ONLY a Python array of post IDs.
 
@@ -291,13 +293,13 @@ INSTRUCTIONS:
 
 CRITICAL: Return ONLY the raw Python array. No markdown, no backticks, no explanation."""
 
-    ids, last_user_prompt = _run_chunked_filter("posts", filter_prompt, posts_content, api_key, model, system_prompt)
+    ids, last_user_prompt = _run_batched_filter("posts", filter_prompt, posts_content, api_key, model, system_prompt)
     return ids, system_prompt, last_user_prompt
 
 
 def filter_comments_with_ai(filter_prompt: str, comments_content: str, api_key: str, model: str = "") -> tuple[list, str, str]:
     """
-    Use AI to filter comments. Raises AIFilterError on first-chunk failure.
+    Use AI to filter comments. Raises AIFilterError on first-batch failure.
     """
     system_prompt = """You are an expert content analyst. Your task is to filter comments and return ONLY a Python array of comment IDs.
 
@@ -310,7 +312,7 @@ INSTRUCTIONS:
 
 CRITICAL: Return ONLY the raw Python array. No markdown, no backticks, no explanation."""
 
-    ids, last_user_prompt = _run_chunked_filter("comments", filter_prompt, comments_content, api_key, model, system_prompt)
+    ids, last_user_prompt = _run_batched_filter("comments", filter_prompt, comments_content, api_key, model, system_prompt)
     return ids, system_prompt, last_user_prompt
 
 

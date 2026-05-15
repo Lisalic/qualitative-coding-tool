@@ -12,6 +12,12 @@ export default ({ mode }) => {
 
   return defineConfig({
     plugins: [react()],
+    resolve: {
+      dedupe: ["react", "react-dom"],
+    },
+    optimizeDeps: {
+      include: ["react-markdown"],
+    },
     base: process.env.VITE_BASE_PATH || "/",
     server: {
       fs: {
