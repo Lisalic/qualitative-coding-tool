@@ -56,6 +56,7 @@ function Navbar({ showBack, onBack }) {
         <div className="nav-actions">
           {showApiInput ? (
             <div className="api-input-group">
+              <span className="nav-api-label">API Key</span>
               <input
                 type="password"
                 placeholder="Enter API Key"

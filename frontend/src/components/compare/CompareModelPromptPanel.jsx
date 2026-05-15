@@ -1,5 +1,6 @@
 import React from "react";
 import AiModelFormGroup from "../models/AiModelFormGroup";
+import AiLabel from "../forms/AiLabel";
 
 export default function CompareModelPromptPanel({
   model,
@@ -27,7 +28,7 @@ export default function CompareModelPromptPanel({
 
         <div className="compare-form-group">
           <div className="compare-prompt-label-row">
-            <label className="compare-label">Prompt (optional)</label>
+            <AiLabel text="Prompt (optional)" className="compare-label" />
             <button
               className="project-tab prompt-example-btn"
               type="button"

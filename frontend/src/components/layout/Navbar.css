@@ -83,6 +83,11 @@
   gap: 8px;
 }
 
+.nav-api-label {
+  color: #ffffff;
+  font-size: 12px;
+}
+
 .nav-toggle {
   background-color: transparent;
   color: #ffffff;

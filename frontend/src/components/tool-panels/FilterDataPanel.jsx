@@ -4,6 +4,7 @@ import { apiFetch, postForm } from "../../api";
 import FormShell from "../forms/FormShell";
 import DatabaseSourceFields from "../forms/DatabaseSourceFields";
 import PromptTextareaWithActions from "../forms/PromptTextareaWithActions";
+import AiLabel from "../forms/AiLabel";
 import MinWordsField from "../forms/MinWordsField";
 import SamplePercentageSlider from "../forms/SamplePercentageSlider";
 import AiModelFormGroup from "../models/AiModelFormGroup";
@@ -278,7 +279,7 @@ export default function FilterDataPanel({
         />
 
         <div className="form-group">
-          <label htmlFor="filterTags">Keywords (optional)</label>
+          <AiLabel htmlFor="filterTags" text="Keywords (optional)" />
           <textarea
             id="filterTags"
             value={filterTags}

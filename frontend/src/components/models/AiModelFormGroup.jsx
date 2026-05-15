@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { filterAiModelsByPaid } from "../../lib/aiModelCatalog";
 import { AI_MODELS } from "../../lib/constants";
 import PaidModelPricingNotice from "./PaidModelPricingNotice";
+import AiLabel from "../forms/AiLabel";
 
 const SEGMENTS = [
   { mode: "all", label: "All" },
@@ -86,9 +87,12 @@ export default function AiModelFormGroup({
   return (
     <div className={className || undefined}>
       <div className="ai-model-form-group__label-row">
-        <label htmlFor={id} className={labelClassName} style={labelStyle}>
-          {label}
-        </label>
+        <AiLabel
+          htmlFor={id}
+          text={label}
+          className={labelClassName}
+          style={labelStyle}
+        />
         <div
           className="ai-model-price-filter"
           role="group"

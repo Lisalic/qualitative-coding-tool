@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { apiFetch } from "../api";
 import ReactMarkdown from "react-markdown";
 import AiModelFormGroup from "../components/models/AiModelFormGroup";
+import AiLabel from "../components/forms/AiLabel";
 import "../styles/Home.css";
 
 export default function SummarizeCoding() {
@@ -179,7 +180,7 @@ export default function SummarizeCoding() {
                   marginBottom: 6,
                 }}
               >
-                <label style={{ marginBottom: 0 }}>Prompt</label>
+                <AiLabel text="Prompt" style={{ marginBottom: 0 }} />
                 <button
                   className="project-tab"
                   type="button"

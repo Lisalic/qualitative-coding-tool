@@ -2,6 +2,7 @@ import { useState } from "react";
 import PromptManager from "./PromptManager";
 import { savePromptToLibrary } from "../../lib/savePromptToLibrary";
 import ToastService from "../feedback/ToastService";
+import AiLabel from "./AiLabel";
 import "../../styles/Home.css";
 
 export default function PromptTextareaWithActions({
@@ -55,7 +56,7 @@ export default function PromptTextareaWithActions({
 
   return (
     <div className="form-group">
-      <label htmlFor={id}>{label}</label>
+      <AiLabel htmlFor={id} text={label} />
       <div style={{ textAlign: "right", marginTop: "-2rem" }}>
         <button
           type="button"
