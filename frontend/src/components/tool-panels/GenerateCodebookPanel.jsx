@@ -1,11 +1,12 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { apiFetch, postForm } from "../../api";
+import { postForm } from "../../api";
 import FormShell from "../forms/FormShell";
 import DatabaseSourceFields from "../forms/DatabaseSourceFields";
 import SamplePercentageSlider from "../forms/SamplePercentageSlider";
 import PromptTextareaWithActions from "../forms/PromptTextareaWithActions";
-import AiModelFormGroup from "../AiModelFormGroup";
+import AiModelFormGroup from "../models/AiModelFormGroup";
+import { useToolPanelData } from "./useToolPanelData";
 import {
   EXAMPLE_PROMPTS,
   MissingFieldsError,
@@ -19,9 +20,6 @@ export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
   const navigate = useNavigate();
   const [database, setDatabase] = useState("");
   const [databaseType, setDatabaseType] = useState("unfiltered");
-  const [databases, setDatabases] = useState([]);
-  const [filteredDatabases, setFilteredDatabases] = useState([]);
-  const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -32,59 +30,12 @@ export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
   const [model, setModel] = useState("");
   const [samplePercentage, setSamplePercentage] = useState(100);
   const [codebookName, setCodebookName] = useState("");
-
-  useEffect(() => {
-    fetchDatabases();
-    fetchFilteredDatabases();
-    let mounted = true;
-    apiFetch("/api/projects/")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (!mounted || !data) return;
-        setProjects(data.projects || []);
-      })
-      .catch(() => {});
-    return () => (mounted = false);
-  }, []);
-
-  const fetchDatabases = async () => {
-    try {
-      const response = await apiFetch("/api/my-files/?file_type=raw_data");
-      if (!response.ok) throw new Error("Failed to fetch projects");
-      const data = await response.json();
-
-      const projectOptions = (data.projects || []).map((p) => ({
-        value: p.schema_name,
-        label: p.display_name || p.schema_name,
-        meta: p,
-      }));
-
-      setDatabases(projectOptions);
-    } catch (err) {
-      console.error("Error fetching databases:", err);
-    }
-  };
-
-  const fetchFilteredDatabases = async () => {
-    try {
-      const projResp = await apiFetch("/api/my-files/?file_type=filtered_data");
-      if (projResp.ok) {
-        const projData = await projResp.json();
-        const projectsList = projData.projects || [];
-        const projectOptions = projectsList.map((p) => ({
-          value: p.schema_name,
-          label: p.display_name || p.schema_name,
-          meta: p,
-        }));
-        setFilteredDatabases(projectOptions);
-        return;
-      }
-
-      setFilteredDatabases([]);
-    } catch (err) {
-      console.error("Error fetching filtered databases:", err);
-    }
-  };
+  const {
+    databases,
+    filteredDatabases,
+    projects,
+    error: panelDataError,
+  } = useToolPanelData();
 
   const getAvailableDatabases = () => {
     if (databaseType === "filtered") {
@@ -220,7 +171,7 @@ export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
           loadingText: "Generating...",
           disabled: loading,
         }}
-        error={error}
+        error={error || panelDataError || null}
         result={result}
         resultTitle="Generated Codebook"
       >

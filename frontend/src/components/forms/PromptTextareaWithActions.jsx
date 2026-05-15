@@ -1,6 +1,7 @@
 import { useState } from "react";
-import PromptManager from "../PromptManager";
+import PromptManager from "./PromptManager";
 import { savePromptToLibrary } from "../../lib/savePromptToLibrary";
+import ToastService from "../feedback/ToastService";
 import "../../styles/Home.css";
 
 export default function PromptTextareaWithActions({
@@ -24,7 +25,7 @@ export default function PromptTextareaWithActions({
 
   const handleSave = async () => {
     if (!value || !value.trim()) {
-      alert("Please enter a prompt before saving");
+      ToastService.show("Please enter a prompt before saving", "info");
       return;
     }
     try {
@@ -40,7 +41,7 @@ export default function PromptTextareaWithActions({
       }
     } catch (err) {
       if (err?.message === "EMPTY_PROMPT") {
-        alert("Please enter a prompt before saving");
+        ToastService.show("Please enter a prompt before saving", "info");
         return;
       }
       console.error("Failed to save prompt:", err);

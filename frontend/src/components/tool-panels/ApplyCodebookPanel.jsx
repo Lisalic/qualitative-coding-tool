@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { apiFetch, postForm } from "../../api";
+import { postForm } from "../../api";
 import FormShell from "../forms/FormShell";
 import DatabaseSourceFields from "../forms/DatabaseSourceFields";
 import SamplePercentageSlider from "../forms/SamplePercentageSlider";
 import PromptTextareaWithActions from "../forms/PromptTextareaWithActions";
-import AiModelFormGroup from "../AiModelFormGroup";
+import AiModelFormGroup from "../models/AiModelFormGroup";
+import { useToolPanelData } from "./useToolPanelData";
 import {
   EXAMPLE_PROMPTS,
   MissingFieldsError,
@@ -25,101 +26,26 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [description, setDescription] = useState("");
-  const [codebooks, setCodebooks] = useState([]);
-  const [databases, setDatabases] = useState([]);
-  const [filteredDatabases, setFilteredDatabases] = useState([]);
-  const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
   const [saveMessage, setSaveMessage] = useState("");
   const [saveMessageType, setSaveMessageType] = useState("success");
   const [model, setModel] = useState("");
   const [samplePercentage, setSamplePercentage] = useState(100);
+  const {
+    databases,
+    filteredDatabases,
+    projects,
+    codebooks,
+    error: panelDataError,
+  } = useToolPanelData({ includeCodebooks: true });
 
   useEffect(() => {
-    fetchCodebooks();
-    fetchDatabases();
-    fetchFilteredDatabases();
-    fetchProjects();
-  }, []);
-
-  const fetchProjects = async () => {
-    try {
-      const resp = await apiFetch("/api/projects/");
-      if (!resp.ok) return;
-      const data = await resp.json();
-      setProjects(data.projects || []);
-    } catch (err) {
-      console.error("Error fetching projects:", err);
-    }
-  };
-
-  const fetchCodebooks = async () => {
-    try {
-      const response = await apiFetch("/api/list-codebooks");
-      if (!response.ok) throw new Error("Failed to fetch codebooks");
-      const data = await response.json();
-      setCodebooks(data.codebooks);
-      setCodebook((prev) => {
-        if (prev) return prev;
-        if (data.codebooks.length > 0) {
-          return data.codebooks[0].id.toString();
-        }
-        return prev;
-      });
-    } catch (err) {
-      console.error("Error fetching codebooks:", err);
-    }
-  };
-
-  const fetchDatabases = async () => {
-    try {
-      const projResp = await apiFetch("/api/my-files/?file_type=raw_data");
-      if (projResp.ok) {
-        const projData = await projResp.json();
-        const projectsList = projData.projects || [];
-        const normalized = projectsList.map((p) => ({
-          name: p.schema_name,
-          display_name: p.display_name,
-          metadata: p,
-        }));
-        setDatabases(normalized);
-        return;
-      }
-
-      const response = await apiFetch("/api/my-files/?file_type=raw_data");
-      if (!response.ok) throw new Error("Failed to fetch projects");
-      const data = await response.json();
-      const normalized = (data.projects || []).map((p) => ({
-        name: p.schema_name,
-        display_name: p.display_name,
-        metadata: p,
-      }));
-      setDatabases(normalized);
-    } catch (err) {
-      console.error("Error fetching databases:", err);
-    }
-  };
-
-  const fetchFilteredDatabases = async () => {
-    try {
-      const projResp = await apiFetch("/api/my-files/?file_type=filtered_data");
-      if (projResp.ok) {
-        const projData = await projResp.json();
-        const projectsList = projData.projects || [];
-        const normalized = projectsList.map((p) => ({
-          name: p.schema_name,
-          display_name: p.display_name,
-          metadata: p,
-        }));
-        setFilteredDatabases(normalized);
-        return;
-      }
-
-      setFilteredDatabases([]);
-    } catch (err) {
-      console.error("Error fetching filtered databases:", err);
-    }
-  };
+    setCodebook((prev) => {
+      if (prev) return prev;
+      if (codebooks.length > 0) return String(codebooks[0].id);
+      return prev;
+    });
+  }, [codebooks]);
 
   const handleViewCoding = () => {
     navigate("/coding-view");
@@ -180,9 +106,17 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
 
   const getAvailableDatabases = () => {
     if (databaseType === "filtered") {
-      return filteredDatabases;
+      return filteredDatabases.map((item) => ({
+        name: item.value,
+        display_name: item.label,
+        metadata: item.meta,
+      }));
     }
-    return databases;
+    return databases.map((item) => ({
+      name: item.value,
+      display_name: item.label,
+      metadata: item.meta,
+    }));
   };
 
   const getDisplayName = (item) => {
@@ -237,7 +171,7 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
     label: p.projectname || p.display_name || p.name || String(p.id),
   }));
 
-  const displayError = error || (result && result.error);
+  const displayError = error || panelDataError || (result && result.error);
   const displayResult = result && result.classification_report;
 
   return (

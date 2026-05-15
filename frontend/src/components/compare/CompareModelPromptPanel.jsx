@@ -1,5 +1,5 @@
 import React from "react";
-import AiModelFormGroup from "../AiModelFormGroup";
+import AiModelFormGroup from "../models/AiModelFormGroup";
 
 export default function CompareModelPromptPanel({
   model,

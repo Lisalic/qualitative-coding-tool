@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
 import { apiFetch } from "../api";
 import { useNavigate, useLocation } from "react-router-dom";
-import SelectionList from "../components/SelectionList";
-import DataTable from "../components/DataTable";
+import SelectionList from "../components/shared/SelectionList";
+import DataTable from "../components/files/DataTable";
 import "../styles/Data.css";
 
 export default function Data() {

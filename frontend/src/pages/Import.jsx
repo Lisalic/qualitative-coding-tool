@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
-import ErrorDisplay from "../components/ErrorDisplay";
-import UploadData from "../components/UploadData";
+import ErrorDisplay from "../components/feedback/ErrorDisplay";
+import UploadData from "../components/files/UploadData";
 import { useState } from "react";
 import "../styles/Home.css";
 import "../styles/Data.css";

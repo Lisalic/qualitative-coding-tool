@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
 import { useLocation } from "react-router-dom";
 import { apiFetch } from "../api";
-import SelectionList from "../components/SelectionList";
-import CodingTableView from "../components/CodingTableView";
+import SelectionList from "../components/shared/SelectionList";
+import CodingTableView from "../components/coding-table/CodingTableView";
 import "../styles/Data.css";
 import "../styles/DataTable.css";
-import MarkdownView from "../components/MarkdownView";
+import MarkdownView from "../components/codebook/MarkdownView";
 import {
   getCodeColor,
   formatCodingData,

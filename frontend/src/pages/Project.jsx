@@ -1,8 +1,8 @@
 import { useParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { apiFetch } from "../api";
-import ProjectHeaderSection from "../components/ProjectHeaderSection";
-import ProjectFilesSection from "../components/ProjectFilesSection";
+import ProjectHeaderSection from "../components/project/ProjectHeaderSection";
+import ProjectFilesSection from "../components/project/ProjectFilesSection";
 
 export default function Project() {
   const { projectId } = useParams();

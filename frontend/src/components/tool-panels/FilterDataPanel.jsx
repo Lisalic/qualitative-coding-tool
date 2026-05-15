@@ -6,7 +6,8 @@ import DatabaseSourceFields from "../forms/DatabaseSourceFields";
 import PromptTextareaWithActions from "../forms/PromptTextareaWithActions";
 import MinWordsField from "../forms/MinWordsField";
 import SamplePercentageSlider from "../forms/SamplePercentageSlider";
-import AiModelFormGroup from "../AiModelFormGroup";
+import AiModelFormGroup from "../models/AiModelFormGroup";
+import { useToolPanelData } from "./useToolPanelData";
 import {
   EXAMPLE_PROMPTS,
   MissingFieldsError,
@@ -27,9 +28,6 @@ export default function FilterDataPanel({
   const [loading, setLoading] = useState(false);
   const [database, setDatabase] = useState("");
   const [databaseType, setDatabaseType] = useState("unfiltered");
-  const [databases, setDatabases] = useState([]);
-  const [filteredDatabases, setFilteredDatabases] = useState([]);
-  const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -42,23 +40,12 @@ export default function FilterDataPanel({
     comments: [],
   });
   const [rangesLoading, setRangesLoading] = useState(false);
-
-  useEffect(() => {
-    fetchDatabases();
-    fetchFilteredDatabases();
-  }, []);
-
-  useEffect(() => {
-    let mounted = true;
-    apiFetch("/api/projects/")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (!mounted || !data) return;
-        setProjects(data.projects || []);
-      })
-      .catch(() => {});
-    return () => (mounted = false);
-  }, []);
+  const {
+    databases,
+    filteredDatabases,
+    projects,
+    error: panelDataError,
+  } = useToolPanelData();
 
   const fetchWordCountRanges = useCallback(async (schema) => {
     if (!schema) {
@@ -110,44 +97,6 @@ export default function FilterDataPanel({
   useEffect(() => {
     fetchWordCountRanges(database);
   }, [database, fetchWordCountRanges]);
-
-  const fetchDatabases = async () => {
-    try {
-      const respRaw = await apiFetch("/api/my-files/?file_type=raw_data");
-      if (!respRaw.ok) throw new Error("Failed to fetch raw projects");
-      const rawData = await respRaw.json();
-      const rawOptions = (rawData.projects || []).map((p) => ({
-        value: p.schema_name,
-        label: p.display_name || p.schema_name,
-        meta: p,
-      }));
-
-      setDatabases(rawOptions);
-    } catch (err) {
-      console.error("Error fetching databases:", err);
-    }
-  };
-
-  const fetchFilteredDatabases = async () => {
-    try {
-      const projResp = await apiFetch("/api/my-files/?file_type=filtered_data");
-      if (projResp.ok) {
-        const projData = await projResp.json();
-        const projectsList = projData.projects || [];
-        const projectOptions = projectsList.map((p) => ({
-          value: p.schema_name,
-          label: p.display_name || p.schema_name,
-          meta: p,
-        }));
-        setFilteredDatabases(projectOptions);
-        return;
-      }
-
-      setFilteredDatabases([]);
-    } catch (err) {
-      console.error("Error fetching filtered databases:", err);
-    }
-  };
 
   const getAvailableDatabases = () => {
     if (databaseType === "filtered") {
@@ -267,7 +216,11 @@ export default function FilterDataPanel({
           loadingText: "Processing...",
           disabled: loading,
         }}
-        error={message && message.startsWith("Error:") ? message : null}
+        error={
+          message && message.startsWith("Error:")
+            ? message
+            : panelDataError || null
+        }
         result={message && message.startsWith("✓") ? message : null}
         resultTitle="Filter Result"
       >

@@ -1,9 +1,9 @@
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import React, { Suspense } from "react";
-import ProtectedRoute from "./components/ProtectedRoute";
-import Sidebar from "./components/Sidebar";
-import Navbar from "./components/Navbar";
-import AuthGate from "./components/AuthGate";
+import ProtectedRoute from "./components/auth/ProtectedRoute";
+import Sidebar from "./components/layout/Sidebar";
+import Navbar from "./components/layout/Navbar";
+import AuthGate from "./components/auth/AuthGate";
 import "./App.css";
 
 const ImportPage = React.lazy(() => import("./pages/Import"));

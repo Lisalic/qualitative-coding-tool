@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { apiFetch } from "../api";
-import SelectionList from "../components/SelectionList";
+import SelectionList from "../components/shared/SelectionList";
 import ReactMarkdown from "react-markdown";
 import "../styles/Home.css";
 

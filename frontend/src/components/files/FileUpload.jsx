@@ -1,0 +1,412 @@
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import "../../styles/FileUpload.css";
+import { apiFetch } from "../../api";
+
+function formatApiErrorPayload(parsed, fallback) {
+  if (!parsed || typeof parsed !== "object") return fallback;
+  if (typeof parsed.error === "string") return parsed.error;
+  if (typeof parsed.detail === "string") return parsed.detail;
+  if (Array.isArray(parsed.detail)) {
+    const msg = parsed.detail
+      .map((d) => {
+        const loc = Array.isArray(d.loc) ? d.loc.slice(-1).join(".") : "";
+        return loc ? `${loc}: ${d.msg}` : d.msg;
+      })
+      .filter(Boolean)
+      .join("; ");
+    return msg || fallback;
+  }
+  return fallback;
+}
+
+export default function FileUpload({ onUploadSuccess, onView }) {
+  const navigate = useNavigate();
+  const [file, setFile] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [subredditInput, setSubredditInput] = useState("");
+  const [subredditTags, setSubredditTags] = useState([]);
+  const [dataType, setDataType] = useState("posts");
+  const [customName, setCustomName] = useState("");
+  const [description, setDescription] = useState("");
+  const [projects, setProjects] = useState([]);
+  const [projectsLoading, setProjectsLoading] = useState(true);
+  const [projectsError, setProjectsError] = useState("");
+  const [selectedProject, setSelectedProject] = useState("");
+
+  const handleFileChange = (e) => {
+    const selectedFile = e.target.files[0];
+    if (selectedFile && selectedFile.name.endsWith(".zst")) {
+      setFile(selectedFile);
+      setError("");
+    } else {
+      setError("Please select a .zst file");
+      setFile(null);
+    }
+  };
+
+  const handleAddSubreddit = (e) => {
+    if (e.key === "Enter" || e.key === ",") {
+      e.preventDefault();
+      const value = subredditInput.trim().replace(/,\s*$/, "");
+      if (value && !subredditTags.includes(value.toLowerCase())) {
+        setSubredditTags([...subredditTags, value.toLowerCase()]);
+        setSubredditInput("");
+      }
+    }
+  };
+
+  const handleAddSubredditClick = () => {
+    const value = subredditInput.trim();
+    if (value && !subredditTags.includes(value.toLowerCase())) {
+      setSubredditTags([...subredditTags, value.toLowerCase()]);
+      setSubredditInput("");
+    }
+  };
+
+  const handleRemoveSubreddit = (index) => {
+    setSubredditTags(subredditTags.filter((_, i) => i !== index));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    if (!file) {
+      setError("Please select a file");
+      return;
+    }
+
+    if (!customName.trim()) {
+      setError("Please enter a database name");
+      return;
+    }
+
+    if (!selectedProject) {
+      setError("Please select a project");
+      return;
+    }
+
+    setLoading(true);
+    setMessage("");
+    setError("");
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      if (subredditTags.length > 0) {
+        formData.append("subreddits", JSON.stringify(subredditTags));
+      }
+
+      formData.append("data_type", dataType);
+      formData.append("name", customName.trim());
+      if (description && description.trim()) {
+        formData.append("description", description.trim());
+      }
+      if (selectedProject) {
+        formData.append("project_id", selectedProject);
+      }
+
+      const response = await apiFetch("/api/upload-zst/", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        let errorMsg = `Upload failed (HTTP ${response.status})`;
+        try {
+          const errorData = text ? JSON.parse(text) : null;
+          errorMsg = formatApiErrorPayload(errorData, text || errorMsg);
+        } catch (e) {
+          errorMsg = text || errorMsg;
+        }
+        throw new Error(errorMsg);
+      }
+
+      const text = await response.text();
+      if (!text) {
+        throw new Error("Empty response from server");
+      }
+      const data = JSON.parse(text);
+
+      if (data.status === "processing") {
+        setMessage("📤 File uploaded. Import processing in background...");
+      } else {
+        setMessage(data.message || "✓ Upload completed");
+      }
+
+      setFile(null);
+      setSubredditTags([]);
+      setSubredditInput("");
+      setDataType("posts");
+      setCustomName("");
+      setDescription("");
+      setSelectedProject("");
+      setLoading(false);
+
+      onUploadSuccess(data);
+    } catch (err) {
+      setError(`Error: ${err.message}`);
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    let mounted = true;
+    async function loadProjects() {
+      setProjectsLoading(true);
+      setProjectsError("");
+      try {
+        const resp = await apiFetch("/api/projects/");
+        if (!mounted) return;
+        if (!resp.ok) {
+          const text = await resp.text();
+          let msg = `Could not load projects (HTTP ${resp.status})`;
+          try {
+            const d = text ? JSON.parse(text) : null;
+            msg = formatApiErrorPayload(d, msg);
+          } catch (_) {
+            if (text) msg = text;
+          }
+          setProjectsError(msg);
+          setProjects([]);
+          setProjectsLoading(false);
+          return;
+        }
+        const text = await resp.text();
+        if (!text) {
+          setProjects([]);
+          setProjectsLoading(false);
+          return;
+        }
+        const data = JSON.parse(text);
+        setProjects(Array.isArray(data.projects) ? data.projects : []);
+      } catch (e) {
+        if (mounted) {
+          setProjectsError(e?.message || String(e));
+          setProjects([]);
+        }
+      } finally {
+        if (mounted) setProjectsLoading(false);
+      }
+    }
+    loadProjects();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  return (
+    <div className="file-upload">
+      <h1
+        style={{
+          textAlign: "center",
+          fontSize: "28px",
+          fontWeight: "600",
+          margin: "0 0 10px 0",
+        }}
+      >
+        Import Data
+      </h1>
+
+      <div className="action-buttons">
+        <button onClick={onView} className="view-button">
+          View Imported Data
+        </button>
+      </div>
+      <div className="form-wrapper">
+        <h2>Upload Data</h2>
+        {projectsLoading && (
+          <p className="form-hint" style={{ marginBottom: "1rem" }}>
+            Loading projects…
+          </p>
+        )}
+        {projectsError && (
+          <p className="error-message" style={{ marginBottom: "1rem" }}>
+            {projectsError}
+          </p>
+        )}
+        {!projectsLoading &&
+          !projectsError &&
+          projects.length === 0 && (
+            <div className="form-hint" style={{ marginBottom: "1rem" }}>
+              <p style={{ margin: "0 0 0.75rem 0" }}>
+                You need at least one project before you can import data. Create
+                a project from the home page, then return here.
+              </p>
+              <button
+                type="button"
+                className="add-btn"
+                onClick={() => navigate("/")}
+              >
+                Go to home
+              </button>
+            </div>
+          )}
+        <form onSubmit={handleSubmit}>
+          <div className="form-group">
+            <label htmlFor="zst-file">Upload .zst File</label>
+            <input
+              id="zst-file"
+              type="file"
+              accept=".zst"
+              onChange={handleFileChange}
+              disabled={loading}
+            />
+            {file && <p className="file-name">Selected: {file.name}</p>}
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="project-select">Select Project</label>
+            <select
+              id="project-select"
+              value={selectedProject}
+              onChange={(e) => setSelectedProject(e.target.value)}
+              disabled={
+                loading ||
+                projectsLoading ||
+                !!projectsError ||
+                projects.length === 0
+              }
+              required
+            >
+              <option value="" disabled>
+                Select a project...
+              </option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.projectname}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label>Data Type</label>
+            <div className="radio-group">
+              <div>
+                <input
+                  type="radio"
+                  id="data-type-submissions"
+                  name="data-type"
+                  value="posts"
+                  checked={dataType === "posts"}
+                  onChange={(e) => setDataType(e.target.value)}
+                  disabled={loading}
+                  style={{ display: "none" }}
+                />
+                <label htmlFor="data-type-submissions" className="radio-label">
+                  Posts
+                </label>
+              </div>
+              <div>
+                <input
+                  type="radio"
+                  id="data-type-comments"
+                  name="data-type"
+                  value="comments"
+                  checked={dataType === "comments"}
+                  onChange={(e) => setDataType(e.target.value)}
+                  disabled={loading}
+                  style={{ display: "none" }}
+                />
+                <label htmlFor="data-type-comments" className="radio-label">
+                  Comments
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="custom-name">Database Name</label>
+            <input
+              id="custom-name"
+              type="text"
+              placeholder="Enter database name..."
+              value={customName}
+              onChange={(e) => setCustomName(e.target.value)}
+              disabled={loading}
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="db-description">Description (optional)</label>
+            <textarea
+              id="db-description"
+              placeholder="Optional description for this dataset..."
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              disabled={loading}
+              rows={3}
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="subreddit-input">
+              Filter by Subreddits (optional)
+            </label>
+            <div className="subreddit-input-wrapper">
+              <input
+                id="subreddit-input"
+                type="text"
+                placeholder="Enter subreddit name..."
+                value={subredditInput}
+                onChange={(e) => setSubredditInput(e.target.value)}
+                disabled={loading}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleAddSubredditClick();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                onClick={handleAddSubredditClick}
+                disabled={loading || !subredditInput.trim()}
+                className="add-btn"
+              >
+                Add
+              </button>
+            </div>
+            {subredditTags.length > 0 && (
+              <div className="subreddit-tags">
+                {subredditTags.map((tag, index) => (
+                  <span key={index} className="subreddit-tag">
+                    {tag}
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveSubreddit(index)}
+                      className="remove-tag-btn"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <button
+            type="submit"
+            disabled={
+              loading ||
+              projectsLoading ||
+              !!projectsError ||
+              projects.length === 0
+            }
+            className="form-submit-btn"
+          >
+            {loading ? "Processing..." : "Upload"}
+          </button>
+        </form>
+
+        {error && <p className="error-message">{error}</p>}
+        {message && <p className="success-message">{message}</p>}
+      </div>
+    </div>
+  );
+}

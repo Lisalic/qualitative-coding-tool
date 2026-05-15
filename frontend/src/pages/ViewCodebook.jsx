@@ -3,9 +3,9 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { apiFetch } from "../api";
 import "../styles/Data.css";
 import "../styles/DataTable.css";
-import MarkdownView from "../components/MarkdownView";
-import CodebookTree from "../components/CodebookTree";
-import SelectionList from "../components/SelectionList";
+import MarkdownView from "../components/codebook/MarkdownView";
+import CodebookTree from "../components/codebook/CodebookTree";
+import SelectionList from "../components/shared/SelectionList";
 
 export default function ViewCodebook() {
   const navigate = useNavigate();

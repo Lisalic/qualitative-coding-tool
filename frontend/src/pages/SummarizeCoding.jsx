@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { apiFetch } from "../api";
 import ReactMarkdown from "react-markdown";
-import AiModelFormGroup from "../components/AiModelFormGroup";
+import AiModelFormGroup from "../components/models/AiModelFormGroup";
 import "../styles/Home.css";
 
 export default function SummarizeCoding() {
