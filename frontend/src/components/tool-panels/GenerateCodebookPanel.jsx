@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { postForm } from "../../api";
 import FormShell from "../forms/FormShell";
 import DatabaseSourceFields from "../forms/DatabaseSourceFields";
-import SamplePercentageSlider from "../forms/SamplePercentageSlider";
+import SliderField from "../forms/SliderField";
 import PromptTextareaWithActions from "../forms/PromptTextareaWithActions";
 import AiModelFormGroup from "../models/AiModelFormGroup";
 import { useToolPanelData } from "./useToolPanelData";
@@ -209,12 +209,22 @@ export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
           selectPlaceholder="dash"
         />
 
-        <SamplePercentageSlider
+        <SliderField
+          id="samplePercentage"
+          label="Sample Size"
           value={samplePercentage}
           onChange={setSamplePercentage}
-          disabled={loading}
-          databaseSelected={Boolean(database)}
-          totalCount={getSelectedRecordCount()}
+          min={1}
+          max={100}
+          step={1}
+          disabled={loading || !Boolean(database)}
+          valueDisplay={database ? `${samplePercentage}%` : ""}
+          valueMinWidth="70px"
+          caption={
+            !database
+              ? "Select a database to see sampled record counts."
+              : `${Math.ceil((getSelectedRecordCount() * samplePercentage) / 100)} of ${getSelectedRecordCount()} records will be selected randomly.`
+          }
         />
 
         <div className="form-group">

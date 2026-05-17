@@ -1,21 +1,27 @@
-export default function MinWordsField({
+export default function SliderField({
+  id,
+  label,
   value,
   onChange,
+  min,
+  max,
+  step,
   disabled,
-  rangesLoading,
+  valueDisplay,
+  valueMinWidth = "60px",
   caption,
 }) {
   return (
     <div className="form-group">
-      <label htmlFor="minWords">Minimum Words</label>
+      <label htmlFor={id}>{label}</label>
       <div>
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
           <input
-            id="minWords"
+            id={id}
             type="range"
-            min={0}
-            max={1000}
-            step={10}
+            min={min}
+            max={max}
+            step={step}
             value={value}
             onChange={(e) => onChange(Number(e.target.value))}
             className="slider-input"
@@ -23,18 +29,18 @@ export default function MinWordsField({
           />
           <span
             style={{
-              minWidth: "60px",
+              minWidth: valueMinWidth,
               textAlign: "right",
               fontWeight: 600,
               color: "#ffffff",
               fontFamily: "system-ui, -apple-system, sans-serif",
             }}
           >
-            {value}
+            {valueDisplay}
           </span>
         </div>
         <div style={{ marginTop: "6px", fontSize: "0.85em", color: "#999" }}>
-          {rangesLoading ? "Loading word count ranges..." : caption}
+          {caption}
         </div>
       </div>
     </div>

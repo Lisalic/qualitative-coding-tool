@@ -1,20 +1,17 @@
 import { useState } from "react";
 import FilterDataPanel from "../components/tool-panels/FilterDataPanel";
+import ToolPage from "../components/shell/ToolPage";
 import "../styles/Home.css";
 
 export default function Filter() {
   const [filterPrompt, setFilterPrompt] = useState("");
 
   return (
-    <div className="home-container">
-      <div className="tool-page-layout">
-        <div className="left-section">
-          <FilterDataPanel
-            filterPrompt={filterPrompt}
-            onFilterPromptChange={setFilterPrompt}
-          />
-        </div>
-      </div>
-    </div>
+    <ToolPage>
+      <FilterDataPanel
+        filterPrompt={filterPrompt}
+        onFilterPromptChange={setFilterPrompt}
+      />
+    </ToolPage>
   );
 }

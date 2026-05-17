@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { filterAiModelsByPaid } from "../../lib/aiModelCatalog";
+import {
+  filterAiModelsByPaid,
+  formatPaidModelPricingLine,
+  getAiModelByValue,
+} from "../../lib/aiModelCatalog";
 import { AI_MODELS } from "../../lib/constants";
-import PaidModelPricingNotice from "./PaidModelPricingNotice";
 import AiLabel from "../forms/AiLabel";
 
 const SEGMENTS = [
@@ -36,6 +39,7 @@ export default function AiModelFormGroup({
   selectClassName = "form-input",
 }) {
   const [priceFilter, setPriceFilter] = useState("all");
+  const selectedModel = getAiModelByValue(model);
   const filteredModels = useMemo(
     () => filterAiModelsByPaid(AI_MODELS, priceFilter),
     [priceFilter],
@@ -125,7 +129,11 @@ export default function AiModelFormGroup({
       >
         {selectChildren}
       </select>
-      <PaidModelPricingNotice modelValue={model} />
+      {selectedModel?.paid ? (
+        <p className="paid-model-pricing-notice">
+          {formatPaidModelPricingLine(selectedModel)}
+        </p>
+      ) : null}
     </div>
   );
 }

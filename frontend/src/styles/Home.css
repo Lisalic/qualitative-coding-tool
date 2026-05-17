@@ -33,6 +33,19 @@
   gap: 40px;
 }
 
+.single-panel-layout {
+  width: 100%;
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+}
+
+.single-panel-layout > * {
+  flex: 2;
+  padding-left: 0;
+  padding-right: 0;
+}
+
 .page-layout {
   display: flex;
   gap: 20px;
@@ -135,12 +148,14 @@
   background-color: #000000;
 }
 
-.tool-page-layout .left-section .action-form {
+.tool-page-layout .left-section .action-form,
+.single-panel-layout .action-form {
   padding: 0;
 }
 
 /* Match import page typography within the Filter page left column */
-.tool-page-layout .left-section {
+.tool-page-layout .left-section,
+.single-panel-layout {
   font-family: system-ui, -apple-system, sans-serif;
   font-size: 1rem;
   line-height: 1.5;
@@ -149,22 +164,28 @@
 
 .tool-page-layout .left-section h2,
 .tool-page-layout .left-section h3,
-.tool-page-layout .left-section h4 {
+.tool-page-layout .left-section h4,
+.single-panel-layout h2,
+.single-panel-layout h3,
+.single-panel-layout h4 {
   font-weight: 600;
   margin: 0 0 10px 0;
 }
 
-.tool-page-layout .left-section .action-form .form-group label {
+.tool-page-layout .left-section .action-form .form-group label,
+.single-panel-layout .action-form .form-group label {
   font-weight: 400;
   font-size: 1rem;
 }
 
-.tool-page-layout .left-section .form-input {
+.tool-page-layout .left-section .form-input,
+.single-panel-layout .form-input {
   font-size: 1rem;
   line-height: 1.5;
 }
 
-.tool-page-layout .left-section > .file-upload {
+.tool-page-layout .left-section > .file-upload,
+.single-panel-layout > .file-upload {
   background-color: #000000;
   padding: 20px;
   border-radius: 8px;

@@ -1,45 +1,42 @@
 import { useNavigate } from "react-router-dom";
 import ErrorDisplay from "../components/feedback/ErrorDisplay";
-import UploadData from "../components/files/UploadData";
-import { useState } from "react";
+import FileUpload from "../components/data/FileUpload";
+import ToolPage from "../components/shell/ToolPage";
 import "../styles/Home.css";
 import "../styles/Data.css";
 
+const HIDDEN_ERROR_MATCHES = [
+  "select at least",
+  "enter a name",
+  "Database",
+  "merge",
+];
+
+function isCriticalError(error) {
+  if (!error) return false;
+  return !HIDDEN_ERROR_MATCHES.some((text) => error.includes(text));
+}
+
 export default function ImportPage() {
   const navigate = useNavigate();
-  const [error, setError] = useState("");
-  const [uploadData, setUploadData] = useState(null);
 
-  const handleUploadSuccess = (data) => {
-    setUploadData(data);
-  };
+  const handleUploadSuccess = () => {};
 
   const handleViewData = () => {
     navigate("/data");
   };
 
-  const handleDismissError = () => {
-    setError("");
-  };
+  const handleDismissError = () => {};
+  const error = "";
+  const displayError = isCriticalError(error) ? error : null;
 
   return (
-    <>
-      <div className="home-container">
-        {error &&
-          !error.includes("select at least") &&
-          !error.includes("enter a name") &&
-          !error.includes("Database") &&
-          !error.includes("merge") && (
-            <ErrorDisplay message={error} onDismiss={handleDismissError} />
-          )}
-
-        <div className="tool-page-layout">
-          <UploadData
-            onUploadSuccess={handleUploadSuccess}
-            onView={handleViewData}
-          />
-        </div>
+    <ToolPage
+      beforeBody={<ErrorDisplay message={displayError} onDismiss={handleDismissError} />}
+    >
+      <div className="left-section">
+        <FileUpload onUploadSuccess={handleUploadSuccess} onView={handleViewData} />
       </div>
-    </>
+    </ToolPage>
   );
 }

@@ -120,7 +120,7 @@ export default function FileUpload({ onUploadSuccess, onView }) {
         try {
           const errorData = text ? JSON.parse(text) : null;
           errorMsg = formatApiErrorPayload(errorData, text || errorMsg);
-        } catch (e) {
+        } catch (e2) {
           errorMsg = text || errorMsg;
         }
         throw new Error(errorMsg);
@@ -184,9 +184,9 @@ export default function FileUpload({ onUploadSuccess, onView }) {
         }
         const data = JSON.parse(text);
         setProjects(Array.isArray(data.projects) ? data.projects : []);
-      } catch (e) {
+      } catch (e3) {
         if (mounted) {
-          setProjectsError(e?.message || String(e));
+          setProjectsError(e3?.message || String(e3));
           setProjects([]);
         }
       } finally {

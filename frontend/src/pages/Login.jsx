@@ -1,91 +1,30 @@
-import React, { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
 import "../styles/Auth.css";
-import { api } from "../api";
+import ErrorDisplay from "../components/feedback/ErrorDisplay";
+import AuthLinksSection from "../components/auth/AuthLinksSection";
+import AuthFormSection from "../components/auth/AuthFormSection";
+import PageHeading from "../components/primitives/PageHeading";
+import useLoginPage from "../components/auth/useLoginPage";
 
 const Login = () => {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [message, setMessage] = useState("");
-  const [messageType, setMessageType] = useState("");
-  const navigate = useNavigate();
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-
-    if (!email || !password) {
-      setMessage("Please fill in all fields");
-      setMessageType("error");
-      return;
-    }
-
-    try {
-      const res = await api.post("/api/login/", { email, password });
-      // store access token (insecure) for Authorization header usage
-      try {
-        const token = res && res.data && res.data.access_token;
-        if (token) {
-          localStorage.setItem("access_token", token);
-          api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
-        }
-      } catch (e) {}
-      setMessage("Login successful!");
-      setMessageType("success");
-      try {
-        window.dispatchEvent(new Event("auth-changed"));
-      } catch (e) {}
-      setTimeout(() => navigate("/"), 500);
-    } catch (err) {
-      const msg =
-        (err &&
-          err.response &&
-          err.response.data &&
-          err.response.data.detail) ||
-        err.message ||
-        "Login failed";
-      setMessage(msg);
-      setMessageType("error");
-    }
-  };
+  const page = useLoginPage();
 
   return (
     <div className="auth-container">
-      <h1 className="auth-title">Qualitative Coding Tool</h1>
-      <div className="auth-card">
-        <h2>Login</h2>
-        <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label htmlFor="email">Email</label>
-            <input
-              type="email"
-              id="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
-          </div>
-          <div className="form-group">
-            <label htmlFor="password">Password</label>
-            <input
-              type="password"
-              id="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </div>
-          <button type="submit" className="btn btn-primary">
-            Login
-          </button>
-        </form>
-        {message && <p className={`${messageType}-message`}>{message}</p>}
-        <p>
-          Don't have an account? <Link to="/register">Register here</Link>
-        </p>
-        <p>
-          <Link to="/">Back</Link>
-        </p>
-      </div>
+      <PageHeading title="Qualitative Coding Tool" className="auth-title" />
+      <AuthFormSection
+        mode="login"
+        email={page.email}
+        password={page.password}
+        onEmailChange={page.setEmail}
+        onPasswordChange={page.setPassword}
+        onSubmit={page.handleSubmit}
+      />
+      <AuthLinksSection
+        promptText="Don't have an account?"
+        linkTo="/register"
+        linkLabel="Register here"
+      />
+      <ErrorDisplay message={page.message} type={page.messageType} variant="message" />
     </div>
   );
 };

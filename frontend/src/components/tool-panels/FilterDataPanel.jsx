@@ -5,8 +5,7 @@ import FormShell from "../forms/FormShell";
 import DatabaseSourceFields from "../forms/DatabaseSourceFields";
 import PromptTextareaWithActions from "../forms/PromptTextareaWithActions";
 import AiLabel from "../forms/AiLabel";
-import MinWordsField from "../forms/MinWordsField";
-import SamplePercentageSlider from "../forms/SamplePercentageSlider";
+import SliderField from "../forms/SliderField";
 import AiModelFormGroup from "../models/AiModelFormGroup";
 import { useToolPanelData } from "./useToolPanelData";
 import {
@@ -298,20 +297,38 @@ export default function FilterDataPanel({
           selectPlaceholder="filter"
         />
 
-        <MinWordsField
+        <SliderField
+          id="minWords"
+          label="Minimum Words"
           value={minWords}
           onChange={setMinWords}
+          min={0}
+          max={1000}
+          step={10}
           disabled={loading}
-          rangesLoading={rangesLoading}
-          caption={minWordsCaption}
+          valueDisplay={minWords}
+          valueMinWidth="60px"
+          caption={rangesLoading ? "Loading word count ranges..." : minWordsCaption}
         />
 
-        <SamplePercentageSlider
+        <SliderField
+          id="samplePercentage"
+          label="Sample Size"
           value={samplePercentage}
           onChange={setSamplePercentage}
-          disabled={loading}
-          databaseSelected={Boolean(database)}
-          totalCount={counts.submissions + counts.comments}
+          min={1}
+          max={100}
+          step={1}
+          disabled={loading || !Boolean(database)}
+          valueDisplay={database ? `${samplePercentage}%` : ""}
+          valueMinWidth="70px"
+          caption={
+            !database
+              ? "Select a database to see sampled record counts."
+              : `${Math.ceil(
+                  ((counts.submissions + counts.comments) * samplePercentage) / 100,
+                )} of ${counts.submissions + counts.comments} records will be selected randomly.`
+          }
         />
       </FormShell>
 
