@@ -8,6 +8,7 @@ import PromptTextareaWithActions from "../forms/PromptTextareaWithActions";
 import AiModelFormGroup from "../models/AiModelFormGroup";
 import ArtifactCreatedMessage from "../feedback/ArtifactCreatedMessage";
 import { useToolPanelData } from "./useToolPanelData";
+import { useInitialProjectId } from "./useInitialProjectId";
 import {
   EXAMPLE_PROMPTS,
   MissingFieldsError,
@@ -20,9 +21,10 @@ const inputClasses =
 
 export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
   const navigate = useNavigate();
+  const initialProjectId = useInitialProjectId();
   const [database, setDatabase] = useState("");
   const [databaseType, setDatabaseType] = useState("unfiltered");
-  const [selectedProject, setSelectedProject] = useState("");
+  const [selectedProject, setSelectedProject] = useState(initialProjectId);
   const [loading, setLoading] = useState(false);
   const [createdFile, setCreatedFile] = useState(null);
   const [error, setError] = useState(null);

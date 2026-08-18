@@ -8,6 +8,7 @@ import PromptTextareaWithActions from "../forms/PromptTextareaWithActions";
 import AiModelFormGroup from "../models/AiModelFormGroup";
 import ArtifactCreatedMessage from "../feedback/ArtifactCreatedMessage";
 import { useToolPanelData } from "./useToolPanelData";
+import { useInitialProjectId } from "./useInitialProjectId";
 import {
   EXAMPLE_PROMPTS,
   MissingFieldsError,
@@ -20,6 +21,7 @@ const inputClasses =
 
 export default function ApplyCodebookPanel({ methodology, onMethodologyChange }) {
   const navigate = useNavigate();
+  const initialProjectId = useInitialProjectId();
   const [database, setDatabase] = useState("");
   const [reportName, setReportName] = useState("");
   const [databaseType, setDatabaseType] = useState("unfiltered");
@@ -28,7 +30,7 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
   const [createdFile, setCreatedFile] = useState(null);
   const [error, setError] = useState(null);
   const [description, setDescription] = useState("");
-  const [selectedProject, setSelectedProject] = useState("");
+  const [selectedProject, setSelectedProject] = useState(initialProjectId);
   const [saveMessage, setSaveMessage] = useState("");
   const [saveMessageType, setSaveMessageType] = useState("success");
   const [model, setModel] = useState("");

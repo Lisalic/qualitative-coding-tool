@@ -9,6 +9,7 @@ import SliderField from "../forms/SliderField";
 import AiModelFormGroup from "../models/AiModelFormGroup";
 import ArtifactCreatedMessage from "../feedback/ArtifactCreatedMessage";
 import { useToolPanelData } from "./useToolPanelData";
+import { useInitialProjectId } from "./useInitialProjectId";
 import {
   EXAMPLE_PROMPTS,
   MissingFieldsError,
@@ -24,6 +25,7 @@ export default function FilterDataPanel({
   onFilterPromptChange,
 }) {
   const navigate = useNavigate();
+  const initialProjectId = useInitialProjectId();
   const [message, setMessage] = useState("");
   const [createdFile, setCreatedFile] = useState(null);
   const [saveMessage, setSaveMessage] = useState("");
@@ -31,7 +33,7 @@ export default function FilterDataPanel({
   const [loading, setLoading] = useState(false);
   const [database, setDatabase] = useState("");
   const [databaseType, setDatabaseType] = useState("unfiltered");
-  const [selectedProject, setSelectedProject] = useState("");
+  const [selectedProject, setSelectedProject] = useState(initialProjectId);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [model, setModel] = useState("");
