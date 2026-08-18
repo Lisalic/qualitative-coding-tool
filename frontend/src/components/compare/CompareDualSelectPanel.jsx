@@ -1,5 +1,8 @@
 import React from "react";
 
+const selectClasses =
+  "w-full border border-paper bg-white/5 px-3 py-2 text-paper focus:outline-none focus:ring-2 focus:ring-paper";
+
 export default function CompareDualSelectPanel({
   panelTitle,
   labelA,
@@ -12,15 +15,15 @@ export default function CompareDualSelectPanel({
   onChangeB,
 }) {
   return (
-    <div className="compare-layout-column">
-      <div className="compare-panel-card">
-        <div className="compare-panel-header">
-          <h2 className="compare-panel-title">{panelTitle}</h2>
+    <div className="flex flex-1">
+      <div className="w-full border-2 border-paper p-5">
+        <div className="mb-3">
+          <h2 className="text-lg font-semibold">{panelTitle}</h2>
         </div>
-        <div className="compare-form-group">
-          <label className="compare-label">{labelA}</label>
+        <div className="mb-3">
+          <label className="mb-1 block text-sm">{labelA}</label>
           <select
-            className="form-input"
+            className={selectClasses}
             value={valueA}
             onChange={(e) => onChangeA(e.target.value)}
           >
@@ -33,10 +36,10 @@ export default function CompareDualSelectPanel({
           </select>
         </div>
 
-        <div className="compare-form-group">
-          <label className="compare-label">{labelB}</label>
+        <div className="mb-3">
+          <label className="mb-1 block text-sm">{labelB}</label>
           <select
-            className="form-input"
+            className={selectClasses}
             value={valueB}
             onChange={(e) => onChangeB(e.target.value)}
           >

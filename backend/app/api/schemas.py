@@ -62,7 +62,7 @@ def as_form(cls: Type[T]):
 
 
 class _StrippingModel(BaseModel):
-    """Shared config: whitespace is stripped, unknown fields are rejected."""
+    """Shared config: whitespace is stripped, unknown fields are ignored."""
 
     model_config = {
         "str_strip_whitespace": True,
@@ -180,6 +180,24 @@ class GenerateCodebookFileInfo(BaseModel):
 class GenerateCodebookResponse(BaseModel):
     codebook: str
     file: GenerateCodebookFileInfo
+
+
+# ---------------------------------------------------------------------------
+# CompareCodebooks
+# ---------------------------------------------------------------------------
+
+
+class CompareCodebooksRequest(_StrippingModel):
+    """Payload for ``POST /api/compare-codebooks/``."""
+
+    codebook_a: str = Field(pattern=_SCHEMA_PATTERN)
+    codebook_b: str = Field(pattern=_SCHEMA_PATTERN)
+    api_key: str = Field(min_length=1)
+    name: str = Field(min_length=1, description="Display name for the comparison")
+    model: Optional[str] = Field(default=None)
+    prompt: Optional[str] = Field(default=None)
+    description: Optional[str] = Field(default=None)
+    project_id: Optional[int] = Field(default=None)
 
 
 # ---------------------------------------------------------------------------

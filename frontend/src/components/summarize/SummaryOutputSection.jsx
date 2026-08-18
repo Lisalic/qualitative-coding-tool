@@ -1,56 +1,46 @@
-import SaveSummarySection from "./SaveSummarySection";
 import MarkdownDisplay from "../primitives/MarkdownDisplay";
+import ArtifactCreatedMessage from "../feedback/ArtifactCreatedMessage";
 
-export default function SummaryOutputSection({
-  summary,
-  projects,
-  selectedProject,
-  onProjectChange,
-  saveName,
-  onSaveNameChange,
-  saveDescription,
-  onSaveDescriptionChange,
-  onSave,
-  saving,
-  saveSuccess,
-  saveError,
-}) {
+const smallBtn =
+  "border border-paper px-3.5 py-2 text-sm transition-colors hover:bg-paper hover:text-ink disabled:opacity-40";
+
+export default function SummaryOutputSection({ summary, createdFile }) {
   if (summary === "") return null;
 
   return (
-    <>
-      <MarkdownDisplay
-        content={summary}
-        title="Summary Result"
-        style={{ marginTop: 16 }}
-        titleStyle={{ margin: 0 }}
-        innerStyle={{
-          marginTop: 8,
-          padding: 16,
-          backgroundColor: "#000000",
-          border: "1px solid #ffffff",
-          borderRadius: 8,
-          maxHeight: 600,
-          overflow: "auto",
-          whiteSpace: "pre-wrap",
-          fontFamily: "monospace",
-          fontSize: "14px",
-          lineHeight: 1.5,
-        }}
-      />
-      <SaveSummarySection
-        projects={projects}
-        selectedProject={selectedProject}
-        onProjectChange={onProjectChange}
-        saveName={saveName}
-        onSaveNameChange={onSaveNameChange}
-        saveDescription={saveDescription}
-        onSaveDescriptionChange={onSaveDescriptionChange}
-        onSave={onSave}
-        saving={saving}
-        saveSuccess={saveSuccess}
-        saveError={saveError}
-      />
-    </>
+    <div className="mt-6 flex">
+      <div className="w-full border-2 border-paper p-5">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Summary result</h2>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              className={smallBtn}
+              onClick={() => {
+                if (navigator.clipboard && summary) {
+                  navigator.clipboard.writeText(summary).catch(() => {});
+                }
+              }}
+            >
+              Copy
+            </button>
+          </div>
+        </div>
+
+        {createdFile && (
+          <div className="mb-3">
+            <ArtifactCreatedMessage
+              name={createdFile.filename}
+              viewPath="/summaryview"
+              viewState={{ selectedSummary: createdFile.schema_name }}
+            />
+          </div>
+        )}
+
+        <div className="mt-3 max-h-[60vh] overflow-auto border border-paper bg-white/5 p-4 text-sm leading-relaxed text-paper">
+          <MarkdownDisplay content={summary} />
+        </div>
+      </div>
+    </div>
   );
 }

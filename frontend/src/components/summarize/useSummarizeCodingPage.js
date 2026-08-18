@@ -4,17 +4,12 @@ import { apiFetch, postFormAndPoll } from "../../api";
 export default function useSummarizeCodingPage() {
   const [codings, setCodings] = useState([]);
   const [selectedCoding, setSelectedCoding] = useState("");
-  const [projects, setProjects] = useState([]);
-  const [selectedProject, setSelectedProject] = useState("");
   const [additionalPrompt, setAdditionalPrompt] = useState("");
   const [loading, setLoading] = useState(false);
   const [summary, setSummary] = useState("");
+  const [createdFile, setCreatedFile] = useState(null);
   const [error, setError] = useState("");
-  const [saveName, setSaveName] = useState("");
-  const [saveDescription, setSaveDescription] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState("");
-  const [saveError, setSaveError] = useState("");
+  const [name, setName] = useState("");
   const [model, setModel] = useState("");
 
   useEffect(() => {
@@ -36,42 +31,34 @@ export default function useSummarizeCodingPage() {
     };
   }, []);
 
-  useEffect(() => {
-    let mounted = true;
-    apiFetch("/api/projects/")
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data) => {
-        if (!mounted || !data) return;
-        setProjects(Array.isArray(data.projects) ? data.projects : []);
-      })
-      .catch(() => {});
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
   const submitSummarize = async (event) => {
     event.preventDefault();
     setSummary("");
+    setCreatedFile(null);
     setError("");
     if (!selectedCoding) return setError("Select a coding to summarize");
+    if (!name.trim()) return setError("Enter a name for the summary");
     const apiKey = localStorage.getItem("apiKey");
     if (!apiKey) return setError("Set your API key in the navbar first");
 
     const form = new FormData();
     form.append("coding", selectedCoding);
     form.append("api_key", apiKey);
+    form.append("name", name.trim());
     if (model) form.append("model", model);
     if (additionalPrompt.trim()) form.append("prompt", additionalPrompt.trim());
-    if (selectedProject) form.append("project_id", selectedProject);
 
     try {
       setLoading(true);
+      // The job also persists the summary as a File artifact directly
+      // (see `name` above), so `data.file` is the created artifact -- no
+      // separate save step needed.
       const { ok, data, error: pollError } = await postFormAndPoll("/api/summarize-coding/", form);
       if (!ok) {
         setError(pollError || "Failed to generate summary");
       } else {
         setSummary((data && data.summary) || "");
+        setCreatedFile((data && data.file) || null);
       }
     } catch (submitError) {
       setError(String(submitError));
@@ -80,66 +67,20 @@ export default function useSummarizeCodingPage() {
     }
   };
 
-  const saveSummaryToProject = async (event) => {
-    event?.preventDefault();
-    setSaveError("");
-    setSaveSuccess("");
-    if (!saveName || !saveName.trim()) {
-      return setSaveError("Provide a name for the summary");
-    }
-    if (!selectedProject) {
-      return setSaveError("Select a project to attach the summary to");
-    }
-
-    try {
-      setSaving(true);
-      const form = new FormData();
-      form.append("content", summary || "");
-      form.append("name", saveName.trim());
-      form.append("description", saveDescription || "");
-      form.append("project_id", String(selectedProject));
-
-      const response = await apiFetch("/api/save-summary/", {
-        method: "POST",
-        body: form,
-      });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.detail || data.error || `HTTP ${response.status}`);
-      }
-      await response.json();
-      setSaveSuccess("Saved summary to project");
-      setSaveName("");
-      setSaveDescription("");
-    } catch (saveErrorValue) {
-      setSaveError(String(saveErrorValue));
-    } finally {
-      setSaving(false);
-    }
-  };
-
   return {
     codings,
     selectedCoding,
     setSelectedCoding,
-    projects,
-    selectedProject,
-    setSelectedProject,
     additionalPrompt,
     setAdditionalPrompt,
     loading,
     summary,
+    createdFile,
     error,
-    saveName,
-    setSaveName,
-    saveDescription,
-    setSaveDescription,
-    saving,
-    saveSuccess,
-    saveError,
+    name,
+    setName,
     model,
     setModel,
     submitSummarize,
-    saveSummaryToProject,
   };
 }

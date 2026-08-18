@@ -6,6 +6,7 @@ import DatabaseSourceFields from "../forms/DatabaseSourceFields";
 import SliderField from "../forms/SliderField";
 import PromptTextareaWithActions from "../forms/PromptTextareaWithActions";
 import AiModelFormGroup from "../models/AiModelFormGroup";
+import ArtifactCreatedMessage from "../feedback/ArtifactCreatedMessage";
 import { useToolPanelData } from "./useToolPanelData";
 import {
   EXAMPLE_PROMPTS,
@@ -23,7 +24,7 @@ export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
   const [databaseType, setDatabaseType] = useState("unfiltered");
   const [selectedProject, setSelectedProject] = useState("");
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
+  const [createdFile, setCreatedFile] = useState(null);
   const [error, setError] = useState(null);
   const [description, setDescription] = useState("");
   const [saveMessage, setSaveMessage] = useState("");
@@ -96,7 +97,7 @@ export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
     try {
       setLoading(true);
       setError(null);
-      setResult(null);
+      setCreatedFile(null);
 
       let requestData;
       try {
@@ -127,7 +128,7 @@ export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
         setError(postError || "Failed to generate codebook");
         return;
       }
-      setResult(data?.codebook ?? "");
+      setCreatedFile(data?.file || null);
     } catch (err) {
       if (err.name === "AbortError") {
         setError("Request timed out. Please try again.");
@@ -177,8 +178,6 @@ export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
           disabled: loading,
         }}
         error={error || panelDataError || null}
-        result={result}
-        resultTitle="Generated Codebook"
       >
         <DatabaseSourceFields
           radioName="generate-database-type"
@@ -262,6 +261,16 @@ export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
           />
         </div>
       </FormShell>
+
+      {createdFile && (
+        <div className="mt-4">
+          <ArtifactCreatedMessage
+            name={createdFile.filename}
+            viewPath="/codebook-view"
+            viewState={{ selected: createdFile.schema_name }}
+          />
+        </div>
+      )}
 
       {saveMessage && (
         <div

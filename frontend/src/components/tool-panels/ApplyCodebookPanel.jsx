@@ -6,6 +6,7 @@ import DatabaseSourceFields from "../forms/DatabaseSourceFields";
 import SliderField from "../forms/SliderField";
 import PromptTextareaWithActions from "../forms/PromptTextareaWithActions";
 import AiModelFormGroup from "../models/AiModelFormGroup";
+import ArtifactCreatedMessage from "../feedback/ArtifactCreatedMessage";
 import { useToolPanelData } from "./useToolPanelData";
 import {
   EXAMPLE_PROMPTS,
@@ -24,7 +25,7 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
   const [databaseType, setDatabaseType] = useState("unfiltered");
   const [codebook, setCodebook] = useState("");
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
+  const [createdFile, setCreatedFile] = useState(null);
   const [error, setError] = useState(null);
   const [description, setDescription] = useState("");
   const [selectedProject, setSelectedProject] = useState("");
@@ -65,7 +66,7 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
     try {
       setLoading(true);
       setError(null);
-      setResult(null);
+      setCreatedFile(null);
 
       let requestData;
       try {
@@ -97,7 +98,7 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
         setError(postError || "Failed to apply codebook");
         return;
       }
-      setResult(data);
+      setCreatedFile(data?.file || null);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -172,8 +173,7 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
     label: p.projectname || p.display_name || p.name || String(p.id),
   }));
 
-  const displayError = error || panelDataError || (result && result.error);
-  const displayResult = result && result.classification_report;
+  const displayError = error || panelDataError;
 
   return (
     <div>
@@ -197,8 +197,6 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
           disabled: loading,
         }}
         error={displayError}
-        result={displayResult}
-        resultTitle="Classification Report"
       >
         <DatabaseSourceFields
           radioName="apply-database-type"
@@ -305,6 +303,16 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
           />
         </div>
       </FormShell>
+
+      {createdFile && (
+        <div className="mt-4">
+          <ArtifactCreatedMessage
+            name={createdFile.filename}
+            viewPath="/coding-view"
+            viewState={{ selectedCodedData: createdFile.schema_name }}
+          />
+        </div>
+      )}
 
       {saveMessage && (
         <div

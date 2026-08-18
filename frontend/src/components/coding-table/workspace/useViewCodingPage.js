@@ -28,7 +28,7 @@ export default function useViewCodingPage() {
   const [parsedCoding, setParsedCoding] = useState([]);
   const [codebookTree, setCodebookTree] = useState([]);
   const [postContents, setPostContents] = useState({});
-  const [viewMode, setViewMode] = useState("text");
+  const [viewMode, setViewMode] = useState("table");
   const [selectedFilterCodes, setSelectedFilterCodes] = useState([]);
   const [tableSaveState, setTableSaveState] = useState({
     status: "idle",

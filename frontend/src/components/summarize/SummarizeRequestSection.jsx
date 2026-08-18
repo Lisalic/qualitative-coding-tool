@@ -1,5 +1,5 @@
-import PromptEditorSection from "./PromptEditorSection";
-import SummarizeFormSection from "./SummarizeFormSection";
+import SummarizeCodingPanel from "./SummarizeCodingPanel";
+import SummarizeModelPromptPanel from "./SummarizeModelPromptPanel";
 
 export default function SummarizeRequestSection({
   codings,
@@ -7,6 +7,8 @@ export default function SummarizeRequestSection({
   onCodingChange,
   model,
   onModelChange,
+  name,
+  onNameChange,
   additionalPrompt,
   onAdditionalPromptChange,
   loading,
@@ -14,25 +16,31 @@ export default function SummarizeRequestSection({
 }) {
   return (
     <form onSubmit={onSubmit}>
-      <div className="compare-panel">
-        <SummarizeFormSection
+      <div className="flex flex-col gap-6 lg:flex-row">
+        <SummarizeCodingPanel
           codings={codings}
           selectedCoding={selectedCoding}
           onCodingChange={onCodingChange}
-          model={model}
-          onModelChange={onModelChange}
-        />
-        <PromptEditorSection
-          value={additionalPrompt}
-          onChange={onAdditionalPromptChange}
-          onLoadExample={onAdditionalPromptChange}
         />
 
-        <div className="compare-actions" style={{ justifyContent: "center" }}>
-          <button className="project-tab" type="submit" disabled={loading}>
-            {loading ? "Summarizing..." : "Summarize"}
-          </button>
-        </div>
+        <SummarizeModelPromptPanel
+          model={model}
+          onModelChange={onModelChange}
+          name={name}
+          onNameChange={onNameChange}
+          additionalPrompt={additionalPrompt}
+          onAdditionalPromptChange={onAdditionalPromptChange}
+        />
+      </div>
+
+      <div className="mt-4 flex justify-center">
+        <button
+          type="submit"
+          className="border-2 border-paper px-7 py-2.5 text-base font-semibold transition-colors hover:bg-paper hover:text-ink disabled:opacity-50"
+          disabled={loading}
+        >
+          {loading ? "Summarizing..." : "Summarize"}
+        </button>
       </div>
     </form>
   );

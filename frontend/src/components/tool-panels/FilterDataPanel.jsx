@@ -7,6 +7,7 @@ import PromptTextareaWithActions from "../forms/PromptTextareaWithActions";
 import AiLabel from "../forms/AiLabel";
 import SliderField from "../forms/SliderField";
 import AiModelFormGroup from "../models/AiModelFormGroup";
+import ArtifactCreatedMessage from "../feedback/ArtifactCreatedMessage";
 import { useToolPanelData } from "./useToolPanelData";
 import {
   EXAMPLE_PROMPTS,
@@ -24,6 +25,7 @@ export default function FilterDataPanel({
 }) {
   const navigate = useNavigate();
   const [message, setMessage] = useState("");
+  const [createdFile, setCreatedFile] = useState(null);
   const [saveMessage, setSaveMessage] = useState("");
   const [saveMessageType, setSaveMessageType] = useState("success");
   const [loading, setLoading] = useState(false);
@@ -114,6 +116,7 @@ export default function FilterDataPanel({
   const handleSubmit = async () => {
     setLoading(true);
     setMessage("");
+    setCreatedFile(null);
 
     try {
       const savedApiKey = localStorage.getItem("apiKey");
@@ -156,15 +159,7 @@ export default function FilterDataPanel({
         return;
       }
 
-      let resultMessage = `✓ ${data?.message || "Database filtered and saved"}`;
-      if (data?.tag_filter) {
-        resultMessage += `\n\nTag expansion:\n${JSON.stringify(
-          data.tag_filter,
-          null,
-          2,
-        )}`;
-      }
-      setMessage(resultMessage);
+      setCreatedFile(data?.file || null);
       onFilterPromptChange("");
       setFilterTags("");
     } catch (err) {
@@ -217,13 +212,7 @@ export default function FilterDataPanel({
           loadingText: "Processing...",
           disabled: loading,
         }}
-        error={
-          message && message.startsWith("Error:")
-            ? message
-            : panelDataError || null
-        }
-        result={message && message.startsWith("✓") ? message : null}
-        resultTitle="Filter Result"
+        error={message || panelDataError || null}
       >
         <DatabaseSourceFields
           radioName="filter-database-type"
@@ -336,6 +325,16 @@ export default function FilterDataPanel({
           }
         />
       </FormShell>
+
+      {createdFile && (
+        <div className="mt-4">
+          <ArtifactCreatedMessage
+            name={createdFile.filename}
+            viewPath="/filtered-data"
+            viewState={{ selectedDatabase: createdFile.schema_name }}
+          />
+        </div>
+      )}
 
       {saveMessage && (
         <div

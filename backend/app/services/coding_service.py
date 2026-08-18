@@ -464,6 +464,9 @@ async def start_compare_codings_job(
     api_key: str,
     model: str | None,
     prompt: str,
+    name: str,
+    description: str | None = None,
+    project_id: int | None = None,
 ) -> Job:
     """Validate and enqueue a ``compare_codings`` background job.
 
@@ -474,6 +477,11 @@ async def start_compare_codings_job(
     Keeps the same ``proj_<id>``/``api_key`` guard-clause shape the old
     route used, so a malformed request still fails fast with a 400 before
     anything is persisted or a background task is spawned.
+
+    ``name`` is required (same blank-name-check convention as
+    ``project_service.create_project``): the job handler now persists the
+    comparison as a ``File`` artifact directly, so it needs a display name
+    up front rather than via a later separate save step.
     """
     schema_a = (coding_a or "").strip()
     schema_b = (coding_b or "").strip()
@@ -481,6 +489,8 @@ async def start_compare_codings_job(
         raise ValidationAppError("schema names must be proj_<id>")
     if not api_key:
         raise ValidationAppError("api_key is required")
+    if not name or not name.strip():
+        raise ValidationAppError("name is required")
 
     file_id_a = await file_repo.resolve_file_id(session, schema_a, user_id, file_types=_CODING_FILE_TYPES)
     file_id_b = await file_repo.resolve_file_id(session, schema_b, user_id, file_types=_CODING_FILE_TYPES)
@@ -489,7 +499,16 @@ async def start_compare_codings_job(
         session,
         user_id=user_id,
         job_type="compare_codings",
-        payload={"file_id_a": file_id_a, "file_id_b": file_id_b, "model": model, "prompt": prompt or ""},
+        payload={
+            "user_id": user_id,
+            "file_id_a": file_id_a,
+            "file_id_b": file_id_b,
+            "model": model,
+            "prompt": prompt or "",
+            "name": name,
+            "description": description,
+            "project_id": project_id,
+        },
         runtime_extra={"api_key": api_key},
     )
 
@@ -504,15 +523,24 @@ async def _run_compare_codings_job(job_id: int, payload: dict) -> dict:
     sync OpenAI SDK call, which is what made the old inline route call one
     of the confirmed request-blocking-event-loop sites this whole refactor
     started from.
+
+    Persists the comparison as a ``File`` (``file_type="coding_comparison"``)
+    the same way ``_run_apply_codebook_job`` persists a classification --
+    no more separate ``/api/save-comparison/`` step required.
+    ``FileDependency`` rows link the new file to BOTH source codings.
     """
     from backend.scripts.codebook_generator import MODEL_3
     from backend.scripts.codebook_generator import get_client as codebook_get_client
 
+    user_id = payload["user_id"]
     file_id_a = payload["file_id_a"]
     file_id_b = payload["file_id_b"]
     model = payload.get("model")
     prompt = payload.get("prompt", "")
     api_key = payload["api_key"]
+    name = payload.get("name")
+    description = payload.get("description")
+    project_id = payload.get("project_id")
 
     async with AsyncSessionLocal() as session:
         text_a = await artifact_content_repo.read_content(session, file_id_a) or ""
@@ -537,7 +565,38 @@ async def _run_compare_codings_job(job_id: int, payload: dict) -> dict:
     chosen_model = model or MODEL_3
 
     comparison = await codebook_get_client(system_prompt, user_prompt, api_key, chosen_model)
-    return {"comparison": comparison}
+
+    final_description = (description or "").strip() if description is not None else None
+    if final_description == "":
+        final_description = None
+
+    async with AsyncSessionLocal() as session:
+        new_schema = f"cmp_{secrets.token_hex(6)}"
+        file_rec = File(
+            user_id=user_id,
+            filename=name,
+            schemaname=new_schema,
+            file_type="coding_comparison",
+            description=final_description,
+        )
+        session.add(file_rec)
+        await session.flush()
+
+        session.add(FileDependency(child_file_id=file_rec.id, parent_file_id=file_id_a))
+        session.add(FileDependency(child_file_id=file_rec.id, parent_file_id=file_id_b))
+        await artifact_content_repo.write_content(session, file_rec.id, comparison)
+
+        if project_id is not None:
+            project = await project_repo.get_owned_project(session, project_id, user_id)
+            await async_link_file_to_project(session, file_rec.id, project.id)
+
+        await session.commit()
+        file_id, schema_name, filename = file_rec.id, file_rec.schemaname, file_rec.filename
+
+    return {
+        "comparison": comparison,
+        "file": {"id": str(file_id), "schema_name": schema_name, "filename": filename},
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -553,6 +612,9 @@ async def start_summarize_coding_job(
     api_key: str,
     model: str | None,
     prompt: str,
+    name: str,
+    description: str | None = None,
+    project_id: int | None = None,
 ) -> Job:
     """Validate and enqueue a ``summarize_coding`` background job.
 
@@ -560,6 +622,17 @@ async def start_summarize_coding_job(
     (schema must look like ``proj_<id>``, ``api_key`` must be present) --
     both raise ``ValidationAppError`` (400) so a bad request still fails
     fast, before anything is persisted or a background task is spawned.
+
+    ``name`` is required (same blank-name-check convention as
+    ``project_service.create_project``): the job handler now persists the
+    summary as a ``File`` artifact directly, so it needs a display name up
+    front rather than via a later separate save step. Also resolves
+    ``coding`` to an owned ``File.id`` via ``file_repo.resolve_file_id`` --
+    a new ownership check this endpoint never had before (the old handler
+    only validated the ``proj_<id>`` shape of the schema string, then read
+    directly from that Postgres schema with no owner check at all) -- so
+    the new summary ``File`` can be linked to its source coding file via
+    ``FileDependency``.
 
     ``model``/``prompt``/the resolved schema name go into the persisted
     ``payload``; ``api_key`` is passed as ``runtime_extra`` so it is never
@@ -572,11 +645,25 @@ async def start_summarize_coding_job(
     if not api_key:
         raise ValidationAppError("api_key is required")
 
+    if not name or not name.strip():
+        raise ValidationAppError("name is required")
+
+    source_file_id = await file_repo.resolve_file_id(session, schema, user_id, file_types=_CODING_FILE_TYPES)
+
     return await enqueue_job(
         session,
         user_id=user_id,
         job_type="summarize_coding",
-        payload={"schema": schema, "prompt": prompt, "model": model},
+        payload={
+            "user_id": user_id,
+            "schema": schema,
+            "prompt": prompt,
+            "model": model,
+            "source_file_id": source_file_id,
+            "name": name,
+            "description": description,
+            "project_id": project_id,
+        },
         runtime_extra={"api_key": api_key},
     )
 
@@ -591,13 +678,24 @@ async def _run_summarize_coding_job(job_id: int, payload: dict) -> dict:
     this stage. ``summarize_coding_function`` is a native ``async def``
     (Stage 9), so it's ``await``ed directly instead of going through
     ``asyncio.to_thread``.
+
+    Persists the summary as a ``File`` (``file_type="summary"``) the same
+    way ``_run_generate_codebook_job``/``_run_apply_codebook_job`` persist
+    their own outputs -- no more separate ``/api/save-summary/`` step
+    required. A ``FileDependency`` links the new file to the source coding
+    file (``source_file_id``, resolved at kickoff time).
     """
     from backend.scripts.summarize_coding import summarize_coding as summarize_coding_function
 
+    user_id = payload["user_id"]
     schema = payload["schema"]
     prompt = payload.get("prompt", "")
     model = payload.get("model")
     api_key = payload["api_key"]
+    source_file_id = payload["source_file_id"]
+    name = payload.get("name")
+    description = payload.get("description")
+    project_id = payload.get("project_id")
 
     async with async_engine.connect() as conn:
         rr = await conn.execute(text(f'SELECT file_text FROM "{schema}".content_store LIMIT 1'))
@@ -608,4 +706,34 @@ async def _run_summarize_coding_job(job_id: int, payload: dict) -> dict:
         raise ValidationAppError("No content found in coding")
 
     summary = await summarize_coding_function(coding_data, prompt, api_key, model)
-    return {"summary": summary}
+
+    final_description = (description or "").strip() if description is not None else None
+    if final_description == "":
+        final_description = None
+
+    async with AsyncSessionLocal() as session:
+        new_schema = f"sum_{secrets.token_hex(6)}"
+        file_rec = File(
+            user_id=user_id,
+            filename=name,
+            schemaname=new_schema,
+            file_type="summary",
+            description=final_description,
+        )
+        session.add(file_rec)
+        await session.flush()
+
+        session.add(FileDependency(child_file_id=file_rec.id, parent_file_id=source_file_id))
+        await artifact_content_repo.write_content(session, file_rec.id, summary)
+
+        if project_id is not None:
+            project = await project_repo.get_owned_project(session, project_id, user_id)
+            await async_link_file_to_project(session, file_rec.id, project.id)
+
+        await session.commit()
+        file_id, schema_name, filename = file_rec.id, file_rec.schemaname, file_rec.filename
+
+    return {
+        "summary": summary,
+        "file": {"id": str(file_id), "schema_name": schema_name, "filename": filename},
+    }

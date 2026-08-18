@@ -345,6 +345,9 @@ async def start_compare_codebooks_job(
     api_key: str,
     model: str | None,
     prompt: str,
+    name: str,
+    description: str | None = None,
+    project_id: int | None = None,
 ) -> Job:
     """Validate and enqueue a ``compare_codebooks`` background job.
 
@@ -353,11 +356,19 @@ async def start_compare_codebooks_job(
     must resolve to a file owned by ``user_id`` via
     ``repositories/file_repo.py`` before anything is enqueued. Keeps the
     old ``proj_<id>``-shape guard and ``api_key`` requirement.
+
+    ``name`` is required (matching ``start_generate_codebook_job``'s
+    ``name``/``create_project``'s blank-name-check convention): the job
+    handler now persists the comparison as a ``File`` artifact directly,
+    so it needs a display name up front rather than via a later separate
+    save step.
     """
     schema_a = require_valid_schema(codebook_a, field_name="codebook_a")
     schema_b = require_valid_schema(codebook_b, field_name="codebook_b")
     if not api_key:
         raise ValidationAppError("api_key is required")
+    if not name or not name.strip():
+        raise ValidationAppError("name is required")
 
     file_id_a = await file_repo.resolve_file_id(session, schema_a, user_id)
     file_id_b = await file_repo.resolve_file_id(session, schema_b, user_id)
@@ -367,10 +378,14 @@ async def start_compare_codebooks_job(
         user_id=user_id,
         job_type="compare_codebooks",
         payload={
+            "user_id": user_id,
             "file_id_a": file_id_a,
             "file_id_b": file_id_b,
             "model": model,
             "prompt": (prompt or "").strip(),
+            "name": name,
+            "description": description,
+            "project_id": project_id,
         },
         runtime_extra={"api_key": api_key},
     )
@@ -385,12 +400,21 @@ async def _run_compare_codebooks_job(job_id: int, payload: dict) -> dict:
     blocking read), then ``await``s ``codebook_generator.get_client``
     directly -- it's a native ``async def`` as of Stage 9, so no more
     ``asyncio.to_thread`` wrapper is needed.
+
+    Persists the comparison as a ``File`` (``file_type="codebook_comparison"``)
+    the same way ``_run_generate_codebook_job`` persists a generated
+    codebook -- no more separate ``/api/save-comparison/`` step required.
+    ``FileDependency`` rows link the new file to BOTH source codebooks.
     """
+    user_id = payload["user_id"]
     file_id_a = payload["file_id_a"]
     file_id_b = payload["file_id_b"]
     api_key = payload["api_key"]
     model = payload.get("model") or codebook_generator_module.MODEL_3
     prompt = payload.get("prompt", "")
+    name = payload.get("name")
+    description = payload.get("description")
+    project_id = payload.get("project_id")
 
     async with AsyncSessionLocal() as session:
         text_a = await artifact_content_repo.read_content(session, file_id_a) or ""
@@ -413,5 +437,36 @@ async def _run_compare_codebooks_job(job_id: int, payload: dict) -> dict:
         f"Please compare them in detail. Additional instructions: {prompt}"
     )
 
-    resp = await codebook_generator_module.get_client(system_prompt, user_prompt, api_key, model)
-    return {"comparison": resp}
+    comparison = await codebook_generator_module.get_client(system_prompt, user_prompt, api_key, model)
+
+    final_description = (description or "").strip() if description is not None else None
+    if final_description == "":
+        final_description = None
+
+    async with AsyncSessionLocal() as session:
+        new_schema = f"cmp_{secrets.token_hex(6)}"
+        file_rec = File(
+            user_id=user_id,
+            filename=name,
+            schemaname=new_schema,
+            file_type="codebook_comparison",
+            description=final_description,
+        )
+        session.add(file_rec)
+        await session.flush()
+
+        session.add(FileDependency(child_file_id=file_rec.id, parent_file_id=file_id_a))
+        session.add(FileDependency(child_file_id=file_rec.id, parent_file_id=file_id_b))
+        await artifact_content_repo.write_content(session, file_rec.id, comparison)
+
+        if project_id is not None:
+            project = await project_repo.get_owned_project(session, project_id, user_id)
+            await async_link_file_to_project(session, file_rec.id, project.id)
+
+        await session.commit()
+        file_id, schema_name, filename = file_rec.id, file_rec.schemaname, file_rec.filename
+
+    return {
+        "comparison": comparison,
+        "file": {"id": str(file_id), "schema_name": schema_name, "filename": filename},
+    }

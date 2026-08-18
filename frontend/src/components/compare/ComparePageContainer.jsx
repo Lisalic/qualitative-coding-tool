@@ -17,7 +17,8 @@ const CONFIG_BY_MODE = {
     fieldAName: "codebook_a",
     fieldBName: "codebook_b",
     validationMessage: "Select two codebooks to compare",
-    resultFileType: "codebook_comparison",
+    viewPath: "/codebook-view",
+    viewStateKey: "selected",
     // Backend converted to the background-job pattern (Stage 7) -- see
     // useComparePageData's usesJobPolling handling.
     usesJobPolling: true,
@@ -35,7 +36,8 @@ const CONFIG_BY_MODE = {
     fieldAName: "coding_a",
     fieldBName: "coding_b",
     validationMessage: "Select two codings to compare",
-    resultFileType: "coding_comparison",
+    viewPath: "/coding-view",
+    viewStateKey: "selectedCodedData",
     // Backend converted to the background-job pattern (Stage 8) -- see
     // useComparePageData's usesJobPolling handling.
     usesJobPolling: true,
@@ -52,10 +54,12 @@ export default function ComparePageContainer({ mode = "codebook", initialA = "",
     setB,
     loading,
     comparison,
+    createdFile,
     error,
     model,
     setModel,
-    projects,
+    name,
+    setName,
     additionalPrompt,
     setAdditionalPrompt,
     submitCompare,
@@ -92,6 +96,8 @@ export default function ComparePageContainer({ mode = "codebook", initialA = "",
           <CompareModelPromptPanel
             model={model}
             onModelChange={setModel}
+            name={name}
+            onNameChange={setName}
             additionalPrompt={additionalPrompt}
             onAdditionalPromptChange={setAdditionalPrompt}
             examplePromptText={config.examplePromptText}
@@ -117,11 +123,9 @@ export default function ComparePageContainer({ mode = "codebook", initialA = "",
 
       <CompareResultPanel
         comparison={comparison}
-        fileType={config.resultFileType}
-        valueA={a}
-        valueB={b}
-        options={items}
-        projects={projects}
+        createdFile={createdFile}
+        viewPath={config.viewPath}
+        viewStateKey={config.viewStateKey}
       />
     </div>
   );

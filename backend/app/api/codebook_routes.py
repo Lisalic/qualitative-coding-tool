@@ -152,5 +152,8 @@ async def compare_codebooks(
         api_key=payload.api_key,
         model=payload.model,
         prompt=payload.prompt or "",
+        name=payload.name,
+        description=payload.description,
+        project_id=payload.project_id,
     )
     return JSONResponse({"job_id": job.id, "status": job.status}, status_code=202)

@@ -501,6 +501,7 @@ class TestStartCompareCodebooksJobValidation:
                     api_key="k",
                     model=None,
                     prompt="",
+                    name="my comparison",
                 )
 
     async def test_non_proj_schema_b_raises(self, session_factory) -> None:
@@ -515,6 +516,7 @@ class TestStartCompareCodebooksJobValidation:
                     api_key="k",
                     model=None,
                     prompt="",
+                    name="my comparison",
                 )
 
     async def test_missing_api_key_raises(self, session_factory) -> None:
@@ -529,6 +531,22 @@ class TestStartCompareCodebooksJobValidation:
                     api_key="",
                     model=None,
                     prompt="",
+                    name="my comparison",
+                )
+
+    async def test_blank_name_raises(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            with pytest.raises(ValidationAppError, match="name"):
+                await codebook_service.start_compare_codebooks_job(
+                    session,
+                    user.id,
+                    codebook_a="proj_a",
+                    codebook_b="proj_b",
+                    api_key="k",
+                    model=None,
+                    prompt="",
+                    name="   ",
                 )
 
     async def test_unowned_codebook_a_raises_not_found(self, session_factory) -> None:
@@ -546,6 +564,7 @@ class TestStartCompareCodebooksJobValidation:
                     api_key="k",
                     model=None,
                     prompt="",
+                    name="my comparison",
                 )
 
 
@@ -564,12 +583,14 @@ class TestStartCompareCodebooksJobEnqueue:
                 api_key="sk-secret",
                 model="some-model",
                 prompt="focus on overlaps",
+                name="my comparison",
             )
 
             assert job.status == "pending"
             assert job.job_type == "compare_codebooks"
             assert job.payload["file_id_a"] == file_a.id
             assert job.payload["file_id_b"] == file_b.id
+            assert job.payload["name"] == "my comparison"
             assert "api_key" not in job.payload
 
             await _wait_for_terminal_status(session, job.id, user.id)
@@ -592,8 +613,9 @@ class TestCompareCodebooksJobHandlerEndToEnd:
             user = await _make_user(session)
             file_a = await _make_file(session, user.id, file_type="codebook", schemaname="proj_a")
             file_b = await _make_file(session, user.id, file_type="codebook", schemaname="proj_b")
-            await artifact_content_repo.write_content(session, file_a.id, "codebook A text")
-            await artifact_content_repo.write_content(session, file_b.id, "codebook B text")
+            file_a_id, file_b_id = file_a.id, file_b.id
+            await artifact_content_repo.write_content(session, file_a_id, "codebook A text")
+            await artifact_content_repo.write_content(session, file_b_id, "codebook B text")
             await session.commit()
 
             job = await codebook_service.start_compare_codebooks_job(
@@ -604,17 +626,41 @@ class TestCompareCodebooksJobHandlerEndToEnd:
                 api_key="sk-secret",
                 model=None,
                 prompt="",
+                name="A vs B",
+                description="  a nice comparison  ",
             )
 
             finished = await _wait_for_terminal_status(session, job.id, user.id)
             assert finished.status == "succeeded", finished.error
-            assert finished.result == {"comparison": "the comparison text"}
+            assert finished.result["comparison"] == "the comparison text"
+            file_info = finished.result["file"]
+            assert file_info["filename"] == "A vs B"
+            assert file_info["schema_name"].startswith("cmp_")
 
             assert get_client_mock.called
             call_args = get_client_mock.call_args.args
             assert "codebook A text" in call_args[1]
             assert "codebook B text" in call_args[1]
             assert call_args[2] == "sk-secret"
+
+            # The new File was actually persisted, with content and
+            # FileDependency links to BOTH source codebooks.
+            new_file_id = int(file_info["id"])
+            result = await session.execute(select(File).where(File.id == new_file_id))
+            new_file = result.scalar_one()
+            assert new_file.file_type == "codebook_comparison"
+            assert new_file.description == "a nice comparison"
+
+            content = await artifact_content_repo.read_content(session, new_file_id)
+            assert content == "the comparison text"
+
+            deps = (
+                await session.execute(
+                    select(FileDependency).where(FileDependency.child_file_id == new_file_id)
+                )
+            ).scalars().all()
+            parent_ids = {d.parent_file_id for d in deps}
+            assert parent_ids == {file_a_id, file_b_id}
 
     async def test_no_content_marks_job_failed(self, session_factory, monkeypatch) -> None:
         get_client_mock = AsyncMock(return_value="should not be called")
@@ -636,6 +682,7 @@ class TestCompareCodebooksJobHandlerEndToEnd:
                 api_key="sk-secret",
                 model=None,
                 prompt="",
+                name="A vs B",
             )
 
             finished = await _wait_for_terminal_status(session, job.id, user.id)

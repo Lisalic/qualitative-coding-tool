@@ -151,6 +151,7 @@ class TestStartSummarizeCodingJobValidation:
                 api_key="k",
                 model=None,
                 prompt="",
+                name="my summary",
             )
 
     async def test_missing_api_key_raises(self, session, user_id) -> None:
@@ -162,6 +163,37 @@ class TestStartSummarizeCodingJobValidation:
                 api_key="",
                 model=None,
                 prompt="",
+                name="my summary",
+            )
+
+    async def test_blank_name_raises(self, session, user_id) -> None:
+        with pytest.raises(ValidationAppError, match="name"):
+            await coding_service.start_summarize_coding_job(
+                session,
+                user_id,
+                coding="proj_a",
+                api_key="k",
+                model=None,
+                prompt="",
+                name="   ",
+            )
+
+    async def test_unowned_coding_raises_not_found(self, session, user_id) -> None:
+        """Regression coverage: the old handler never checked that
+        ``coding`` resolved to a file owned by the caller at all -- it
+        only validated the ``proj_<id>`` shape and read straight from that
+        Postgres schema. Resolving a ``source_file_id`` for the new
+        summary's ``FileDependency`` link closes that gap.
+        """
+        with pytest.raises(NotFoundError):
+            await coding_service.start_summarize_coding_job(
+                session,
+                user_id,
+                coding="proj_missing",
+                api_key="k",
+                model=None,
+                prompt="",
+                name="my summary",
             )
 
 
@@ -169,6 +201,7 @@ class TestStartSummarizeCodingJobEnqueue:
     async def test_enqueues_pending_job_without_persisting_api_key(
         self, session, user_id, monkeypatch
     ) -> None:
+        source_file = await _make_file(session, user_id, schemaname="proj_a", content="coded rows")
         monkeypatch.setattr(
             "backend.app.services.coding_service.async_engine",
             _mock_async_engine_with_content("coded rows"),
@@ -185,13 +218,23 @@ class TestStartSummarizeCodingJobEnqueue:
             api_key="sk-secret",
             model="some-model",
             prompt="be concise",
+            name="my summary",
         )
         job_id = job.id
 
         assert job.status == "pending"
         assert job.job_type == "summarize_coding"
         # payload persisted to the jobs table must never contain the key
-        assert job.payload == {"schema": "proj_a", "prompt": "be concise", "model": "some-model"}
+        assert job.payload == {
+            "user_id": user_id,
+            "schema": "proj_a",
+            "prompt": "be concise",
+            "model": "some-model",
+            "source_file_id": source_file.id,
+            "name": "my summary",
+            "description": None,
+            "project_id": None,
+        }
         assert "api_key" not in job.payload
 
         # Drain the background task before the test (and its SQLite engine
@@ -207,6 +250,8 @@ class TestSummarizeCodingJobHandlerEndToEnd:
     """
 
     async def test_succeeds_and_stores_summary_result(self, session, user_id, monkeypatch) -> None:
+        source_file = await _make_file(session, user_id, schemaname="proj_a", content="coded rows")
+        source_file_id = source_file.id
         monkeypatch.setattr(
             "backend.app.services.coding_service.async_engine",
             _mock_async_engine_with_content("post_1: CODE_A - evidence"),
@@ -221,12 +266,17 @@ class TestSummarizeCodingJobHandlerEndToEnd:
             api_key="sk-secret",
             model=None,
             prompt="",
+            name="my summary",
+            description="  notes  ",
         )
         job_id = job.id
 
         finished = await _wait_for_terminal_status(session, job_id, user_id)
-        assert finished.status == "succeeded"
-        assert finished.result == {"summary": "the final summary"}
+        assert finished.status == "succeeded", finished.error
+        assert finished.result["summary"] == "the final summary"
+        file_info = finished.result["file"]
+        assert file_info["filename"] == "my summary"
+        assert file_info["schema_name"].startswith("sum_")
         assert finished.error is None
 
         # The mocked LLM call actually received the API key -- proves
@@ -236,7 +286,23 @@ class TestSummarizeCodingJobHandlerEndToEnd:
         call_args = summarize_mock.call_args.args
         assert call_args[2] == "sk-secret"
 
+        new_file_id = int(file_info["id"])
+        new_file = await session.get(File, new_file_id)
+        assert new_file.file_type == "summary"
+        assert new_file.description == "notes"
+
+        content = await artifact_content_repo.read_content(session, new_file_id)
+        assert content == "the final summary"
+
+        deps = (
+            await session.execute(
+                select(FileDependency).where(FileDependency.child_file_id == new_file_id)
+            )
+        ).scalars().all()
+        assert [d.parent_file_id for d in deps] == [source_file_id]
+
     async def test_no_content_marks_job_failed(self, session, user_id, monkeypatch) -> None:
+        await _make_file(session, user_id, schemaname="proj_a", content="coded rows")
         monkeypatch.setattr(
             "backend.app.services.coding_service.async_engine",
             _mock_async_engine_no_row(),
@@ -251,6 +317,7 @@ class TestSummarizeCodingJobHandlerEndToEnd:
             api_key="sk-secret",
             model=None,
             prompt="",
+            name="my summary",
         )
         job_id = job.id
 
@@ -747,6 +814,7 @@ class TestStartCompareCodingsJobValidation:
                 api_key="k",
                 model=None,
                 prompt="",
+                name="my comparison",
             )
 
     async def test_missing_api_key_raises(self, session, user_id) -> None:
@@ -759,6 +827,20 @@ class TestStartCompareCodingsJobValidation:
                 api_key="",
                 model=None,
                 prompt="",
+                name="my comparison",
+            )
+
+    async def test_blank_name_raises(self, session, user_id) -> None:
+        with pytest.raises(ValidationAppError, match="name"):
+            await coding_service.start_compare_codings_job(
+                session,
+                user_id,
+                coding_a="proj_a",
+                coding_b="proj_b",
+                api_key="k",
+                model=None,
+                prompt="",
+                name="   ",
             )
 
     async def test_unowned_schema_raises_not_found(self, session, user_id) -> None:
@@ -774,6 +856,7 @@ class TestStartCompareCodingsJobValidation:
                 api_key="k",
                 model=None,
                 prompt="",
+                name="my comparison",
             )
 
 
@@ -784,8 +867,9 @@ class TestStartCompareCodingsJobValidation:
 
 class TestCompareCodingsJobHandlerEndToEnd:
     async def test_succeeds_with_mocked_llm(self, session, user_id, monkeypatch) -> None:
-        await _make_file(session, user_id, schemaname="proj_cmp_a", content="coding a text")
-        await _make_file(session, user_id, schemaname="proj_cmp_b", content="coding b text")
+        file_a = await _make_file(session, user_id, schemaname="proj_cmp_a", content="coding a text")
+        file_b = await _make_file(session, user_id, schemaname="proj_cmp_b", content="coding b text")
+        file_a_id, file_b_id = file_a.id, file_b.id
         llm_mock = AsyncMock(return_value="the comparison")
         # compare_codings' handler imports get_client via a LOCAL import
         # inside the handler body, so it must be patched at its source
@@ -800,13 +884,33 @@ class TestCompareCodingsJobHandlerEndToEnd:
             api_key="sk-secret",
             model=None,
             prompt="be nice",
+            name="coding cmp",
+            description="notes",
         )
         finished = await _wait_for_terminal_status(session, job.id, user_id)
         assert finished.status == "succeeded", finished.error
-        assert finished.result == {"comparison": "the comparison"}
+        assert finished.result["comparison"] == "the comparison"
+        file_info = finished.result["file"]
+        assert file_info["filename"] == "coding cmp"
+        assert file_info["schema_name"].startswith("cmp_")
         assert llm_mock.called
         call_args = llm_mock.call_args.args
         assert call_args[2] == "sk-secret"
+
+        new_file_id = int(file_info["id"])
+        new_file = await session.get(File, new_file_id)
+        assert new_file.file_type == "coding_comparison"
+        assert new_file.description == "notes"
+
+        content = await artifact_content_repo.read_content(session, new_file_id)
+        assert content == "the comparison"
+
+        deps = (
+            await session.execute(
+                select(FileDependency).where(FileDependency.child_file_id == new_file_id)
+            )
+        ).scalars().all()
+        assert {d.parent_file_id for d in deps} == {file_a_id, file_b_id}
 
     async def test_no_content_marks_job_failed(self, session, user_id, monkeypatch) -> None:
         await _make_file(session, user_id, schemaname="proj_cmp_empty_a", content=None)
@@ -822,6 +926,7 @@ class TestCompareCodingsJobHandlerEndToEnd:
             api_key="k",
             model=None,
             prompt="",
+            name="coding cmp",
         )
         finished = await _wait_for_terminal_status(session, job.id, user_id)
         assert finished.status == "failed"

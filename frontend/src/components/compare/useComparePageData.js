@@ -15,9 +15,10 @@ export default function useComparePageData({
   const [b, setB] = useState("");
   const [loading, setLoading] = useState(false);
   const [comparison, setComparison] = useState("");
+  const [createdFile, setCreatedFile] = useState(null);
   const [error, setError] = useState("");
   const [model, setModel] = useState("");
-  const [projects, setProjects] = useState([]);
+  const [name, setName] = useState("");
   const [additionalPrompt, setAdditionalPrompt] = useState("");
 
   useEffect(() => {
@@ -49,28 +50,19 @@ export default function useComparePageData({
     };
   }, [fileType, initialA]);
 
-  useEffect(() => {
-    let mounted = true;
-    apiFetch("/api/projects/")
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data) => {
-        if (!mounted || !data) return;
-        setProjects(Array.isArray(data.projects) ? data.projects : []);
-      })
-      .catch(() => {});
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
   const submitCompare = async (event) => {
     event.preventDefault();
     setComparison("");
+    setCreatedFile(null);
     setError("");
 
     if (!a || !b) {
       setError(validationMessage);
+      return;
+    }
+
+    if (!name.trim()) {
+      setError("Enter a name for the comparison");
       return;
     }
 
@@ -84,6 +76,7 @@ export default function useComparePageData({
     form.append(fieldAName, a);
     form.append(fieldBName, b);
     form.append("api_key", apiKey);
+    form.append("name", name.trim());
     if (model) form.append("model", model);
     if (additionalPrompt.trim()) form.append("prompt", additionalPrompt.trim());
 
@@ -94,7 +87,9 @@ export default function useComparePageData({
         // Endpoint has been converted to the background-job pattern
         // (kicks off a job and returns 202 {job_id, status}) -- poll
         // /api/jobs/{id} until it resolves rather than blocking on the
-        // initial request.
+        // initial request. The job also persists the comparison as a
+        // File artifact directly (see `name` above), so `data.file` is
+        // the created artifact -- no separate save step needed.
         const { ok, data, error: pollError } = await postFormAndPoll(
           compareEndpoint,
           form,
@@ -103,6 +98,7 @@ export default function useComparePageData({
           setError(pollError || "Failed to compare");
         } else {
           setComparison(data?.comparison || "");
+          setCreatedFile(data?.file || null);
         }
         return;
       }
@@ -116,8 +112,12 @@ export default function useComparePageData({
         throw new Error(payload.error || `HTTP ${response.status}`);
       }
       const data = await response.json();
-      if (data.error) setError(data.error);
-      else setComparison(data.comparison || "");
+      if (data.error) {
+        setError(data.error);
+      } else {
+        setComparison(data.comparison || "");
+        setCreatedFile(data?.file || null);
+      }
     } catch (submitError) {
       setError(String(submitError));
     } finally {
@@ -133,10 +133,12 @@ export default function useComparePageData({
     setB,
     loading,
     comparison,
+    createdFile,
     error,
     model,
     setModel,
-    projects,
+    name,
+    setName,
     additionalPrompt,
     setAdditionalPrompt,
     submitCompare,

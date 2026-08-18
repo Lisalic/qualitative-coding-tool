@@ -484,8 +484,8 @@ class TestCompareCodebooksValidation:
     @pytest.mark.parametrize(
         "form",
         [
-            {"codebook_a": "not_proj", "codebook_b": "proj_b", "api_key": "k"},
-            {"codebook_a": "proj_a", "codebook_b": "not_proj", "api_key": "k"},
+            {"codebook_a": "not_proj", "codebook_b": "proj_b", "api_key": "k", "name": "n"},
+            {"codebook_a": "proj_a", "codebook_b": "not_proj", "api_key": "k", "name": "n"},
         ],
     )
     def test_non_proj_schema_returns_422(self, client, form) -> None:
@@ -501,14 +501,19 @@ class TestCompareCodebooksValidation:
         # schema names, no login needed. `require_user_id` closes that gap.
         resp = client.post(
             "/api/compare-codebooks/",
-            data={"codebook_a": "proj_a", "codebook_b": "proj_b", "api_key": "k"},
+            data={"codebook_a": "proj_a", "codebook_b": "proj_b", "api_key": "k", "name": "n"},
         )
         assert resp.status_code == 401
 
     def test_unowned_codebook_returns_404(self, client, override_async_db, auth_cookies) -> None:
         resp = client.post(
             "/api/compare-codebooks/",
-            data={"codebook_a": "proj_missing_a", "codebook_b": "proj_missing_b", "api_key": "k"},
+            data={
+                "codebook_a": "proj_missing_a",
+                "codebook_b": "proj_missing_b",
+                "api_key": "k",
+                "name": "n",
+            },
             cookies=auth_cookies,
         )
         assert resp.status_code == 404
@@ -522,7 +527,12 @@ class TestCompareCodebooksKickoff:
         file_b = await _make_codebook_file(codebook_route_backed_by_sqlite_jobs, user_id=1, file_type="codebook")
         resp = client.post(
             "/api/compare-codebooks/",
-            data={"codebook_a": file_a.schemaname, "codebook_b": file_b.schemaname, "api_key": "k"},
+            data={
+                "codebook_a": file_a.schemaname,
+                "codebook_b": file_b.schemaname,
+                "api_key": "k",
+                "name": "n",
+            },
             cookies={"access_token": make_token(sub="1")},
         )
         assert resp.status_code == 202

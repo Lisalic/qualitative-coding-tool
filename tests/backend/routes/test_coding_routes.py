@@ -425,15 +425,15 @@ class TestCompareCodingsGuard:
     def test_requires_auth(self, client) -> None:
         resp = client.post(
             "/api/compare-codings/",
-            data={"coding_a": "proj_a", "coding_b": "proj_b", "api_key": "k"},
+            data={"coding_a": "proj_a", "coding_b": "proj_b", "api_key": "k", "name": "n"},
         )
         assert resp.status_code == 401
 
     @pytest.mark.parametrize(
         "form",
         [
-            {"coding_a": "not_proj", "coding_b": "proj_b", "api_key": "k"},
-            {"coding_a": "proj_a", "coding_b": "not_proj", "api_key": "k"},
+            {"coding_a": "not_proj", "coding_b": "proj_b", "api_key": "k", "name": "n"},
+            {"coding_a": "proj_a", "coding_b": "not_proj", "api_key": "k", "name": "n"},
         ],
     )
     def test_non_proj_schema_returns_400(self, client, auth_cookies, form) -> None:
@@ -446,7 +446,12 @@ class TestCompareCodingsGuard:
         user = await _make_user(route_backed_by_sqlite_jobs)
         resp = client.post(
             "/api/compare-codings/",
-            data={"coding_a": "proj_missing_a", "coding_b": "proj_missing_b", "api_key": "k"},
+            data={
+                "coding_a": "proj_missing_a",
+                "coding_b": "proj_missing_b",
+                "api_key": "k",
+                "name": "n",
+            },
             headers=_auth_headers(make_token, sub=str(user.id)),
         )
         assert resp.status_code == 404
@@ -465,7 +470,12 @@ class TestCompareCodingsGuard:
 
         resp = client.post(
             "/api/compare-codings/",
-            data={"coding_a": file_a.schemaname, "coding_b": file_b.schemaname, "api_key": "k"},
+            data={
+                "coding_a": file_a.schemaname,
+                "coding_b": file_b.schemaname,
+                "api_key": "k",
+                "name": "n",
+            },
             headers=_auth_headers(make_token, sub=str(user.id)),
         )
         assert resp.status_code == 202
@@ -489,7 +499,7 @@ class TestSummarizeCodingGuard:
 
     def test_requires_auth_returns_401(self, client) -> None:
         resp = client.post(
-            "/api/summarize-coding/", data={"coding": "proj_a", "api_key": "k"}
+            "/api/summarize-coding/", data={"coding": "proj_a", "api_key": "k", "name": "n"}
         )
         assert resp.status_code == 401
 
@@ -499,7 +509,7 @@ class TestSummarizeCodingGuard:
         monkeypatch.setattr("backend.app.services.coding_service.async_engine", unused_engine)
         resp = client.post(
             "/api/summarize-coding/",
-            data={"coding": "not_proj", "api_key": "k"},
+            data={"coding": "not_proj", "api_key": "k", "name": "n"},
             headers=_auth_headers(make_token),
         )
         assert resp.status_code == 400
@@ -512,9 +522,11 @@ class TestSummarizeCodingGuard:
     # future non-Form caller) is covered at the service layer in
     # tests/backend/services/test_coding_service.py::TestStartSummarizeCodingJobValidation.
 
-    def test_valid_kickoff_returns_202_with_job_id(
+    async def test_valid_kickoff_returns_202_with_job_id(
         self, client, make_token, route_backed_by_sqlite_jobs, monkeypatch
     ) -> None:
+        user = await _make_user(route_backed_by_sqlite_jobs)
+        source_file = await _make_file(route_backed_by_sqlite_jobs, user.id, content="coded rows")
         monkeypatch.setattr(
             "backend.app.services.coding_service.async_engine",
             _mock_async_engine_with_content("coded rows"),
@@ -525,8 +537,8 @@ class TestSummarizeCodingGuard:
         )
         resp = client.post(
             "/api/summarize-coding/",
-            data={"coding": "proj_a", "api_key": "k"},
-            headers=_auth_headers(make_token),
+            data={"coding": source_file.schemaname, "api_key": "k", "name": "n"},
+            headers=_auth_headers(make_token, sub=str(user.id)),
         )
         assert resp.status_code == 202
         body = resp.json()
