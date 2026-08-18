@@ -22,7 +22,13 @@ jobs:
       - name: Set up Python version
         uses: actions/setup-python@v5
         with:
-          python-version: '3.14'
+          python-version: '3.12'
+
+      - name: Install backend test dependencies
+        run: pip install -r backend/requirements-dev.txt
+
+      - name: Run backend test suite
+        run: python -m pytest -q
 
       # Send the repo root to Azure so the `backend/` package exists on disk for `from backend.app...` imports.
       # Dependency install is handled by Azure Oryx (SCM_DO_BUILD_DURING_DEPLOYMENT) on the server, not in this job.

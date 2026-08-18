@@ -19,9 +19,9 @@ ENV/
 *.sqlite
 *.zst
 *.txt
+!backend/requirements*.txt
 
 # Build
-Makefile
 
 # Node
 node_modules/
@@ -64,5 +64,8 @@ htmlcov/
 junit*.xml
 pytestdebug.log
 
-# Maintenance scripts 
+# Maintenance scripts
 backend/scripts/update_database.py
+
+# Local agent notes
+CLAUDE.md
