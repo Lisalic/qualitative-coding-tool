@@ -123,24 +123,34 @@ class TestMarkerParsing:
         result = parsed("### Code Family: F\n#### Code Name:   \n")
         assert result[0]["codes"][0]["code_name"] == ""
 
-    def test_str_replace_removes_every_marker_occurrence_in_line(self) -> None:
-        # str.replace removes ALL occurrences, not just a leading prefix.
+    def test_only_text_after_first_marker_match_is_captured(self) -> None:
+        # The regex match is anchored at line start and captures everything
+        # after the first "Code Family:" -- unlike the old str.replace
+        # approach, a second occurrence later in the line is not stripped out.
         result = parsed("### Code Family: A ### Code Family: B\n")
-        assert result[0]["family_name"] == "A  B"
+        assert result[0]["family_name"] == "A ### Code Family: B"
 
     @pytest.mark.parametrize(
-        "line",
+        "line,expected_name",
         [
-            "###Code Family: X",  # no space after ###
-            "### Code family: X",  # lowercase 'family'
-            "## Code Family: X",  # only 2 hashes
-            "### Code Family X",  # no colon
+            ("###Code Family: X", "X"),  # no space after ###
+            ("### Code family: X", "X"),  # lowercase 'family'
+            ("## Code Family: X", "X"),  # only 2 hashes
+            ("Code Family: X", "X"),  # no markdown prefix at all
         ],
     )
-    def test_near_miss_family_markers_fall_through_to_content(self, line: str) -> None:
-        # None of these open a family, so with no family open the line is
-        # discarded content (orphan-content rule).
-        assert parsed(line) == []
+    def test_near_miss_family_markers_still_open_a_family(self, line: str, expected_name: str) -> None:
+        # The parser is deliberately lenient about hash count, spacing, and
+        # case, since the model's actual output doesn't reliably match the
+        # exact "### Code Family:" prefix the prompt asks for -- see
+        # known-issues.md #2.
+        result = parsed(line)
+        assert result[0]["family_name"] == expected_name
+
+    def test_missing_colon_falls_through_to_content(self) -> None:
+        # No colon at all means the label can't be distinguished from
+        # ordinary prose, so this still doesn't open a family.
+        assert parsed("### Code Family X") == []
 
     def test_indented_markers_still_match(self) -> None:
         result = parsed("    ### Code Family: X\n")
@@ -153,6 +163,42 @@ class TestMarkerParsing:
     def test_unicode_family_name_round_trips_through_json(self) -> None:
         result = parsed("### Code Family: Ångst\n")
         assert result[0]["family_name"] == "Ångst"
+
+
+class TestUnprefixedModelOutput:
+    """Regression coverage for known-issues.md #2: the generator's system
+    prompt didn't always come back with markdown-prefixed headers, so the
+    parser needs to handle unprefixed and mixed-format output too."""
+
+    def test_fully_unprefixed_output_parses(self) -> None:
+        raw = (
+            "Code Family: Anxiety\n"
+            "Family description.\n"
+            "Code Name: Panic\n"
+            "Code description."
+        )
+        result = parsed(raw)
+        assert result == [
+            {
+                "family_name": "Anxiety",
+                "content": "Family description.",
+                "codes": [{"code_name": "Panic", "content": "Code description."}],
+            }
+        ]
+
+    def test_mixed_prefixed_and_unprefixed_families_both_parse(self) -> None:
+        raw = (
+            "### Code Family: A\n"
+            "#### Code Name: A1\n"
+            "a1 content\n"
+            "Code Family: B\n"
+            "Code Name: B1\n"
+            "b1 content\n"
+        )
+        result = parsed(raw)
+        assert [f["family_name"] for f in result] == ["A", "B"]
+        assert [c["code_name"] for c in result[0]["codes"]] == ["A1"]
+        assert [c["code_name"] for c in result[1]["codes"]] == ["B1"]
 
 
 class TestReturnType:

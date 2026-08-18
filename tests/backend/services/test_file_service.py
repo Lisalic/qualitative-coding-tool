@@ -5,15 +5,21 @@ in-memory async SQLite session (`async_sqlite_engine` from
 `tests/conftest.py`) -- pure ORM operations on the fixed tables, no
 Postgres-only SQL involved.
 
-`upload_zst`/`merge_databases` involve either real `.zst` streaming or
-raw SQL reads from old dynamic Postgres schemas (`to_regclass`, quoted
-dynamic schema names) that SQLite can't run -- those are mocked at the
-`stream_zst_to_postgres` / `_fetch_dynamic_rows` / `_drop_dynamic_schema`
-boundary here for fast, deterministic unit coverage. Real end-to-end
-coverage of the dynamic-schema read/drop path is intentionally left to
-the opt-in integration suite (`tests/backend/integration/`), since it
-needs a real Postgres to create the throwaway dynamic schemas in the
-first place.
+`upload_zst` involves both real `.zst` streaming and raw SQL reads from
+the throwaway dynamic Postgres schema `stream_zst_to_postgres` writes
+into (`to_regclass`, quoted dynamic schema names) that SQLite can't run
+-- that's mocked at the `stream_zst_to_postgres` / `_fetch_dynamic_rows`
+/ `_drop_dynamic_schema` boundary here for fast, deterministic unit
+coverage. Real end-to-end coverage of the dynamic-schema read/drop path
+is intentionally left to the opt-in integration suite
+(`tests/backend/integration/`), since it needs a real Postgres to create
+the throwaway dynamic schema in the first place.
+
+`merge_databases` reads its sources from the fixed `submissions`/
+`comments` tables by `file_id` (ownership-checked via
+`file_repo.get_owned_file`) -- plain ORM operations, so it runs directly
+against the SQLite fixture like `delete_database`/`delete_row`/
+`move_rows`.
 """
 
 from __future__ import annotations
@@ -389,43 +395,28 @@ class TestUploadZst:
 
 
 # ---------------------------------------------------------------------------
-# merge_databases -- mocked at the dynamic-schema-read boundary
+# merge_databases -- reads the fixed submissions/comments tables by file_id
+# (see known-issues.md #5: this used to read old dynamic proj_* Postgres
+# schemas with no ownership check; now it's plain ORM reads against the
+# fixed tables, ownership-checked via file_repo.get_owned_file, so these
+# run directly against the SQLite fixture like the other pure-ORM tests
+# in this module).
 # ---------------------------------------------------------------------------
 
 
 class TestMergeDatabases:
-    def _patch_sources(self, monkeypatch, sources: dict[str, dict[str, list[dict]]]):
-        async def _fake_read(session, schema_src):
-            return sources.get(schema_src, {"submissions": [], "comments": []})
-
-        monkeypatch.setattr(file_service, "_read_source_tables", _fake_read)
-
-    async def test_merges_two_sources_with_id_dedup(self, session_factory, monkeypatch) -> None:
-        self._patch_sources(monkeypatch, {
-            "proj_a": {
-                "submissions": [
-                    {"id": "1", "subreddit": "s", "title": "t1", "selftext": "x", "author": "u",
-                     "created_utc": 1, "score": 1, "num_comments": 0},
-                ],
-                "comments": [],
-            },
-            "proj_b": {
-                "submissions": [
-                    # Duplicate id "1" (must be dropped -- already copied from proj_a) ...
-                    {"id": "1", "subreddit": "s", "title": "dup", "selftext": "x", "author": "u",
-                     "created_utc": 1, "score": 1, "num_comments": 0},
-                    # ... plus a genuinely new row.
-                    {"id": "2", "subreddit": "s", "title": "t2", "selftext": "y", "author": "u",
-                     "created_utc": 2, "score": 2, "num_comments": 0},
-                ],
-                "comments": [],
-            },
-        })
-
+    async def test_merges_two_sources_with_id_dedup(self, session_factory) -> None:
         async with session_factory() as session:
             user = await _make_user(session)
             parent_a = await _make_file(session, user.id, "proj_a", filename="A")
             parent_b = await _make_file(session, user.id, "proj_b", filename="B")
+
+            session.add(_submission(parent_a.id, "1", title="t1"))
+            # Duplicate id "1" on the second source (must be dropped -- already
+            # copied from proj_a) plus a genuinely new row.
+            session.add(_submission(parent_b.id, "1", title="dup"))
+            session.add(_submission(parent_b.id, "2", title="t2"))
+            await session.commit()
 
             file_rec, result = await file_service.merge_databases(
                 session, user.id,
@@ -449,13 +440,11 @@ class TestMergeDatabases:
             # Both sources have an owned File row, so both are linked as parents.
             assert {d.parent_file_id for d in deps} == {parent_a.id, parent_b.id}
 
-    async def test_no_rows_returns_not_migrated_without_creating_file(
-        self, session_factory, monkeypatch
-    ) -> None:
-        self._patch_sources(monkeypatch, {})
-
+    async def test_no_rows_returns_not_migrated_without_creating_file(self, session_factory) -> None:
         async with session_factory() as session:
             user = await _make_user(session)
+            await _make_file(session, user.id, "proj_empty", filename="Empty")
+
             file_rec, result = await file_service.merge_databases(
                 session, user.id,
                 source_schemas=["proj_empty"],
@@ -469,6 +458,40 @@ class TestMergeDatabases:
 
             count = (await session.execute(select(File).where(File.filename == "Merged")))
             assert count.scalar_one_or_none() is None
+
+    async def test_source_not_owned_by_caller_raises_not_found(self, session_factory) -> None:
+        """Regression coverage for known-issues.md #5: a source schema the
+        caller doesn't own must reject the merge, not silently contribute
+        zero rows while quietly reading someone else's data.
+        """
+        async with session_factory() as session:
+            owner = await _make_user(session, email="owner@example.com")
+            attacker = await _make_user(session, email="attacker@example.com")
+            other_file = await _make_file(session, owner.id, "proj_secret", filename="Secret")
+            session.add(_submission(other_file.id, "1"))
+            await session.commit()
+
+            with pytest.raises(NotFoundError):
+                await file_service.merge_databases(
+                    session, attacker.id,
+                    source_schemas=["proj_secret"],
+                    name="Merged",
+                    description=None,
+                    project_id=None,
+                )
+
+    async def test_nonexistent_source_raises_not_found(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+
+            with pytest.raises(NotFoundError):
+                await file_service.merge_databases(
+                    session, user.id,
+                    source_schemas=["proj_does_not_exist"],
+                    name="Merged",
+                    description=None,
+                    project_id=None,
+                )
 
     async def test_blank_name_raises_validation_error(self, session_factory) -> None:
         from backend.app.core.exceptions import ValidationAppError

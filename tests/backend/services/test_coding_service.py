@@ -11,8 +11,7 @@ stages reuse verbatim): the synchronous kickoff/validation function
 of a synthetic one.
 """
 
-from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select
@@ -24,36 +23,6 @@ from backend.app.jobs import service as jobs_service
 from backend.app.repositories import artifact_content_repo
 from backend.app.services import coding_service
 from backend.app.storage_models import ArtifactContent, CodingEntry, Submission
-
-
-def _mock_async_engine_with_content(text_value: str) -> MagicMock:
-    conn = AsyncMock()
-    result = MagicMock()
-    result.fetchone.return_value = (text_value,)
-    conn.execute.return_value = result
-
-    @asynccontextmanager
-    async def _connect():
-        yield conn
-
-    engine = MagicMock()
-    engine.connect.side_effect = _connect
-    return engine
-
-
-def _mock_async_engine_no_row() -> MagicMock:
-    conn = AsyncMock()
-    result = MagicMock()
-    result.fetchone.return_value = None
-    conn.execute.return_value = result
-
-    @asynccontextmanager
-    async def _connect():
-        yield conn
-
-    engine = MagicMock()
-    engine.connect.side_effect = _connect
-    return engine
 
 
 async def _wait_for_terminal_status(session, job_id: int, user_id: int, timeout: float = 5.0):
@@ -203,10 +172,6 @@ class TestStartSummarizeCodingJobEnqueue:
     ) -> None:
         source_file = await _make_file(session, user_id, schemaname="proj_a", content="coded rows")
         monkeypatch.setattr(
-            "backend.app.services.coding_service.async_engine",
-            _mock_async_engine_with_content("coded rows"),
-        )
-        monkeypatch.setattr(
             "backend.scripts.summarize_coding.summarize_coding",
             AsyncMock(return_value="a summary"),
         )
@@ -250,12 +215,10 @@ class TestSummarizeCodingJobHandlerEndToEnd:
     """
 
     async def test_succeeds_and_stores_summary_result(self, session, user_id, monkeypatch) -> None:
-        source_file = await _make_file(session, user_id, schemaname="proj_a", content="coded rows")
-        source_file_id = source_file.id
-        monkeypatch.setattr(
-            "backend.app.services.coding_service.async_engine",
-            _mock_async_engine_with_content("post_1: CODE_A - evidence"),
+        source_file = await _make_file(
+            session, user_id, schemaname="proj_a", content="post_1: CODE_A - evidence"
         )
+        source_file_id = source_file.id
         summarize_mock = AsyncMock(return_value="the final summary")
         monkeypatch.setattr("backend.scripts.summarize_coding.summarize_coding", summarize_mock)
 
@@ -302,11 +265,8 @@ class TestSummarizeCodingJobHandlerEndToEnd:
         assert [d.parent_file_id for d in deps] == [source_file_id]
 
     async def test_no_content_marks_job_failed(self, session, user_id, monkeypatch) -> None:
-        await _make_file(session, user_id, schemaname="proj_a", content="coded rows")
-        monkeypatch.setattr(
-            "backend.app.services.coding_service.async_engine",
-            _mock_async_engine_no_row(),
-        )
+        # No `content=` -- the source file has no artifact_content row at all.
+        await _make_file(session, user_id, schemaname="proj_a")
         summarize_mock = AsyncMock(return_value="should not be called")
         monkeypatch.setattr("backend.scripts.summarize_coding.summarize_coding", summarize_mock)
 

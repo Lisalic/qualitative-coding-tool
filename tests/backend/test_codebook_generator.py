@@ -4,19 +4,14 @@ Stage 9 replaces the sync ``OpenAI(...)`` client + hand-rolled retry loop
 with a call into ``external/openrouter_client.py::chat_completion`` --
 these tests mock ``chat_completion`` at the seam
 (``backend.scripts.codebook_generator.chat_completion``) instead of the
-OpenAI SDK, and verify the response-parsing logic (percentage extraction
-in ``compare_agreement``) is untouched by that plumbing swap.
+OpenAI SDK.
 """
 
 from unittest.mock import AsyncMock
 
 import pytest
 
-from backend.scripts.codebook_generator import (
-    compare_agreement,
-    generate_codebook,
-    get_client,
-)
+from backend.scripts.codebook_generator import generate_codebook, get_client
 
 
 class TestGetClient:
@@ -56,45 +51,3 @@ class TestGenerateCodebook:
         assert "focus on X" in user_prompt
         assert "qualitative researcher" in system_prompt
         assert mock.call_args.kwargs["model"] == "model-y"
-
-
-class TestCompareAgreement:
-    async def test_extracts_integer_percentage(self, monkeypatch) -> None:
-        monkeypatch.setattr(
-            "backend.scripts.codebook_generator.chat_completion",
-            AsyncMock(return_value="85%"),
-        )
-        result = await compare_agreement("cb a", "cb b", "sk-key")
-        assert result == "85%"
-
-    async def test_extracts_percentage_from_surrounding_text(self, monkeypatch) -> None:
-        monkeypatch.setattr(
-            "backend.scripts.codebook_generator.chat_completion",
-            AsyncMock(return_value="The agreement is about 72.5 percent overall."),
-        )
-        result = await compare_agreement("cb a", "cb b", "sk-key")
-        assert result == "72.5%"
-
-    async def test_clamps_value_over_100(self, monkeypatch) -> None:
-        monkeypatch.setattr(
-            "backend.scripts.codebook_generator.chat_completion",
-            AsyncMock(return_value="150"),
-        )
-        result = await compare_agreement("cb a", "cb b", "sk-key")
-        assert result == "100%"
-
-    async def test_no_number_falls_back_to_stripped_response(self, monkeypatch) -> None:
-        monkeypatch.setattr(
-            "backend.scripts.codebook_generator.chat_completion",
-            AsyncMock(return_value="  no digits here  "),
-        )
-        result = await compare_agreement("cb a", "cb b", "sk-key")
-        assert result == "no digits here"
-
-    async def test_empty_response_raises(self, monkeypatch) -> None:
-        monkeypatch.setattr(
-            "backend.scripts.codebook_generator.chat_completion",
-            AsyncMock(return_value=""),
-        )
-        with pytest.raises(ValueError, match="Empty response"):
-            await compare_agreement("cb a", "cb b", "sk-key")

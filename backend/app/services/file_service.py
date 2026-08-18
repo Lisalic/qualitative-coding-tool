@@ -215,18 +215,33 @@ async def upload_zst(
 # ---------------------------------------------------------------------------
 
 
-async def _read_source_tables(session: AsyncSession, schema_src: str) -> dict[str, list[dict]]:
-    """Read the ``submissions``/``comments`` rows out of one old dynamic
-    ``proj_*`` schema. Narrowed from the old handler's fully-generic
-    "introspect every table in the schema" approach to exactly these two
-    tables: every ``proj_*`` schema this endpoint is ever pointed at is
-    created by ``upload_zst``/``stream_zst_to_postgres``, which only ever
-    create ``submissions``/``comments`` -- so this isn't a behavior
-    narrowing for any real input, just dropping speculative generality.
+async def _fetch_fixed_rows(
+    session: AsyncSession, file_id: int, table: str, columns: tuple[str, ...]
+) -> list[dict]:
+    """Read the source columns of ``table`` (``submissions``/``comments``)
+    out of the fixed tables for ``file_id``, mirroring
+    ``_fetch_dynamic_rows``'s column set/shape so ``_merge_table_into_target``
+    doesn't need to know which storage a row came from.
+    """
+    model = Submission if table == "submissions" else Comment
+    cols = [getattr(model, c) for c in columns]
+    result = await session.execute(select(*cols).where(model.file_id == file_id))
+    return [dict(zip(columns, row)) for row in result.all()]
+
+
+async def _read_source_tables(session: AsyncSession, source_file_id: int) -> dict[str, list[dict]]:
+    """Read the ``submissions``/``comments`` rows for one already
+    ownership-checked source ``File.id`` out of the fixed tables.
+
+    Reads from the fixed ``submissions``/``comments`` tables (keyed by
+    ``file_id``) rather than the old dynamic ``proj_*`` Postgres schema:
+    every raw-data file has already been copied into the fixed tables by
+    the storage migration, so the dynamic schema is a stale duplicate,
+    not the source of truth -- see known-issues.md #5.
     """
     return {
-        "submissions": await _fetch_dynamic_rows(session, schema_src, "submissions", _SUBMISSION_SOURCE_COLUMNS),
-        "comments": await _fetch_dynamic_rows(session, schema_src, "comments", _COMMENT_SOURCE_COLUMNS),
+        "submissions": await _fetch_fixed_rows(session, source_file_id, "submissions", _SUBMISSION_SOURCE_COLUMNS),
+        "comments": await _fetch_fixed_rows(session, source_file_id, "comments", _COMMENT_SOURCE_COLUMNS),
     }
 
 
@@ -306,15 +321,16 @@ async def merge_databases(
     description: str | None,
     project_id: int | None,
 ) -> tuple[File | None, dict]:
-    """Merge N old dynamic ``proj_*`` schemas' ``submissions``/``comments``
-    rows into one brand-new fixed-table ``file_id``.
+    """Merge N raw-data files' ``submissions``/``comments`` rows into one
+    brand-new fixed-table ``file_id``.
 
-    Note on source ownership: matching the old handler exactly, rows are
-    read from any ``source_schemas`` entry starting with ``"proj_"``
-    *without* checking that the caller owns that schema (only the
-    ``FileDependency`` link in ``_finalize_merge`` is ownership-scoped).
-    This is a pre-existing gap (not introduced here) worth flagging
-    separately -- see the report.
+    Each ``source_schemas`` entry is resolved to a ``raw_data`` file
+    *owned by* ``user_id`` via ``file_repo.get_owned_file`` before it's
+    read -- fixes a pre-existing gap (see known-issues.md #5) where rows
+    were read from any ``proj_*``-prefixed schema regardless of ownership,
+    with only the resulting ``FileDependency`` link ownership-scoped. A
+    source naming a file the caller doesn't own (or that doesn't exist)
+    now raises ``NotFoundError`` instead of silently contributing no rows.
 
     Returns ``(None, response_dict)`` -- not a ``File`` -- for the
     "nothing to migrate" case, matching the old handler's own empty-merge
@@ -351,7 +367,8 @@ async def merge_databases(
     for db_name in source_schemas:
         if not isinstance(db_name, str) or not db_name.startswith("proj_"):
             continue
-        source_tables = await _read_source_tables(session, db_name)
+        source_file = await file_repo.get_owned_file(session, db_name, user_id, file_types=("raw_data",))
+        source_tables = await _read_source_tables(session, source_file.id)
         total_counts["submissions"] += await _merge_table_into_target(
             session,
             target_file_id=file_rec.id,

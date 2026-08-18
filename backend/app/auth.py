@@ -60,7 +60,8 @@ def decode_access_token(token: str) -> Dict[str, Any]:
         body_json = _b64url_decode(body_b)
         payload = json.loads(body_json.decode())
         now = int(time.time())
-        if payload.get("exp") and now > int(payload.get("exp")):
+        exp = payload.get("exp")
+        if exp is not None and now > int(exp):
             raise ValueError("Token expired")
         return payload
     except Exception as exc:

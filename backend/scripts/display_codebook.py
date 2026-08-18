@@ -1,4 +1,8 @@
 import json
+import re
+
+_FAMILY_RE = re.compile(r"^#{0,6}\s*code family\s*:\s*(.*)$", re.IGNORECASE)
+_CODE_RE = re.compile(r"^#{0,6}\s*code name\s*:\s*(.*)$", re.IGNORECASE)
 
 def parse_codebook_to_json(raw_text):
     codebook_structure = []
@@ -11,8 +15,10 @@ def parse_codebook_to_json(raw_text):
 
     for line in lines:
         line = line.strip()
+        family_match = _FAMILY_RE.match(line)
+        code_match = _CODE_RE.match(line) if not family_match else None
 
-        if line.startswith("### Code Family:"):
+        if family_match:
             # Save any buffered content to the last code of the current family, or to the current family if no codes
             if current_code is not None and content_buffer:
                 current_code["content"] = "\n".join(content_buffer).strip()
@@ -21,7 +27,7 @@ def parse_codebook_to_json(raw_text):
                 current_family["content"] = "\n".join(content_buffer).strip()
                 content_buffer = []
 
-            family_name = line.replace("### Code Family:", "").strip()
+            family_name = family_match.group(1).strip()
 
             current_family = {
                 "family_name": family_name,
@@ -31,7 +37,7 @@ def parse_codebook_to_json(raw_text):
             codebook_structure.append(current_family)
             current_code = None  # Reset current code when starting new family
 
-        elif line.startswith("#### Code Name:"):
+        elif code_match:
             # Save any buffered content to the previous code, or to current family if no previous code
             if current_code is not None and content_buffer:
                 current_code["content"] = "\n".join(content_buffer).strip()
@@ -40,7 +46,7 @@ def parse_codebook_to_json(raw_text):
                 current_family["content"] = "\n".join(content_buffer).strip()
                 content_buffer = []
 
-            code_name = line.replace("#### Code Name:", "").strip()
+            code_name = code_match.group(1).strip()
 
             current_code = {
                 "code_name": code_name,

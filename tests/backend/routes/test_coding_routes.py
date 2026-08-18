@@ -15,31 +15,11 @@ the service functions themselves (including the job handlers'
 `coding_entries` population).
 """
 
-from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 pytestmark = pytest.mark.usefixtures("override_db")
-
-
-def _mock_async_engine_with_content(text_value: str):
-    """Kept verbatim from the pre-Stage-8 version of this module --
-    ``TestSummarizeCodingGuard`` (Stage 4, untouched by Stage 8) still
-    depends on it.
-    """
-    conn = AsyncMock()
-    result = MagicMock()
-    result.fetchone.return_value = (text_value,)
-    conn.execute.return_value = result
-
-    @asynccontextmanager
-    async def _connect():
-        yield conn
-
-    engine = MagicMock()
-    engine.connect.side_effect = _connect
-    return engine
 
 
 def _auth_headers(make_token, sub="1"):
@@ -492,8 +472,8 @@ class TestSummarizeCodingGuard:
     the DB or spawning a job), but a valid request now returns
     ``202 {"job_id", "status": "pending"}`` instead of a blocking
     ``200 {"summary": ...}``. Content-not-found is no longer a synchronous
-    400 either, since reading ``content_store`` now happens inside the job
-    handler, not the kickoff request -- see
+    400 either, since reading the coding artifact's content now happens
+    inside the job handler, not the kickoff request -- see
     ``tests/backend/services/test_coding_service.py`` for that path.
     """
 
@@ -503,10 +483,7 @@ class TestSummarizeCodingGuard:
         )
         assert resp.status_code == 401
 
-    def test_non_proj_schema_returns_400(
-        self, client, unused_engine, monkeypatch, make_token
-    ) -> None:
-        monkeypatch.setattr("backend.app.services.coding_service.async_engine", unused_engine)
+    def test_non_proj_schema_returns_400(self, client, make_token) -> None:
         resp = client.post(
             "/api/summarize-coding/",
             data={"coding": "not_proj", "api_key": "k", "name": "n"},
@@ -527,10 +504,6 @@ class TestSummarizeCodingGuard:
     ) -> None:
         user = await _make_user(route_backed_by_sqlite_jobs)
         source_file = await _make_file(route_backed_by_sqlite_jobs, user.id, content="coded rows")
-        monkeypatch.setattr(
-            "backend.app.services.coding_service.async_engine",
-            _mock_async_engine_with_content("coded rows"),
-        )
         summarize_mock = AsyncMock(return_value="mocked summary")
         monkeypatch.setattr(
             "backend.scripts.summarize_coding.summarize_coding", summarize_mock

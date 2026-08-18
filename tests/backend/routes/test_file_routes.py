@@ -3,14 +3,14 @@
 The router is fully async (`Depends(get_async_db)`), so every test here
 runs against `override_async_db` (in-memory SQLite via
 `async_sqlite_engine`), matching the pattern used in
-`test_project_routes.py`/`test_prompt_routes.py`. Raw-dynamic-schema
-paths (`upload_zst`'s `.zst` streaming, `merge_databases`' reads from old
-`proj_*` schemas) need real Postgres semantics not reachable from SQLite
--- those are covered by `tests/backend/services/test_file_service.py`
-(mocked at the streaming/raw-SQL-read boundary) and the opt-in
-integration suite, not here. This module covers request validation,
-auth/ownership guards, and the fixed-table happy paths for
-delete-database/delete-row/move-rows.
+`test_project_routes.py`/`test_prompt_routes.py`. `upload_zst`'s `.zst` streaming into a throwaway dynamic Postgres schema
+needs real Postgres semantics not reachable from SQLite -- that's covered
+by `tests/backend/services/test_file_service.py` (mocked at the
+streaming/raw-SQL-read boundary) and the opt-in integration suite, not
+here. `merge_databases` is plain ORM reads against the fixed tables, so
+it's covered directly in `test_file_service.py`. This module covers
+request validation, auth/ownership guards, and the fixed-table happy
+paths for delete-database/delete-row/move-rows.
 """
 
 import pytest

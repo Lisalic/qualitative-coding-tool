@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import secrets
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -36,7 +36,6 @@ from backend.app.database import (
     AsyncSessionLocal,
     File,
     FileDependency,
-    async_engine,
     async_link_file_to_project,
 )
 from backend.app.jobs.models import Job
@@ -673,9 +672,9 @@ async def _run_summarize_coding_job(job_id: int, payload: dict) -> dict:
     """Handler for ``job_type="summarize_coding"``.
 
     Runs in the background job runner's context (no request-scoped
-    session/connection), so it opens its own connection directly via the
-    module-level ``async_engine`` -- same as the route did inline before
-    this stage. ``summarize_coding_function`` is a native ``async def``
+    session/connection), so it opens its own connection directly via
+    ``AsyncSessionLocal`` -- same as the route did inline before this
+    stage. ``summarize_coding_function`` is a native ``async def``
     (Stage 9), so it's ``await``ed directly instead of going through
     ``asyncio.to_thread``.
 
@@ -688,7 +687,6 @@ async def _run_summarize_coding_job(job_id: int, payload: dict) -> dict:
     from backend.scripts.summarize_coding import summarize_coding as summarize_coding_function
 
     user_id = payload["user_id"]
-    schema = payload["schema"]
     prompt = payload.get("prompt", "")
     model = payload.get("model")
     api_key = payload["api_key"]
@@ -697,11 +695,10 @@ async def _run_summarize_coding_job(job_id: int, payload: dict) -> dict:
     description = payload.get("description")
     project_id = payload.get("project_id")
 
-    async with async_engine.connect() as conn:
-        rr = await conn.execute(text(f'SELECT file_text FROM "{schema}".content_store LIMIT 1'))
-        row = rr.fetchone()
+    async with AsyncSessionLocal() as session:
+        coding_data = await artifact_content_repo.read_content(session, source_file_id)
 
-    coding_data = (row[0] if row else "") or ""
+    coding_data = coding_data or ""
     if not coding_data:
         raise ValidationAppError("No content found in coding")
 
