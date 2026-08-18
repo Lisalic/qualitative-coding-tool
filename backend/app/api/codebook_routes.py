@@ -43,7 +43,7 @@ async def get_codebook(codebook_id: str = None, db: Session = Depends(get_db)):
             # try id match (integer)
             try:
                 fid = int(codebook_id)
-            except Exception:
+            except ValueError:
                 file_rec = None
             else:
                 file_rec = db.query(File).filter(File.file_type.in_(['codebook', 'codebook_comparison']), File.id == fid).first()
@@ -84,7 +84,7 @@ async def parse_codebook(codebook_id: str = None, db: Session = Depends(get_db))
         if not file_rec:
             try:
                 fid = int(codebook_id)
-            except Exception:
+            except ValueError:
                 file_rec = None
             else:
                 file_rec = db.query(File).filter(File.file_type == 'codebook', File.id == fid).first()
@@ -113,10 +113,17 @@ async def parse_codebook(codebook_id: str = None, db: Session = Depends(get_db))
 
 
 @router.get("/list-codebooks")
-async def list_codebooks(db: Session = Depends(get_db)):
+async def list_codebooks(request: Request, db: Session = Depends(get_db)):
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
     codebooks = []
     try:
-        files = db.query(File).filter(File.file_type.in_(['codebook', 'codebook_comparison'])).all()
+        files = db.query(File).filter(
+            File.file_type.in_(['codebook', 'codebook_comparison']),
+            File.user_id == user_id,
+        ).all()
         for p in files:
             codebooks.append({
                 "id": str(p.id),
@@ -125,8 +132,8 @@ async def list_codebooks(db: Session = Depends(get_db)):
                 "description": p.description,
                 "source": "file",
             })
-    except Exception:
-        return JSONResponse({"codebooks": []})
+    except Exception as e:
+        return JSONResponse({"codebooks": [], "error": str(e)}, status_code=500)
 
     codebooks.sort(key=lambda x: x.get("name") or x.get("id"))
     return JSONResponse({"codebooks": codebooks})
@@ -196,7 +203,7 @@ async def generate_codebook(
     payload: GenerateCodebookRequest = Depends(as_form(GenerateCodebookRequest)),
 ):
     """Sample a raw-data schema, ask the LLM to build a codebook, persist it."""
-    from .utils import MODEL_1
+    from backend.scripts.codebook_generator import MODEL_1
     import asyncio
     import inspect
     import math
@@ -231,7 +238,7 @@ async def generate_codebook(
                     try:
                         title = r._mapping.get('title')
                         selftext = r._mapping.get('selftext')
-                    except Exception:
+                    except AttributeError:
                         title = r[0] if len(r) > 0 else ""
                         selftext = r[1] if len(r) > 1 else ""
                     assembled += f"Title: {title or ''}\n{selftext or ''}\n\n"
@@ -255,7 +262,7 @@ async def generate_codebook(
                 for r in rows:
                     try:
                         body = r._mapping.get('body')
-                    except Exception:
+                    except AttributeError:
                         body = r[0] if len(r) > 0 else ""
                     assembled += f"{body or ''}\n\n"
             else:
@@ -354,7 +361,8 @@ async def generate_codebook(
 @router.post("/compare-codebooks/")
 async def compare_codebooks(request: Request, codebook_a: str = Form(...), codebook_b: str = Form(...), api_key: str = Form(...), model: str = Form(None), prompt: str = Form("")):
     """Compare two codebooks stored in Postgres schemas by calling the LLM and return the full message."""
-    from .utils import engine, MODEL_3, codebook_get_client
+    from backend.app.database import engine
+    from backend.scripts.codebook_generator import MODEL_3, get_client as codebook_get_client
 
     schema_a = (codebook_a or "").strip()
     schema_b = (codebook_b or "").strip()

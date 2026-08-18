@@ -815,11 +815,13 @@ async def get_comments_for_submission(submission_id: str, database: str = Query(
 async def get_post_contents(request: Request):
     try:
         data = await request.json()
-        schema_name = data.get("schema")
+        schema_name = normalize_schema(data.get("schema"))
         post_ids = data.get("post_ids", [])
 
         if not schema_name or not post_ids:
             raise HTTPException(status_code=400, detail="schema and post_ids are required")
+        if not is_proj_schema(schema_name):
+            raise HTTPException(status_code=400, detail="Invalid schema name")
 
         async with async_engine.connect() as conn:
             placeholders = ", ".join([f":id_{i}" for i in range(len(post_ids))])
@@ -843,6 +845,8 @@ async def get_post_contents(request: Request):
                 }
 
         return JSONResponse({"contents": posts})
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         traceback.print_exc()
