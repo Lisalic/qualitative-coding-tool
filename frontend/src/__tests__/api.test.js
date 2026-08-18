@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { BASE_URL, apiFetch, postForm } from "../api";
+import { BASE_URL, apiFetch, postForm, postFormAndPoll } from "../api";
 
 function mockResponse({ ok, status, body }) {
   const rawText = typeof body === "string" ? body : body === undefined ? "" : JSON.stringify(body);
@@ -250,5 +250,96 @@ describe("postForm", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockResponse({ ok: false, status: 400, body })));
     const result = await postForm("/api/x", new FormData());
     expect(result.data).toEqual(body);
+  });
+});
+
+describe("postFormAndPoll", () => {
+  it("kicks off, polls through a pending status, and resolves on success", async () => {
+    const onStatusChange = vi.fn();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockResponse({ ok: true, status: 202, body: { job_id: 42, status: "pending" } }))
+      .mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: { status: "running" } }))
+      .mockResolvedValueOnce(
+        mockResponse({ ok: true, status: 200, body: { status: "succeeded", result: { summary: "done" } } }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await postFormAndPoll("/api/x", new FormData(), { intervalMs: 1, onStatusChange });
+
+    expect(result).toEqual({ ok: true, status: 200, data: { summary: "done" }, error: null });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[1][0]).toBe(`${BASE_URL}/api/jobs/42`);
+    expect(onStatusChange.mock.calls.map((c) => c[0])).toEqual(["running", "succeeded"]);
+  });
+
+  it("resolves an error result when the job reaches a failed status", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockResponse({ ok: true, status: 202, body: { job_id: 7, status: "pending" } }))
+      .mockResolvedValueOnce(
+        mockResponse({ ok: true, status: 200, body: { status: "failed", error: "boom" } }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await postFormAndPoll("/api/x", new FormData(), { intervalMs: 1 });
+
+    expect(result).toEqual({ ok: false, status: 200, data: null, error: "boom" });
+  });
+
+  it("a failing kickoff (e.g. 400) is returned as-is and never polls", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse({ ok: false, status: 400, body: { error: "bad schema" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await postFormAndPoll("/api/x", new FormData(), { intervalMs: 1 });
+
+    expect(result).toEqual({ ok: false, status: 400, data: { error: "bad schema" }, error: "bad schema" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("times out if the job never reaches a terminal status within timeoutMs", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockResponse({ ok: true, status: 202, body: { job_id: 1, status: "pending" } }))
+      .mockResolvedValue(mockResponse({ ok: true, status: 200, body: { status: "pending" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await postFormAndPoll("/api/x", new FormData(), { intervalMs: 5, timeoutMs: 20 });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/timed out/i);
+  });
+
+  it("stops early and resolves an aborted result when the AbortSignal fires mid-poll", async () => {
+    const controller = new AbortController();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockResponse({ ok: true, status: 202, body: { job_id: 1, status: "pending" } }))
+      .mockResolvedValue(mockResponse({ ok: true, status: 200, body: { status: "pending" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const promise = postFormAndPoll("/api/x", new FormData(), {
+      intervalMs: 5000,
+      timeoutMs: 60000,
+      signal: controller.signal,
+    });
+    // Let the kickoff + first poll resolve, then abort while it's sleeping
+    // between polls (well before the 5s interval would otherwise elapse).
+    setTimeout(() => controller.abort(), 5);
+
+    const result = await promise;
+    expect(result).toEqual({ ok: false, status: 0, data: null, error: "Aborted" });
+  });
+
+  it("returns a network-error result if a poll request itself throws", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockResponse({ ok: true, status: 202, body: { job_id: 1, status: "pending" } }))
+      .mockRejectedValueOnce(new Error("network down"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await postFormAndPoll("/api/x", new FormData(), { intervalMs: 1 });
+
+    expect(result).toEqual({ ok: false, status: 0, data: null, error: "network down" });
   });
 });

@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useState, useEffect, useCallback } from "react";
-import { apiFetch, postForm } from "../../api";
+import { apiFetch, postFormAndPoll } from "../../api";
 import FormShell from "../forms/FormShell";
 import DatabaseSourceFields from "../forms/DatabaseSourceFields";
 import PromptTextareaWithActions from "../forms/PromptTextareaWithActions";
@@ -13,9 +13,10 @@ import {
   MissingFieldsError,
   buildFilterDataForm,
 } from "../../lib/apiContracts";
-import "../../styles/Home.css";
 
 const EXAMPLE_PROMPT = EXAMPLE_PROMPTS.filter;
+const inputClasses =
+  "border border-paper bg-white/5 px-3 py-2.5 text-paper placeholder:text-paper/40 focus:outline-none focus:ring-2 focus:ring-paper disabled:opacity-50";
 
 export default function FilterDataPanel({
   filterPrompt,
@@ -145,7 +146,7 @@ export default function FilterDataPanel({
         throw err;
       }
 
-      const { ok, data, error } = await postForm(
+      const { ok, data, error } = await postFormAndPoll(
         "/api/filter-data/",
         requestData,
       );
@@ -197,13 +198,13 @@ export default function FilterDataPanel({
   }));
 
   return (
-    <div className="file-upload">
-      <h1 className="tool-page-title">Apply Filter</h1>
-      <div className="action-buttons">
+    <div>
+      <h1 className="mb-2 text-center text-2xl font-bold">Apply Filter</h1>
+      <div className="mb-6 flex justify-center">
         <button
           type="button"
           onClick={handleViewFilteredData}
-          className="view-button"
+          className="border border-paper px-4 py-2 text-sm transition-colors hover:bg-paper hover:text-ink"
         >
           View Filtered Data
         </button>
@@ -238,28 +239,32 @@ export default function FilterDataPanel({
           disabled={loading}
         />
 
-        <div className="form-group">
-          <label htmlFor="name">Filtered Database Name</label>
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="name" className="text-sm">
+            Filtered Database Name
+          </label>
           <input
             id="name"
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="my-filtered-db"
-            className="form-input"
+            className={inputClasses}
             disabled={loading}
           />
         </div>
 
-        <div className="form-group">
-          <label htmlFor="description">Description (optional)</label>
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="description" className="text-sm">
+            Description (optional)
+          </label>
           <textarea
             id="description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Optional description for the filtered database"
             rows={3}
-            className="form-input"
+            className={`${inputClasses} resize-y`}
             disabled={loading}
           />
         </div>
@@ -277,7 +282,7 @@ export default function FilterDataPanel({
           onSaveFeedback={handlePromptSaveFeedback}
         />
 
-        <div className="form-group">
+        <div className="flex flex-col gap-1.5">
           <AiLabel htmlFor="filterTags" text="Keywords (optional)" />
           <textarea
             id="filterTags"
@@ -285,7 +290,7 @@ export default function FilterDataPanel({
             onChange={(e) => setFilterTags(e.target.value)}
             placeholder="Comma-separated keywords (optional)."
             rows={3}
-            className="form-input"
+            className={`${inputClasses} resize-y`}
             disabled={loading}
           />
         </div>
@@ -319,7 +324,7 @@ export default function FilterDataPanel({
           min={1}
           max={100}
           step={1}
-          disabled={loading || !Boolean(database)}
+          disabled={loading || !database}
           valueDisplay={database ? `${samplePercentage}%` : ""}
           valueMinWidth="70px"
           caption={
@@ -334,11 +339,11 @@ export default function FilterDataPanel({
 
       {saveMessage && (
         <div
-          className={
+          className={`mt-4 border px-4 py-3 text-center text-sm ${
             saveMessageType === "success"
-              ? "success-message"
-              : "error-message"
-          }
+              ? "border-success bg-success/10 text-success"
+              : "border-error bg-error/10 text-error"
+          }`}
         >
           {saveMessage}
         </div>

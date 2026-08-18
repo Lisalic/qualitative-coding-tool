@@ -1,302 +1,70 @@
-import asyncio
-from fastapi import APIRouter, HTTPException, Depends, Request, Form
-from fastapi.responses import JSONResponse
-from sqlalchemy.orm import Session, selectinload
-from sqlalchemy import text, select
 import json
-import traceback
-import secrets
-import math
 
-from backend.app.api.utils import get_user_id_from_request
-from backend.app.api.schemas import (
-    ApplyCodebookRequest,
-    ApplyCodebookResponse,
-    GenerateCodebookFileInfo,
-    as_form,
-)
-from backend.app.database import (
-    get_db,
-    File,
-    FileDependency,
-    Project,
-    engine,
-    async_engine,
-    async_link_file_to_project,
-)
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi.responses import JSONResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.app.api.schemas import ApplyCodebookRequest, as_form
+from backend.app.core.auth_dependency import require_user_id
+from backend.app.database import get_async_db
 from backend.scripts.display_codebook import parse_codebook_to_json
-from backend.app.databasemanager import AsyncDatabaseManager
-from backend.app.api import utils as api_utils_module
+from backend.app.services import coding_service
 
 router = APIRouter()
 
 
-def _resolve_coding_file_record(db: Session, coded_id: str | None) -> File | None:
-    if not coded_id:
-        return (
-            db.query(File)
-            .filter(File.file_type.in_(["coding", "coding_comparison"]))
-            .order_by(File.created_at.desc())
-            .first()
-        )
-
-    file_rec = (
-        db.query(File)
-        .filter(
-            File.file_type.in_(["coding", "coding_comparison"]),
-            File.schemaname == coded_id,
-        )
-        .first()
-    )
-    if file_rec:
-        return file_rec
-
-    file_rec = (
-        db.query(File)
-        .filter(
-            File.file_type.in_(["coding", "coding_comparison"]),
-            File.filename == coded_id,
-        )
-        .first()
-    )
-    if file_rec:
-        return file_rec
-
-    try:
-        fid = int(coded_id)
-    except Exception:
-        return None
-
-    return (
-        db.query(File)
-        .filter(File.file_type.in_(["coding", "coding_comparison"]), File.id == fid)
-        .first()
-    )
-
-
-def _assemble_posts_content(schema: str, sample_percentage: float = 100.0) -> str:
-    assembled_rows: list[str] = []
-    sample_percentage = max(1.0, min(100.0, float(sample_percentage)))
-
-    with engine.connect() as conn:
-        submissions_table = f"{schema}.submissions"
-        submissions_exists = conn.execute(
-            text("SELECT to_regclass(:tbl)"),
-            {"tbl": submissions_table},
-        ).scalar()
-        if submissions_exists:
-            submissions_total = int(
-                conn.execute(
-                    text(f'SELECT COUNT(*) FROM "{schema}"."submissions"')
-                ).scalar()
-                or 0
-            )
-            submissions_limit = math.ceil(
-                (submissions_total * sample_percentage) / 100.0
-            )
-            rows = []
-            if submissions_limit > 0:
-                rows = conn.execute(
-                    text(
-                        f'SELECT id, title, selftext FROM "{schema}"."submissions" ORDER BY RANDOM() LIMIT :sample_limit'
-                    ),
-                    {"sample_limit": submissions_limit},
-                ).fetchall()
-            for row in rows:
-                data = row._mapping
-                assembled_rows.append(
-                    f"POST_ID: {data.get('id', '')}  "
-                    f"Title: {(data.get('title') or '')}  "
-                    f"{(data.get('selftext') or '')}"
-                )
-
-        comments_table = f"{schema}.comments"
-        comments_exists = conn.execute(
-            text("SELECT to_regclass(:tbl)"),
-            {"tbl": comments_table},
-        ).scalar()
-        if comments_exists:
-            comments_total = int(
-                conn.execute(
-                    text(f'SELECT COUNT(*) FROM "{schema}"."comments"')
-                ).scalar()
-                or 0
-            )
-            comments_limit = math.ceil((comments_total * sample_percentage) / 100.0)
-            rows = []
-            if comments_limit > 0:
-                rows = conn.execute(
-                    text(
-                        f'SELECT id, body FROM "{schema}"."comments" ORDER BY RANDOM() LIMIT :sample_limit'
-                    ),
-                    {"sample_limit": comments_limit},
-                ).fetchall()
-            for row in rows:
-                data = row._mapping
-                assembled_rows.append(
-                    f"POST_ID: {data.get('id', '')}  "
-                    f"{(data.get('body') or '')}"
-                )
-
-    return "\n\n".join(assembled_rows).strip()
-
-
-def _resolve_codebook_schema(db: Session, codebook_value: str) -> str | None:
-    raw_value = (codebook_value or "").strip()
-    if not raw_value:
-        return None
-
-    if raw_value.startswith("proj_"):
-        return raw_value
-
-    try:
-        file_id = int(raw_value)
-    except Exception:
-        return None
-
-    file_rec = (
-        db.query(File)
-        .filter(
-            File.id == file_id,
-            File.file_type.in_(["codebook", "codebook_comparison"]),
-        )
-        .first()
-    )
-    return file_rec.schemaname if file_rec else None
-
-
-def _load_content_store_text(schema: str | None) -> str:
-    if not schema:
-        return ""
-
-    with engine.connect() as conn:
-        table_exists = conn.execute(
-            text("SELECT to_regclass(:tbl)"),
-            {"tbl": f"{schema}.content_store"},
-        ).scalar()
-        if not table_exists:
-            return ""
-
-        row = conn.execute(
-            text(f'SELECT file_text FROM "{schema}".content_store LIMIT 1')
-        ).fetchone()
-        return (row[0] if row else "") or ""
-
-
-def _load_codebook_snapshot(schema: str | None) -> tuple[bool, str]:
-    if not schema:
-        return False, ""
-
-    with engine.connect() as conn:
-        table_exists = conn.execute(
-            text("SELECT to_regclass(:tbl)"),
-            {"tbl": f"{schema}.codebook"},
-        ).scalar()
-        if not table_exists:
-            return False, ""
-
-        row = conn.execute(
-            text(f'SELECT codebook_text FROM "{schema}".codebook LIMIT 1')
-        ).fetchone()
-        return True, (row[0] if row else "") or ""
-
-
-async def _upsert_codebook_text_async(conn, schema: str, codebook_text: str) -> None:
-    """Create codebook table if needed and replace its single row."""
-    await conn.execute(
-        text(
-            f'CREATE TABLE IF NOT EXISTS "{schema}".codebook (codebook_text text)'
-        )
-    )
-    await conn.execute(text(f'TRUNCATE TABLE "{schema}".codebook'))
-    await conn.execute(
-        text(
-            f'INSERT INTO "{schema}".codebook (codebook_text) VALUES (:codebook_text)'
-        ),
-        {"codebook_text": codebook_text or ""},
-    )
-
-
-def _generate_unique_schema_name(prefix: str = "proj") -> str:
-    for _ in range(12):
-        candidate = f"{prefix}_{secrets.token_hex(6)}"
-        with engine.connect() as conn:
-            exists = conn.execute(
-                text("SELECT to_regnamespace(:schema_name)"),
-                {"schema_name": candidate},
-            ).scalar()
-        if not exists:
-            return candidate
-    raise RuntimeError("Failed to allocate unique schema name")
-
-
 @router.get("/coded-data")
-async def get_coded_data_query(coded_id: str = None, db: Session = Depends(get_db)):
-    """Return coded data stored in a File record with file_type='coding' or 'coding_comparison'.
-    Also includes codebook content/tree from the coding schema's `codebook` table when present.
+async def get_coded_data_query(
+    coded_id: str = None,
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """Return coded data for a File record with file_type='coding' or
+    'coding_comparison', owned by the authenticated user. Also includes
+    the parent codebook's content/tree, resolved via `file_dependencies`
+    (see `coding_service._resolve_parent_codebook_text` -- the redundant
+    per-artifact copy of the codebook text this used to read from is
+    retired).
     """
-    file_rec = _resolve_coding_file_record(db, coded_id)
+    file_rec, coded_data, codebook_text = await coding_service.get_coded_data(db, user_id, coded_id)
 
-    if file_rec:
-        schema = file_rec.schemaname
+    codebook_tree = []
+    if codebook_text:
         try:
-            with engine.connect() as conn:
-                tbl_exists = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": f"{schema}.content_store"}).scalar()
-                if not tbl_exists:
-                    return JSONResponse({"error": f"content_store table not found in schema {schema}"}, status_code=404)
-                res = conn.execute(text(f'SELECT file_text FROM "{schema}".content_store LIMIT 1'))
-                row = res.fetchone()
-                if row:
-                    codebook_text = ""
-                    codebook_tree = []
-                    codebook_tbl_exists = conn.execute(
-                        text("SELECT to_regclass(:tbl)"),
-                        {"tbl": f"{schema}.codebook"},
-                    ).scalar()
-                    if codebook_tbl_exists:
-                        cb_res = conn.execute(
-                            text(f'SELECT codebook_text FROM "{schema}".codebook LIMIT 1')
-                        )
-                        cb_row = cb_res.fetchone()
-                        codebook_text = (cb_row[0] if cb_row else "") or ""
-                        if codebook_text:
-                            try:
-                                parsed_text = parse_codebook_to_json(codebook_text)
-                                parsed_obj = json.loads(parsed_text)
-                                if isinstance(parsed_obj, list):
-                                    codebook_tree = parsed_obj
-                            except Exception:
-                                codebook_tree = []
+            parsed_text = parse_codebook_to_json(codebook_text)
+            parsed_obj = json.loads(parsed_text)
+            if isinstance(parsed_obj, list):
+                codebook_tree = parsed_obj
+        except Exception:
+            codebook_tree = []
 
-                    return JSONResponse({
-                        "coded_data": row[0],
-                        "codebook_text": codebook_text,
-                        "codebook_tree": codebook_tree,
-                        "systemprompt": file_rec.systemprompt,
-                        "userprompt": file_rec.userprompt
-                    })
-                else:
-                    return JSONResponse({"error": "Coded data content not found in file"}, status_code=404)
-        except Exception as e:
-            return JSONResponse({"error": f"Error reading coded data: {e}"}, status_code=500)
-
-    return JSONResponse({"error": "No coded data file found"}, status_code=404)
+    return JSONResponse({
+        "coded_data": coded_data,
+        "codebook_text": codebook_text,
+        "codebook_tree": codebook_tree,
+        "systemprompt": file_rec.systemprompt,
+        "userprompt": file_rec.userprompt,
+    })
 
 
 @router.post("/save-file-coded-data/")
-async def save_project_coded_data(request: Request, schema_name: str = Form(None), content: str = Form(None), db: Session = Depends(get_db)):
-    """Save coded content into a Postgres file-backed schema's content_store table for file_type 'coding'.
-    Requires authentication and ownership.
-    Accepts JSON or form-data with `schema_name` and `content`.
+async def save_project_coded_data(
+    request: Request,
+    schema_name: str = Form(None),
+    content: str = Form(None),
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """Save coded content for an owned coding file. Accepts JSON or
+    form-data with `schema_name` and `content`.
+
+    A request body may still include a `codebook_text` field for backward
+    compatibility with not-yet-updated callers -- it is parsed but
+    intentionally ignored: the redundant per-artifact codebook-text copy
+    it used to write no longer exists (see
+    `coding_service.save_project_coded_data`).
     """
-    user_id = get_user_id_from_request(request)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    codebook_text_provided = False
-    codebook_text_value = ""
-
-    # Support JSON body as well as form-data
+    display_name = None
     try:
         ctype = (request.headers.get("content-type") or "").lower()
         if "application/json" in ctype:
@@ -304,10 +72,6 @@ async def save_project_coded_data(request: Request, schema_name: str = Form(None
             schema_name = body.get("schema_name")
             content = body.get("content")
             display_name = body.get("display_name")
-            if isinstance(body, dict) and "codebook_text" in body:
-                codebook_text_provided = True
-                raw_cb = body.get("codebook_text")
-                codebook_text_value = "" if raw_cb is None else str(raw_cb)
         else:
             form = await request.form()
             if schema_name is None:
@@ -315,50 +79,21 @@ async def save_project_coded_data(request: Request, schema_name: str = Form(None
             if content is None:
                 content = form.get("content")
             display_name = form.get("display_name") if "display_name" in form else None
-            if "codebook_text" in form:
-                codebook_text_provided = True
-                raw_cb = form.get("codebook_text")
-                codebook_text_value = "" if raw_cb is None else str(raw_cb)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid request body")
 
-    if not schema_name or not content:
-        raise HTTPException(status_code=400, detail="schema_name and content are required")
-
-    schema = schema_name.strip()
-    file_rec = (
-        db.query(File)
-        .filter(
-            File.schemaname == schema,
-            File.user_id == user_id,
-            File.file_type.in_(["coding", "coding_comparison"]),
-        )
-        .first()
+    file_rec = await coding_service.save_project_coded_data(
+        db,
+        user_id,
+        schema_name=(schema_name or "").strip(),
+        content=content,
+        display_name=display_name,
     )
-    if not file_rec:
-        raise HTTPException(status_code=404, detail="File/project not found or you do not have permission")
-
-    try:
-        async with async_engine.begin() as conn:
-            await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
-            await conn.execute(text(f'CREATE TABLE IF NOT EXISTS "{schema}".content_store (file_text text)'))
-            await conn.execute(text(f'TRUNCATE TABLE "{schema}".content_store'))
-            await conn.execute(text(f'INSERT INTO "{schema}".content_store (file_text) VALUES (:file_text)'), {"file_text": content})
-
-            if codebook_text_provided:
-                await _upsert_codebook_text_async(conn, schema, codebook_text_value)
-
-        if display_name:
-            file_rec.filename = display_name
-            try:
-                db.commit()
-                db.refresh(file_rec)
-            except Exception:
-                db.rollback()
-
-        return JSONResponse({"message": "File coded data saved", "id": str(file_rec.id), "filename": file_rec.filename})
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+    return JSONResponse({
+        "message": "File coded data saved",
+        "id": str(file_rec.id),
+        "filename": file_rec.filename,
+    })
 
 
 @router.post("/save-file-coded-data-duplicate/")
@@ -367,18 +102,12 @@ async def save_project_coded_data_duplicate(
     source_schema_name: str = Form(None),
     content: str = Form(None),
     display_name: str = Form(None),
-    db: Session = Depends(get_db),
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
 ):
-    """Duplicate coding data into a new schema and file record.
-    Accepts JSON or form-data with source_schema_name, content, and display_name.
+    """Duplicate coding data into a new file. Accepts JSON or form-data
+    with source_schema_name, content, and display_name.
     """
-    user_id = get_user_id_from_request(request)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    codebook_text_provided = False
-    codebook_text_value = ""
-
     try:
         ctype = (request.headers.get("content-type") or "").lower()
         if "application/json" in ctype:
@@ -386,10 +115,6 @@ async def save_project_coded_data_duplicate(
             source_schema_name = body.get("source_schema_name")
             content = body.get("content")
             display_name = body.get("display_name")
-            if isinstance(body, dict) and "codebook_text" in body:
-                codebook_text_provided = True
-                raw_cb = body.get("codebook_text")
-                codebook_text_value = "" if raw_cb is None else str(raw_cb)
         else:
             form = await request.form()
             if source_schema_name is None:
@@ -398,412 +123,100 @@ async def save_project_coded_data_duplicate(
                 content = form.get("content")
             if display_name is None:
                 display_name = form.get("display_name")
-            if "codebook_text" in form:
-                codebook_text_provided = True
-                raw_cb = form.get("codebook_text")
-                codebook_text_value = "" if raw_cb is None else str(raw_cb)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid request body")
 
-    if not source_schema_name or not content or not display_name:
-        raise HTTPException(
-            status_code=400,
-            detail="source_schema_name, content, and display_name are required",
-        )
-
-    source_schema = source_schema_name.strip()
-    target_display_name = display_name.strip()
-    if not source_schema or not target_display_name:
-        raise HTTPException(
-            status_code=400,
-            detail="source_schema_name and display_name cannot be empty",
-        )
-
-    source_file = (
-        db.query(File)
-        .filter(
-            File.schemaname == source_schema,
-            File.user_id == user_id,
-            File.file_type.in_(["coding", "coding_comparison"]),
-        )
-        .first()
+    file_rec = await coding_service.save_project_coded_data_duplicate(
+        db,
+        user_id,
+        source_schema_name=source_schema_name or "",
+        content=content or "",
+        display_name=display_name or "",
     )
-    if not source_file:
-        raise HTTPException(
-            status_code=404,
-            detail="Source coding file not found or you do not have permission",
-        )
-
-    try:
-        source_codebook_exists, copied_codebook_text = (False, "")
-        if not codebook_text_provided:
-            source_codebook_exists, copied_codebook_text = _load_codebook_snapshot(
-                source_schema
-            )
-
-        new_schema = _generate_unique_schema_name("proj")
-        source_file_type = source_file.file_type or "coding"
-        source_system_prompt = source_file.systemprompt
-        source_user_prompt = source_file.userprompt
-        source_file_id = source_file.id
-
-        write_codebook = codebook_text_provided or source_codebook_exists
-        codebook_payload = (
-            codebook_text_value if codebook_text_provided else copied_codebook_text
-        )
-
-        async with async_engine.begin() as conn:
-            await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{new_schema}"'))
-            await conn.execute(
-                text(
-                    f'CREATE TABLE IF NOT EXISTS "{new_schema}".content_store (file_text text)'
-                )
-            )
-            await conn.execute(text(f'TRUNCATE TABLE "{new_schema}".content_store'))
-            await conn.execute(
-                text(
-                    f'INSERT INTO "{new_schema}".content_store (file_text) VALUES (:file_text)'
-                ),
-                {"file_text": content},
-            )
-
-            if write_codebook:
-                await _upsert_codebook_text_async(conn, new_schema, codebook_payload)
-
-        async with AsyncDatabaseManager() as dm:
-            file_rec = File(
-                user_id=user_id,
-                filename=target_display_name,
-                schemaname=new_schema,
-                file_type=source_file_type,
-                systemprompt=source_system_prompt,
-                userprompt=source_user_prompt,
-            )
-            dm.session.add(file_rec)
-            await dm.session.flush()
-
-            sfdm = await dm.session.execute(
-                select(File)
-                .where(File.id == source_file_id, File.user_id == user_id)
-                .options(selectinload(File.projects))
-            )
-            source_file_in_dm = sfdm.scalar_one_or_none()
-
-            for project in (source_file_in_dm.projects if source_file_in_dm else []):
-                await async_link_file_to_project(dm.session, file_rec.id, project.id)
-
-            copied_parent_ids: set[int] = set()
-            spd = await dm.session.execute(
-                select(FileDependency).where(FileDependency.child_file_id == source_file_id)
-            )
-            source_parent_dependencies = spd.scalars().all()
-
-            for parent_dependency in source_parent_dependencies:
-                pf = await dm.session.execute(
-                    select(File).where(
-                        File.id == parent_dependency.parent_file_id,
-                        File.user_id == user_id,
-                    )
-                )
-                parent_file = pf.scalar_one_or_none()
-                if not parent_file:
-                    continue
-
-                parent_file_id = parent_file.id
-                if parent_file_id in copied_parent_ids:
-                    continue
-
-                dm.session.add(
-                    FileDependency(
-                        child_file_id=file_rec.id,
-                        parent_file_id=parent_file_id,
-                    )
-                )
-                copied_parent_ids.add(parent_file_id)
-
-            if source_file_id not in copied_parent_ids:
-                dm.session.add(
-                    FileDependency(
-                        child_file_id=file_rec.id,
-                        parent_file_id=source_file_id,
-                    )
-                )
-
-            await dm.session.flush()
-
-            await dm.file_tables.add_table_metadata(
-                file_id=file_rec.id,
-                table_name="content_store",
-                row_count=1,
-            )
-            if write_codebook:
-                await dm.file_tables.add_table_metadata(
-                    file_id=file_rec.id,
-                    table_name="codebook",
-                    row_count=1,
-                )
-
-            new_file_id = file_rec.id
-
-        return JSONResponse(
-            {
-                "message": "File coded data duplicated",
-                "id": str(new_file_id),
-                "schema_name": new_schema,
-                "filename": target_display_name,
-            }
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+    return JSONResponse({
+        "message": "File coded data duplicated",
+        "id": str(file_rec.id),
+        "schema_name": file_rec.schemaname,
+        "filename": file_rec.filename,
+    })
 
 
-@router.post("/apply-codebook/", response_model=ApplyCodebookResponse)
+@router.post("/apply-codebook/")
 async def apply_codebook(
-    request: Request,
     payload: ApplyCodebookRequest = Depends(as_form(ApplyCodebookRequest)),
-    db: Session = Depends(get_db),
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
 ):
-    """Classify a raw/filtered schema against a codebook and persist the output.
+    """Kick off a background job that classifies a raw/filtered data
+    source against a codebook and persists the classification output, and
+    return immediately with a job id to poll instead of blocking the
+    request on the LLM call (see backend/app/jobs/).
 
     The ``codebook`` field accepts either a numeric File id or a
     ``proj_<hex>`` schema name; this is enforced by
     :class:`ApplyCodebookRequest`.
     """
-    import secrets
-
-    schema = payload.database
-    api_key = payload.api_key
-    codebook = payload.codebook
-    methodology = payload.methodology or ""
-    report_name = payload.report_name
-    model = payload.model or ""
-    sample_percentage = payload.sample_percentage
-    project_id = payload.project_id
-
-    try:
-        assembled = await asyncio.to_thread(_assemble_posts_content, schema, sample_percentage)
-
-        resolved_codebook_schema = _resolve_codebook_schema(db, codebook)
-        codebook_text = _load_content_store_text(resolved_codebook_schema)
-
-        if not codebook_text:
-            raise HTTPException(
-                status_code=404,
-                detail="Cannot apply codebook: codebook not found or empty",
-            )
-
-        # Attempt classification using the provided codebook and API key
-        classification_output = ""
-        system_prompt = ""
-        user_prompt = ""
-        try:
-            result = await asyncio.to_thread(
-                api_utils_module.classify_posts,
-                codebook_text,
-                assembled,
-                methodology,
-                api_key,
-                model,
-            )
-            classification_output, system_prompt, user_prompt = result
-        except Exception as e:
-            print(f"Exception during classification: {e}")
-            traceback.print_exc()
-            raise HTTPException(status_code=502, detail=f"API request error: {str(e)}")
-
-        user_id = get_user_id_from_request(request)
-        file_rec_info: dict | None = None
-        if user_id:
-            display_name = report_name.strip() or "coding"
-
-            unique_id = secrets.token_hex(6)
-            new_schema = f"proj_{unique_id}"
-            try:
-                async with async_engine.begin() as conn:
-                    await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{new_schema}"'))
-                    await conn.execute(text(f'CREATE TABLE IF NOT EXISTS "{new_schema}".content_store (file_text text)'))
-                    await conn.execute(text(f'CREATE TABLE IF NOT EXISTS "{new_schema}".codebook (codebook_text text)'))
-                    await conn.execute(text(f'TRUNCATE TABLE "{new_schema}".content_store'))
-                    await conn.execute(text(f'TRUNCATE TABLE "{new_schema}".codebook'))
-                    await conn.execute(text(f'INSERT INTO "{new_schema}".content_store (file_text) VALUES (:file_text)'), {"file_text": classification_output})
-                    await conn.execute(text(f'INSERT INTO "{new_schema}".codebook (codebook_text) VALUES (:codebook_text)'), {"codebook_text": codebook_text})
-
-                async with AsyncDatabaseManager() as dm:
-                    file_rec = File(user_id=user_id, filename=display_name, schemaname=new_schema, file_type='coding', systemprompt=system_prompt, userprompt=user_prompt)
-                    dm.session.add(file_rec)
-                    await dm.session.flush()
-                    db_fr = await dm.session.execute(
-                        select(File).where(File.schemaname == schema, File.user_id == user_id)
-                    )
-                    db_file = db_fr.scalar_one_or_none()
-                    if db_file:
-                        dep = FileDependency(child_file_id=file_rec.id, parent_file_id=db_file.id)
-                        dm.session.add(dep)
-                    cb_file = None
-                    if resolved_codebook_schema:
-                        cb_fr = await dm.session.execute(
-                            select(File).where(
-                                File.schemaname == resolved_codebook_schema,
-                                File.user_id == user_id,
-                            )
-                        )
-                        cb_file = cb_fr.scalar_one_or_none()
-                    if not cb_file and codebook:
-                        cb_fr2 = await dm.session.execute(
-                            select(File).where(File.filename == codebook, File.user_id == user_id)
-                        )
-                        cb_file = cb_fr2.scalar_one_or_none()
-                    if cb_file:
-                        dep = FileDependency(child_file_id=file_rec.id, parent_file_id=cb_file.id)
-                        dm.session.add(dep)
-                    await dm.session.flush()
-                    raw_fr = await dm.session.execute(
-                        select(File)
-                        .where(File.schemaname == schema, File.file_type == "raw_data")
-                        .options(selectinload(File.projects))
-                    )
-                    raw_file = raw_fr.scalar_one_or_none()
-                    if raw_file:
-                        for proj in raw_file.projects:
-                            await async_link_file_to_project(
-                                dm.session, file_rec.id, proj.id
-                            )
-                        await dm.session.flush()
-
-                    if project_id is not None:
-                        pr = await dm.session.execute(
-                            select(Project).where(Project.id == project_id)
-                        )
-                        proj = pr.scalar_one_or_none()
-                        if proj is None:
-                            raise HTTPException(status_code=404, detail="Project not found")
-                        if proj.user_id != user_id:
-                            raise HTTPException(
-                                status_code=403,
-                                detail="Forbidden: project does not belong to user",
-                            )
-                        await async_link_file_to_project(
-                            dm.session, file_rec.id, proj.id
-                        )
-                        await dm.session.flush()
-
-                    await dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name='content_store', row_count=1)
-                    await dm.file_tables.add_table_metadata(file_id=file_rec.id, table_name='codebook', row_count=1)
-                    file_rec_info = {
-                        "id": str(file_rec.id),
-                        "schema_name": new_schema,
-                        "filename": file_rec.filename,
-                    }
-            except HTTPException:
-                raise
-            except Exception as e:
-                print(f"Failed to persist classification project/schema: {e}")
-                traceback.print_exc()
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Failed to persist classification: {e}",
-                )
-
-        return JSONResponse({
-            "classification_output": classification_output,
-            "file": file_rec_info,
-        })
-    except HTTPException:
-        raise
-    except Exception as exc:
-        print(f"Error reading schema {schema}: {exc}")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc))
+    job = await coding_service.start_apply_codebook_job(
+        db,
+        user_id,
+        database=payload.database,
+        codebook=payload.codebook,
+        methodology=payload.methodology,
+        api_key=payload.api_key,
+        model=payload.model,
+        sample_percentage=payload.sample_percentage,
+        report_name=payload.report_name,
+        project_id=payload.project_id,
+    )
+    return JSONResponse({"job_id": job.id, "status": job.status}, status_code=202)
 
 
 @router.post("/compare-codings/")
-async def compare_codings(request: Request, coding_a: str = Form(...), coding_b: str = Form(...), api_key: str = Form(...), model: str = Form(None), prompt: str = Form("")):
-    """Compare two coding outputs stored in Postgres schemas by calling the LLM and return the full message."""
-    from .utils import codebook_get_client, MODEL_3
-
-    schema_a = (coding_a or "").strip()
-    schema_b = (coding_b or "").strip()
-
-    if not schema_a.startswith("proj_") or not schema_b.startswith("proj_"):
-        return JSONResponse({"error": "schema names must be proj_<id>"}, status_code=400)
-
-    if not api_key:
-        return JSONResponse({"error": "api_key is required"}, status_code=400)
-
-    try:
-        async with async_engine.connect() as conn:
-            ar = await conn.execute(text(f'SELECT file_text FROM "{schema_a}".content_store LIMIT 1'))
-            br = await conn.execute(text(f'SELECT file_text FROM "{schema_b}".content_store LIMIT 1'))
-            a_row = ar.fetchone()
-            b_row = br.fetchone()
-
-        text_a = (a_row[0] if a_row else "") or ""
-        text_b = (b_row[0] if b_row else "") or ""
-
-        if not text_a and not text_b:
-            return JSONResponse({"error": "No content found in either coding"}, status_code=400)
-
-        system_prompt = (
-            "You are an expert qualitative researcher. Compare the two provided coded datasets.\n"
-            "Provide a clear, structured comparison including:\n"
-            "- Major overlaps and divergences in coding decisions\n"
-            "- Instances where codes appear inconsistent or misapplied\n"
-            "- Suggestions for reconciliation or re-labeling\n"
-            "- An overall recommendation and confidence level.\n"
-            "Return the full comparison in a markdown format."
-        )
-
-        user_prompt = f"Coding A: {text_a} Coding B: {text_b} Please compare them in detail. Additional instructions: {prompt}"
-
-        chosen_model = model or MODEL_3
-
-        resp = await asyncio.to_thread(
-            codebook_get_client, system_prompt, user_prompt, api_key, chosen_model
-        )
-        return JSONResponse({"comparison": resp})
-    except Exception as exc:
-        traceback.print_exc()
-        return JSONResponse({"error": str(exc)}, status_code=500)
+async def compare_codings(
+    coding_a: str = Form(...),
+    coding_b: str = Form(...),
+    api_key: str = Form(...),
+    model: str = Form(None),
+    prompt: str = Form(""),
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """Kick off a background job that compares two coding outputs by
+    calling the LLM, and return immediately with a job id to poll (see
+    backend/app/jobs/). Also closes the missing-auth gap the old
+    synchronous route had (no user check at all).
+    """
+    job = await coding_service.start_compare_codings_job(
+        db,
+        user_id,
+        coding_a=coding_a,
+        coding_b=coding_b,
+        api_key=api_key,
+        model=model,
+        prompt=prompt,
+    )
+    return JSONResponse({"job_id": job.id, "status": job.status}, status_code=202)
 
 
 @router.post("/summarize-coding/")
-async def summarize_coding(request: Request, coding: str = Form(...), api_key: str = Form(...), model: str = Form(None), prompt: str = Form("")):
-    """Summarize a coding output stored in Postgres schema by calling the LLM and return the summary."""
-    from backend.scripts.summarize_coding import summarize_coding as summarize_coding_function
-
-    print("[summarize-coding] Endpoint called")
-    schema = (coding or "").strip()
-
-    if not schema.startswith("proj_"):
-        print(f"[summarize-coding] Invalid schema name: {schema}")
-        return JSONResponse({"error": "schema name must be proj_<id>"}, status_code=400)
-
-    if not api_key:
-        print("[summarize-coding] No API key provided")
-        return JSONResponse({"error": "api_key is required"}, status_code=400)
-
-    try:
-        print(f"[summarize-coding] Retrieving data from schema: {schema}")
-        async with async_engine.connect() as conn:
-            rr = await conn.execute(text(f'SELECT file_text FROM "{schema}".content_store LIMIT 1'))
-            row = rr.fetchone()
-
-        coding_data = (row[0] if row else "") or ""
-        print(f"[summarize-coding] Retrieved coding data length: {len(coding_data)}")
-
-        if not coding_data:
-            print("[summarize-coding] No content found in coding data")
-            return JSONResponse({"error": "No content found in coding"}, status_code=400)
-
-        print("[summarize-coding] Calling summarize_coding function")
-        summary = await asyncio.to_thread(
-            summarize_coding_function, coding_data, prompt, api_key, model
-        )
-        print(f"[summarize-coding] Summary generated, length: {len(summary)}")
-        return JSONResponse({"summary": summary})
-    except Exception as exc:
-        print(f"[summarize-coding] Error: {exc}")
-        traceback.print_exc()
-        return JSONResponse({"error": str(exc)}, status_code=500)
+async def summarize_coding(
+    coding: str = Form(...),
+    api_key: str = Form(...),
+    model: str = Form(None),
+    prompt: str = Form(""),
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """Kick off a background job to summarize a coding output stored in a
+    Postgres schema, and return immediately with a job id to poll instead
+    of blocking the request on the LLM call (see backend/app/jobs/).
+    """
+    job = await coding_service.start_summarize_coding_job(
+        db,
+        user_id,
+        coding=coding,
+        api_key=api_key,
+        model=model,
+        prompt=prompt,
+    )
+    return JSONResponse({"job_id": job.id, "status": job.status}, status_code=202)

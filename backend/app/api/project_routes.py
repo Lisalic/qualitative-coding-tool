@@ -1,197 +1,92 @@
-from fastapi import APIRouter, HTTPException, Depends, Request, Form, Query
+from fastapi import APIRouter, Depends, Form, Query
 from fastapi.responses import JSONResponse
-from sqlalchemy.orm import Session, selectinload
-from sqlalchemy import text, select
-import json
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.api.utils import get_user_id_from_request
-from backend.app.database import get_db, Project, File, FileTable, FileDependency
-from backend.app.databasemanager import AsyncDatabaseManager
+from backend.app.core.auth_dependency import require_user_id
+from backend.app.database import get_async_db
+from backend.app.services import project_service
 
 router = APIRouter()
 
 
 @router.get("/my-files/")
-def my_projects(request: Request, file_type: str = Query("raw_data"), db: Session = Depends(get_db)):
-    user_id = get_user_id_from_request(request)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    # Use File table instead of Project; `file_type` query param maps to `file_type` on File
-    # Allow callers requesting 'codebook' or 'coding' to also receive saved comparison files
-    if file_type == 'codebook':
-        files = db.query(File).filter(File.user_id == user_id, File.file_type.in_(['codebook', 'codebook_comparison'])).all()
-    elif file_type == 'coding':
-        files = db.query(File).filter(File.user_id == user_id, File.file_type.in_(['coding', 'coding_comparison'])).all()
-    else:
-        files = db.query(File).filter(File.user_id == user_id, File.file_type == file_type).all()
-    result = []
-    for p in files:
-        rows = db.query(FileTable).filter(FileTable.file_id == p.id).all()
-        tables = [{"table_name": r.tablename, "row_count": r.row_count} for r in rows]
-
-        deps = db.query(FileDependency).filter(FileDependency.child_file_id == p.id).all()
-        parent_files = []
-        for d in deps:
-            parent_file = db.query(File).filter(File.id == d.parent_file_id).first()
-            if parent_file:
-                parent_files.append(
-                    {
-                        "id": str(parent_file.id),
-                        "name": parent_file.filename,
-                        "schema_name": parent_file.schemaname,
-                        "type": parent_file.file_type,
-                    }
-                )
-
-        result.append(
-            {
-                "id": str(p.id),
-                "display_name": p.filename,
-                "description": p.description,
-                "schema_name": p.schemaname,
-                "file_type": p.file_type,
-                "created_at": p.created_at.isoformat() if p.created_at else None,
-                "tables": tables,
-                "parent_files": parent_files,
-            }
-        )
-
+async def my_projects(
+    file_type: str = Query("raw_data"),
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
+) -> JSONResponse:
+    result = await project_service.list_files_for_user(db, user_id, file_type)
     return JSONResponse({"projects": result})
 
 
 @router.post("/create-project/")
-def create_project(request: Request, name: str = Form(...), description: str = Form(None), db: Session = Depends(get_db)):
+async def create_project(
+    name: str = Form(...),
+    description: str = Form(None),
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
+) -> JSONResponse:
     """Create a new project."""
-    user_id = get_user_id_from_request(request)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    if not name or not name.strip():
-        raise HTTPException(status_code=400, detail="Project name is required")
-
-    # create project record (no schema_name column in DB)
-    proj = Project(user_id=user_id, projectname=name.strip(), description=(description or None))
-    db.add(proj)
-    try:
-        db.commit()
-        db.refresh(proj)
-    except Exception as exc:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    return JSONResponse({"project": {"id": str(proj.id), "projectname": proj.projectname, "description": proj.description, "created_at": proj.created_at.isoformat() if proj.created_at else None}})
+    proj = await project_service.create_project(db, user_id, name, description)
+    return JSONResponse(
+        {
+            "project": {
+                "id": str(proj.id),
+                "projectname": proj.projectname,
+                "description": proj.description,
+                "created_at": proj.created_at.isoformat() if proj.created_at else None,
+            }
+        }
+    )
 
 
 @router.post("/update-project/")
-def update_project(request: Request, project_id: int = Form(...), name: str = Form(...), description: str = Form(None), db: Session = Depends(get_db)):
+async def update_project(
+    project_id: int = Form(...),
+    name: str = Form(...),
+    description: str = Form(None),
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
+) -> JSONResponse:
     """Update a project."""
-    user_id = get_user_id_from_request(request)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    proj = db.query(Project).filter(Project.id == project_id).first()
-    if not proj:
-        raise HTTPException(status_code=404, detail="Project not found")
-    if proj.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Forbidden: project does not belong to user")
-
-    if not name or not name.strip():
-        raise HTTPException(status_code=400, detail="Project name is required")
-
-    proj.projectname = name.strip()
-    proj.description = description or None
-    try:
-        db.add(proj)
-        db.commit()
-        db.refresh(proj)
-    except Exception as exc:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    return JSONResponse({"project": {"id": str(proj.id), "projectname": proj.projectname, "description": proj.description, "created_at": proj.created_at.isoformat() if proj.created_at else None}})
+    proj = await project_service.update_project(db, user_id, project_id, name, description)
+    return JSONResponse(
+        {
+            "project": {
+                "id": str(proj.id),
+                "projectname": proj.projectname,
+                "description": proj.description,
+                "created_at": proj.created_at.isoformat() if proj.created_at else None,
+            }
+        }
+    )
 
 
 @router.get("/projects/")
-async def list_projects(request: Request):
+async def list_projects(
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
+) -> JSONResponse:
     """List user's projects."""
-    user_id = get_user_id_from_request(request)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    async with AsyncDatabaseManager() as dm:
-        stmt = (
-            select(Project)
-            .where(Project.user_id == user_id)
-            .options(selectinload(Project.files))
-        )
-        res = await dm.session.execute(stmt)
-        rows = res.scalars().unique().all()
-        result = []
-        for r in rows:
-            files = []
-            try:
-                for f in getattr(r, "files", []) or []:
-                    parent_files = []
-                    try:
-                        deps_r = await dm.session.execute(
-                            select(FileDependency).where(FileDependency.child_file_id == f.id)
-                        )
-                        deps = deps_r.scalars().all()
-                        for d in deps:
-                            parent_file = await dm.session.get(File, d.parent_file_id)
-                            if parent_file:
-                                parent_files.append({
-                                    "id": str(parent_file.id),
-                                    "name": parent_file.filename,
-                                    "type": parent_file.file_type
-                                })
-                    except Exception:
-                        parent_files = []
-                    files.append({
-                        "id": str(f.id),
-                        "display_name": f.filename,
-                        "schema_name": f.schemaname,
-                        "file_type": f.file_type,
-                        "description": f.description,
-                        "created_at": f.created_at.isoformat() if f.created_at else None,
-                        "parent_files": parent_files,
-                    })
-            except Exception:
-                files = []
-
-            result.append({
-                "id": str(r.id),
-                "projectname": r.projectname,
-                "description": r.description,
-                "created_at": r.created_at.isoformat() if r.created_at else None,
-                "files": files,
-            })
-
+    result = await project_service.list_projects_with_files(db, user_id)
     return JSONResponse({"projects": result})
 
 
 @router.post("/rename-file/")
-def rename_project(request: Request, schema_name: str = Form(...), display_name: str = Form(...), description: str = Form(None), db: Session = Depends(get_db)):
+async def rename_project(
+    schema_name: str = Form(...),
+    display_name: str = Form(...),
+    description: str = Form(None),
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
+) -> JSONResponse:
     """Rename a file's display_name. Requires authentication and ownership."""
-    user_id = get_user_id_from_request(request)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    schema = schema_name.strip()
-
-    file_rec = db.query(File).filter(File.schemaname == schema, File.user_id == user_id).first()
-    if not file_rec:
-        raise HTTPException(status_code=404, detail="File not found or you do not have permission")
-
-    file_rec.filename = display_name
-    if description is not None:
-        file_rec.description = description
-    try:
-        db.commit()
-        db.refresh(file_rec)
-    except Exception as exc:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to rename file: {exc}")
-
-    return JSONResponse({"message": "File renamed", "id": str(file_rec.id), "display_name": file_rec.filename, "description": file_rec.description})
+    file_rec = await project_service.rename_file(db, user_id, schema_name, display_name, description)
+    return JSONResponse(
+        {
+            "message": "File renamed",
+            "id": str(file_rec.id),
+            "display_name": file_rec.filename,
+            "description": file_rec.description,
+        }
+    )

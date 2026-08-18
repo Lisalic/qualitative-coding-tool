@@ -1,44 +1,74 @@
-"""Guard-level tests for backend/app/api/file_routes.py.
+"""Tests for backend/app/api/file_routes.py.
 
-Same rationale as the other route test modules: SQLite (via
-`override_db`) covers the ORM lookups; `engine` is patched (or replaced
-with `unused_engine` to prove a guard fires first) for the raw-SQL
-DROP/DELETE/INSERT paths, which need real Postgres semantics for a full
-happy-path test -- covered by the opt-in integration suite.
+The router is fully async (`Depends(get_async_db)`), so every test here
+runs against `override_async_db` (in-memory SQLite via
+`async_sqlite_engine`), matching the pattern used in
+`test_project_routes.py`/`test_prompt_routes.py`. Raw-dynamic-schema
+paths (`upload_zst`'s `.zst` streaming, `merge_databases`' reads from old
+`proj_*` schemas) need real Postgres semantics not reachable from SQLite
+-- those are covered by `tests/backend/services/test_file_service.py`
+(mocked at the streaming/raw-SQL-read boundary) and the opt-in
+integration suite, not here. This module covers request validation,
+auth/ownership guards, and the fixed-table happy paths for
+delete-database/delete-row/move-rows.
 """
 
-from contextlib import contextmanager
-from unittest.mock import MagicMock
-
 import pytest
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
-pytestmark = pytest.mark.usefixtures("override_db")
+from backend.app.database import File, User
+from backend.app.storage_models import Submission
 
-
-def _auth_headers(make_token):
-    return {"Authorization": f"Bearer {make_token()}"}
-
-
-def _own_file(db_session, user_id, schemaname, filename="f"):
-    from backend.app.database import File
-
-    f = File(user_id=user_id, filename=filename, schemaname=schemaname, file_type="raw_data")
-    db_session.add(f)
-    db_session.commit()
-    return f
+pytestmark = pytest.mark.usefixtures("override_async_db")
 
 
-def _make_user(db_session, email="a@b.com"):
-    from backend.app.database import User
+def _auth_headers(make_token, sub="1"):
+    return {"Authorization": f"Bearer {make_token(sub=sub)}"}
 
-    user = User(email=email, password="hash")
-    db_session.add(user)
-    db_session.commit()
-    return user
+
+@pytest.fixture()
+def session_factory(async_sqlite_engine):
+    return async_sessionmaker(async_sqlite_engine, expire_on_commit=False)
+
+
+async def _make_user(session_factory, email="a@b.com") -> int:
+    async with session_factory() as session:
+        user = User(email=email, password="hash")
+        session.add(user)
+        await session.commit()
+        return user.id
+
+
+async def _make_file(session_factory, user_id, schemaname, filename="f", file_type="raw_data") -> int:
+    async with session_factory() as session:
+        f = File(user_id=user_id, filename=filename, schemaname=schemaname, file_type=file_type)
+        session.add(f)
+        await session.commit()
+        return f.id
+
+
+async def _add_submission(session_factory, file_id, row_id, **overrides):
+    async with session_factory() as session:
+        defaults = dict(
+            file_id=file_id,
+            id=row_id,
+            subreddit="s",
+            title="t",
+            selftext="body text",
+            author="a",
+            created_utc=1,
+            score=1,
+            num_comments=0,
+            word_count=2,
+        )
+        defaults.update(overrides)
+        session.add(Submission(**defaults))
+        await session.commit()
 
 
 # ---------------------------------------------------------------------------
-# upload-zst
+# upload-zst -- pure request validation, no DB touched before the checks
 # ---------------------------------------------------------------------------
 
 
@@ -70,7 +100,7 @@ class TestUploadZst:
         assert "data_type" in resp.json()["detail"]
 
     def test_no_auth_returns_401(self, client) -> None:
-        # Reaches the auth check after saving the temp file (no
+        # Reaches the auth check after reading the upload's bytes (no
         # DB/engine work happens before it), so no patching needed.
         resp = client.post(
             "/api/upload-zst/",
@@ -106,35 +136,34 @@ class TestDeleteDatabase:
         )
         assert resp.status_code == 404
 
-    def test_deletes_owned_file_and_drops_schema(
-        self, client, make_token, db_session, monkeypatch
+    async def test_deletes_owned_file_and_its_fixed_table_rows(
+        self, client, make_token, session_factory
     ) -> None:
-        user = _make_user(db_session)
-        _own_file(db_session, user.id, "proj_a")
-
-        eng = MagicMock()
-
-        @contextmanager
-        def _begin():
-            yield MagicMock()
-
-        eng.begin.side_effect = _begin
-        monkeypatch.setattr("backend.app.api.file_routes.engine", eng)
+        uid = await _make_user(session_factory)
+        fid = await _make_file(session_factory, uid, "proj_a")
+        await _add_submission(session_factory, fid, "s1")
 
         resp = client.delete(
             "/api/delete-database/proj_a",
-            headers={"Authorization": f"Bearer {make_token(sub=str(user.id))}"},
+            headers=_auth_headers(make_token, sub=str(uid)),
         )
         assert resp.status_code == 200
-        assert eng.begin.called
+        assert "proj_a" in resp.json()["message"] or "f" in resp.json()["message"]
 
-    def test_someone_elses_file_returns_404(self, client, make_token, db_session) -> None:
-        owner = _make_user(db_session, "owner@x.com")
-        _own_file(db_session, owner.id, "proj_a")
+        async with session_factory() as session:
+            assert (await session.execute(select(File).where(File.id == fid))).scalar_one_or_none() is None
+            remaining = (
+                await session.execute(select(Submission).where(Submission.file_id == fid))
+            ).scalars().all()
+            assert remaining == []
+
+    async def test_someone_elses_file_returns_404(self, client, make_token, session_factory) -> None:
+        owner_id = await _make_user(session_factory, "owner@x.com")
+        await _make_file(session_factory, owner_id, "proj_a")
 
         resp = client.delete(
             "/api/delete-database/proj_a",
-            headers={"Authorization": f"Bearer {make_token(sub='999999')}"},
+            headers=_auth_headers(make_token, sub="999999"),
         )
         assert resp.status_code == 404
 
@@ -177,34 +206,36 @@ class TestDeleteRow:
         )
         assert resp.status_code == 403
 
-    def test_deletes_row_for_owned_file(self, client, make_token, db_session, monkeypatch) -> None:
-        user = _make_user(db_session)
-        _own_file(db_session, user.id, "proj_a")
-
-        conn = MagicMock()
-        delete_result = MagicMock()
-        delete_result.rowcount = 1
-        count_result = MagicMock()
-        count_result.scalar.return_value = 0
-        conn.execute.side_effect = [delete_result, count_result]
-
-        eng = MagicMock()
-
-        @contextmanager
-        def _ctx():
-            yield conn
-
-        eng.begin.side_effect = _ctx
-        eng.connect.side_effect = _ctx
-        monkeypatch.setattr("backend.app.api.file_routes.engine", eng)
+    async def test_deletes_row_for_owned_file(self, client, make_token, session_factory) -> None:
+        uid = await _make_user(session_factory)
+        fid = await _make_file(session_factory, uid, "proj_a")
+        await _add_submission(session_factory, fid, "abc123")
 
         resp = client.post(
             "/api/delete-row/",
-            headers={"Authorization": f"Bearer {make_token(sub=str(user.id))}"},
+            headers=_auth_headers(make_token, sub=str(uid)),
             data={"schemaname": "proj_a", "table": "submissions", "row_id": "abc123"},
         )
         assert resp.status_code == 200
         assert resp.json()["deleted"] == 1
+
+        async with session_factory() as session:
+            remaining = (
+                await session.execute(select(Submission).where(Submission.file_id == fid))
+            ).scalars().all()
+            assert remaining == []
+
+    async def test_deletes_zero_for_missing_row(self, client, make_token, session_factory) -> None:
+        uid = await _make_user(session_factory)
+        await _make_file(session_factory, uid, "proj_a")
+
+        resp = client.post(
+            "/api/delete-row/",
+            headers=_auth_headers(make_token, sub=str(uid)),
+            data={"schemaname": "proj_a", "table": "submissions", "row_id": "nonexistent"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["deleted"] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -285,3 +316,63 @@ class TestMoveRows:
             },
         )
         assert resp.status_code == 403
+
+    async def test_moves_matching_rows_between_owned_files(
+        self, client, make_token, session_factory
+    ) -> None:
+        """Row/content-parity proof for the new set-based
+        `raw_data_repo.copy_rows_by_id` path (replacing the old per-id
+        SELECT+INSERT Python loop): the moved row lands in the target
+        with its content intact and is gone from the source.
+        """
+        uid = await _make_user(session_factory)
+        src_id = await _make_file(session_factory, uid, "proj_src")
+        tgt_id = await _make_file(session_factory, uid, "proj_tgt")
+        await _add_submission(session_factory, src_id, "keep", selftext="stay")
+        await _add_submission(session_factory, src_id, "move", selftext="move me")
+
+        resp = client.post(
+            "/api/move-rows/",
+            headers=_auth_headers(make_token, sub=str(uid)),
+            json={
+                "source_schema": "proj_src",
+                "target_schema": "proj_tgt",
+                "table": "submissions",
+                "row_ids": ["move"],
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["moved"] == 1
+
+        async with session_factory() as session:
+            src_rows = (
+                await session.execute(select(Submission).where(Submission.file_id == src_id))
+            ).scalars().all()
+            assert [r.id for r in src_rows] == ["keep"]
+
+            tgt_rows = (
+                await session.execute(select(Submission).where(Submission.file_id == tgt_id))
+            ).scalars().all()
+            assert len(tgt_rows) == 1
+            assert tgt_rows[0].id == "move"
+            assert tgt_rows[0].selftext == "move me"
+
+    async def test_no_matching_rows_returns_zero_with_message(
+        self, client, make_token, session_factory
+    ) -> None:
+        uid = await _make_user(session_factory)
+        await _make_file(session_factory, uid, "proj_src")
+        await _make_file(session_factory, uid, "proj_tgt")
+
+        resp = client.post(
+            "/api/move-rows/",
+            headers=_auth_headers(make_token, sub=str(uid)),
+            json={
+                "source_schema": "proj_src",
+                "target_schema": "proj_tgt",
+                "table": "submissions",
+                "row_ids": ["nonexistent"],
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {"moved": 0, "message": "No matching rows found"}

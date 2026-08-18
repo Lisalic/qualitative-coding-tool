@@ -1,19 +1,44 @@
 """Tests for backend/app/api/project_routes.py.
 
-`my_projects`, `create_project`, `update_project`, `rename_project` use
-`Depends(get_db)` (sync SQLite via `override_db`). `list_projects` uses
-`AsyncDatabaseManager()` directly, bypassing dependency injection, so it
-is exercised separately against `override_async_db`.
+The router is fully async (`Depends(get_async_db)`), so every test class
+here runs against `override_async_db` (in-memory SQLite via
+`async_sqlite_engine`), matching the pattern already used in
+`test_prompt_routes.py`.
 """
 
 import pytest
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+from backend.app.database import File, Project, User, project_files_table
+
+pytestmark = pytest.mark.usefixtures("override_async_db")
 
 
 def _auth_headers(make_token, sub="1"):
     return {"Authorization": f"Bearer {make_token(sub=sub)}"}
 
 
-@pytest.mark.usefixtures("override_db")
+@pytest.fixture()
+def session_factory(async_sqlite_engine):
+    return async_sessionmaker(async_sqlite_engine, expire_on_commit=False)
+
+
+@pytest.fixture()
+def make_user(session_factory):
+    """Create a real `User` row on the same in-memory SQLite engine
+    `override_async_db` reads from, and return its id as a string.
+    """
+
+    async def _make(email: str = "u@x.com") -> str:
+        async with session_factory() as session:
+            user = User(email=email, password="hash")
+            session.add(user)
+            await session.commit()
+            return str(user.id)
+
+    return _make
+
+
 class TestCreateProject:
     def test_create_requires_auth(self, client) -> None:
         resp = client.post("/api/create-project/", data={"name": "P1"})
@@ -50,7 +75,6 @@ class TestCreateProject:
         assert resp.status_code == 422
 
 
-@pytest.mark.usefixtures("override_db")
 class TestUpdateProject:
     def _create(self, client, make_token, sub="1", name="Orig"):
         resp = client.post(
@@ -99,7 +123,6 @@ class TestUpdateProject:
         assert resp.status_code == 400
 
 
-@pytest.mark.usefixtures("override_db")
 class TestMyFiles:
     def test_requires_auth(self, client) -> None:
         assert client.get("/api/my-files/").status_code == 401
@@ -109,43 +132,51 @@ class TestMyFiles:
         assert resp.status_code == 200
         assert resp.json() == {"projects": []}
 
-    def test_default_file_type_is_raw_data(self, client, make_token, db_session) -> None:
-        from backend.app.database import File, User
+    async def test_default_file_type_is_raw_data(
+        self, client, make_token, session_factory
+    ) -> None:
+        async with session_factory() as session:
+            user = User(email="a@b.com", password="hash")
+            session.add(user)
+            await session.commit()
+            f = File(user_id=user.id, filename="f1", schemaname="proj_a", file_type="raw_data")
+            f2 = File(
+                user_id=user.id, filename="f2", schemaname="proj_b", file_type="filtered_data"
+            )
+            session.add_all([f, f2])
+            await session.commit()
+            uid = user.id
 
-        user = User(email="a@b.com", password="hash")
-        db_session.add(user)
-        db_session.commit()
-        f = File(user_id=user.id, filename="f1", schemaname="proj_a", file_type="raw_data")
-        f2 = File(user_id=user.id, filename="f2", schemaname="proj_b", file_type="filtered_data")
-        db_session.add_all([f, f2])
-        db_session.commit()
-
-        resp = client.get("/api/my-files/", headers=_auth_headers(make_token, sub=str(user.id)))
+        resp = client.get("/api/my-files/", headers=_auth_headers(make_token, sub=str(uid)))
         names = [p["display_name"] for p in resp.json()["projects"]]
         assert names == ["f1"]
 
-    def test_codebook_file_type_includes_comparisons(self, client, make_token, db_session) -> None:
-        from backend.app.database import File, User
-
-        user = User(email="a@b.com", password="hash")
-        db_session.add(user)
-        db_session.commit()
-        f1 = File(user_id=user.id, filename="cb", schemaname="proj_a", file_type="codebook")
-        f2 = File(
-            user_id=user.id, filename="cmp", schemaname="cmp_a", file_type="codebook_comparison"
-        )
-        db_session.add_all([f1, f2])
-        db_session.commit()
+    async def test_codebook_file_type_includes_comparisons(
+        self, client, make_token, session_factory
+    ) -> None:
+        async with session_factory() as session:
+            user = User(email="a@b.com", password="hash")
+            session.add(user)
+            await session.commit()
+            f1 = File(user_id=user.id, filename="cb", schemaname="proj_a", file_type="codebook")
+            f2 = File(
+                user_id=user.id,
+                filename="cmp",
+                schemaname="cmp_a",
+                file_type="codebook_comparison",
+            )
+            session.add_all([f1, f2])
+            await session.commit()
+            uid = user.id
 
         resp = client.get(
             "/api/my-files/?file_type=codebook",
-            headers=_auth_headers(make_token, sub=str(user.id)),
+            headers=_auth_headers(make_token, sub=str(uid)),
         )
         names = {p["display_name"] for p in resp.json()["projects"]}
         assert names == {"cb", "cmp"}
 
 
-@pytest.mark.usefixtures("override_db")
 class TestRenameFile:
     def test_requires_auth(self, client) -> None:
         resp = client.post(
@@ -153,19 +184,19 @@ class TestRenameFile:
         )
         assert resp.status_code == 401
 
-    def test_rename_success(self, client, make_token, db_session) -> None:
-        from backend.app.database import File, User
-
-        user = User(email="a@b.com", password="hash")
-        db_session.add(user)
-        db_session.commit()
-        f = File(user_id=user.id, filename="old", schemaname="proj_a", file_type="raw_data")
-        db_session.add(f)
-        db_session.commit()
+    async def test_rename_success(self, client, make_token, session_factory) -> None:
+        async with session_factory() as session:
+            user = User(email="a@b.com", password="hash")
+            session.add(user)
+            await session.commit()
+            f = File(user_id=user.id, filename="old", schemaname="proj_a", file_type="raw_data")
+            session.add(f)
+            await session.commit()
+            uid = user.id
 
         resp = client.post(
             "/api/rename-file/",
-            headers=_auth_headers(make_token, sub=str(user.id)),
+            headers=_auth_headers(make_token, sub=str(uid)),
             data={"schema_name": "proj_a", "display_name": "new-name"},
         )
         assert resp.status_code == 200
@@ -179,17 +210,18 @@ class TestRenameFile:
         )
         assert resp.status_code == 404
 
-    def test_rename_someone_elses_file_returns_404(self, client, make_token, db_session) -> None:
+    async def test_rename_someone_elses_file_returns_404(
+        self, client, make_token, session_factory
+    ) -> None:
         # Ownership is enforced via the WHERE clause itself (File.user_id
         # == user_id), so a mismatch surfaces as 404, not 403.
-        from backend.app.database import File, User
-
-        owner = User(email="owner@x.com", password="hash")
-        db_session.add(owner)
-        db_session.commit()
-        f = File(user_id=owner.id, filename="old", schemaname="proj_a", file_type="raw_data")
-        db_session.add(f)
-        db_session.commit()
+        async with session_factory() as session:
+            owner = User(email="owner@x.com", password="hash")
+            session.add(owner)
+            await session.commit()
+            f = File(user_id=owner.id, filename="old", schemaname="proj_a", file_type="raw_data")
+            session.add(f)
+            await session.commit()
 
         resp = client.post(
             "/api/rename-file/",
@@ -200,33 +232,18 @@ class TestRenameFile:
 
 
 class TestListProjects:
-    """`list_projects` constructs `AsyncDatabaseManager()` directly rather
-    than using `Depends(get_async_db)`, so it needs
-    `patch_async_database_manager` rather than `override_async_db`.
-    """
-
     def test_requires_auth(self, client) -> None:
         assert client.get("/api/projects/").status_code == 401
 
-    def test_empty_for_new_user(self, client, make_token, patch_async_database_manager) -> None:
+    def test_empty_for_new_user(self, client, make_token) -> None:
         resp = client.get("/api/projects/", headers=_auth_headers(make_token))
         assert resp.status_code == 200
         assert resp.json() == {"projects": []}
 
     async def test_lists_own_projects_with_files(
-        self, client, make_token, patch_async_database_manager
+        self, client, make_token, session_factory
     ) -> None:
-        # NOTE: `async_link_file_to_project` builds its INSERT via
-        # `sqlalchemy.dialects.postgresql.insert(...).on_conflict_do_nothing`,
-        # which only compiles against the postgresql dialect -- it cannot
-        # run against this SQLite fixture. Insert into the plain
-        # `project_files` association table directly instead; the
-        # Postgres-specific ON CONFLICT path is covered by the opt-in
-        # integration suite (tests/backend/integration/).
-        SessionLocal = patch_async_database_manager
-        from backend.app.database import File, Project, User, project_files_table
-
-        async with SessionLocal() as session:
+        async with session_factory() as session:
             user = User(email="a@b.com", password="hash")
             session.add(user)
             await session.commit()

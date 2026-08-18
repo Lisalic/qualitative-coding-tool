@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { postForm } from "../../api";
+import { postFormAndPoll } from "../../api";
 import FormShell from "../forms/FormShell";
 import DatabaseSourceFields from "../forms/DatabaseSourceFields";
 import SliderField from "../forms/SliderField";
@@ -12,9 +12,10 @@ import {
   MissingFieldsError,
   buildApplyCodebookForm,
 } from "../../lib/apiContracts";
-import "../../styles/Home.css";
 
 const EXAMPLE_PROMPT = EXAMPLE_PROMPTS.apply;
+const inputClasses =
+  "border border-paper bg-white/5 px-3 py-2.5 text-paper placeholder:text-paper/40 focus:outline-none focus:ring-2 focus:ring-paper disabled:opacity-50";
 
 export default function ApplyCodebookPanel({ methodology, onMethodologyChange }) {
   const navigate = useNavigate();
@@ -87,7 +88,7 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
         throw err;
       }
 
-      const { ok, data, error: postError } = await postForm(
+      const { ok, data, error: postError } = await postFormAndPoll(
         "/api/apply-codebook/",
         requestData,
       );
@@ -175,11 +176,15 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
   const displayResult = result && result.classification_report;
 
   return (
-    <div className="file-upload">
-      <h1 className="tool-page-title">Apply Codebook</h1>
+    <div>
+      <h1 className="mb-2 text-center text-2xl font-bold">Apply Codebook</h1>
 
-      <div className="action-buttons">
-        <button type="button" onClick={handleViewCoding} className="view-button">
+      <div className="mb-6 flex justify-center">
+        <button
+          type="button"
+          onClick={handleViewCoding}
+          className="border border-paper px-4 py-2 text-sm transition-colors hover:bg-paper hover:text-ink"
+        >
           View Coding Results
         </button>
       </div>
@@ -209,13 +214,15 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
           disabled={loading}
         />
 
-        <div className="form-group">
-          <label htmlFor="codebook">Select Codebook</label>
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="codebook" className="text-sm">
+            Select Codebook
+          </label>
           <select
             id="codebook"
             value={codebook}
             onChange={(e) => setCodebook(e.target.value)}
-            className="form-input"
+            className={inputClasses}
             disabled={loading}
           >
             {codebooks.length === 0 ? (
@@ -258,7 +265,7 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
           min={1}
           max={100}
           step={1}
-          disabled={loading || !Boolean(database)}
+          disabled={loading || !database}
           valueDisplay={database ? `${samplePercentage}%` : ""}
           valueMinWidth="70px"
           caption={
@@ -268,28 +275,32 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
           }
         />
 
-        <div className="form-group">
-          <label htmlFor="report_name">Report Name</label>
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="report_name" className="text-sm">
+            Report Name
+          </label>
           <input
             id="report_name"
             type="text"
             value={reportName}
             onChange={(e) => setReportName(e.target.value)}
             placeholder="Enter report name... "
-            className="form-input"
+            className={inputClasses}
             disabled={loading}
           />
         </div>
 
-        <div className="form-group">
-          <label htmlFor="description">Description (optional)</label>
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="description" className="text-sm">
+            Description (optional)
+          </label>
           <textarea
             id="description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Optional description for the report"
             rows={2}
-            className="form-input"
+            className={`${inputClasses} resize-y`}
             disabled={loading}
           />
         </div>
@@ -297,11 +308,11 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
 
       {saveMessage && (
         <div
-          className={
+          className={`mt-4 border px-4 py-3 text-center text-sm ${
             saveMessageType === "success"
-              ? "success-message"
-              : "error-message"
-          }
+              ? "border-success bg-success/10 text-success"
+              : "border-error bg-error/10 text-error"
+          }`}
         >
           {saveMessage}
         </div>

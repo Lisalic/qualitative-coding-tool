@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { apiFetch } from "../../api";
+import { apiFetch, postFormAndPoll } from "../../api";
 
 export default function useSummarizeCodingPage() {
   const [codings, setCodings] = useState([]);
@@ -67,17 +67,12 @@ export default function useSummarizeCodingPage() {
 
     try {
       setLoading(true);
-      const response = await apiFetch("/api/summarize-coding/", {
-        method: "POST",
-        body: form,
-      });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.error || `HTTP ${response.status}`);
+      const { ok, data, error: pollError } = await postFormAndPoll("/api/summarize-coding/", form);
+      if (!ok) {
+        setError(pollError || "Failed to generate summary");
+      } else {
+        setSummary((data && data.summary) || "");
       }
-      const data = await response.json();
-      if (data.error) setError(data.error);
-      else setSummary(data.summary || "");
     } catch (submitError) {
       setError(String(submitError));
     } finally {

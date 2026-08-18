@@ -92,3 +92,103 @@ export async function postForm(path, formData) {
 
   return { ok: false, status: response.status, data: parsed, error };
 }
+
+// Resolves `ms` milliseconds later, or immediately if `signal` is already
+// aborted or gets aborted while waiting. Never rejects.
+function _sleepOrAbort(ms, signal) {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    function onAbort() {
+      clearTimeout(timer);
+      resolve();
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/**
+ * POST `formData` to `path` (expects a `{job_id, status}` 202 response),
+ * then poll `GET /api/jobs/{job_id}` until a terminal status, timeout, or
+ * abort. Resolves to the same `{ok, status, data, error}` shape `postForm`
+ * returns -- `data` is the job's `result` on success.
+ *
+ * This is the shared kickoff+poll helper for every AI-backed endpoint
+ * converted to the background-job pattern (see backend/app/jobs/) --
+ * `summarize-coding` first, more to follow -- so its shape is meant to
+ * stay stable across all of them.
+ */
+export async function postFormAndPoll(path, formData, {
+  intervalMs = 2000, timeoutMs = 600000, onStatusChange, signal,
+} = {}) {
+  const kickoff = await postForm(path, formData);
+  if (!kickoff.ok) {
+    // Kickoff itself failed (e.g. a 400 validation error) -- nothing to poll.
+    return kickoff;
+  }
+
+  const jobId = kickoff.data && kickoff.data.job_id;
+  const deadline = Date.now() + timeoutMs;
+
+  for (;;) {
+    if (signal?.aborted) {
+      return { ok: false, status: 0, data: null, error: "Aborted" };
+    }
+
+    let response;
+    try {
+      response = await apiFetch(`/api/jobs/${jobId}`);
+    } catch (err) {
+      return {
+        ok: false,
+        status: 0,
+        data: null,
+        error: err?.message || "Network error",
+      };
+    }
+
+    const rawText = await response.text();
+    let job = null;
+    try {
+      job = rawText ? JSON.parse(rawText) : null;
+    } catch {
+      job = null;
+    }
+
+    if (!response.ok) {
+      const error = (job && typeof job.error === "string" && job.error) || `HTTP error ${response.status}`;
+      return { ok: false, status: response.status, data: null, error };
+    }
+
+    const status = job?.status;
+    onStatusChange?.(status);
+
+    if (status === "succeeded") {
+      return { ok: true, status: 200, data: job.result, error: null };
+    }
+    if (status === "failed") {
+      return { ok: false, status: 200, data: null, error: job.error || "Job failed" };
+    }
+
+    if (Date.now() >= deadline) {
+      return {
+        ok: false,
+        status: 0,
+        data: null,
+        error: `Timed out waiting for job ${jobId} to complete`,
+      };
+    }
+
+    await _sleepOrAbort(intervalMs, signal);
+
+    if (signal?.aborted) {
+      return { ok: false, status: 0, data: null, error: "Aborted" };
+    }
+  }
+}

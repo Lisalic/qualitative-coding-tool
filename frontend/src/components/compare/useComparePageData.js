@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { apiFetch } from "../../api";
+import { apiFetch, postFormAndPoll } from "../../api";
 
 export default function useComparePageData({
   fileType,
@@ -8,6 +8,7 @@ export default function useComparePageData({
   fieldBName,
   initialA = "",
   validationMessage,
+  usesJobPolling = false,
 }) {
   const [items, setItems] = useState([]);
   const [a, setA] = useState(initialA || "");
@@ -88,6 +89,24 @@ export default function useComparePageData({
 
     try {
       setLoading(true);
+
+      if (usesJobPolling) {
+        // Endpoint has been converted to the background-job pattern
+        // (kicks off a job and returns 202 {job_id, status}) -- poll
+        // /api/jobs/{id} until it resolves rather than blocking on the
+        // initial request.
+        const { ok, data, error: pollError } = await postFormAndPoll(
+          compareEndpoint,
+          form,
+        );
+        if (!ok) {
+          setError(pollError || "Failed to compare");
+        } else {
+          setComparison(data?.comparison || "");
+        }
+        return;
+      }
+
       const response = await apiFetch(compareEndpoint, {
         method: "POST",
         body: form,

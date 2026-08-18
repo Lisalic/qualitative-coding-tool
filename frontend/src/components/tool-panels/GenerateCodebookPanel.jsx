@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { postForm } from "../../api";
+import { postFormAndPoll } from "../../api";
 import FormShell from "../forms/FormShell";
 import DatabaseSourceFields from "../forms/DatabaseSourceFields";
 import SliderField from "../forms/SliderField";
@@ -12,9 +12,10 @@ import {
   MissingFieldsError,
   buildGenerateCodebookForm,
 } from "../../lib/apiContracts";
-import "../../styles/Home.css";
 
 const EXAMPLE_PROMPT = EXAMPLE_PROMPTS.generate;
+const inputClasses =
+  "border border-paper bg-white/5 px-3 py-2.5 text-paper placeholder:text-paper/40 focus:outline-none focus:ring-2 focus:ring-paper disabled:opacity-50";
 
 export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
   const navigate = useNavigate();
@@ -117,7 +118,7 @@ export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
         throw err;
       }
 
-      const { ok, data, error: postError } = await postForm(
+      const { ok, data, error: postError } = await postFormAndPoll(
         "/api/generate-codebook/",
         requestData,
       );
@@ -155,11 +156,15 @@ export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
   }));
 
   return (
-    <div className="file-upload">
-      <h1 className="tool-page-title">Generate Codebook</h1>
+    <div>
+      <h1 className="mb-2 text-center text-2xl font-bold">Generate Codebook</h1>
 
-      <div className="action-buttons">
-        <button type="button" onClick={handleViewCodebook} className="view-button">
+      <div className="mb-6 flex justify-center">
+        <button
+          type="button"
+          onClick={handleViewCodebook}
+          className="border border-paper px-4 py-2 text-sm transition-colors hover:bg-paper hover:text-ink"
+        >
           View Codebook
         </button>
       </div>
@@ -217,7 +222,7 @@ export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
           min={1}
           max={100}
           step={1}
-          disabled={loading || !Boolean(database)}
+          disabled={loading || !database}
           valueDisplay={database ? `${samplePercentage}%` : ""}
           valueMinWidth="70px"
           caption={
@@ -227,28 +232,32 @@ export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
           }
         />
 
-        <div className="form-group">
-          <label htmlFor="name">Codebook Name</label>
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="name" className="text-sm">
+            Codebook Name
+          </label>
           <input
             id="name"
             type="text"
             value={codebookName}
             onChange={(e) => setCodebookName(e.target.value)}
             placeholder="my-codebook"
-            className="form-input"
+            className={inputClasses}
             disabled={loading}
           />
         </div>
 
-        <div className="form-group">
-          <label htmlFor="description">Description (optional)</label>
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="description" className="text-sm">
+            Description (optional)
+          </label>
           <textarea
             id="description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Optional description for the codebook"
             rows={2}
-            className="form-input"
+            className={`${inputClasses} resize-y`}
             disabled={loading}
           />
         </div>
@@ -256,11 +265,11 @@ export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
 
       {saveMessage && (
         <div
-          className={
+          className={`mt-4 border px-4 py-3 text-center text-sm ${
             saveMessageType === "success"
-              ? "success-message"
-              : "error-message"
-          }
+              ? "border-success bg-success/10 text-success"
+              : "border-error bg-error/10 text-error"
+          }`}
         >
           {saveMessage}
         </div>

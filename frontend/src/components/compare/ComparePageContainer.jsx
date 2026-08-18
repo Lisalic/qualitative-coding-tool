@@ -18,6 +18,9 @@ const CONFIG_BY_MODE = {
     fieldBName: "codebook_b",
     validationMessage: "Select two codebooks to compare",
     resultFileType: "codebook_comparison",
+    // Backend converted to the background-job pattern (Stage 7) -- see
+    // useComparePageData's usesJobPolling handling.
+    usesJobPolling: true,
   },
   coding: {
     title: "Compare Coding",
@@ -33,10 +36,13 @@ const CONFIG_BY_MODE = {
     fieldBName: "coding_b",
     validationMessage: "Select two codings to compare",
     resultFileType: "coding_comparison",
+    // Backend converted to the background-job pattern (Stage 8) -- see
+    // useComparePageData's usesJobPolling handling.
+    usesJobPolling: true,
   },
 };
 
-export default function ComparePageContainer({ mode = "codebook", initialA = "", showTitle = false }) {
+export default function ComparePageContainer({ mode = "codebook", initialA = "", showTitle = true }) {
   const config = CONFIG_BY_MODE[mode] || CONFIG_BY_MODE.codebook;
   const {
     items,
@@ -60,14 +66,17 @@ export default function ComparePageContainer({ mode = "codebook", initialA = "",
     fieldBName: config.fieldBName,
     initialA,
     validationMessage: config.validationMessage,
+    usesJobPolling: config.usesJobPolling,
   });
 
   return (
-    <div className="compare-page">
-      {showTitle ? <h1 className="tool-page-title">{config.title}</h1> : null}
+    <div className="w-full">
+      {showTitle ? (
+        <h1 className="mb-6 text-center text-2xl font-bold">{config.title}</h1>
+      ) : null}
 
       <form onSubmit={submitCompare}>
-        <div className="compare-layout-row">
+        <div className="flex flex-col gap-6 lg:flex-row">
           <CompareDualSelectPanel
             panelTitle={config.panelTitle}
             labelA={config.labelA}
@@ -89,9 +98,9 @@ export default function ComparePageContainer({ mode = "codebook", initialA = "",
           />
         </div>
 
-        <div className="compare-actions-bar">
+        <div className="mt-4 flex justify-center">
           <button
-            className="project-tab compare-submit-btn"
+            className="border-2 border-paper px-7 py-2.5 text-base font-semibold transition-colors hover:bg-paper hover:text-ink disabled:opacity-50"
             type="submit"
             disabled={loading}
           >
@@ -100,7 +109,11 @@ export default function ComparePageContainer({ mode = "codebook", initialA = "",
         </div>
       </form>
 
-      {error && <div className="alert alert--error compare-page-alert">{error}</div>}
+      {error && (
+        <div className="mt-4 border border-error bg-error/10 px-4 py-3 text-sm text-error">
+          {error}
+        </div>
+      )}
 
       <CompareResultPanel
         comparison={comparison}
