@@ -17,6 +17,31 @@ _MODEL_META_BY_SLUG: dict[str, dict[str, Any]] = {
 }
 
 
+def set_catalog(models: list[dict[str, Any]]) -> None:
+    """Replace the in-memory catalog (called after a successful OpenRouter refresh).
+
+    Module-level constants elsewhere (e.g. ``codebook_generator.MODEL_1``) are
+    bound from ``model_slug_at`` at import time, before any refresh can run,
+    so they keep pointing at whichever free models were current at process
+    start -- a deliberate trade-off to avoid every call site re-resolving a
+    model slug per request. ``is_paid_model`` and a fresh ``/api/models`` read
+    both see the live catalog immediately, since they look it up at call time.
+    """
+    global AI_MODELS, _MODEL_META_BY_SLUG
+    if not models:
+        raise ValueError("Refusing to set an empty model catalog")
+    AI_MODELS = models
+    _MODEL_META_BY_SLUG = {str(m.get("value")): m for m in models if m.get("value")}
+
+
+async def refresh_from_openrouter() -> None:
+    """Fetch the live OpenRouter catalog and replace the in-memory one."""
+    from backend.app.external.openrouter_catalog import fetch_openrouter_catalog
+
+    models = await fetch_openrouter_catalog()
+    set_catalog(models)
+
+
 def model_slug_at(index: int) -> str:
     """Return the OpenRouter slug at ``index``, clamped to the list bounds."""
     if not AI_MODELS:

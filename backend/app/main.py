@@ -1,9 +1,11 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from backend.app import ai_models
 from backend.app.api import routes
 from backend.app.core.exceptions import AppError
 from backend.app.core.logging import configure_logging, get_logger
@@ -15,6 +17,24 @@ from backend.app.jobs import models as job_models  # noqa: F401
 
 logger = get_logger(__name__)
 
+MODEL_CATALOG_REFRESH_INTERVAL_SECONDS = 24 * 60 * 60
+
+
+async def _refresh_model_catalog_loop() -> None:
+    """Refresh the OpenRouter model catalog immediately, then once a day.
+
+    Runs as a background task rather than blocking startup, so a slow or
+    unreachable OpenRouter doesn't delay the app from serving requests --
+    on failure it logs and keeps the previously cached catalog.
+    """
+    while True:
+        try:
+            await ai_models.refresh_from_openrouter()
+            logger.info("Refreshed OpenRouter model catalog (%d models)", len(ai_models.AI_MODELS))
+        except Exception:
+            logger.exception("Failed to refresh OpenRouter model catalog; keeping existing catalog")
+        await asyncio.sleep(MODEL_CATALOG_REFRESH_INTERVAL_SECONDS)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -24,7 +44,9 @@ async def lifespan(app: FastAPI):
     reconciled = await reconcile_orphaned_jobs_on_startup()
     if reconciled > 0:
         logger.warning("Reconciled %d orphaned jobs on startup", reconciled)
+    refresh_task = asyncio.create_task(_refresh_model_catalog_loop())
     yield
+    refresh_task.cancel()
     await async_engine.dispose()
 
 

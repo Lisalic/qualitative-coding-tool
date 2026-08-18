@@ -3,8 +3,8 @@ import {
   filterAiModelsByPaid,
   formatPaidModelPricingLine,
   getAiModelByValue,
+  useAiModels,
 } from "../../lib/aiModelCatalog";
-import { AI_MODELS } from "../../lib/constants";
 import AiLabel from "../forms/AiLabel";
 
 const SEGMENTS = [
@@ -12,6 +12,9 @@ const SEGMENTS = [
   { mode: "free", label: "Free" },
   { mode: "paid", label: "Paid" },
 ];
+
+const DEFAULT_SELECT_CLASSES =
+  "border border-paper bg-white/5 px-3 py-2.5 text-paper focus:outline-none focus:ring-2 focus:ring-paper disabled:opacity-50";
 
 /**
  * @param {object} props
@@ -21,7 +24,7 @@ const SEGMENTS = [
  * @param {string} [props.id]
  * @param {string} [props.label]
  * @param {'filter' | 'dash' | 'compare'} [props.selectPlaceholder]
- * @param {string} [props.className] — root wrapper; default "form-group"
+ * @param {string} [props.className] — root wrapper; default "flex flex-col gap-1.5"
  * @param {string} [props.labelClassName]
  * @param {import('react').CSSProperties} [props.labelStyle]
  * @param {string} [props.selectClassName]
@@ -33,26 +36,35 @@ export default function AiModelFormGroup({
   id = "model",
   label = "AI Model",
   selectPlaceholder = "dash",
-  className = "form-group",
+  className = "flex flex-col gap-1.5",
   labelClassName,
   labelStyle,
-  selectClassName = "form-input",
+  selectClassName = DEFAULT_SELECT_CLASSES,
 }) {
   const [priceFilter, setPriceFilter] = useState("all");
-  const selectedModel = getAiModelByValue(model);
+  const { models, loading: modelsLoading, error: modelsError } = useAiModels();
+  const selectedModel = getAiModelByValue(models, model);
   const filteredModels = useMemo(
-    () => filterAiModelsByPaid(AI_MODELS, priceFilter),
-    [priceFilter],
+    () => filterAiModelsByPaid(models, priceFilter),
+    [models, priceFilter],
   );
 
   useEffect(() => {
-    if (!model) return;
+    if (!model || modelsLoading) return;
     const ok = filteredModels.some((m) => m.value === model);
     if (!ok) onModelChange("");
-  }, [model, filteredModels, onModelChange]);
+  }, [model, filteredModels, modelsLoading, onModelChange]);
+
+  const isDisabled = disabled || modelsLoading;
 
   let selectChildren;
-  if (selectPlaceholder === "filter") {
+  if (modelsLoading) {
+    selectChildren = (
+      <option value="" disabled>
+        Loading models…
+      </option>
+    );
+  } else if (selectPlaceholder === "filter") {
     selectChildren = (
       <>
         {!model && (
@@ -90,7 +102,7 @@ export default function AiModelFormGroup({
 
   return (
     <div className={className || undefined}>
-      <div className="ai-model-form-group__label-row">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
         <AiLabel
           htmlFor={id}
           text={label}
@@ -98,7 +110,7 @@ export default function AiModelFormGroup({
           style={labelStyle}
         />
         <div
-          className="ai-model-price-filter"
+          className="inline-flex shrink-0 items-center gap-1"
           role="group"
           aria-label="Filter models by pricing"
         >
@@ -106,13 +118,13 @@ export default function AiModelFormGroup({
             <button
               key={mode}
               type="button"
-              className={
+              className={`border px-2 py-0.5 text-xs transition-colors ${
                 priceFilter === mode
-                  ? "ai-model-price-filter__seg is-active"
-                  : "ai-model-price-filter__seg"
-              }
+                  ? "border-paper bg-paper text-ink"
+                  : "border-paper/30 text-paper/70 hover:border-paper hover:text-paper"
+              }`}
               aria-pressed={priceFilter === mode}
-              disabled={disabled}
+              disabled={isDisabled}
               onClick={() => setPriceFilter(mode)}
             >
               {segLabel}
@@ -125,12 +137,14 @@ export default function AiModelFormGroup({
         value={model}
         onChange={(e) => onModelChange(e.target.value)}
         className={selectClassName}
-        disabled={disabled}
+        disabled={isDisabled}
       >
         {selectChildren}
       </select>
-      {selectedModel?.paid ? (
-        <p className="paid-model-pricing-notice">
+      {modelsError ? (
+        <p className="mt-1.5 text-sm leading-snug text-error">{modelsError}</p>
+      ) : selectedModel?.paid ? (
+        <p className="mt-1.5 text-sm leading-snug text-paper/70">
           {formatPaidModelPricingLine(selectedModel)}
         </p>
       ) : null}

@@ -259,3 +259,15 @@ class ApplyCodebookRequest(_StrippingModel):
 class ApplyCodebookResponse(BaseModel):
     classification_output: str
     file: Optional[GenerateCodebookFileInfo] = None
+
+
+class AiModelPricing(BaseModel):
+    inputUsdPerMillion: float
+    outputUsdPerMillion: float
+
+
+class AiModelOut(BaseModel):
+    value: str
+    label: str
+    paid: bool
+    pricing: Optional[AiModelPricing] = None

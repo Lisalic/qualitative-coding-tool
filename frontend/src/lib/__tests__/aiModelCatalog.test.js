@@ -1,16 +1,27 @@
-import { describe, it, expect } from "vitest";
+// @vitest-environment jsdom
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   filterAiModelsByPaid,
   getAiModelByValue,
   formatPaidModelPricingLine,
 } from "../aiModelCatalog";
-import { AI_MODELS } from "../constants";
 
 const sample = [
   { value: "free/a", paid: false },
   { value: "free/b", paid: undefined },
   { value: "paid/a", paid: true },
 ];
+
+beforeEach(() => {
+  // fetchAiModels caches its promise at module scope; reset between tests
+  // so each test controls its own fetch mock.
+  vi.resetModules();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 describe("filterAiModelsByPaid", () => {
   it("'all' returns the SAME array reference, unfiltered", () => {
@@ -42,47 +53,19 @@ describe("filterAiModelsByPaid", () => {
 
 describe("getAiModelByValue", () => {
   it("returns undefined for falsy value", () => {
-    expect(getAiModelByValue("")).toBeUndefined();
-    expect(getAiModelByValue(null)).toBeUndefined();
-    expect(getAiModelByValue(undefined)).toBeUndefined();
-    expect(getAiModelByValue(0)).toBeUndefined();
+    expect(getAiModelByValue(sample, "")).toBeUndefined();
+    expect(getAiModelByValue(sample, null)).toBeUndefined();
+    expect(getAiModelByValue(sample, undefined)).toBeUndefined();
+    expect(getAiModelByValue(sample, 0)).toBeUndefined();
   });
 
   it("returns undefined for an unknown slug", () => {
-    expect(getAiModelByValue("not/a/real-model")).toBeUndefined();
+    expect(getAiModelByValue(sample, "not/a/real-model")).toBeUndefined();
   });
 
-  it("finds a known slug from the real catalog, case-sensitively", () => {
-    const known = AI_MODELS[0];
-    expect(getAiModelByValue(known.value)).toEqual(known);
-    expect(getAiModelByValue(known.value.toUpperCase())).toBeUndefined();
-  });
-});
-
-describe("AI_MODELS catalog invariants", () => {
-  it("is a non-empty array", () => {
-    expect(Array.isArray(AI_MODELS)).toBe(true);
-    expect(AI_MODELS.length).toBeGreaterThan(0);
-  });
-
-  it("every entry has a unique `value`", () => {
-    const values = AI_MODELS.map((m) => m.value);
-    expect(new Set(values).size).toBe(values.length);
-  });
-
-  it("every entry declares `paid`", () => {
-    for (const m of AI_MODELS) {
-      expect(typeof m.paid).toBe("boolean");
-    }
-  });
-
-  it("every paid entry carries numeric pricing", () => {
-    const paid = AI_MODELS.filter((m) => m.paid === true);
-    expect(paid.length).toBeGreaterThan(0);
-    for (const m of paid) {
-      expect(typeof m.pricing?.inputUsdPerMillion).toBe("number");
-      expect(typeof m.pricing?.outputUsdPerMillion).toBe("number");
-    }
+  it("finds a known slug, case-sensitively", () => {
+    expect(getAiModelByValue(sample, "free/a")).toEqual(sample[0]);
+    expect(getAiModelByValue(sample, "FREE/A")).toBeUndefined();
   });
 });
 
@@ -138,5 +121,54 @@ describe("formatPaidModelPricingLine", () => {
         pricing: { inputUsdPerMillion: Infinity, outputUsdPerMillion: 1 },
       }),
     ).toBe("Paid model — pricing not listed");
+  });
+});
+
+describe("fetchAiModels", () => {
+  it("GETs /api/models and resolves with the parsed catalog", async () => {
+    const catalog = [{ value: "a/b", label: "A B", paid: false }];
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => catalog,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { fetchAiModels: freshFetch } = await import("../aiModelCatalog");
+    const result = await freshFetch();
+
+    expect(result).toEqual(catalog);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/models"),
+      expect.anything(),
+    );
+  });
+
+  it("caches the in-flight/settled promise across calls", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => [],
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { fetchAiModels: freshFetch } = await import("../aiModelCatalog");
+    await freshFetch();
+    await freshFetch();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects on a non-ok response and allows a retry on the next call", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => [] });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { fetchAiModels: freshFetch } = await import("../aiModelCatalog");
+    await expect(freshFetch()).rejects.toThrow(/HTTP 500/);
+    await expect(freshFetch()).resolves.toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

@@ -1,5 +1,7 @@
 """Tests for backend/app/ai_models.py."""
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from backend.app import ai_models
@@ -110,3 +112,58 @@ class TestIsPaidModel:
         # it is a frozen snapshot, not a live view.
         monkeypatch.setattr(ai_models, "AI_MODELS", [{"value": "new/model", "paid": True}])
         assert ai_models.is_paid_model("new/model") is False
+
+
+class TestSetCatalog:
+    def test_replaces_both_ai_models_and_meta_index(self, monkeypatch) -> None:
+        monkeypatch.setattr(ai_models, "AI_MODELS", [])
+        monkeypatch.setattr(ai_models, "_MODEL_META_BY_SLUG", {})
+
+        ai_models.set_catalog([{"value": "new/model", "label": "New", "paid": True}])
+
+        assert ai_models.AI_MODELS == [{"value": "new/model", "label": "New", "paid": True}]
+        assert ai_models.is_paid_model("new/model") is True
+
+    def test_empty_list_raises_and_leaves_catalog_untouched(self, monkeypatch) -> None:
+        original = [{"value": "keep/me", "paid": False}]
+        monkeypatch.setattr(ai_models, "AI_MODELS", original)
+
+        with pytest.raises(ValueError, match="empty model catalog"):
+            ai_models.set_catalog([])
+
+        assert ai_models.AI_MODELS == original
+
+
+class TestRefreshFromOpenrouter:
+    @pytest.fixture(autouse=True)
+    def _restore_catalog(self):
+        # refresh_from_openrouter -> set_catalog reassigns module globals via
+        # `global`, which monkeypatch.setattr can't auto-undo -- restore by hand.
+        original_models = ai_models.AI_MODELS
+        original_meta = ai_models._MODEL_META_BY_SLUG
+        yield
+        ai_models.AI_MODELS = original_models
+        ai_models._MODEL_META_BY_SLUG = original_meta
+
+    async def test_success_installs_fetched_catalog(self, monkeypatch) -> None:
+        fetched = [{"value": "fresh/model", "label": "Fresh", "paid": False}]
+        monkeypatch.setattr(
+            "backend.app.external.openrouter_catalog.fetch_openrouter_catalog",
+            AsyncMock(return_value=fetched),
+        )
+
+        await ai_models.refresh_from_openrouter()
+
+        assert ai_models.AI_MODELS == fetched
+
+    async def test_propagates_fetch_failure_without_changing_catalog(self, monkeypatch) -> None:
+        original = list(ai_models.AI_MODELS)
+        monkeypatch.setattr(
+            "backend.app.external.openrouter_catalog.fetch_openrouter_catalog",
+            AsyncMock(side_effect=RuntimeError("network down")),
+        )
+
+        with pytest.raises(RuntimeError, match="network down"):
+            await ai_models.refresh_from_openrouter()
+
+        assert ai_models.AI_MODELS == original

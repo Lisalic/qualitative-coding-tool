@@ -1,9 +1,10 @@
-import { AI_MODELS } from "./constants";
+import { useEffect, useState } from "react";
+import { apiFetch } from "../api";
 
 /** @typedef {'all' | 'free' | 'paid'} AiModelPaidFilter */
 
 /**
- * @param {typeof AI_MODELS} models
+ * @param {object[]} models
  * @param {AiModelPaidFilter} mode
  */
 export function filterAiModelsByPaid(models, mode) {
@@ -12,9 +13,50 @@ export function filterAiModelsByPaid(models, mode) {
   return models.filter((m) => m.paid === true);
 }
 
-export function getAiModelByValue(value) {
+export function getAiModelByValue(models, value) {
   if (!value) return undefined;
-  return AI_MODELS.find((m) => m.value === value);
+  return models.find((m) => m.value === value);
+}
+
+let _cachedModelsPromise = null;
+
+/** Fetches the live OpenRouter catalog from the backend, caching the in-flight/settled promise. */
+export function fetchAiModels() {
+  if (!_cachedModelsPromise) {
+    _cachedModelsPromise = apiFetch("/api/models")
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`Failed to load AI models (HTTP ${res.status})`);
+        return res.json();
+      })
+      .catch((err) => {
+        _cachedModelsPromise = null; // allow retry on next call
+        throw err;
+      });
+  }
+  return _cachedModelsPromise;
+}
+
+/** @returns {{models: object[], loading: boolean, error: string | null}} */
+export function useAiModels() {
+  const [state, setState] = useState({ models: [], loading: true, error: null });
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchAiModels()
+      .then((models) => {
+        if (!cancelled) setState({ models, loading: false, error: null });
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setState({ models: [], loading: false, error: err?.message || "Failed to load AI models" });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return state;
 }
 
 function formatUsdPerMillion(n) {
