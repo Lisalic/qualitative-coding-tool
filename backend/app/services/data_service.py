@@ -33,7 +33,6 @@ set-based ``INSERT ... SELECT`` for each of submissions/comments.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import math
 import secrets
@@ -385,8 +384,9 @@ async def _apply_tag_or_ai_filter(
     """Resolve the final set of submission/comment ids to copy: either the
     tag-matched sample ids directly (tags-only, no AI step) or the AI's
     filtered id list (``filter_db_module.filter_posts_with_ai``/
-    ``filter_comments_with_ai``, run off the event loop via
-    ``asyncio.to_thread`` since the OpenRouter SDK call is sync).
+    ``filter_comments_with_ai``, both native ``async def`` as of Stage 9
+    and awaited directly -- no more ``asyncio.to_thread`` wrapper around a
+    sync OpenRouter SDK call).
     """
     from backend.scripts import filter_db as filter_db_module
     from backend.scripts.filter_db import AIFilterError
@@ -403,8 +403,8 @@ async def _apply_tag_or_ai_filter(
 
     if use_ai_posts and submissions_text:
         try:
-            post_ids, system_prompt, user_prompt = await asyncio.to_thread(
-                filter_db_module.filter_posts_with_ai, filter_prompt, submissions_text, api_key, model
+            post_ids, system_prompt, user_prompt = await filter_db_module.filter_posts_with_ai(
+                filter_prompt, submissions_text, api_key, model
             )
         except AIFilterError:
             raise
@@ -413,8 +413,8 @@ async def _apply_tag_or_ai_filter(
 
     if use_ai_comments and comments_text:
         try:
-            comment_ids, _, _ = await asyncio.to_thread(
-                filter_db_module.filter_comments_with_ai, filter_prompt, comments_text, api_key, model
+            comment_ids, _, _ = await filter_db_module.filter_comments_with_ai(
+                filter_prompt, comments_text, api_key, model
             )
         except AIFilterError:
             raise
@@ -521,8 +521,8 @@ async def _run_filter_data_job(job_id: int, payload: dict) -> dict:
     expanded_terms_sql: list[str] = []
     original_tags_meta: list[str] = []
     if user_tags_list:
-        original_tags_meta, expanded_terms_sql = await asyncio.to_thread(
-            tag_expansion_module.expand_tags_via_openrouter, user_tags_list, api_key, model
+        original_tags_meta, expanded_terms_sql = await tag_expansion_module.expand_tags_via_openrouter(
+            user_tags_list, api_key, model
         )
 
     has_tags = bool(user_tags_list)

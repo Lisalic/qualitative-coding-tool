@@ -9,7 +9,7 @@ route/auth/response-shape behavior on top of this.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select
@@ -396,7 +396,7 @@ class TestGenerateCodebookJobHandlerEndToEnd:
     async def test_samples_calls_llm_and_persists_new_codebook_file(
         self, session_factory, monkeypatch
     ) -> None:
-        generate_mock = MagicMock(return_value=("generated codebook", "sys prompt", "user prompt"))
+        generate_mock = AsyncMock(return_value=("generated codebook", "sys prompt", "user prompt"))
         monkeypatch.setattr(
             "backend.app.services.codebook_service.codebook_generator_module.generate_codebook",
             generate_mock,
@@ -454,7 +454,7 @@ class TestGenerateCodebookJobHandlerEndToEnd:
             assert [d.parent_file_id for d in deps] == [source_file_id]
 
     async def test_no_records_sampled_marks_job_failed(self, session_factory, monkeypatch) -> None:
-        generate_mock = MagicMock(return_value=("should not run", "", ""))
+        generate_mock = AsyncMock(return_value=("should not run", "", ""))
         monkeypatch.setattr(
             "backend.app.services.codebook_service.codebook_generator_module.generate_codebook",
             generate_mock,
@@ -582,7 +582,7 @@ class TestStartCompareCodebooksJobEnqueue:
 
 class TestCompareCodebooksJobHandlerEndToEnd:
     async def test_reads_both_contents_and_calls_llm(self, session_factory, monkeypatch) -> None:
-        get_client_mock = MagicMock(return_value="the comparison text")
+        get_client_mock = AsyncMock(return_value="the comparison text")
         monkeypatch.setattr(
             "backend.app.services.codebook_service.codebook_generator_module.get_client",
             get_client_mock,
@@ -617,7 +617,7 @@ class TestCompareCodebooksJobHandlerEndToEnd:
             assert call_args[2] == "sk-secret"
 
     async def test_no_content_marks_job_failed(self, session_factory, monkeypatch) -> None:
-        get_client_mock = MagicMock(return_value="should not be called")
+        get_client_mock = AsyncMock(return_value="should not be called")
         monkeypatch.setattr(
             "backend.app.services.codebook_service.codebook_generator_module.get_client",
             get_client_mock,

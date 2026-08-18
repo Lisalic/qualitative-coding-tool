@@ -175,7 +175,7 @@ class TestStartSummarizeCodingJobEnqueue:
         )
         monkeypatch.setattr(
             "backend.scripts.summarize_coding.summarize_coding",
-            MagicMock(return_value="a summary"),
+            AsyncMock(return_value="a summary"),
         )
 
         job = await coding_service.start_summarize_coding_job(
@@ -211,7 +211,7 @@ class TestSummarizeCodingJobHandlerEndToEnd:
             "backend.app.services.coding_service.async_engine",
             _mock_async_engine_with_content("post_1: CODE_A - evidence"),
         )
-        summarize_mock = MagicMock(return_value="the final summary")
+        summarize_mock = AsyncMock(return_value="the final summary")
         monkeypatch.setattr("backend.scripts.summarize_coding.summarize_coding", summarize_mock)
 
         job = await coding_service.start_summarize_coding_job(
@@ -241,7 +241,7 @@ class TestSummarizeCodingJobHandlerEndToEnd:
             "backend.app.services.coding_service.async_engine",
             _mock_async_engine_no_row(),
         )
-        summarize_mock = MagicMock(return_value="should not be called")
+        summarize_mock = AsyncMock(return_value="should not be called")
         monkeypatch.setattr("backend.scripts.summarize_coding.summarize_coding", summarize_mock)
 
         job = await coding_service.start_summarize_coding_job(
@@ -605,7 +605,7 @@ class TestApplyCodebookJobHandlerEndToEnd:
             "CODE: Alpha\n"
             'EVIDENCE: "quote three"\n'
         )
-        classify_mock = MagicMock(return_value=(classification_output, "sys prompt", "user prompt"))
+        classify_mock = AsyncMock(return_value=(classification_output, "sys prompt", "user prompt"))
         monkeypatch.setattr("backend.app.services.coding_service.classify_posts", classify_mock)
 
         # Capture ids before _wait_for_terminal_status's session.expire_all()
@@ -680,7 +680,7 @@ class TestApplyCodebookJobHandlerEndToEnd:
         )
         monkeypatch.setattr(
             "backend.app.services.coding_service.classify_posts",
-            MagicMock(return_value=(classification_output, "", "")),
+            AsyncMock(return_value=(classification_output, "", "")),
         )
 
         job = await coding_service.start_apply_codebook_job(
@@ -710,7 +710,7 @@ class TestApplyCodebookJobHandlerEndToEnd:
         codebook_file = await _make_file(
             session, user_id, file_type="codebook", schemaname="proj_cb5", content=None
         )
-        classify_mock = MagicMock(return_value=("output", "s", "u"))
+        classify_mock = AsyncMock(return_value=("output", "s", "u"))
         monkeypatch.setattr("backend.app.services.coding_service.classify_posts", classify_mock)
 
         job = await coding_service.start_apply_codebook_job(
@@ -786,7 +786,7 @@ class TestCompareCodingsJobHandlerEndToEnd:
     async def test_succeeds_with_mocked_llm(self, session, user_id, monkeypatch) -> None:
         await _make_file(session, user_id, schemaname="proj_cmp_a", content="coding a text")
         await _make_file(session, user_id, schemaname="proj_cmp_b", content="coding b text")
-        llm_mock = MagicMock(return_value="the comparison")
+        llm_mock = AsyncMock(return_value="the comparison")
         # compare_codings' handler imports get_client via a LOCAL import
         # inside the handler body, so it must be patched at its source
         # module, not on coding_service.
@@ -811,7 +811,7 @@ class TestCompareCodingsJobHandlerEndToEnd:
     async def test_no_content_marks_job_failed(self, session, user_id, monkeypatch) -> None:
         await _make_file(session, user_id, schemaname="proj_cmp_empty_a", content=None)
         await _make_file(session, user_id, schemaname="proj_cmp_empty_b", content=None)
-        llm_mock = MagicMock(return_value="should not run")
+        llm_mock = AsyncMock(return_value="should not run")
         monkeypatch.setattr("backend.scripts.codebook_generator.get_client", llm_mock)
 
         job = await coding_service.start_compare_codings_job(

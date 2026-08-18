@@ -1,7 +1,8 @@
 import os
 import re
 from pathlib import Path
-from typing import AsyncGenerator, Any
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from sqlalchemy import (
     Column,

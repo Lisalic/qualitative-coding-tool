@@ -40,7 +40,6 @@ locally-scoped binding of the same name to shadow.
 
 from __future__ import annotations
 
-import asyncio
 import secrets
 
 from sqlalchemy import select
@@ -253,9 +252,11 @@ async def _run_generate_codebook_job(job_id: int, payload: dict) -> dict:
     ``repositories/raw_data_repo.py::sample_submissions``/``sample_comments``
     against the fixed ``submissions``/``comments`` tables (replacing the old
     raw-SQL ``ORDER BY RANDOM() LIMIT`` reads against a per-artifact
-    schema); the LLM call stays the sync
-    ``codebook_generator.generate_codebook``, run via ``asyncio.to_thread``
-    so it doesn't block the event loop.
+    schema); ``codebook_generator.generate_codebook`` is a native
+    ``async def`` (Stage 9, backed by
+    ``external/openrouter_client.py::chat_completion``), so it's ``await``ed
+    directly -- no more ``asyncio.to_thread`` wrapper around a sync
+    OpenAI SDK call.
     """
     source_file_id = payload["source_file_id"]
     user_id = payload["user_id"]
@@ -282,8 +283,8 @@ async def _run_generate_codebook_job(job_id: int, payload: dict) -> dict:
                 "No records were sampled from the selected database. Increase sample size above 0%."
             )
 
-        codebook_text, system_prompt, user_prompt = await asyncio.to_thread(
-            codebook_generator_module.generate_codebook, assembled, api_key, prompt, MODEL=model
+        codebook_text, system_prompt, user_prompt = await codebook_generator_module.generate_codebook(
+            assembled, api_key, prompt, MODEL=model
         )
         codebook_text = str(codebook_text or "")
 
@@ -381,8 +382,9 @@ async def _run_compare_codebooks_job(job_id: int, payload: dict) -> dict:
 
     Reads both codebooks' content via ``artifact_content_repo.read_content``
     (replacing the old inline ``with engine.connect(): ...`` synchronous
-    blocking read), then calls the sync ``codebook_generator.get_client``
-    via ``asyncio.to_thread``.
+    blocking read), then ``await``s ``codebook_generator.get_client``
+    directly -- it's a native ``async def`` as of Stage 9, so no more
+    ``asyncio.to_thread`` wrapper is needed.
     """
     file_id_a = payload["file_id_a"]
     file_id_b = payload["file_id_b"]
@@ -411,7 +413,5 @@ async def _run_compare_codebooks_job(job_id: int, payload: dict) -> dict:
         f"Please compare them in detail. Additional instructions: {prompt}"
     )
 
-    resp = await asyncio.to_thread(
-        codebook_generator_module.get_client, system_prompt, user_prompt, api_key, model
-    )
+    resp = await codebook_generator_module.get_client(system_prompt, user_prompt, api_key, model)
     return {"comparison": resp}

@@ -82,28 +82,50 @@ def _table_exists(conn: Connection, schemaname: str, table: str) -> bool:
     return result.scalar() is not None
 
 
+def _existing_columns(conn: Connection, schemaname: str, table: str) -> set[str]:
+    result = conn.execute(
+        text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = :schema AND table_name = :table"
+        ),
+        {"schema": schemaname, "table": table},
+    )
+    return {row[0] for row in result}
+
+
 def _fetch_submissions(conn: Connection, schemaname: str) -> list[dict[str, Any]]:
     if not _table_exists(conn, schemaname, "submissions"):
         return []
-    result = conn.execute(
-        text(
-            f'SELECT id, subreddit, title, selftext, author, created_utc, score, num_comments '
-            f'FROM "{schemaname}"."submissions"'
-        )
-    )
-    return [dict(row) for row in result.mappings().all()]
+    wanted = ["id", "subreddit", "title", "selftext", "author", "created_utc", "score", "num_comments"]
+    # Some older per-upload schemas predate a column being added to the
+    # DDL (e.g. `subreddit`) -- select only columns that actually exist in
+    # this particular schema; the fixed Submission table's other columns
+    # are nullable, so a missing source column just becomes None below,
+    # rather than the whole file failing to migrate at all.
+    present = _existing_columns(conn, schemaname, "submissions")
+    cols = [c for c in wanted if c in present]
+    result = conn.execute(text(f'SELECT {", ".join(cols)} FROM "{schemaname}"."submissions"'))
+    rows = [dict(row) for row in result.mappings().all()]
+    missing = [c for c in wanted if c not in present]
+    for row in rows:
+        for c in missing:
+            row[c] = None
+    return rows
 
 
 def _fetch_comments(conn: Connection, schemaname: str) -> list[dict[str, Any]]:
     if not _table_exists(conn, schemaname, "comments"):
         return []
-    result = conn.execute(
-        text(
-            f'SELECT id, subreddit, body, author, created_utc, score, link_id, parent_id '
-            f'FROM "{schemaname}"."comments"'
-        )
-    )
-    return [dict(row) for row in result.mappings().all()]
+    wanted = ["id", "subreddit", "body", "author", "created_utc", "score", "link_id", "parent_id"]
+    present = _existing_columns(conn, schemaname, "comments")
+    cols = [c for c in wanted if c in present]
+    result = conn.execute(text(f'SELECT {", ".join(cols)} FROM "{schemaname}"."comments"'))
+    rows = [dict(row) for row in result.mappings().all()]
+    missing = [c for c in wanted if c not in present]
+    for row in rows:
+        for c in missing:
+            row[c] = None
+    return rows
 
 
 def _fetch_content_text(conn: Connection, schemaname: str) -> str | None:

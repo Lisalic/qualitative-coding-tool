@@ -39,6 +39,14 @@ from backend.scripts.migrate_to_fixed_tables import (
 # ---------------------------------------------------------------------------
 
 
+_ALL_SUBMISSION_COLUMNS = {
+    "id", "subreddit", "title", "selftext", "author", "created_utc", "score", "num_comments",
+}
+_ALL_COMMENT_COLUMNS = {
+    "id", "subreddit", "body", "author", "created_utc", "score", "link_id", "parent_id",
+}
+
+
 def _make_mock_engine(fixtures: dict[str, dict[str, Any]]) -> MagicMock:
     """`fixtures`: schemaname -> {
         "tables": set of table names that exist in that schema,
@@ -46,14 +54,19 @@ def _make_mock_engine(fixtures: dict[str, dict[str, Any]]) -> MagicMock:
         "comments": list[dict] (rows for "comments"),
         "content_text": str | None (row for "content_store"),
         "raise": Exception to raise on any query against this schema,
+        "submission_columns": set[str] (defaults to every expected column --
+            override to simulate an older schema missing e.g. "subreddit"),
+        "comment_columns": set[str] (same, for "comments"),
     }
-    All keys optional; missing ones default to "nothing there".
+    All keys optional; missing ones default to "nothing there"/"every column present".
     """
     conn = MagicMock()
 
     def _schema_for(sql: str, params: dict | None) -> str | None:
         if params and "tbl" in params:
             return params["tbl"].split(".")[0].strip('"')
+        if params and "schema" in params:
+            return params["schema"]
         for name in fixtures:
             if f'"{name}"' in sql:
                 return name
@@ -67,7 +80,16 @@ def _make_mock_engine(fixtures: dict[str, dict[str, Any]]) -> MagicMock:
             raise fixture["raise"]
 
         result = MagicMock()
-        if "to_regclass" in sql:
+        if "information_schema.columns" in sql:
+            table = (params or {}).get("table", "")
+            if table == "submissions":
+                cols = fixture.get("submission_columns", _ALL_SUBMISSION_COLUMNS)
+            elif table == "comments":
+                cols = fixture.get("comment_columns", _ALL_COMMENT_COLUMNS)
+            else:
+                cols = set()
+            result.__iter__ = lambda self, cols=cols: iter((c,) for c in cols)
+        elif "to_regclass" in sql:
             tbl = (params or {}).get("tbl", "")
             table_name = tbl.split(".")[-1].strip('"')
             result.scalar.return_value = table_name if table_name in fixture.get("tables", set()) else None
@@ -259,6 +281,69 @@ class TestMigrateRawTableFileTypes:
         com = db_session.query(Comment).filter(Comment.file_id == file.id).one()
         assert com.id == "c1"
         assert com.word_count == 3  # "a reply here" -> 3 tokens
+
+    def test_older_schema_missing_a_column_migrates_with_none_for_it(
+        self, db_session, monkeypatch, file_type
+    ) -> None:
+        """Regression test: some real per-upload schemas in the dev DB
+        predate `subreddit` being added to the submissions/comments DDL,
+        so they have no such column at all -- a fixed `SELECT subreddit,
+        ...` against them fails outright with UndefinedColumn, which
+        previously meant the whole file silently never migrated. The
+        fetch helpers must select only the columns that actually exist in
+        that particular schema and backfill the rest as None (a nullable
+        column on the fixed tables), not hard-fail the file.
+        """
+        user = _make_user(db_session)
+        file = _make_file(db_session, user, file_type=file_type, schemaname="proj_old")
+
+        engine = _make_mock_engine(
+            {
+                "proj_old": {
+                    "tables": {"submissions", "comments"},
+                    "submission_columns": {"id", "title", "selftext", "author", "created_utc", "score", "num_comments"},
+                    "comment_columns": {"id", "body", "author", "created_utc", "score", "link_id", "parent_id"},
+                    "submissions": [
+                        {
+                            "id": "s1",
+                            "title": "Hello",
+                            "selftext": "world",
+                            "author": "a",
+                            "created_utc": 100,
+                            "score": 5,
+                            "num_comments": 1,
+                        }
+                    ],
+                    "comments": [
+                        {
+                            "id": "c1",
+                            "body": "a reply here",
+                            "author": "b",
+                            "created_utc": 101,
+                            "score": 2,
+                            "link_id": "s1",
+                            "parent_id": "s1",
+                        }
+                    ],
+                }
+            }
+        )
+        monkeypatch.setattr("backend.scripts.migrate_to_fixed_tables.engine", engine)
+
+        report = migrate_file_type(db_session, file_type)
+
+        assert report.files_migrated == 1
+        assert report.files_errored == 0
+        assert report.rows_copied["submissions"] == 1
+        assert report.rows_copied["comments"] == 1
+
+        sub = db_session.query(Submission).filter(Submission.file_id == file.id).one()
+        assert sub.subreddit is None
+        assert sub.word_count == 2
+
+        com = db_session.query(Comment).filter(Comment.file_id == file.id).one()
+        assert com.subreddit is None
+        assert com.word_count == 3
 
     def test_missing_tables_result_in_zero_rows_not_an_error(
         self, db_session, monkeypatch, file_type

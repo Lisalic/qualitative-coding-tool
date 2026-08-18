@@ -1,13 +1,15 @@
-"""Tests for backend/scripts/tag_expansion.py -- the pure helpers.
-
-`expand_tags_via_openrouter` (network) is covered separately in the AI
-route tests via a patched `get_client`/OpenAI seam, not here.
+"""Tests for backend/scripts/tag_expansion.py -- the pure helpers, plus
+(Stage 9) `expand_tags_via_openrouter` itself, now mocked at the
+`external/openrouter_client.py::chat_completion` seam instead of the
+OpenAI SDK directly.
 """
 
 import time
 
 import pytest
+from unittest.mock import AsyncMock
 
+from backend.app.external.errors import ExternalServiceError
 from backend.scripts.tag_expansion import (
     TagExpansionError,
     _extract_error_code,
@@ -15,6 +17,7 @@ from backend.scripts.tag_expansion import (
     _parse_expansion_json,
     _strip_json_fences,
     comment_body_tag_predicate_sql,
+    expand_tags_via_openrouter,
     normalize_and_cap_terms,
     parse_filter_tags_input,
     submission_text_tag_predicate_sql,
@@ -323,3 +326,89 @@ class TestCommentBodyTagPredicateSql:
         # query's bind params without key collision.
         assert set(sub_bind.keys()).isdisjoint(com_bind.keys())
         assert "tag_com_0" in com_bind
+
+
+# ---------------------------------------------------------------------------
+# expand_tags_via_openrouter (Stage 9 -- mocked at the chat_completion seam)
+# ---------------------------------------------------------------------------
+
+
+class TestExpandTagsViaOpenrouter:
+    async def test_no_tags_returns_empty_without_calling_api(self, monkeypatch) -> None:
+        mock = AsyncMock()
+        monkeypatch.setattr("backend.scripts.tag_expansion.chat_completion", mock)
+        assert await expand_tags_via_openrouter([], "sk-key", "model-x") == ([], [])
+        mock.assert_not_called()
+
+    async def test_no_api_key_raises_401(self) -> None:
+        with pytest.raises(TagExpansionError) as exc_info:
+            await expand_tags_via_openrouter(["anxiety"], "", "model-x")
+        assert exc_info.value.code == 401
+
+    async def test_happy_path_merges_expanded_terms_with_seeds(self, monkeypatch) -> None:
+        response = (
+            '{"original_tags": ["anxiety"], '
+            '"expanded_terms": ["anxiety", "worry", "panic attack"], "notes": ""}'
+        )
+        monkeypatch.setattr(
+            "backend.scripts.tag_expansion.chat_completion", AsyncMock(return_value=response)
+        )
+
+        orig, expanded = await expand_tags_via_openrouter(["anxiety"], "sk-key", "model-x")
+
+        assert orig == ["anxiety"]
+        assert set(expanded) == {"anxiety", "worry", "panic attack"}
+
+    async def test_response_format_rejected_falls_back_to_plain_call_same_attempt(
+        self, monkeypatch
+    ) -> None:
+        """The nested-retry nuance: if the structured `response_format`
+        call fails, a second call *without* `response_format` is tried in
+        the same outer attempt, with no backoff sleep in between.
+        """
+        good_response = '{"original_tags": ["worry"], "expanded_terms": ["worry", "nervous"], "notes": ""}'
+        mock = AsyncMock(
+            side_effect=[ExternalServiceError("model rejects response_format"), good_response]
+        )
+        monkeypatch.setattr("backend.scripts.tag_expansion.chat_completion", mock)
+        sleep_mock = AsyncMock()
+        monkeypatch.setattr("backend.app.external.openrouter_client.asyncio.sleep", sleep_mock)
+
+        orig, expanded = await expand_tags_via_openrouter(["worry"], "sk-key", "model-x")
+
+        assert set(expanded) == {"worry", "nervous"}
+        assert mock.await_count == 2
+        first_kwargs, second_kwargs = mock.call_args_list[0].kwargs, mock.call_args_list[1].kwargs
+        assert first_kwargs["response_format"] == {"type": "json_object"}
+        assert second_kwargs["response_format"] is None
+        # No outer-loop backoff was needed -- the fallback succeeded within
+        # the same attempt.
+        sleep_mock.assert_not_called()
+
+    async def test_invalid_json_fails_fast_without_retrying(self, monkeypatch) -> None:
+        """A JSON-parse failure isn't a network hiccup -- don't burn the
+        outer retry budget on it.
+        """
+        mock = AsyncMock(return_value="not json at all")
+        monkeypatch.setattr("backend.scripts.tag_expansion.chat_completion", mock)
+
+        with pytest.raises(TagExpansionError):
+            await expand_tags_via_openrouter(["x"], "sk-key", "model-x")
+
+        # The response_format call succeeded (no exception, just bad JSON),
+        # so the no-response_format fallback never ran, and the outer
+        # retry loop never re-ran a second outer attempt -- exactly one
+        # call total.
+        assert mock.await_count == 1
+
+    async def test_exhausts_outer_retries_then_raises_mapped_error(self, monkeypatch) -> None:
+        mock = AsyncMock(side_effect=ExternalServiceError("boom", code=429))
+        monkeypatch.setattr("backend.scripts.tag_expansion.chat_completion", mock)
+        monkeypatch.setattr("backend.app.external.openrouter_client.asyncio.sleep", AsyncMock())
+
+        with pytest.raises(TagExpansionError) as exc_info:
+            await expand_tags_via_openrouter(["x"], "sk-key", "model-x")
+
+        assert exc_info.value.code == 429
+        # 3 outer attempts x 2 inner calls (response_format + fallback) each.
+        assert mock.await_count == 6

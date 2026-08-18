@@ -1,8 +1,6 @@
-import os
-import json
 from backend.scripts.codebook_generator import get_client, MODEL_3
 
-def summarize_coding(coding_data: str, user_prompt: str = "", api_key: str = "", model: str = "") -> str:
+async def summarize_coding(coding_data: str, user_prompt: str = "", api_key: str = "", model: str = "") -> str:
     """Summarize a coding output using qualitative coding techniques."""
     if not coding_data:
         raise ValueError("Coding data is required")
@@ -17,7 +15,7 @@ def summarize_coding(coding_data: str, user_prompt: str = "", api_key: str = "",
     user_prompt = f"Coding Data to Summarize: {coding_data} Additional Instructions: {user_prompt} Please provide a comprehensive summary of this coded qualitative data using qualitative research techniques."
 
     try:
-        response = get_client(system_prompt, user_prompt, api_key, chosen_model)
+        response = await get_client(system_prompt, user_prompt, api_key, chosen_model)
         return response
     except Exception as exc:
         raise ValueError(f"Failed to generate summary: {str(exc)}")

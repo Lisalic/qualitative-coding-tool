@@ -1,13 +1,10 @@
 import re
-import time
-from openai import OpenAI
 
 from backend.app.ai_models import model_slug_at
+from backend.app.external.openrouter_client import chat_completion
 
-OPENROUTER_URL = "https://openrouter.ai/api/v1"
 FREE_MODEL = model_slug_at(0)
 MAX_RETRIES = 3
-INITIAL_RETRY_DELAY = 2
 
 POST_ID_LINE_RE = re.compile(
     r"^\s*POST[\s_-]*ID\s*:\s*(.+?)\s*$",
@@ -29,37 +26,26 @@ LEADING_LABEL_BULLET_RE = re.compile(
 QUOTED_EVIDENCE_BLOCK_RE = re.compile(r'^"[^"\n]+"(?:§"[^"\n]+")*$')
 QUOTED_SNIPPET_RE = re.compile(r'"([^"\n]+)"')
 
-def get_client(system_prompt: str, user_prompt: str, api_key: str, model: str = FREE_MODEL) -> str:
+async def get_client(system_prompt: str, user_prompt: str, api_key: str, model: str = FREE_MODEL) -> str:
     if not api_key:
         raise ValueError("OpenRouter API key is required")
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            client = OpenAI(
-                api_key=api_key,
-                base_url=OPENROUTER_URL,
-            )
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=0.05,
-                timeout=30, 
-                extra_body={"transforms": ["middle-out"]}
-            )
-            print("API call successful.")
-            return response.choices[0].message.content
-        except KeyboardInterrupt:
-            print("\nkeyboard interrupt")
-            raise
-        except Exception as e:
-            if attempt == MAX_RETRIES:
-                raise
-            wait_time = INITIAL_RETRY_DELAY * (2 ** (attempt - 1))
-            print(f"\nAPI call failed (attempt {attempt}/{MAX_RETRIES}): {type(e).__name__}")
-            print(f"Retrying in {wait_time}s...")
-            time.sleep(wait_time)
+
+    def _on_retry(attempt: int, exc: Exception, wait_seconds: float) -> None:
+        print(f"\nAPI call failed (attempt {attempt}/{MAX_RETRIES}): {type(exc).__name__}")
+        print(f"Retrying in {wait_seconds}s...")
+
+    result = await chat_completion(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        api_key=api_key,
+        model=model,
+        timeout=30.0,
+        use_middle_out=True,
+        max_retries=MAX_RETRIES,
+        on_retry=_on_retry,
+    )
+    print("API call successful.")
+    return result
 
 
 def _clean_inline_text(value: str) -> str:
@@ -266,7 +252,7 @@ def validate_coding_output(normalized_text: str) -> bool:
 
     return saw_post
 
-def classify_posts(codebook: str, posts_content: str, methodology: str, api_key: str, model: str = "") -> tuple[str, str, str]:
+async def classify_posts(codebook: str, posts_content: str, methodology: str, api_key: str, model: str = "") -> tuple[str, str, str]:
     
     print("Starting codebook application process...")
     
@@ -309,7 +295,7 @@ def classify_posts(codebook: str, posts_content: str, methodology: str, api_key:
     
     print("Prompts prepared. Sending request to AI model...")
     chosen_model = model or FREE_MODEL
-    raw_result = get_client(system_prompt, user_prompt, api_key, chosen_model)
+    raw_result = await get_client(system_prompt, user_prompt, api_key, chosen_model)
     normalized_result = normalize_coding_output(raw_result)
 
     if validate_coding_output(normalized_result):

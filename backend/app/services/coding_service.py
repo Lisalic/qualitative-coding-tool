@@ -25,7 +25,6 @@ back into one opaque blob.
 
 from __future__ import annotations
 
-import asyncio
 import secrets
 
 from sqlalchemy import select, text
@@ -401,8 +400,8 @@ async def _run_apply_codebook_job(job_id: int, payload: dict) -> dict:
         comments = await raw_data_repo.sample_comments(session, source_file_id, sample_percentage)
         assembled = _assemble_posts_content(submissions, comments)
 
-    classification_output, system_prompt, user_prompt = await asyncio.to_thread(
-        classify_posts, codebook_text, assembled, methodology, api_key, model
+    classification_output, system_prompt, user_prompt = await classify_posts(
+        codebook_text, assembled, methodology, api_key, model
     )
     coding_entries = _build_coding_entries_from_output(classification_output)
 
@@ -499,10 +498,12 @@ async def start_compare_codings_job(
 async def _run_compare_codings_job(job_id: int, payload: dict) -> dict:
     """Handler for ``job_type="compare_codings"``.
 
-    The LLM call now runs via ``asyncio.to_thread`` -- the old route
-    called ``codebook_get_client`` (a sync OpenAI SDK call) directly
-    inline, one of the confirmed request-blocking-event-loop sites this
-    whole refactor started from.
+    ``codebook_get_client`` is now a native ``async def`` (Stage 9, backed
+    by ``external/openrouter_client.py::chat_completion``), so it's
+    ``await``ed directly -- no more ``asyncio.to_thread`` wrapper around a
+    sync OpenAI SDK call, which is what made the old inline route call one
+    of the confirmed request-blocking-event-loop sites this whole refactor
+    started from.
     """
     from backend.scripts.codebook_generator import MODEL_3
     from backend.scripts.codebook_generator import get_client as codebook_get_client
@@ -535,7 +536,7 @@ async def _run_compare_codings_job(job_id: int, payload: dict) -> dict:
     )
     chosen_model = model or MODEL_3
 
-    comparison = await asyncio.to_thread(codebook_get_client, system_prompt, user_prompt, api_key, chosen_model)
+    comparison = await codebook_get_client(system_prompt, user_prompt, api_key, chosen_model)
     return {"comparison": comparison}
 
 
@@ -587,7 +588,9 @@ async def _run_summarize_coding_job(job_id: int, payload: dict) -> dict:
     Runs in the background job runner's context (no request-scoped
     session/connection), so it opens its own connection directly via the
     module-level ``async_engine`` -- same as the route did inline before
-    this stage.
+    this stage. ``summarize_coding_function`` is a native ``async def``
+    (Stage 9), so it's ``await``ed directly instead of going through
+    ``asyncio.to_thread``.
     """
     from backend.scripts.summarize_coding import summarize_coding as summarize_coding_function
 
@@ -604,7 +607,5 @@ async def _run_summarize_coding_job(job_id: int, payload: dict) -> dict:
     if not coding_data:
         raise ValidationAppError("No content found in coding")
 
-    summary = await asyncio.to_thread(
-        summarize_coding_function, coding_data, prompt, api_key, model
-    )
+    summary = await summarize_coding_function(coding_data, prompt, api_key, model)
     return {"summary": summary}

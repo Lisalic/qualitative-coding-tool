@@ -8,15 +8,6 @@ try:
 except Exception:
     from app.auth import decode_access_token
 
-# Re-exported for existing importers; the implementation now lives in
-# backend.app.core.schema_guard. Remove this shim once nothing imports
-# is_proj_schema/normalize_schema from here (planned for the refactor's
-# cleanup stage).
-try:
-    from backend.app.core.schema_guard import is_proj_schema, normalize_schema  # noqa: F401
-except Exception:
-    from app.core.schema_guard import is_proj_schema, normalize_schema  # noqa: F401
-
 
 def get_user_id_from_request(request: Request):
     """Get user ID from request token. Returns int or None."""

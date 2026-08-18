@@ -18,7 +18,7 @@ against SQLite.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select
@@ -364,8 +364,8 @@ class TestStartFilterDataJobEnqueue:
 
 class TestFilterDataJobHandlerEndToEnd:
     async def test_ai_filters_and_materializes_new_file(self, session_factory, monkeypatch) -> None:
-        filter_posts_mock = MagicMock(return_value=(["s1"], "sys prompt", "user prompt"))
-        filter_comments_mock = MagicMock(return_value=(["c1"], "", ""))
+        filter_posts_mock = AsyncMock(return_value=(["s1"], "sys prompt", "user prompt"))
+        filter_comments_mock = AsyncMock(return_value=(["c1"], "", ""))
         monkeypatch.setattr("backend.scripts.filter_db.filter_posts_with_ai", filter_posts_mock)
         monkeypatch.setattr("backend.scripts.filter_db.filter_comments_with_ai", filter_comments_mock)
 
@@ -429,7 +429,7 @@ class TestFilterDataJobHandlerEndToEnd:
 
         monkeypatch.setattr(
             "backend.scripts.filter_db.filter_posts_with_ai",
-            MagicMock(side_effect=AIFilterError("bad key", code=401)),
+            AsyncMock(side_effect=AIFilterError("bad key", code=401)),
         )
 
         async with session_factory() as session:

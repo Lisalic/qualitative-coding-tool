@@ -17,9 +17,8 @@ from backend.app.api.utils import (
     _hash_password,
     _verify_password,
     get_user_id_from_request,
-    is_proj_schema,
-    normalize_schema,
 )
+from backend.app.core.schema_guard import is_proj_schema, normalize_schema
 
 
 # ---------------------------------------------------------------------------

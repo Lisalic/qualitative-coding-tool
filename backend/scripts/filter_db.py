@@ -1,16 +1,15 @@
-import time
 import ast
 import re
 import datetime
-from openai import OpenAI
 
 from backend.app.ai_models import is_paid_model
+from backend.app.external.errors import ExternalServiceError
+from backend.app.external.openrouter_client import chat_completion
+from backend.app.external.response_parsers import strip_markdown_fences
 from backend.scripts.openrouter_http import openrouter_user_message
 
-OPENROUTER_URL = "https://openrouter.ai/api/v1"
 FREE_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
 MAX_RETRIES = 3
-INITIAL_RETRY_DELAY = 2
 
 MODEL_CONTEXT_LIMITS = {
     "default": 100_000 * 4,   
@@ -30,27 +29,6 @@ class AIFilterError(Exception):
     def __init__(self, message: str, code: int = 0):
         self.code = code
         super().__init__(message)
-
-
-class _EmptyCompletionError(Exception):
-    """HTTP 200 but no usable assistant message — retry or fail with a clear message."""
-
-    def __init__(self, detail: str):
-        self.detail = detail
-        super().__init__(detail)
-
-
-def _extract_error_code(error: Exception) -> int:
-    """Extract HTTP error code from an OpenAI/OpenRouter exception."""
-    error_str = str(error)
-    # Match "Error code: 401" pattern
-    match = re.search(r'Error code:\s*(\d{3})', error_str)
-    if match:
-        return int(match.group(1))
-    # Check for status_code attribute
-    if hasattr(error, 'status_code'):
-        return error.status_code
-    return 0
 
 
 def _log_ai(stage: str, message: str, data: dict = None):
@@ -116,91 +94,57 @@ def _preview_response(response: str, max_len: int = 500) -> str:
     return f"{response[:half]}\n... [{len(response) - max_len} chars omitted] ...\n{response[-half:]}"
 
 
-def get_client(system_prompt: str, user_prompt: str, api_key: str, model: str = FREE_MODEL) -> str:
+async def get_client(system_prompt: str, user_prompt: str, api_key: str, model: str = FREE_MODEL) -> str:
     if not api_key:
         raise AIFilterError("OpenRouter API key is required", code=401)
-    
+
     total_chars = len(system_prompt) + len(user_prompt)
-    
+
     _log_ai("REQUEST", f"API call to {model}", {
         "prompt_chars": f"{total_chars:,}"
     })
-    
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            client = OpenAI(
-                api_key=api_key,
-                base_url=OPENROUTER_URL,
-            )
-            # middle-out can yield empty completions for some providers; omit on retries.
-            kwargs = dict(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=0.05,
-                timeout=300,
-            )
-            if attempt == 1:
-                kwargs["extra_body"] = {"transforms": ["middle-out"]}
 
-            response = client.chat.completions.create(**kwargs)
-
-            if not response.choices or not isinstance(response.choices, list) or len(response.choices) == 0:
-                _log_ai(
-                    "EMPTY",
-                    "No choices in completion",
-                    {"model": model, "attempt": attempt},
-                )
-                raise _EmptyCompletionError("no choices")
-
-            choice0 = response.choices[0]
-            finish = getattr(choice0, "finish_reason", None)
-            msg = choice0.message if choice0 else None
-            raw_content = (msg.content or "") if msg else ""
-            if not msg or not raw_content.strip():
-                _log_ai(
-                    "EMPTY",
-                    "Empty assistant content",
-                    {"model": model, "attempt": attempt, "finish_reason": finish},
-                )
-                raise _EmptyCompletionError("empty content")
-
-            return raw_content
-
-        except KeyboardInterrupt:
-            raise
-        except AIFilterError:
-            raise
-        except _EmptyCompletionError:
-            if attempt == MAX_RETRIES:
-                msg = (
-                    "The model returned no usable output (empty reply). "
-                    "This often happens when a free model is overloaded or briefly unavailable—try another model or retry."
-                )
-                _log_ai("ERROR", msg, {"model": model})
-                raise AIFilterError(msg, code=502) from None
-            wait_time = INITIAL_RETRY_DELAY * (2 ** (attempt - 1))
+    def _on_retry(attempt: int, exc: Exception, wait_seconds: float) -> None:
+        if isinstance(exc, ExternalServiceError) and "empty completion" in str(exc).lower():
             _log_ai(
                 "RETRY",
                 f"Empty completion, attempt {attempt}/{MAX_RETRIES}",
-                {"wait": f"{wait_time}s", "model": model},
+                {"wait": f"{wait_seconds}s", "model": model},
             )
-            time.sleep(wait_time)
-        except Exception as e:
-            code = _extract_error_code(e)
-            if attempt == MAX_RETRIES:
-                msg = openrouter_user_message(code, model) if code else str(e)
-                extra = {"model": model, "http_code": code} if code else None
-                _log_ai("ERROR", f"All {MAX_RETRIES} attempts failed: {msg}", extra)
-                raise AIFilterError(msg, code=code)
-            wait_time = INITIAL_RETRY_DELAY * (2 ** (attempt - 1))
-            _log_ai("RETRY", f"Attempt {attempt}/{MAX_RETRIES} failed: {type(e).__name__}", {"wait": f"{wait_time}s"})
-            time.sleep(wait_time)
+        else:
+            _log_ai(
+                "RETRY",
+                f"Attempt {attempt}/{MAX_RETRIES} failed: {type(exc).__name__}",
+                {"wait": f"{wait_seconds}s"},
+            )
+
+    try:
+        return await chat_completion(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            api_key=api_key,
+            model=model,
+            timeout=300.0,
+            use_middle_out=True,
+            max_retries=MAX_RETRIES,
+            on_retry=_on_retry,
+        )
+    except ExternalServiceError as e:
+        if e.code == 0 and "empty completion" in str(e).lower():
+            msg = (
+                "The model returned no usable output (empty reply). "
+                "This often happens when a free model is overloaded or briefly unavailable—try another model or retry."
+            )
+            _log_ai("ERROR", msg, {"model": model})
+            raise AIFilterError(msg, code=502) from None
+        code = e.code
+        msg = openrouter_user_message(code, model) if code else str(e)
+        extra = {"model": model, "http_code": code} if code else None
+        _log_ai("ERROR", f"All {MAX_RETRIES} attempts failed: {msg}", extra)
+        raise AIFilterError(msg, code=code) from e
 
 
-def _run_batched_filter(content_type: str, filter_prompt: str, content: str, api_key: str, model: str, system_prompt: str) -> tuple[list, str]:
+async def _run_batched_filter(content_type: str, filter_prompt: str, content: str, api_key: str, model: str, system_prompt: str) -> tuple[list, str]:
     """
     Shared batched filtering logic for both posts and comments.
     
@@ -255,7 +199,7 @@ def _run_batched_filter(content_type: str, filter_prompt: str, content: str, api
         _log_ai("BATCH", f"Processing batch {i+1}/{len(batches)}", {"chars": f"{len(batch):,}"})
         
         try:
-            response = get_client(system_prompt, user_prompt, api_key, chosen_model)
+            response = await get_client(system_prompt, user_prompt, api_key, chosen_model)
             
             _log_ai("RESPONSE", f"Batch {i+1} response ({len(response)} chars):")
             print(f"    {_preview_response(response, 300)}")
@@ -278,7 +222,7 @@ def _run_batched_filter(content_type: str, filter_prompt: str, content: str, api
     return unique_ids, last_user_prompt
 
 
-def filter_posts_with_ai(filter_prompt: str, posts_content: str, api_key: str, model: str = "") -> tuple[list, str, str]:
+async def filter_posts_with_ai(filter_prompt: str, posts_content: str, api_key: str, model: str = "") -> tuple[list, str, str]:
     """
     Use AI to filter posts. Raises AIFilterError on first-batch failure.
     """
@@ -293,11 +237,11 @@ INSTRUCTIONS:
 
 CRITICAL: Return ONLY the raw Python array. No markdown, no backticks, no explanation."""
 
-    ids, last_user_prompt = _run_batched_filter("posts", filter_prompt, posts_content, api_key, model, system_prompt)
+    ids, last_user_prompt = await _run_batched_filter("posts", filter_prompt, posts_content, api_key, model, system_prompt)
     return ids, system_prompt, last_user_prompt
 
 
-def filter_comments_with_ai(filter_prompt: str, comments_content: str, api_key: str, model: str = "") -> tuple[list, str, str]:
+async def filter_comments_with_ai(filter_prompt: str, comments_content: str, api_key: str, model: str = "") -> tuple[list, str, str]:
     """
     Use AI to filter comments. Raises AIFilterError on first-batch failure.
     """
@@ -312,7 +256,7 @@ INSTRUCTIONS:
 
 CRITICAL: Return ONLY the raw Python array. No markdown, no backticks, no explanation."""
 
-    ids, last_user_prompt = _run_batched_filter("comments", filter_prompt, comments_content, api_key, model, system_prompt)
+    ids, last_user_prompt = await _run_batched_filter("comments", filter_prompt, comments_content, api_key, model, system_prompt)
     return ids, system_prompt, last_user_prompt
 
 
@@ -322,15 +266,11 @@ def wrap_in_python_array(content: str) -> list:
     Parse AI response into a list of ID strings.
     Handles various formats the AI might return.
     """
-    content = content.strip()
-    
-    # Remove common markdown artifacts
-    if content.startswith("```"):
-        lines = content.split("\n")
-        # Remove first line (```python or ```) and last line (```)
-        lines = [l for l in lines if not l.strip().startswith("```")]
-        content = "\n".join(lines).strip()
-    
+    # Remove common markdown artifacts (identical logic to
+    # external/response_parsers.py::strip_markdown_fences, so reuse it
+    # directly instead of keeping a second copy).
+    content = strip_markdown_fences(content)
+
     # Try to parse as Python literal
     try:
         obj = ast.literal_eval(content)

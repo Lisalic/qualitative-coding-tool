@@ -402,7 +402,7 @@ class TestApplyCodebookKickoff:
         codebook_file = await _make_file(
             route_backed_by_sqlite_jobs, user.id, file_type="codebook", content="CODEBOOK: code A"
         )
-        classify_mock = MagicMock(return_value=("POST_ID: p1\nCODE: A\nEVIDENCE: \"x\"", "sys", "usr"))
+        classify_mock = AsyncMock(return_value=("POST_ID: p1\nCODE: A\nEVIDENCE: \"x\"", "sys", "usr"))
         monkeypatch.setattr("backend.app.services.coding_service.classify_posts", classify_mock)
 
         resp = client.post(
@@ -457,7 +457,7 @@ class TestCompareCodingsGuard:
         user = await _make_user(route_backed_by_sqlite_jobs)
         file_a = await _make_file(route_backed_by_sqlite_jobs, user.id, content="coding a text")
         file_b = await _make_file(route_backed_by_sqlite_jobs, user.id, content="coding b text")
-        llm_mock = MagicMock(return_value="mocked comparison result")
+        llm_mock = AsyncMock(return_value="mocked comparison result")
         # compare_codings' job handler imports get_client via a LOCAL
         # import inside the handler body, so it must be patched at its
         # source module, not on coding_service.
@@ -519,7 +519,7 @@ class TestSummarizeCodingGuard:
             "backend.app.services.coding_service.async_engine",
             _mock_async_engine_with_content("coded rows"),
         )
-        summarize_mock = MagicMock(return_value="mocked summary")
+        summarize_mock = AsyncMock(return_value="mocked summary")
         monkeypatch.setattr(
             "backend.scripts.summarize_coding.summarize_coding", summarize_mock
         )
