@@ -394,16 +394,8 @@ const HighlightedContent = ({
         elements.push(
           <span
             key={`segment-${idx}`}
-            className="coded-span"
+            className="relative cursor-pointer bg-paper px-0.5 py-px text-ink"
             data-codes={codes.join(",")}
-            style={{
-              position: "relative",
-              backgroundColor: "#e0e0e0",
-              color: "#000000",
-              borderRadius: "2px",
-              padding: "1px 2px",
-              cursor: "pointer",
-            }}
             onMouseEnter={(e) => showCodeTooltip(e, codes, notesByCode)}
             onMouseMove={moveTooltip}
             onMouseLeave={hideTooltip}
@@ -436,40 +428,31 @@ const HighlightedContent = ({
   return (
     <>
       <div
-        className="highlighted-container"
+        className="relative flex bg-ink text-paper"
         ref={containerRef}
-        style={{ display: "flex", position: "relative" }}
       >
         <div
-          className="text-area"
+          className="flex-1 leading-relaxed"
           ref={textAreaRef}
-          style={{ flex: 1, padding: "8px 6px 8px 8px" }}
+          style={{ padding: "8px 6px 8px 8px" }}
         >
           {textAreaChildren}
         </div>
         <div
-          className="coding-margin"
+          className="relative ml-1 shrink-0 self-stretch overflow-hidden bg-white/5"
           ref={marginRef}
-          style={{
-            width: `${marginWidth}px`,
-            position: "relative",
-            marginLeft: "4px",
-            flexShrink: 0,
-          }}
+          style={{ width: `${marginWidth}px` }}
         >
           {lines.map((line, idx) => (
             <div
               key={idx}
-              className="margin-line"
+              className="absolute cursor-pointer transition-opacity hover:opacity-80"
               style={{
-                position: "absolute",
                 width: `${MARGIN_STRIPE_WIDTH_PX}px`,
                 height: `${line.height}px`,
                 top: `${line.top}px`,
                 left: `${line.left}px`,
                 backgroundColor: line.color,
-                borderRadius: "1px",
-                cursor: "pointer",
               }}
               onMouseEnter={(e) =>
                 showCodeTooltip(
@@ -489,69 +472,28 @@ const HighlightedContent = ({
       </div>
       {tooltip && (
         <div
-          className="robust-tooltip show"
+          className="fixed z-[10000] max-w-[300px] break-words border border-paper bg-ink px-4 py-3 text-sm font-medium text-paper shadow-lg"
           style={{
             left: tooltip.x + 12,
             top: tooltip.y + 12,
           }}
         >
-          <div
-            style={{
-              fontWeight: 700,
-              fontSize: 12,
-              marginBottom: 6,
-              color: "#aaa",
-              textTransform: "uppercase",
-              letterSpacing: "0.5px",
-            }}
-          >
+          <div className="mb-1.5 text-xs font-bold uppercase tracking-wide text-paper/60">
             Codes:
           </div>
           {tooltip.codes.map((code) => (
-            <div
-              key={code}
-              style={{
-                display: "flex",
-                alignItems: "flex-start",
-                marginBottom: 8,
-                flexDirection: "column",
-                gap: 4,
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center" }}>
+            <div key={code} className="mb-2 flex flex-col items-start gap-1">
+              <div className="flex items-center">
                 <div
-                  style={{
-                    width: 10,
-                    height: 10,
-                    borderRadius: 2,
-                    marginRight: 8,
-                    flexShrink: 0,
-                    backgroundColor: getCodeColor(code),
-                  }}
+                  className="mr-2 h-2.5 w-2.5 shrink-0"
+                  style={{ backgroundColor: getCodeColor(code) }}
                 />
-                <span style={{ fontWeight: 600 }}>{code}</span>
+                <span className="font-semibold">{code}</span>
               </div>
               {Array.isArray(tooltip.notesByCode?.[code]) &&
                 tooltip.notesByCode[code].length > 0 && (
-                  <div
-                    style={{
-                      marginLeft: 18,
-                      fontSize: 12,
-                      color: "#d0d0d0",
-                      lineHeight: 1.35,
-                      maxWidth: 260,
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontWeight: 700,
-                        fontSize: 11,
-                        color: "#9b9b9b",
-                        textTransform: "uppercase",
-                        letterSpacing: "0.35px",
-                        marginBottom: 2,
-                      }}
-                    >
+                  <div className="ml-[18px] max-w-[260px] text-xs leading-snug text-paper/70">
+                    <div className="mb-0.5 text-[11px] font-bold uppercase tracking-wide text-paper/50">
                       Notes
                     </div>
                     {tooltip.notesByCode[code].map((note, index) => (
@@ -568,7 +510,7 @@ const HighlightedContent = ({
         createPortal(
           <div
             ref={selectionPopoverRef}
-            className="selection-add-code-popover"
+            className="fixed z-[10001] border border-paper bg-ink p-1.5 shadow-lg"
             style={{
               left: selectionPopover.left,
               top: selectionPopover.top,
@@ -578,7 +520,7 @@ const HighlightedContent = ({
           >
             <button
               type="button"
-              className="btn btn-primary btn-small selection-add-code-popover__button"
+              className="whitespace-nowrap border-2 border-paper px-3 py-1.5 text-xs font-semibold transition-colors hover:bg-paper hover:text-ink"
               onMouseDown={(e) => e.preventDefault()}
               onClick={handleAddCodeClick}
             >

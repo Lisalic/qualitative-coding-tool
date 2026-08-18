@@ -1,6 +1,10 @@
 import { useState, useEffect } from "react";
-import "../../styles/Home.css";
 import { api } from "../../api";
+
+const inputClasses =
+  "border border-paper bg-white/5 px-3 py-2.5 text-paper placeholder:text-paper/40 focus:outline-none focus:ring-2 focus:ring-paper";
+const actionBtn =
+  "border border-paper px-3 py-1.5 text-sm transition-colors hover:bg-paper hover:text-ink";
 
 export default function PromptManager({
   isOpen = true,
@@ -83,7 +87,7 @@ export default function PromptManager({
     // Attempt to get authenticated user id for debugging and include it in POST
     let fetchedUserId = null;
     api
-      .get("/api/me")
+      .get("/api/me/")
       .then((meRes) => {
         const userId = meRes?.data?.id || meRes?.data?.sub || null;
         fetchedUserId = userId;
@@ -201,133 +205,140 @@ export default function PromptManager({
   promptItems.push(...savedPrompts.map((prompt) => ({ ...prompt, isExample: false })));
 
   return (
-    <div className="prompt-manager-modal-overlay" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-[999] flex items-center justify-center bg-black/70 p-4"
+      onClick={onClose}
+    >
       <div
-        className="prompt-manager prompt-manager-modal"
+        className="max-h-[90vh] w-full max-w-3xl overflow-y-auto border-2 border-paper bg-ink p-4"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="prompt-manager-modal-header">
-          <h3>Saved Prompts</h3>
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-lg font-semibold">Saved Prompts</h3>
           <button
             type="button"
             onClick={onClose}
-            className="message-close-btn"
+            className="flex h-8 w-8 items-center justify-center text-lg transition-colors hover:bg-white/10"
             aria-label="Close prompt picker"
           >
             ×
           </button>
         </div>
-        <div className="prompt-manager-content">
-        {message && (
-          <div className={`prompt-message ${messageType}`}>
-            <span>{message}</span>
-            <button
-              type="button"
-              onClick={clearMessage}
-              className="message-close-btn"
-              aria-label="Close message"
+        <div className="mt-5">
+          {message && (
+            <div
+              className={`mb-4 flex items-center justify-between gap-3 border px-4 py-3 text-sm ${
+                messageType === "error"
+                  ? "border-error bg-error/10 text-error"
+                  : "border-success bg-success/10 text-success"
+              }`}
             >
-              ×
-            </button>
-          </div>
-        )}
-
-        <div>
-          {promptItems.length === 0 ? (
-            <p className="no-prompts">No saved prompts yet.</p>
-          ) : (
-            <div className="prompts-list">
-              {promptItems.map((prompt) => (
-                <div key={prompt.id} className="prompt-item">
-                  {!prompt.isExample && editingId === prompt.id ? (
-                    <div className="prompt-edit">
-                      <div className="form-group">
-                        <label>Edit name</label>
-                        <input
-                          type="text"
-                          className="form-input"
-                          value={editName}
-                          onChange={(e) => setEditName(e.target.value)}
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label>Edit prompt</label>
-                        <textarea
-                          className="form-input"
-                          rows={4}
-                          value={editContent}
-                          onChange={(e) => setEditContent(e.target.value)}
-                        />
-                      </div>
-                      <div className="prompt-actions">
-                        <button
-                          type="button"
-                          onClick={() => saveEdit(prompt.id)}
-                          className="save-prompt-btn"
-                        >
-                          Save
-                        </button>
-                        <button
-                          type="button"
-                          onClick={cancelEdit}
-                          className="delete-prompt-btn"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="prompt-info">
-                        <h4>{prompt.name}</h4>
-                        <p className="prompt-preview">
-                          {prompt.prompt.length > 100
-                            ? `${prompt.prompt.substring(0, 100)}...`
-                            : prompt.prompt}
-                        </p>
-                        {prompt.isExample ? (
-                          <small className="prompt-date">Built-in</small>
-                        ) : (
-                          <small className="prompt-date">
-                            Saved:{" "}
-                            {new Date(prompt.createdAt).toLocaleDateString()}
-                          </small>
-                        )}
-                      </div>
-                      <div className="prompt-actions">
-                        <button
-                          type="button"
-                          onClick={() => loadPrompt(prompt)}
-                          className="load-prompt-btn"
-                        >
-                          Load
-                        </button>
-                        {!prompt.isExample && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => startEdit(prompt)}
-                              className="load-prompt-btn"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => deletePrompt(prompt.id)}
-                              className="delete-prompt-btn"
-                            >
-                              Delete
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
-              ))}
+              <span>{message}</span>
+              <button
+                type="button"
+                onClick={clearMessage}
+                className="text-lg leading-none hover:opacity-70"
+                aria-label="Close message"
+              >
+                ×
+              </button>
             </div>
           )}
-        </div>
+
+          <div>
+            {promptItems.length === 0 ? (
+              <p className="py-6 text-center italic text-paper/70">No saved prompts yet.</p>
+            ) : (
+              <div className="flex flex-col gap-4">
+                {promptItems.map((prompt) => (
+                  <div
+                    key={prompt.id}
+                    className="flex items-start justify-between gap-4 border border-paper/20 p-4"
+                  >
+                    {!prompt.isExample && editingId === prompt.id ? (
+                      <div className="flex flex-1 flex-col gap-3">
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-sm">Edit name</label>
+                          <input
+                            type="text"
+                            className={inputClasses}
+                            value={editName}
+                            onChange={(e) => setEditName(e.target.value)}
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-sm">Edit prompt</label>
+                          <textarea
+                            className={`${inputClasses} resize-y`}
+                            rows={4}
+                            value={editContent}
+                            onChange={(e) => setEditContent(e.target.value)}
+                          />
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => saveEdit(prompt.id)}
+                            className={actionBtn}
+                          >
+                            Save
+                          </button>
+                          <button type="button" onClick={cancelEdit} className={actionBtn}>
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="min-w-0 flex-1">
+                          <h4 className="font-semibold">{prompt.name}</h4>
+                          <p className="mt-1.5 text-sm text-paper/70">
+                            {prompt.prompt.length > 100
+                              ? `${prompt.prompt.substring(0, 100)}...`
+                              : prompt.prompt}
+                          </p>
+                          {prompt.isExample ? (
+                            <small className="mt-1.5 block text-xs text-paper/50">Built-in</small>
+                          ) : (
+                            <small className="mt-1.5 block text-xs text-paper/50">
+                              Saved: {new Date(prompt.createdAt).toLocaleDateString()}
+                            </small>
+                          )}
+                        </div>
+                        <div className="flex shrink-0 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => loadPrompt(prompt)}
+                            className={actionBtn}
+                          >
+                            Load
+                          </button>
+                          {!prompt.isExample && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => startEdit(prompt)}
+                                className={actionBtn}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => deletePrompt(prompt.id)}
+                                className="border border-error px-3 py-1.5 text-sm text-error transition-colors hover:bg-error hover:text-paper"
+                              >
+                                Delete
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

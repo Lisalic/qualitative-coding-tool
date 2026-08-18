@@ -6,7 +6,6 @@ export default function CodingProjectScopeBar({ page }) {
       projects={page.projectsList || []}
       value={page.selectedProject}
       onChange={page.setSelectedProject}
-      style={{ marginBottom: 12 }}
     />
   );
 }

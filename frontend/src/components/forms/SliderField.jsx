@@ -12,10 +12,12 @@ export default function SliderField({
   caption,
 }) {
   return (
-    <div className="form-group">
-      <label htmlFor={id}>{label}</label>
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor={id} className="text-sm">
+        {label}
+      </label>
       <div>
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+        <div className="flex items-center gap-3">
           <input
             id={id}
             type="range"
@@ -24,24 +26,17 @@ export default function SliderField({
             step={step}
             value={value}
             onChange={(e) => onChange(Number(e.target.value))}
-            className="slider-input"
             disabled={disabled}
+            className="h-1.5 flex-1 cursor-pointer appearance-none bg-white/20 accent-paper disabled:cursor-not-allowed disabled:opacity-40"
           />
           <span
-            style={{
-              minWidth: valueMinWidth,
-              textAlign: "right",
-              fontWeight: 600,
-              color: "#ffffff",
-              fontFamily: "system-ui, -apple-system, sans-serif",
-            }}
+            className="text-right font-semibold"
+            style={{ minWidth: valueMinWidth }}
           >
             {valueDisplay}
           </span>
         </div>
-        <div style={{ marginTop: "6px", fontSize: "0.85em", color: "#999" }}>
-          {caption}
-        </div>
+        <div className="mt-1.5 text-sm text-paper/60">{caption}</div>
       </div>
     </div>
   );

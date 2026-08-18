@@ -13,6 +13,10 @@ import {
   COLUMN_WIDTHS_MIN,
 } from "./constants";
 
+const tdClasses = "border-b border-r border-paper/20 px-3 py-2.5 last:border-r-0";
+const inputClasses =
+  "border border-paper bg-white/5 px-3 py-2 text-paper placeholder:text-paper/40 focus:outline-none focus:ring-2 focus:ring-paper disabled:opacity-50";
+
 function fitVisibleColumnsToWidth(visibleIds, sourceWidths, targetWidth) {
   if (!Array.isArray(visibleIds) || visibleIds.length === 0 || targetWidth <= 0) {
     return null;
@@ -131,15 +135,6 @@ const CodingTableView = ({
     postContents,
   });
 
-  const lastVisibleColumnIndex = visibleColumns.length - 1;
-  const getVisibleCellStyle = useCallback(
-    (columnId, index) => ({
-      ...getColumnCellStyle(columnId),
-      borderRight: index < lastVisibleColumnIndex ? "1px solid #ffffff" : "none",
-    }),
-    [getColumnCellStyle, lastVisibleColumnIndex],
-  );
-
   useEffect(() => {
     const syncToParentWidth = () => {
       if (isResizingRef.current) return;
@@ -167,34 +162,35 @@ const CodingTableView = ({
   return (
     <div>
       {saveState?.status === "saving" && (
-        <div className="info-message coding-table__status-message">
+        <div className="mb-2.5 border border-paper/20 bg-white/5 px-4 py-3 text-sm text-paper/70">
           Saving coding changes...
         </div>
       )}
       {saveState?.status === "error" && saveState?.message && (
-        <div className="error-message coding-table__status-message">
+        <div className="mb-2.5 border border-error bg-error/10 px-4 py-3 text-sm text-error">
           {saveState.message}
         </div>
       )}
       {saveState?.status === "success" && saveState?.message && (
-        <div className="success-message coding-table__status-message">
+        <div className="mb-2.5 border border-success bg-success/10 px-4 py-3 text-sm text-success">
           {saveState.message}
         </div>
       )}
 
       {selectedFilterCodes.length > 0 && !isEditMode && (
-        <div className="body-sm text-primary coding-table__status-message">
+        <div className="mb-2.5 text-sm">
           <strong>Filtering by codes:</strong> {selectedFilterCodes.join(", ")}{" "}
           <button
+            type="button"
             onClick={() => setSelectedFilterCodes([])}
-            className="btn btn-secondary btn-small"
+            className="border border-paper px-2.5 py-1 text-xs transition-colors hover:bg-paper hover:text-ink"
           >
             Clear Filter
           </button>
         </div>
       )}
-      <div className="coding-table-layout">
-        <div className="coding-table-layout__legend">
+      <div className="grid grid-cols-[minmax(260px,320px)_minmax(0,1fr)] items-start gap-4">
+        <div className="sticky top-20 z-[2] max-h-[calc(100vh-96px)] self-start overflow-y-auto">
           <CodeLegend
             codebookTree={codebookTree}
             isEditMode={isEditMode}
@@ -208,13 +204,13 @@ const CodingTableView = ({
           />
         </div>
 
-        <div className="table-wrapper" ref={tableWrapperRef}>
+        <div className="overflow-x-auto border border-paper" ref={tableWrapperRef}>
           <ColumnPicker
             columnVisibility={columnVisibility}
             visibleColumnCount={visibleColumnCount}
             toggleColumnVisibility={toggleColumnVisibility}
           />
-          <table className="table table--resizable coding-table">
+          <table className="w-full table-fixed border-collapse">
             <colgroup>
               {visibleColumns.map(({ id }) => (
                 <col key={`coding-col-${id}`} style={getColumnCellStyle(id)} />
@@ -229,14 +225,14 @@ const CodingTableView = ({
               {rowsForRender.map((row) => (
                 <React.Fragment key={row.rowKey}>
                   {isEditMode ? (
-                    <tr className="table__row--hover">
-                      {visibleColumns.map(({ id }, index) => {
+                    <tr className="transition-colors hover:bg-white/5">
+                      {visibleColumns.map(({ id }) => {
                         if (id === "postId") {
                           return (
-                            <td key={`${row.rowKey}-postId`} className="table__td" style={getVisibleCellStyle("postId", index)}>
+                            <td key={`${row.rowKey}-postId`} className={tdClasses} style={getColumnCellStyle("postId")}>
                               <input
                                 type="text"
-                                className="form__input"
+                                className={inputClasses}
                                 value={row.editableItem?.postId || ""}
                                 onChange={(e) =>
                                   updateRowPostId(row.sourceIndex, e.target.value)
@@ -248,8 +244,10 @@ const CodingTableView = ({
                         }
                         if (id === "title") {
                           return (
-                            <td key={`${row.rowKey}-title`} className="table__td" style={getVisibleCellStyle("title", index)}>
-                              <div className="table__cell-wrap">{row.postTitle}</div>
+                            <td key={`${row.rowKey}-title`} className={tdClasses} style={getColumnCellStyle("title")}>
+                              <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                                {row.postTitle}
+                              </div>
                             </td>
                           );
                         }
@@ -257,12 +255,12 @@ const CodingTableView = ({
                           return (
                             <td
                               key={`${row.rowKey}-content`}
-                              className="table__td table__td--content"
-                              style={getVisibleCellStyle("content", index)}
+                              className={`${tdClasses} min-w-0`}
+                              style={getColumnCellStyle("content")}
                             >
-                              <div className="table__cell-wrap">
+                              <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
                                 {row.postContent ? (
-                                  <div className="table__cell-wrap">
+                                  <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
                                     <HighlightedContent
                                       content={row.postContent}
                                       codeEvidence={row.readOnlyCodeEvidence}
@@ -283,18 +281,18 @@ const CodingTableView = ({
                           return (
                             <td
                               key={`${row.rowKey}-codesApplied`}
-                              className="table__td table__td--codes"
-                              style={getVisibleCellStyle("codesApplied", index)}
+                              className={`${tdClasses} min-w-0 overflow-hidden`}
+                              style={getColumnCellStyle("codesApplied")}
                             >
-                              <div className="table__codes-wrap">
+                              <div className="flex min-w-0 flex-wrap gap-1 overflow-hidden">
                                 {row.editCodes.length > 0 ? (
                                   row.editCodes.map((code) => (
                                     <div
                                       key={`${row.rowKey}-edit-code-${code}`}
-                                      className="code-badge-container"
+                                      className="m-0.5 inline-flex min-w-0 max-w-full items-center"
                                     >
                                       <div
-                                        className="code-badge"
+                                        className="inline-block max-w-full truncate px-2 py-1 text-sm font-bold text-ink"
                                         style={{ backgroundColor: getCodeColor(code) }}
                                       >
                                         {code}
@@ -302,7 +300,7 @@ const CodingTableView = ({
                                     </div>
                                   ))
                                 ) : (
-                                  <span className="text-muted">No codes configured</span>
+                                  <span className="text-paper/60">No codes configured</span>
                                 )}
                               </div>
                             </td>

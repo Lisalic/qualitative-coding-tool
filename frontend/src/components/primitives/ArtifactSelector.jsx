@@ -1,6 +1,12 @@
 import SelectionList from "./SelectionList";
 import ProjectFilterSelect from "../forms/ProjectFilterSelect";
 
+// Renders as a fragment (not a wrapping div) so the project filter and the
+// item list become direct siblings of whatever flex/gap container hosts
+// this component — matching the spacing produced by DatabaseSelectionSection
+// and CodingProjectScopeBar+ArtifactSelector, which do the same. Wrapping
+// them in a div here would make them count as a single flex child and lose
+// the parent's `gap` spacing between the filter and the list.
 export default function ArtifactSelector({
   items,
   selectedId,
@@ -12,17 +18,14 @@ export default function ArtifactSelector({
   projects,
   selectedProject,
   onProjectChange,
-  filterStyle,
-  wrapperStyle,
 }) {
   return (
-    <div style={wrapperStyle}>
+    <>
       {showProjectFilter ? (
         <ProjectFilterSelect
           projects={projects}
           value={selectedProject}
           onChange={onProjectChange}
-          style={filterStyle}
         />
       ) : null}
       <SelectionList
@@ -33,6 +36,6 @@ export default function ArtifactSelector({
         buttonClass={buttonClassName}
         emptyMessage={emptyMessage}
       />
-    </div>
+    </>
   );
 }

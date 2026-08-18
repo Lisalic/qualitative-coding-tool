@@ -1,14 +1,12 @@
 import { useLocation } from "react-router-dom";
 import ComparePageContainer from "../components/compare/ComparePageContainer";
-import ToolPage from "../components/shell/ToolPage";
-import "../styles/Home.css";
 
 export default function CompareCoding() {
   const location = useLocation();
 
   return (
-    <ToolPage bodyProps={{ className: "single-panel-layout compare-page-shell" }}>
+    <div className="mx-auto w-full max-w-6xl px-4 py-10">
       <ComparePageContainer mode="coding" initialA={location.state?.codingA || ""} />
-    </ToolPage>
+    </div>
   );
 }

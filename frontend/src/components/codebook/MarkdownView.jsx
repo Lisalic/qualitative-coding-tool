@@ -3,6 +3,11 @@ import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../../api";
 import ReactMarkdown from "react-markdown";
 
+const btnClasses =
+  "border border-paper px-4 py-2 text-sm transition-colors hover:bg-paper hover:text-ink";
+const inputClasses =
+  "border border-paper bg-white/5 px-2.5 py-1.5 text-paper focus:outline-none focus:ring-2 focus:ring-paper";
+
 export default function MarkdownView({
   selectedId,
   title,
@@ -19,6 +24,8 @@ export default function MarkdownView({
   emptyLabel = "No item selected",
   systemPrompt = "",
   userPrompt = "",
+  comparePath = "/compare-coding",
+  compareStateKey = "codingA",
 }) {
   const [content, setContent] = useState("");
   const [loading, setLoading] = useState(true);
@@ -131,194 +138,105 @@ export default function MarkdownView({
 
   return (
     <div>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          gap: "20px",
-          marginBottom: "20px",
-        }}
-      >
+      <div className="mb-5 flex items-center justify-center gap-5">
         {isEditing ? (
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <label style={{ color: "#ffffff" }}>Name:</label>
+          <div className="flex items-center gap-2.5">
+            <label>Name:</label>
             <input
               type="text"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              style={{
-                padding: "5px 10px",
-                border: "1px solid #ffffff",
-                borderRadius: "4px",
-                backgroundColor: "#000000",
-                color: "#ffffff",
-              }}
+              className={inputClasses}
             />
-            <button
-              onClick={handleSave}
-              className="view-button"
-              style={{ fontSize: "14px", padding: "5px 10px" }}
-            >
+            <button type="button" onClick={handleSave} className={btnClasses}>
               Save
             </button>
             <button
+              type="button"
               onClick={() => {
                 setIsEditing(false);
                 setEditedContent(content);
                 setNewName(title || selectedId);
                 setError(null);
               }}
-              className="view-button"
-              style={{
-                fontSize: "14px",
-                padding: "5px 10px",
-                backgroundColor: "#666",
-              }}
+              className={btnClasses}
             >
               Cancel
             </button>
           </div>
         ) : (
-          <>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "flex-start",
-                gap: 8,
-                width: "100%",
-              }}
-            >
-              <div style={{ flex: 1 }}></div>
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  gap: 8,
-                  textAlign: "center",
-                }}
-              >
-                <h1 style={{ color: "#ffffff", margin: 0 }}>
-                  {title || (selectedId ? `${selectedId}` : emptyLabel)}
-                </h1>
-                {description ? (
-                  <div style={{ color: "#cccccc", fontSize: "0.95rem" }}>
-                    {description}
-                  </div>
-                ) : null}
-              </div>
-              <div
-                style={{
-                  flex: 1,
-                  display: "flex",
-                  justifyContent: "flex-end",
-                  flexDirection: "column",
-                  alignItems: "flex-end",
-                  gap: "8px",
-                }}
-              >
-                {selectedId && (
-                  <>
-                    <div style={{ display: "flex", gap: "8px" }}>
-                      <button
-                        onClick={() => {
-                          navigate("/compare-coding", {
-                            state: { codingA: selectedId },
-                          });
-                        }}
-                        className="view-button"
-                        style={{ fontSize: "14px", padding: "8px 16px" }}
-                      >
-                        Compare
-                      </button>
-                      <button
-                        onClick={() => {
-                          setIsEditing(true);
-                          setEditedContent(content);
-                          setNewName(title || selectedId);
-                        }}
-                        className="view-button"
-                        style={{ fontSize: "14px", padding: "8px 16px" }}
-                      >
-                        Edit
-                      </button>
-                    </div>
-                    {systemPrompt && (
-                      <button
-                        onClick={() => setShowSystemPrompt(!showSystemPrompt)}
-                        className="view-button"
-                        style={{
-                          padding: "8px 16px",
-                          fontSize: "14px",
-                        }}
-                      >
-                        {showSystemPrompt ? "Hide" : "Show"} System Prompt
-                      </button>
-                    )}
-                    {userPrompt && (
-                      <button
-                        onClick={() => setShowUserPrompt(!showUserPrompt)}
-                        className="view-button"
-                        style={{
-                          padding: "8px 16px",
-                          fontSize: "14px",
-                        }}
-                      >
-                        {showUserPrompt ? "Hide" : "Show"} User Prompt
-                      </button>
-                    )}
-                  </>
-                )}
-              </div>
+          <div className="flex w-full items-start gap-2">
+            <div className="flex-1" />
+            <div className="flex flex-col items-center gap-2 text-center">
+              <h1 className="text-2xl font-bold">
+                {title || (selectedId ? `${selectedId}` : emptyLabel)}
+              </h1>
+              {description ? (
+                <div className="text-sm text-paper/70">{description}</div>
+              ) : null}
             </div>
-          </>
+            <div className="flex flex-1 flex-col items-end justify-end gap-2">
+              {selectedId && (
+                <>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigate(comparePath, {
+                          state: { [compareStateKey]: selectedId },
+                        });
+                      }}
+                      className={btnClasses}
+                    >
+                      Compare
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsEditing(true);
+                        setEditedContent(content);
+                        setNewName(title || selectedId);
+                      }}
+                      className={btnClasses}
+                    >
+                      Edit
+                    </button>
+                  </div>
+                  {systemPrompt && (
+                    <button
+                      type="button"
+                      onClick={() => setShowSystemPrompt(!showSystemPrompt)}
+                      className={btnClasses}
+                    >
+                      {showSystemPrompt ? "Hide" : "Show"} System Prompt
+                    </button>
+                  )}
+                  {userPrompt && (
+                    <button
+                      type="button"
+                      onClick={() => setShowUserPrompt(!showUserPrompt)}
+                      className={btnClasses}
+                    >
+                      {showUserPrompt ? "Hide" : "Show"} User Prompt
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
         )}
       </div>
 
       {(showSystemPrompt || showUserPrompt) && (
-        <div
-          style={{
-            marginTop: "20px",
-            width: "100%",
-            display: "flex",
-            justifyContent: "flex-start",
-          }}
-        >
-          <div style={{ width: "100%", maxWidth: "800px" }}>
+        <div className="mt-5 flex w-full justify-start">
+          <div className="w-full max-w-[800px]">
             {showSystemPrompt && (
-              <div
-                style={{
-                  backgroundColor: "#1a1a1a",
-                  padding: "10px",
-                  borderRadius: "4px",
-                  marginTop: "5px",
-                  color: "#ccc",
-                  fontFamily: "monospace",
-                  whiteSpace: "pre-wrap",
-                  maxHeight: "200px",
-                  overflowY: "auto",
-                  maxWidth: "800px",
-                }}
-              >
+              <div className="mt-1.5 max-h-[200px] max-w-[800px] overflow-y-auto whitespace-pre-wrap border border-paper/20 bg-white/5 p-2.5 font-mono text-paper/80">
                 {systemPrompt}
               </div>
             )}
             {showUserPrompt && (
-              <div
-                style={{
-                  backgroundColor: "#1a1a1a",
-                  padding: "10px",
-                  borderRadius: "4px",
-                  marginTop: "5px",
-                  color: "#ccc",
-                  fontFamily: "monospace",
-                  whiteSpace: "pre-wrap",
-                  maxHeight: "200px",
-                  overflowY: "auto",
-                  maxWidth: "800px",
-                }}
-              >
+              <div className="mt-1.5 max-h-[200px] max-w-[800px] overflow-y-auto whitespace-pre-wrap border border-paper/20 bg-white/5 p-2.5 font-mono text-paper/80">
                 {userPrompt}
               </div>
             )}
@@ -326,64 +244,24 @@ export default function MarkdownView({
         </div>
       )}
 
-      {loading && <p style={{ color: "#ffffff" }}>Loading...</p>}
-      {error && <p className="error-message">{error}</p>}
+      {loading && <p className="text-paper/70">Loading...</p>}
+      {error && (
+        <p className="mt-4 border border-error bg-error/10 px-4 py-3 text-sm text-error">
+          {error}
+        </p>
+      )}
 
-      <div
-        style={{
-          backgroundColor: "#000000",
-          border: "1px solid #ffffff",
-          borderRadius: "4px",
-          padding: "20px",
-          color: "#ffffff",
-        }}
-      >
+      <div className="border border-paper p-5">
         {isEditing ? (
           <textarea
             value={editedContent}
             onChange={(e) => setEditedContent(e.target.value)}
             rows={40}
-            style={{
-              width: "100%",
-              padding: "8px",
-              border: "1px solid #ffffff",
-              borderRadius: "4px",
-              backgroundColor: "#000000",
-              color: "#ffffff",
-              fontFamily: "monospace",
-              resize: "vertical",
-            }}
+            className="w-full resize-y border border-paper bg-white/5 p-2 font-mono text-paper focus:outline-none focus:ring-2 focus:ring-paper"
             placeholder="Enter content..."
           />
         ) : (
-          <ReactMarkdown
-            components={{
-              h3: ({ children }) => (
-                <h3 style={{ color: "#ffffff", marginTop: "20px" }}>
-                  {children}
-                </h3>
-              ),
-              h4: ({ children }) => (
-                <h4 style={{ color: "#ffffff", marginTop: "15px" }}>
-                  {children}
-                </h4>
-              ),
-              ul: ({ children }) => (
-                <ul style={{ color: "#ffffff" }}>{children}</ul>
-              ),
-              li: ({ children }) => (
-                <li style={{ color: "#ffffff" }}>{children}</li>
-              ),
-              strong: ({ children }) => (
-                <strong style={{ color: "#ffffff" }}>{children}</strong>
-              ),
-              p: ({ children }) => (
-                <p style={{ color: "#ffffff" }}>{children}</p>
-              ),
-            }}
-          >
-            {content}
-          </ReactMarkdown>
+          <ReactMarkdown>{content}</ReactMarkdown>
         )}
       </div>
     </div>

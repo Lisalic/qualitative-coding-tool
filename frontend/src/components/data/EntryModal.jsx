@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { apiFetch } from "../../api";
-import "../../styles/DataTable.css";
+
+const navBtn =
+  "border border-paper px-3 py-1.5 text-sm transition-colors hover:bg-paper hover:text-ink disabled:opacity-40";
 
 export default function EntryModal({
   entry,
@@ -48,136 +50,135 @@ export default function EntryModal({
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-        <div
-          className="modal-header"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: "0.5rem",
-          }}
-        >
-          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-            <button
-              onClick={onPrev}
-              className="btn btn-secondary"
-              disabled={!hasPrev}
-            >
+    <div
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/80"
+      onClick={onClose}
+    >
+      <div
+        className="max-h-[85vh] w-[85%] max-w-[1100px] overflow-y-auto border-2 border-paper bg-ink"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-2 border-b border-paper px-6 py-4">
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={onPrev} className={navBtn} disabled={!hasPrev}>
               Previous
             </button>
-            <button
-              onClick={onNext}
-              className="btn btn-secondary"
-              disabled={!hasNext}
-            >
+            <button type="button" onClick={onNext} className={navBtn} disabled={!hasNext}>
               Next
             </button>
           </div>
-          <h2 style={{ margin: 0 }}>
+          <h2 className="text-xl font-semibold">
             {entry.type === "submission" ? "Post" : "Comment"} Details
           </h2>
-          <button className="modal-close" onClick={onClose}>
+          <button
+            type="button"
+            className="flex h-9 w-9 items-center justify-center text-xl transition-colors hover:bg-white/10"
+            onClick={onClose}
+            aria-label="Close"
+          >
             ×
           </button>
         </div>
-        <div className="modal-body">
+        <div className="p-6">
           {entry.type === "submission" ? (
             <>
-              <div className="detail-row">
+              <div className="mb-3">
                 <strong>ID:</strong> {entry.id}
               </div>
               {entry.subreddit && (
-                <div className="detail-row">
+                <div className="mb-3">
                   <strong>Subreddit:</strong> {entry.subreddit}
                 </div>
               )}
-              <div className="detail-row">
+              <div className="mb-3">
                 <strong>Title:</strong> {entry.title}
               </div>
               {entry.selftext && (
-                <div className="detail-row">
+                <div className="mb-3">
                   <strong>Selftext:</strong>
-                  <div className="detail-text">{entry.selftext}</div>
+                  <div className="mt-1 whitespace-pre-wrap text-paper/80">
+                    {entry.selftext}
+                  </div>
                 </div>
               )}
               {entry.author && (
-                <div className="detail-row">
+                <div className="mb-3">
                   <strong>Author:</strong> {entry.author}
                 </div>
               )}
               {entry.score !== undefined && (
-                <div className="detail-row">
+                <div className="mb-3">
                   <strong>Score:</strong> {entry.score}
                 </div>
               )}
               {entry.created_utc && (
-                <div className="detail-row">
+                <div className="mb-3">
                   <strong>Created:</strong> {formatDate(entry.created_utc)}
                 </div>
               )}
               {entry.num_comments !== undefined && (
-                <div className="detail-row">
+                <div className="mb-3">
                   <strong>Number of Comments:</strong> {entry.num_comments}
                 </div>
               )}
               {entry.type === "submission" && (
-                <div className="comments-section">
-                  <h3>Comments ({comments.length})</h3>
+                <div className="mt-6 border-t border-paper/20 pt-4">
+                  <h3 className="mb-3 text-lg font-medium">
+                    Comments ({comments.length})
+                  </h3>
                   {loadingComments ? (
-                    <p>Loading comments...</p>
+                    <p className="text-paper/70">Loading comments...</p>
                   ) : comments.length > 0 ? (
-                    <div className="comments-list">
+                    <div className="flex flex-col gap-3">
                       {comments.map((comment) => (
-                        <div key={comment.id} className="comment-item">
-                          <div className="comment-header">
+                        <div key={comment.id} className="border border-paper/20 p-3">
+                          <div className="text-sm text-paper/70">
                             <strong>{comment.author}</strong> •{" "}
                             {formatDate(comment.created_utc)}
                           </div>
-                          <div className="comment-body">{comment.body}</div>
-                          <div className="comment-meta">
+                          <div className="mt-1 whitespace-pre-wrap">{comment.body}</div>
+                          <div className="mt-1 text-xs text-paper/50">
                             Score: {comment.score}
                           </div>
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <p>No comments found in this database.</p>
+                    <p className="text-paper/70">No comments found in this database.</p>
                   )}
                 </div>
               )}
             </>
           ) : (
             <>
-              <div className="detail-row">
+              <div className="mb-3">
                 <strong>ID:</strong> {entry.id}
               </div>
-              <div className="detail-row">
+              <div className="mb-3">
                 <strong>Subreddit:</strong> {entry.subreddit}
               </div>
-              <div className="detail-row">
+              <div className="mb-3">
                 <strong>Body:</strong>
-                <div className="detail-text">{entry.body}</div>
+                <div className="mt-1 whitespace-pre-wrap text-paper/80">{entry.body}</div>
               </div>
-              <div className="detail-row">
+              <div className="mb-3">
                 <strong>Author:</strong> {entry.author}
               </div>
-              <div className="detail-row">
+              <div className="mb-3">
                 <strong>Score:</strong> {entry.score}
               </div>
               {entry.created_utc && (
-                <div className="detail-row">
+                <div className="mb-3">
                   <strong>Created:</strong> {formatDate(entry.created_utc)}
                 </div>
               )}
               {entry.link_id && (
-                <div className="detail-row">
+                <div className="mb-3">
                   <strong>Link ID:</strong> {entry.link_id}
                 </div>
               )}
               {entry.parent_id && (
-                <div className="detail-row">
+                <div className="mb-3">
                   <strong>Parent ID:</strong> {entry.parent_id}
                 </div>
               )}

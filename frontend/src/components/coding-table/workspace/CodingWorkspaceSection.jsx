@@ -6,40 +6,36 @@ import ViewModeTabs from "../../primitives/ViewModeTabs";
 import PageEmptyState from "../../primitives/PageEmptyState";
 import { getCodeColor } from "../../../lib/codingUtils";
 
+const tabInactive =
+  "border border-paper px-4 py-2 text-sm transition-colors hover:bg-paper hover:text-ink";
+const tabActive =
+  "border border-paper bg-paper px-4 py-2 text-sm font-semibold text-ink";
+
 export default function CodingWorkspaceSection({ page }) {
   const selectedCodedData = page.selectedCodedData;
   const viewMode = page.viewMode;
 
   return (
-    <section
-      style={{
-        border: "1px solid #ffffff",
-        borderRadius: "8px",
-        padding: "20px",
-        backgroundColor: "#000000",
-      }}
-    >
+    <section className="border-2 border-paper p-6">
       <ViewModeTabs
         modes={[
           {
             value: "text",
             label: "Text View",
-            activeClassName: "project-tab",
-            inactiveClassName: "db-button",
-            style: { padding: "8px 16px" },
+            activeClassName: tabActive,
+            inactiveClassName: tabInactive,
           },
           {
             value: "table",
             label: "Table View",
-            activeClassName: "project-tab",
-            inactiveClassName: "db-button",
-            style: { padding: "8px 16px" },
+            activeClassName: tabActive,
+            inactiveClassName: tabInactive,
           },
         ]}
         activeMode={viewMode}
         onChange={page.setViewMode}
         disabled={!selectedCodedData}
-        containerStyle={{ marginBottom: "16px", display: "flex", gap: "8px" }}
+        containerClassName="mb-4 flex gap-2"
       />
       <CodingEditActionsBar
         selectedCodedData={selectedCodedData}
@@ -50,10 +46,7 @@ export default function CodingWorkspaceSection({ page }) {
         saveStatus={page.tableSaveState.status}
       />
       {!selectedCodedData ? (
-        <PageEmptyState
-          style={{ color: "#888", padding: 20 }}
-          message="Select a coded data file to view"
-        />
+        <PageEmptyState message="Select a coded data file to view" />
       ) : null}
       {selectedCodedData && viewMode === "text" ? (
         <ArtifactMarkdownSection

@@ -1,16 +1,5 @@
 import React from "react";
 
-const baseHeaderStyle = {
-  position: "relative",
-  userSelect: "none",
-  overflow: "visible",
-  borderRight: "1px solid #ffffff",
-};
-
-const headerContentStyle = {
-  paddingRight: "8px",
-};
-
 const handleStyle = {
   position: "absolute",
   top: 0,
@@ -52,18 +41,15 @@ const CodingTableHeader = ({
           return (
             <th
               key={id}
-              className="table__th table__th--resizable"
-              style={{
-                ...getColumnCellStyle(id),
-                ...baseHeaderStyle,
-                borderRight: isLast ? "none" : "1px solid #ffffff",
-              }}
+              className={`relative select-none overflow-visible border-b-2 border-paper px-3 py-2.5 text-left font-medium ${
+                isLast ? "" : "border-r"
+              }`}
+              style={getColumnCellStyle(id)}
             >
-              <div style={headerContentStyle}>{label}</div>
+              <div className="pr-2">{label}</div>
               {!showResizer ? null : (
                 <button
                   type="button"
-                  className="table__column-resizer"
                   role="separator"
                   aria-orientation="vertical"
                   aria-label={`Resize ${label} column`}

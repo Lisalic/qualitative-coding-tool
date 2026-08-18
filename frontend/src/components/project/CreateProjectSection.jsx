@@ -1,3 +1,6 @@
+const inputClasses =
+  "border border-paper bg-white/5 px-3 py-2.5 text-paper placeholder:text-paper/40 focus:outline-none focus:ring-2 focus:ring-paper";
+
 export default function CreateProjectSection({
   showForm,
   name,
@@ -11,9 +14,10 @@ export default function CreateProjectSection({
 }) {
   if (!showForm) {
     return (
-      <div className="layout-center mt-md">
+      <div className="mt-6 flex justify-center">
         <button
-          className="btn btn-primary btn-large"
+          type="button"
+          className="border-2 border-paper px-6 py-3 text-base font-semibold transition-colors hover:bg-paper hover:text-ink"
           onClick={onCreateClick}
           aria-label="Create New Project"
         >
@@ -23,38 +27,53 @@ export default function CreateProjectSection({
     );
   }
 
+  const isError = message.toLowerCase().includes("error");
+
   return (
-    <div className="panel mt-md layout-card--padded">
-      <h2 className="heading-md">Create New Project</h2>
-      <form onSubmit={onSubmit}>
-        <div className="form__group">
-          <label className="form__label">Project Name *</label>
+    <div className="mt-6 border-2 border-paper p-6">
+      <h2 className="mb-4 text-xl font-semibold">Create New Project</h2>
+      <form onSubmit={onSubmit} className="flex flex-col gap-4">
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm">Project Name *</label>
           <input
-            className="form__input"
+            className={inputClasses}
             value={name}
             onChange={(event) => onNameChange(event.target.value)}
             placeholder="Enter project name"
           />
         </div>
-        <div className="form__group">
-          <label className="form__label">Description</label>
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm">Description</label>
           <textarea
-            className="form__textarea"
+            className={`${inputClasses} min-h-[100px] resize-y`}
             value={description}
             onChange={(event) => onDescriptionChange(event.target.value)}
             placeholder="Enter project description (optional)"
           />
         </div>
-        <div className="form__actions">
-          <button type="submit" className="btn btn-primary btn-large">
+        <div className="flex items-center gap-3">
+          <button
+            type="submit"
+            className="border-2 border-paper px-6 py-3 text-base font-semibold transition-colors hover:bg-paper hover:text-ink"
+          >
             Create Project
           </button>
-          <button type="button" className="btn btn-secondary btn-large" onClick={onCancel}>
+          <button
+            type="button"
+            className="border border-paper px-6 py-3 text-base transition-colors hover:bg-paper hover:text-ink"
+            onClick={onCancel}
+          >
             Cancel
           </button>
         </div>
         {message && (
-          <div className={`alert ${message.includes("Error") ? "alert--error" : "alert--success"}`}>
+          <div
+            className={`border px-4 py-3 text-sm ${
+              isError
+                ? "border-error bg-error/10 text-error"
+                : "border-success bg-success/10 text-success"
+            }`}
+          >
             {message}
           </div>
         )}

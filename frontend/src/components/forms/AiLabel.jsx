@@ -19,11 +19,11 @@ export default function AiLabel({
 
   return (
     <Tag {...tagProps}>
-      <span className="ai-label">
+      <span className="inline-flex items-center gap-1.5 text-sm">
         <span>{text}</span>
-        <span className="ai-label__icon-wrap" data-tooltip={title}>
+        <span className="group relative inline-flex cursor-help items-center">
           <svg
-            className="ai-label__icon"
+            className="h-3.5 w-3.5 fill-current text-paper/70"
             viewBox="0 0 24 24"
             width="14"
             height="14"
@@ -32,6 +32,12 @@ export default function AiLabel({
           >
             <path d={ICON_PATH} />
           </svg>
+          <span
+            role="tooltip"
+            className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 translate-y-1 whitespace-nowrap border border-paper bg-ink px-2 py-1 text-xs text-paper opacity-0 transition-all group-hover:translate-y-0 group-hover:opacity-100"
+          >
+            {title}
+          </span>
         </span>
         <span className="sr-only">{title}</span>
       </span>

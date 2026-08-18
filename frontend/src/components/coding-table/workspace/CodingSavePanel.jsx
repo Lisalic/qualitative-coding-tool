@@ -1,3 +1,6 @@
+const inputClasses =
+  "border border-paper bg-white/5 px-3 py-2.5 text-paper focus:outline-none focus:ring-2 focus:ring-paper disabled:opacity-50";
+
 export default function CodingSavePanel({
   isTableEditMode,
   tableEditName,
@@ -9,35 +12,22 @@ export default function CodingSavePanel({
   if (!isTableEditMode) return null;
 
   return (
-    <div
-      style={{
-        marginTop: "16px",
-        border: "1px solid rgba(255, 255, 255, 0.3)",
-        borderRadius: "8px",
-        padding: "12px",
-      }}
-    >
-      <div className="form__group" style={{ marginBottom: "12px" }}>
-        <label className="form__label">Name</label>
+    <div className="mt-4 border border-paper/30 p-3">
+      <div className="mb-3 flex flex-col gap-1.5">
+        <label className="text-sm">Name</label>
         <input
           type="text"
-          className="form__input"
+          className={inputClasses}
           value={tableEditName}
           onChange={(event) => onTableEditNameChange(event.target.value)}
           disabled={saveStatus === "saving"}
         />
       </div>
 
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "flex-end",
-          gap: "8px",
-        }}
-      >
+      <div className="flex justify-end gap-2">
         <button
           type="button"
-          className="btn btn-secondary"
+          className="border border-paper px-4 py-2 text-sm transition-colors hover:bg-paper hover:text-ink disabled:opacity-40"
           onClick={onSaveDuplicate}
           disabled={saveStatus === "saving"}
         >
@@ -45,7 +35,7 @@ export default function CodingSavePanel({
         </button>
         <button
           type="button"
-          className="btn btn-primary"
+          className="border-2 border-paper px-4 py-2 text-sm font-semibold transition-colors hover:bg-paper hover:text-ink disabled:opacity-40"
           onClick={onSaveOverwrite}
           disabled={saveStatus === "saving"}
         >

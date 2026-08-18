@@ -1,14 +1,20 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/useAuth";
-import "../../styles/Home.css";
+
+const navBtn =
+  "w-full px-3 py-2 text-left text-sm transition-colors hover:bg-white/10";
 
 export default function Sidebar() {
   const { status } = useAuth();
   const isAuth = status === "auth";
   const [collapsed, setCollapsed] = useState(() => {
     try {
-      return localStorage.getItem("sidebarCollapsed") === "true";
+      const stored = localStorage.getItem("sidebarCollapsed");
+      if (stored !== null) return stored === "true";
+      // No explicit preference yet: default collapsed on narrow viewports
+      // so the sidebar doesn't eat most of the screen on first load.
+      return typeof window !== "undefined" && window.innerWidth < 768;
     } catch (e) {
       return false;
     }
@@ -52,70 +58,89 @@ export default function Sidebar() {
 
   if (collapsed) return null;
 
+  const collapse = () => {
+    setCollapsed(true);
+    try {
+      localStorage.setItem("sidebarCollapsed", "true");
+      window.dispatchEvent(new Event("sidebar-toggle"));
+    } catch (e) {}
+  };
+
   return (
-    <aside className="app-shell__sidebar">
-      <div className="sidebar__header">
+    <aside className="flex w-[190px] shrink-0 flex-col border-r border-paper">
+      <div className="flex justify-end p-1.5">
         <button
-          className="sidebar__close"
+          type="button"
+          className="px-2 py-1 text-sm transition-colors hover:bg-white/10"
           aria-label="Collapse sidebar"
-          onClick={() => {
-            setCollapsed(true);
-            try {
-              localStorage.setItem("sidebarCollapsed", "true");
-              // notify navbar and other listeners
-              window.dispatchEvent(new Event("sidebar-toggle"));
-            } catch (e) {}
-          }}
+          onClick={collapse}
         >
           ✕
         </button>
       </div>
 
-      {(() => {
-        if (!isAuth) {
-          return items.map(([label, path]) => (
+      {!isAuth ? (
+        <nav className="flex flex-col pb-2">
+          {items.map(([label, path]) => (
             <button
               key={path}
-              className="sidebar__button"
+              type="button"
+              className={navBtn}
               onClick={() => navigate(path)}
             >
               {label}
             </button>
-          ));
-        }
+          ))}
+        </nav>
+      ) : (
+        (() => {
+          const pipelineOrder = [
+            "Home",
+            "Import Data",
+            "Filter Data",
+            "Generate Codebook",
+            "Apply Codebook",
+            "Compare Codebook",
+            "Compare Coding",
+            "Summarize Coding",
+          ];
+          const viewOrder = [
+            "View Data",
+            "View Filtered Data",
+            "View Codebook",
+            "View Coding",
+            "View Summary",
+          ];
 
-        const order = [
-          "Home",
-          "Import Data",
-          "Filter Data",
-          "Generate Codebook",
-          "Apply Codebook",
-          "Compare Codebook",
-          "Compare Coding",
-          "Summarize Coding",
-          "View Data",
-          "View Filtered Data",
-          "View Codebook",
-          "View Coding",
-          "View Summary",
-        ];
+          const mapByLabel = Object.fromEntries(
+            items.map(([label, path]) => [label, path]),
+          );
 
-        const mapByLabel = Object.fromEntries(
-          items.map(([label, path]) => [label, path]),
-        );
+          const renderGroup = (labels) =>
+            labels
+              .filter((label) => label in mapByLabel)
+              .map((label) => (
+                <button
+                  key={mapByLabel[label]}
+                  type="button"
+                  className={navBtn}
+                  onClick={() => navigate(mapByLabel[label])}
+                >
+                  {label}
+                </button>
+              ));
 
-        return order
-          .filter((label) => label in mapByLabel)
-          .map((label) => (
-            <button
-              key={mapByLabel[label]}
-              className="sidebar__button"
-              onClick={() => navigate(mapByLabel[label])}
-            >
-              {label}
-            </button>
-          ));
-      })()}
+          return (
+            <nav className="flex flex-col pb-2">
+              {renderGroup(pipelineOrder)}
+              <div className="mt-2 border-t border-paper/20 px-3 pb-1 pt-2 text-xs uppercase tracking-wide text-paper/50">
+                Views
+              </div>
+              {renderGroup(viewOrder)}
+            </nav>
+          );
+        })()
+      )}
     </aside>
   );
 }

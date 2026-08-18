@@ -2,16 +2,18 @@ import { useEffect, useMemo } from "react";
 import { useLocation } from "react-router-dom";
 import useProjectScopedFiles from "./useProjectScopedFiles";
 
+const SELECT_CLASSES =
+  "border border-paper bg-white/5 px-3 py-2 text-paper focus:outline-none focus:ring-2 focus:ring-paper";
+
 const MODE_CONFIG = {
   raw: {
     fileType: "raw_data",
-    containerClassName: "data-container",
-    cardClassName: "",
     selection: {
-      wrapperClassName: "",
-      selectClassName: "",
-      listClassName: "database-selector",
-      buttonClassName: "db-button",
+      wrapperClassName: "mb-4 flex items-center gap-2",
+      selectClassName: SELECT_CLASSES,
+      listClassName: "mb-6 flex flex-wrap gap-2.5 border-2 border-paper p-4",
+      buttonClassName:
+        "border border-paper px-4 py-2.5 text-sm transition-colors hover:bg-paper hover:text-ink",
       noProjectFilesMessage: "No raw files in project",
       noDatabaseMessage: "No databases available",
     },
@@ -22,13 +24,12 @@ const MODE_CONFIG = {
   },
   filtered: {
     fileType: "filtered_data",
-    containerClassName: "layout-page",
-    cardClassName: "layout-card layout-card--padded",
     selection: {
-      wrapperClassName: "body-base",
-      selectClassName: "form__input",
-      listClassName: "selector-strip",
-      buttonClassName: "selector-button",
+      wrapperClassName: "mb-4 flex items-center gap-2",
+      selectClassName: SELECT_CLASSES,
+      listClassName: "mb-6 flex flex-wrap gap-2.5 border-2 border-paper p-4",
+      buttonClassName:
+        "border border-paper px-4 py-2.5 text-sm transition-colors hover:bg-paper hover:text-ink",
       noProjectFilesMessage: "No filtered files in project",
       noDatabaseMessage: "No filtered databases available",
     },
@@ -64,8 +65,6 @@ export default function useDataBrowserPage({ mode = "raw" } = {}) {
   return {
     mode,
     isFilteredView: config.table.isFilteredView,
-    containerClassName: config.containerClassName,
-    cardClassName: config.cardClassName,
     projects,
     selectedProject: scoped.selectedProject,
     setSelectedProject: scoped.setSelectedProject,

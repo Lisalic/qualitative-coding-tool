@@ -1,6 +1,11 @@
 import { useState } from "react";
 import { apiFetch } from "../../api";
 
+const tabBtn =
+  "border border-paper px-3.5 py-2 text-sm font-medium transition-colors hover:bg-paper hover:text-ink disabled:opacity-50";
+const inputClasses =
+  "border border-paper bg-white/5 px-3 py-2.5 text-paper placeholder:text-paper/40 focus:outline-none focus:ring-2 focus:ring-paper";
+
 export default function ProjectHeaderSection({ project, onRefreshProject }) {
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState("");
@@ -43,81 +48,46 @@ export default function ProjectHeaderSection({ project, onRefreshProject }) {
   };
 
   return (
-    <div
-      style={{
-        backgroundColor: "#000000",
-        border: "2px solid #ffffff",
-        borderRadius: "12px",
-        padding: "24px",
-        marginBottom: "24px",
-      }}
-    >
+    <div className="mb-6 border-2 border-paper p-6">
       {!editing ? (
         <>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "12px",
-              marginBottom: "12px",
-            }}
-          >
-            <h1 style={{ margin: 0, color: "#ffffff" }}>{project.projectname}</h1>
-            <button
-              className="project-tab"
-              onClick={startEdit}
-              style={{ padding: "6px 12px", fontSize: 13 }}
-            >
+          <div className="mb-3 flex items-center gap-3">
+            <h1 className="text-2xl font-bold">{project.projectname}</h1>
+            <button type="button" className={`${tabBtn} text-xs`} onClick={startEdit}>
               Edit
             </button>
           </div>
           {project.description && (
-            <div
-              style={{
-                color: "#cccccc",
-                fontSize: "1.1em",
-                lineHeight: 1.4,
-                marginBottom: "12px",
-              }}
-            >
+            <p className="mb-3 text-base leading-relaxed text-paper/70">
               {project.description}
-            </div>
+            </p>
           )}
           {project.created_at && (
-            <div style={{ color: "#888", fontSize: "0.9em" }}>
+            <div className="text-sm text-paper/50">
               Created: {new Date(project.created_at).toLocaleString()}
             </div>
           )}
         </>
       ) : (
-        <form onSubmit={saveEdit}>
-          <div
-            style={{
-              display: "flex",
-              gap: 12,
-              alignItems: "center",
-              marginBottom: "16px",
-            }}
-          >
+        <form onSubmit={saveEdit} className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <input
-              className="form-input"
+              className={`${inputClasses} flex-1 text-lg font-semibold`}
               value={editName}
               onChange={(e) => setEditName(e.target.value)}
-              style={{ fontSize: "1.2em", fontWeight: "bold" }}
               placeholder="Project name"
             />
-            <button type="submit" className="project-tab" disabled={saving}>
+            <button type="submit" className={tabBtn} disabled={saving}>
               Save
             </button>
-            <button type="button" className="project-tab" onClick={cancelEdit}>
+            <button type="button" className={tabBtn} onClick={cancelEdit}>
               Cancel
             </button>
           </div>
           <textarea
-            className="form-input"
+            className={`${inputClasses} min-h-[80px] resize-y`}
             value={editDescription}
             onChange={(e) => setEditDescription(e.target.value)}
-            style={{ width: "100%", minHeight: 80, resize: "vertical" }}
             placeholder="Project description..."
           />
         </form>

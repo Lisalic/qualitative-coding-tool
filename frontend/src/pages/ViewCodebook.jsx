@@ -1,8 +1,7 @@
-import "../styles/Data.css";
-import "../styles/DataTable.css";
 import ArtifactSelector from "../components/primitives/ArtifactSelector";
 import CodebookWorkspaceSection from "../components/codebook/CodebookWorkspaceSection";
 import useViewCodebookPage from "../components/codebook/useViewCodebookPage";
+import ViewPageShell from "../components/shell/ViewPageShell";
 
 export default function ViewCodebook() {
   const {
@@ -24,18 +23,15 @@ export default function ViewCodebook() {
   } = useViewCodebookPage();
 
   return (
-    <div className="data-container">
+    <ViewPageShell title="View Codebook">
       <ArtifactSelector
         showProjectFilter={true}
         projects={projectsList || []}
         selectedProject={selectedProject}
         onProjectChange={setSelectedProject}
-        filterStyle={{ marginBottom: 12 }}
         items={availableCodebooks}
         selectedId={selectedCodebook}
         onSelect={setSelectedCodebook}
-        listClassName="codebook-selector"
-        buttonClassName="db-button"
         emptyMessage="No codebooks available"
       />
       <CodebookWorkspaceSection
@@ -51,6 +47,6 @@ export default function ViewCodebook() {
         loading={loading}
         error={error}
       />
-    </div>
+    </ViewPageShell>
   );
 }

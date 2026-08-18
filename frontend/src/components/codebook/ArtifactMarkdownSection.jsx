@@ -8,6 +8,8 @@ const ARTIFACT_CONFIG = {
     saveUrl: "/api/save-file-codebook/",
     saveIdFieldName: "schema_name",
     emptyLabel: "View Codebook",
+    comparePath: "/compare-codebook",
+    compareStateKey: "codebookA",
   },
   coding: {
     fetchBase: "/api/coded-data",
@@ -15,6 +17,8 @@ const ARTIFACT_CONFIG = {
     saveUrl: "/api/save-file-coded-data/",
     saveIdFieldName: "schema_name",
     emptyLabel: "View Coding",
+    comparePath: "/compare-coding",
+    compareStateKey: "codingA",
   },
 };
 
@@ -35,13 +39,7 @@ export default function ArtifactMarkdownSection({
   if (!config) return null;
 
   if (artifactType === "codebook" && !selectedId) {
-    return (
-      <PageEmptyState
-        className=""
-        style={{ color: "#888", padding: 20 }}
-        message="Select a codebook file to view"
-      />
-    );
+    return <PageEmptyState message="Select a codebook file to view" />;
   }
 
   const selectedObject = availableItems?.find(
@@ -69,6 +67,8 @@ export default function ArtifactMarkdownSection({
       projectSchema={projectSchema}
       systemPrompt={systemPrompt}
       userPrompt={userPrompt}
+      comparePath={config.comparePath}
+      compareStateKey={config.compareStateKey}
       onSaved={(response) => {
         onSaved?.(response);
         onSelectionChangeAfterSave?.(response);

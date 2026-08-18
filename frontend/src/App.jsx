@@ -4,7 +4,6 @@ import ProtectedRoute from "./components/auth/ProtectedRoute";
 import Sidebar from "./components/layout/Sidebar";
 import Navbar from "./components/layout/Navbar";
 import AuthGate from "./components/auth/AuthGate";
-import "./App.css";
 
 const ImportPage = React.lazy(() => import("./pages/Import"));
 const Filter = React.lazy(() => import("./pages/Filter"));
@@ -29,14 +28,14 @@ const Register = React.lazy(() => import("./pages/Register"));
 function App() {
   return (
     <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-      <div className="app-shell bg-base">
+      <div className="flex min-h-screen w-full flex-col bg-ink text-paper">
         <Navbar />
-        <main className="app-shell__content">
+        <main className="flex w-full flex-1 items-stretch">
           <Sidebar />
-          <div className="app-shell__main">
+          <div className="min-w-0 flex-1 px-6 py-6">
             <Suspense
               fallback={
-                <div className="route-loading">
+                <div className="flex min-h-[40vh] items-center justify-center text-paper/70">
                   <span>Loading...</span>
                 </div>
               }

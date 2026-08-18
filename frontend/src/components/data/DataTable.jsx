@@ -2,7 +2,15 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { apiFetch } from "../../api";
 import EntryModal from "./EntryModal";
 import { useDataTableActions } from "./useDataTableActions";
-import "../../styles/DataTable.css";
+
+const thClasses =
+  "border-b-2 border-r border-paper px-3 py-2.5 text-left font-medium last:border-r-0";
+const tdClasses =
+  "border-b border-r border-paper/20 px-3 py-2.5 last:border-r-0";
+const btnClasses =
+  "border border-paper px-3 py-1.5 text-sm transition-colors hover:bg-paper hover:text-ink disabled:opacity-40";
+const btnDangerClasses =
+  "border border-error bg-error/10 px-3 py-1.5 text-sm text-error transition-colors hover:bg-error hover:text-paper disabled:opacity-40";
 
 export default function DataTable({
   database = "",
@@ -195,35 +203,40 @@ export default function DataTable({
   };
 
   return (
-    <div className="table-shell">
-      <div className="panel-header layout-flex-col layout-center">
-        <h1 className="heading-lg text-center">
+    <div className="border border-paper p-8">
+      <div className="mb-6 flex flex-col items-center">
+        <h1 className="text-3xl font-bold">
           {currentDatabase && String(currentDatabase).trim()
             ? `Database: ${displayDbName}`
             : title}
         </h1>
         {description ? (
-          <div className="text-muted text-center mt-md">
-            {description}
-          </div>
+          <div className="mt-4 text-center text-paper/70">{description}</div>
         ) : null}
       </div>
 
-      {error && <p className="alert alert--error">{error}</p>}
+      {error && (
+        <p className="mb-4 border border-error bg-error/10 px-4 py-3 text-sm text-error">
+          {error}
+        </p>
+      )}
 
       {!dbEntries && !loading && !error && (
-        <p className="alert alert--info">Select a database to view its contents.</p>
+        <p className="mb-4 border border-paper/20 bg-white/5 px-4 py-3 text-sm text-paper/70">
+          Select a database to view its contents.
+        </p>
       )}
 
       {loading && (
-        <p className="alert alert--info">Loading database contents...</p>
+        <p className="mb-4 border border-paper/20 bg-white/5 px-4 py-3 text-sm text-paper/70">
+          Loading database contents...
+        </p>
       )}
 
       {dbEntries && (
         <>
-          {/* Render metadata (counts/date) similarly to ManageDatabase */}
           {metadata && (
-            <div className="database-metadata" style={{ marginBottom: "0.75rem" }}>
+            <div className="mb-3 text-sm text-paper/70">
               {metadata.tables ? (
                 (() => {
                   const submissions =
@@ -234,113 +247,103 @@ export default function DataTable({
                       ?.row_count || 0;
                   return (
                     <>
-                      <div className="metadata-row">
-                        <span>Posts: {submissions.toLocaleString()}</span>
-                      </div>
-                      <div className="metadata-row">
-                        <span>Comments: {comments.toLocaleString()}</span>
-                      </div>
+                      <div>Posts: {submissions.toLocaleString()}</div>
+                      <div>Comments: {comments.toLocaleString()}</div>
                     </>
                   );
                 })()
               ) : (
                 <>
-                  <div className="metadata-row">
-                    <span>
-                      Posts: {metadata.total_submissions?.toLocaleString() || 0}
-                    </span>
+                  <div>
+                    Posts: {metadata.total_submissions?.toLocaleString() || 0}
                   </div>
-                  <div className="metadata-row">
-                    <span>
-                      Comments: {metadata.total_comments?.toLocaleString() || 0}
-                    </span>
+                  <div>
+                    Comments: {metadata.total_comments?.toLocaleString() || 0}
                   </div>
                   {metadata.date_created && metadata.date_created > 0 && (
-                    <div className="metadata-row">
-                      <span>
-                        Date Created:{" "}
-                        {(() => {
-                          try {
-                            return new Date(
-                              metadata.date_created * 1000
-                            ).toLocaleString();
-                          } catch (e) {
-                            return "Unknown";
-                          }
-                        })()}
-                      </span>
+                    <div>
+                      Date Created:{" "}
+                      {(() => {
+                        try {
+                          return new Date(
+                            metadata.date_created * 1000
+                          ).toLocaleString();
+                        } catch (e) {
+                          return "Unknown";
+                        }
+                      })()}
                     </div>
                   )}
                 </>
               )}
               {metadata.tables && metadata.created_at && (
-                <div className="metadata-row">
-                  <span>
-                    Date Created:{" "}
-                    {(() => {
-                      try {
-                        return new Date(metadata.created_at).toLocaleString();
-                      } catch (e) {
-                        return "Unknown";
-                      }
-                    })()}
-                  </span>
+                <div>
+                  Date Created:{" "}
+                  {(() => {
+                    try {
+                      return new Date(metadata.created_at).toLocaleString();
+                    } catch (e) {
+                      return "Unknown";
+                    }
+                  })()}
                 </div>
               )}
             </div>
           )}
 
-          <div className="layout-flex-row layout-space-between" style={{ marginBottom: "1rem", width: "100%" }}>
-            <div className="layout-flex-row gap-sm">
-              <div className="limit-selector">
-                <label htmlFor="entry-limit">Show entries: </label>
-                <select
-                  id="entry-limit"
-                  value={limit}
-                  onChange={(e) => {
-                    setLimit(Number(e.target.value));
-                    setPage(0);
-                  }}
-                  className="limit-select"
-                >
-                  <option value={10}>10</option>
-                  <option value={25}>25</option>
-                  <option value={50}>50</option>
-                  <option value={100}>100</option>
-                  <option value={200}>200</option>
-                </select>
-              </div>
+          <div className="mb-4 flex w-full items-center justify-between">
+            <div className="flex items-center gap-2">
+              <label htmlFor="entry-limit" className="text-sm text-paper/70">
+                Show entries:{" "}
+              </label>
+              <select
+                id="entry-limit"
+                value={limit}
+                onChange={(e) => {
+                  setLimit(Number(e.target.value));
+                  setPage(0);
+                }}
+                className="border border-paper bg-white/5 px-2 py-1.5 text-sm text-paper focus:outline-none focus:ring-2 focus:ring-paper"
+              >
+                <option value={10}>10</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+                <option value={200}>200</option>
+              </select>
             </div>
-            <div className="layout-flex-row">
+            <div className="flex">
               <input
                 type="text"
-                className="search-input"
                 placeholder="Search posts/comments..."
                 value={searchTerm}
                 onChange={(e) => {
                   setSearchTerm(e.target.value);
                   setPage(0);
                 }}
-                style={{ textAlign: "left" }}
+                className="border border-paper bg-white/5 px-3 py-1.5 text-left text-sm text-paper placeholder:text-paper/40 focus:outline-none focus:ring-2 focus:ring-paper"
               />
             </div>
           </div>
 
           {dbEntries.message && (
-            <p className="alert alert--info">{dbEntries.message}</p>
+            <p className="mb-4 border border-paper/20 bg-white/5 px-4 py-3 text-sm text-paper/70">
+              {dbEntries.message}
+            </p>
           )}
 
           {filteredSubmissions.length > 0 && (
-            <div className="table-section">
-              <h3 className="table-section__title">Sample Posts ({limit})</h3>
-              <div className="table-wrapper">
-                <table className="table">
+            <div className="mb-8">
+              <h3 className="mb-3 text-lg font-medium">Sample Posts ({limit})</h3>
+              <div className="overflow-x-auto border border-paper">
+                <table className="w-full border-collapse">
                   <thead>
                     <tr>
-                      <th className="table__th" style={{ width: 48 }}>
+                      <th className={thClasses} style={{ width: 48 }}>
                         <input
                           type="checkbox"
                           aria-label="select-all-submissions"
+                          className="accent-paper"
                           checked={
                             filteredSubmissions.length > 0 &&
                             filteredSubmissions.every((s) =>
@@ -352,20 +355,20 @@ export default function DataTable({
                           }
                         />
                       </th>
-                      <th className="table__th">ID</th>
+                      <th className={thClasses}>ID</th>
                       {isFilteredView || currentDatabase === "filtered" ? (
                         <>
-                          <th className="table__th">Title</th>
-                          <th className="table__th">Selftext</th>
-                          <th className="table__th">Actions</th>
+                          <th className={thClasses}>Title</th>
+                          <th className={thClasses}>Selftext</th>
+                          <th className={thClasses}>Actions</th>
                         </>
                       ) : (
                         <>
-                          <th className="table__th">Subreddit</th>
-                          <th className="table__th">Title</th>
-                          <th className="table__th">Author</th>
-                          <th className="table__th">Score</th>
-                          <th className="table__th">Actions</th>
+                          <th className={thClasses}>Subreddit</th>
+                          <th className={thClasses}>Title</th>
+                          <th className={thClasses}>Author</th>
+                          <th className={thClasses}>Score</th>
+                          <th className={thClasses}>Actions</th>
                         </>
                       )}
                     </tr>
@@ -375,11 +378,12 @@ export default function DataTable({
                       <tr
                         key={sub.id}
                         onClick={() => handleRowClick(sub, "submission")}
-                        className="table__row--clickable table__row--hover"
+                        className="cursor-pointer transition-colors hover:bg-white/5"
                       >
-                        <td className="table__td">
+                        <td className={tdClasses}>
                           <input
                             type="checkbox"
+                            className="accent-paper"
                             checked={isSelected("submission", sub.id)}
                             onChange={(e) =>
                               toggleSelection("submission", sub.id, e)
@@ -387,18 +391,23 @@ export default function DataTable({
                             onClick={(e) => e.stopPropagation()}
                           />
                         </td>
-                        <td className="table__td">{sub.id}</td>
+                        <td className={tdClasses}>{sub.id}</td>
                         {isFilteredView || currentDatabase === "filtered" ? (
                           <>
-                            <td className="table__td truncate-cell">{sub.title}</td>
-                            <td className="table__td truncate-cell">{sub.selftext}</td>
-                            <td className="table__td">
+                            <td className={`${tdClasses} max-w-[300px] truncate`}>
+                              {sub.title}
+                            </td>
+                            <td className={`${tdClasses} max-w-[300px] truncate`}>
+                              {sub.selftext}
+                            </td>
+                            <td className={tdClasses}>
                               <button
+                                type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   deleteRow("submissions", sub.id);
                                 }}
-                                className="btn btn-secondary"
+                                className={btnClasses}
                               >
                                 Delete
                               </button>
@@ -406,17 +415,20 @@ export default function DataTable({
                           </>
                         ) : (
                           <>
-                            <td className="table__td">{sub.subreddit}</td>
-                            <td className="table__td truncate-cell">{sub.title}</td>
-                            <td className="table__td">{sub.author}</td>
-                            <td className="table__td">{sub.score}</td>
-                            <td className="table__td">
+                            <td className={tdClasses}>{sub.subreddit}</td>
+                            <td className={`${tdClasses} max-w-[300px] truncate`}>
+                              {sub.title}
+                            </td>
+                            <td className={tdClasses}>{sub.author}</td>
+                            <td className={tdClasses}>{sub.score}</td>
+                            <td className={tdClasses}>
                               <button
+                                type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   deleteRow("submissions", sub.id);
                                 }}
-                                className="btn btn-secondary"
+                                className={btnClasses}
                               >
                                 Delete
                               </button>
@@ -432,16 +444,17 @@ export default function DataTable({
           )}
 
           {filteredComments.length > 0 && (
-            <div className="table-section">
-              <h3 className="table-section__title">Sample Comments ({limit})</h3>
-              <div className="table-wrapper">
-                <table className="table">
+            <div className="mb-8">
+              <h3 className="mb-3 text-lg font-medium">Sample Comments ({limit})</h3>
+              <div className="overflow-x-auto border border-paper">
+                <table className="w-full border-collapse">
                   <thead>
                     <tr>
-                      <th className="table__th" style={{ width: 48 }}>
+                      <th className={thClasses} style={{ width: 48 }}>
                         <input
                           type="checkbox"
                           aria-label="select-all-comments"
+                          className="accent-paper"
                           checked={
                             filteredComments.length > 0 &&
                             filteredComments.every((c) =>
@@ -453,12 +466,12 @@ export default function DataTable({
                           }
                         />
                       </th>
-                      <th className="table__th">ID</th>
-                      <th className="table__th">Subreddit</th>
-                      <th className="table__th">Body</th>
-                      <th className="table__th">Author</th>
-                      <th className="table__th">Score</th>
-                      <th className="table__th">Actions</th>
+                      <th className={thClasses}>ID</th>
+                      <th className={thClasses}>Subreddit</th>
+                      <th className={thClasses}>Body</th>
+                      <th className={thClasses}>Author</th>
+                      <th className={thClasses}>Score</th>
+                      <th className={thClasses}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -466,11 +479,12 @@ export default function DataTable({
                       <tr
                         key={comment.id}
                         onClick={() => handleRowClick(comment, "comment")}
-                        className="table__row--clickable table__row--hover"
+                        className="cursor-pointer transition-colors hover:bg-white/5"
                       >
-                        <td className="table__td">
+                        <td className={tdClasses}>
                           <input
                             type="checkbox"
+                            className="accent-paper"
                             checked={isSelected("comment", comment.id)}
                             onChange={(e) =>
                               toggleSelection("comment", comment.id, e)
@@ -478,18 +492,21 @@ export default function DataTable({
                             onClick={(e) => e.stopPropagation()}
                           />
                         </td>
-                        <td className="table__td">{comment.id}</td>
-                        <td className="table__td">{comment.subreddit}</td>
-                        <td className="table__td truncate-cell">{comment.body}</td>
-                        <td className="table__td">{comment.author}</td>
-                        <td className="table__td">{comment.score}</td>
-                        <td className="table__td">
+                        <td className={tdClasses}>{comment.id}</td>
+                        <td className={tdClasses}>{comment.subreddit}</td>
+                        <td className={`${tdClasses} max-w-[300px] truncate`}>
+                          {comment.body}
+                        </td>
+                        <td className={tdClasses}>{comment.author}</td>
+                        <td className={tdClasses}>{comment.score}</td>
+                        <td className={tdClasses}>
                           <button
+                            type="button"
                             onClick={(e) => {
                               e.stopPropagation();
                               deleteRow("comments", comment.id);
                             }}
-                            className="btn btn-secondary"
+                            className={btnClasses}
                           >
                             Delete
                           </button>
@@ -504,25 +521,27 @@ export default function DataTable({
 
           {dbEntries.submissions.length === 0 &&
             dbEntries.comments.length === 0 && (
-              <p className="empty-state">
+              <p className="border border-paper/20 bg-white/[0.02] px-4 py-6 text-center italic text-paper/70">
                 No data available. Please upload a file first.
               </p>
             )}
 
-          <div className="layout-flex-row layout-center gap-sm" style={{ marginTop: "1rem" }}>
+          <div className="mt-4 flex items-center justify-center gap-2">
             <button
+              type="button"
               onClick={() => setPage((p) => Math.max(0, p - 1))}
-              className="btn btn-secondary"
+              className={btnClasses}
               disabled={page === 0}
             >
               Previous
             </button>
-            <span style={{ minWidth: 80, textAlign: "center" }}>
+            <span className="min-w-[80px] text-center text-sm">
               Page {page + 1}
             </span>
             <button
+              type="button"
               onClick={() => setPage((p) => p + 1)}
-              className="btn btn-secondary"
+              className={btnClasses}
               disabled={
                 !dbEntries ||
                 !(
@@ -535,24 +554,22 @@ export default function DataTable({
             </button>
           </div>
 
-          <div className="layout-flex-row layout-center" style={{ marginTop: "0.5rem" }}>
+          <div className="mt-2 flex justify-center">
             <button
+              type="button"
               onClick={deleteSelected}
-              className="btn btn-danger"
+              className={btnDangerClasses}
               disabled={selectedRows.size === 0 || loading}
             >
               Delete Selected ({selectedRows.size})
             </button>
           </div>
-          <div className="layout-flex-row layout-center gap-sm" style={{ marginTop: "0.5rem" }}>
-            <label className="text-primary" style={{ alignSelf: "center" }}>
-              Move selected to:
-            </label>
+          <div className="mt-2 flex items-center justify-center gap-2">
+            <label className="text-sm">Move selected to:</label>
             <select
               value={targetDb}
               onChange={(e) => setTargetDb(e.target.value)}
-              className="form__input"
-              style={{ minWidth: 280, maxWidth: 320 }}
+              className="min-w-[280px] max-w-[320px] border border-paper bg-white/5 px-2 py-1.5 text-sm text-paper focus:outline-none focus:ring-2 focus:ring-paper"
             >
               <option value="">-- select database --</option>
               {projects.map((p) => (
@@ -562,8 +579,9 @@ export default function DataTable({
               ))}
             </select>
             <button
+              type="button"
               onClick={moveSelected}
-              className="btn btn-secondary"
+              className={btnClasses}
               disabled={
                 selectedRows.size === 0 ||
                 !targetDb ||

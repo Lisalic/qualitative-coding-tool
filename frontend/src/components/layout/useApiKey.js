@@ -5,7 +5,9 @@ export function useApiKey() {
   const [showApiInput, setShowApiInput] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
-      return localStorage.getItem("sidebarCollapsed") === "true";
+      const stored = localStorage.getItem("sidebarCollapsed");
+      if (stored !== null) return stored === "true";
+      return typeof window !== "undefined" && window.innerWidth < 768;
     } catch {
       return false;
     }

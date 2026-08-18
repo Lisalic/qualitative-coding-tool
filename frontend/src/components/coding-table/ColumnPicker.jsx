@@ -38,12 +38,12 @@ const ColumnPicker = ({
   }, [columnPickerOpen]);
 
   return (
-    <div className="column-picker-toolbar">
-      <div className="column-picker" ref={columnPickerRef}>
+    <div className="mb-3 flex justify-end">
+      <div className="relative z-[5]" ref={columnPickerRef}>
         <button
           type="button"
           ref={columnPickerTriggerRef}
-          className="btn btn-secondary btn-small column-picker__trigger"
+          className="inline-flex items-center border border-paper px-2.5 py-1 text-left text-xs font-semibold transition-colors hover:bg-paper hover:text-ink"
           aria-expanded={columnPickerOpen}
           aria-haspopup="true"
           aria-controls={columnPickerPanelId}
@@ -54,24 +54,26 @@ const ColumnPicker = ({
         {!columnPickerOpen ? null : (
           <div
             id={columnPickerPanelId}
-            className="column-picker__panel"
+            className="absolute right-0 top-[calc(100%+6px)] min-w-[260px] max-w-[min(100vw-24px,320px)] border border-paper bg-ink p-3.5 shadow-lg"
             role="group"
             aria-labelledby={columnPickerHeadingId}
           >
-            <div className="column-picker__title" id={columnPickerHeadingId}>
+            <div className="mb-2 text-sm font-semibold" id={columnPickerHeadingId}>
               Show Columns
             </div>
-            <ul className="column-picker__list">
+            <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
               {TABLE_COLUMNS.map(({ id, label }) => {
                 const isLastVisible = columnVisibility[id] && visibleColumnCount === 1;
                 return (
-                  <li key={id} className="column-picker__row">
+                  <li key={id}>
                     <label
-                      className={`column-picker__label${isLastVisible ? " column-picker__label--disabled" : ""}`}
+                      className={`flex cursor-pointer select-none items-center gap-2.5 text-sm ${
+                        isLastVisible ? "cursor-not-allowed opacity-85" : ""
+                      }`}
                     >
                       <input
                         type="checkbox"
-                        className="column-picker__checkbox"
+                        className="h-4 w-4 shrink-0 cursor-inherit accent-paper"
                         checked={columnVisibility[id]}
                         onChange={() => toggleColumnVisibility(id)}
                         disabled={isLastVisible}

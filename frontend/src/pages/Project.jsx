@@ -10,28 +10,23 @@ export default function Project() {
 
   if (page.loading) {
     return (
-      <div className="layout-page">
-        <PageEmptyState message="Loading project..." style={{ padding: 20 }} />
+      <div className="mx-auto w-full max-w-4xl px-4 py-10">
+        <PageEmptyState message="Loading project..." />
       </div>
     );
   }
   if (!page.project) {
     return (
-      <div className="layout-page">
-        <PageEmptyState message="Project not found" style={{ padding: 20 }} />
+      <div className="mx-auto w-full max-w-4xl px-4 py-10">
+        <PageEmptyState message="Project not found" />
       </div>
     );
   }
 
   return (
-    <div className="layout-page">
-      <div className="layout-card layout-card--padded layout-card--full-width">
-        <ProjectHeaderSection project={page.project} onRefreshProject={page.refreshProject} />
-        <ProjectFilesSection
-          project={page.project}
-          onRefreshProject={page.refreshProject}
-        />
-      </div>
+    <div className="mx-auto w-full max-w-4xl px-4 py-10">
+      <ProjectHeaderSection project={page.project} onRefreshProject={page.refreshProject} />
+      <ProjectFilesSection project={page.project} onRefreshProject={page.refreshProject} />
     </div>
   );
 }

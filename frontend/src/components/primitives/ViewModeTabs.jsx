@@ -4,11 +4,12 @@ export default function ViewModeTabs({
   onChange,
   disabled,
   containerStyle,
+  containerClassName,
 }) {
   if (disabled) return null;
 
   return (
-    <div style={containerStyle}>
+    <div className={containerClassName} style={containerStyle}>
       {modes.map(
         ({
           value,

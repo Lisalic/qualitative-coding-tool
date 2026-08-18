@@ -1,5 +1,9 @@
 import React, { useEffect, useMemo, useState, useRef, useCallback } from "react";
-import "../../styles/CodeLegend.css";
+
+const btnSmall =
+  "border border-paper px-2.5 py-1 text-xs transition-colors hover:bg-paper hover:text-ink disabled:opacity-40";
+const inputClasses =
+  "min-w-0 border border-paper bg-white/5 px-2 py-1 text-sm text-paper focus:outline-none focus:ring-2 focus:ring-paper disabled:opacity-50";
 
 // Component for the filterable code legend (read-only) and editable codebook (table edit mode)
 const CodeLegend = ({
@@ -220,50 +224,30 @@ const CodeLegend = ({
       <div
         key={key}
         onClick={() => onCodeToggle(code)}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          backgroundColor: isSelected ? "#555" : "#333",
-          padding: "4px 8px",
-          borderRadius: "4px",
-          fontSize: "0.9em",
-          cursor: "pointer",
-          border: isSelected ? "2px solid #fff" : "none",
-          transition: "background-color 0.2s",
-        }}
+        className={`flex cursor-pointer items-center gap-1.5 px-2 py-1 text-sm transition-colors ${
+          isSelected
+            ? "border-2 border-paper bg-white/10 font-semibold"
+            : "border border-paper/20 hover:bg-white/5"
+        }`}
       >
         <div
-          style={{
-            width: "12px",
-            height: "12px",
-            backgroundColor: getCodeColor(code),
-            borderRadius: "2px",
-            marginRight: "6px",
-            display: "inline-block",
-            verticalAlign: "middle",
-          }}
+          className="h-3 w-3 shrink-0"
+          style={{ backgroundColor: getCodeColor(code) }}
         />
-        <span style={{ color: "#fff" }}>{code}</span>
+        <span>{code}</span>
       </div>
     );
   };
 
-  const shellStyle = {
-    padding: "10px",
-    backgroundColor: "#222",
-    borderRadius: "8px",
-    width: "100%",
-  };
-
   if (isEditMode) {
     return (
-      <div style={shellStyle} className="code-legend code-legend--edit" ref={menuRootRef}>
-        <h4 className="code-legend__title">Codebook</h4>
-        <div className="code-legend__toolbar">
+      <div className="w-full border border-paper p-3" ref={menuRootRef}>
+        <h4 className="mb-2.5 font-semibold">Codebook</h4>
+        <div className="sticky top-0 z-[3] mb-2.5 flex flex-wrap gap-2 border-b border-paper/20 bg-ink pb-2">
           <button
             type="button"
             onClick={() => setExpandedFamilies(buildExpandedState)}
-            className="db-button code-legend__toolbar-btn"
+            className={btnSmall}
             disabled={disabled}
           >
             Expand all
@@ -271,7 +255,7 @@ const CodeLegend = ({
           <button
             type="button"
             onClick={() => setExpandedFamilies({})}
-            className="db-button code-legend__toolbar-btn"
+            className={btnSmall}
             disabled={disabled}
           >
             Collapse all
@@ -279,7 +263,7 @@ const CodeLegend = ({
           <button
             type="button"
             onClick={addFamily}
-            className="btn btn-secondary btn-small code-legend__toolbar-btn code-legend__toolbar-btn--primary"
+            className="ml-auto border-2 border-paper px-2.5 py-1 text-xs font-semibold transition-colors hover:bg-paper hover:text-ink disabled:opacity-40"
             disabled={disabled}
           >
             + Add family
@@ -287,11 +271,11 @@ const CodeLegend = ({
         </div>
 
         {editFamilies.length === 0 ? (
-          <div className="code-legend__empty-state">
+          <div className="px-0.5 py-2 text-sm text-paper/60">
             No code families yet. Use &quot;Add family&quot; to start.
           </div>
         ) : (
-          <div className="code-legend__family-list">
+          <div className="flex flex-col gap-2.5">
             {editFamilies.map((family, familyIndex) => {
               const famName =
                 typeof family?.family_name === "string"
@@ -302,9 +286,9 @@ const CodeLegend = ({
               const isExpanded = Boolean(expandedFamilies[familyIndex]);
 
               return (
-                <div key={`edit-family-${familyIndex}`} className="code-legend__family-card">
-                  <div className="code-legend__family-header">
-                    <div className="code-legend__family-meta">
+                <div key={`edit-family-${familyIndex}`} className="overflow-hidden border border-paper/30">
+                  <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-b border-paper/20 p-2">
+                    <div className="flex items-center gap-1.5">
                       <button
                         type="button"
                         onClick={() =>
@@ -313,7 +297,7 @@ const CodeLegend = ({
                             [familyIndex]: !prev[familyIndex],
                           }))
                         }
-                        className="db-button code-legend__toggle"
+                        className="min-w-[28px] border border-paper px-1.5 py-0.5 text-xs transition-colors hover:bg-paper hover:text-ink disabled:opacity-40"
                         disabled={disabled}
                         aria-label={isExpanded ? "Collapse family" : "Expand family"}
                       >
@@ -322,7 +306,7 @@ const CodeLegend = ({
                     </div>
                     <input
                       type="text"
-                      className="form__input code-legend__family-input"
+                      className={inputClasses}
                       value={famName}
                       onChange={(e) =>
                         handleFamilyNameChange(familyIndex, e.target.value)
@@ -331,10 +315,10 @@ const CodeLegend = ({
                       disabled={disabled}
                     />
 
-                    <div className="code-legend__menu-wrap">
+                    <div className="relative">
                       <button
                         type="button"
-                        className="db-button code-legend__menu-trigger"
+                        className="min-w-[30px] border border-paper px-2 py-0.5 text-base leading-none transition-colors hover:bg-paper hover:text-ink disabled:opacity-40"
                         onClick={() =>
                           setOpenMenuFamilyIndex((prev) =>
                             prev === familyIndex ? null : familyIndex,
@@ -348,10 +332,13 @@ const CodeLegend = ({
                         ⋯
                       </button>
                       {isMenuOpen && (
-                        <div className="code-legend__menu" role="menu">
+                        <div
+                          className="absolute right-0 top-[calc(100%+6px)] z-[5] min-w-[150px] border border-paper bg-ink p-1 shadow-lg"
+                          role="menu"
+                        >
                           <button
                             type="button"
-                            className="code-legend__menu-item"
+                            className="block w-full px-2 py-1.5 text-left text-sm transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
                             onClick={() => {
                               addCode(familyIndex);
                               setOpenMenuFamilyIndex(null);
@@ -362,7 +349,7 @@ const CodeLegend = ({
                           </button>
                           <button
                             type="button"
-                            className="code-legend__menu-item code-legend__menu-item--danger"
+                            className="block w-full px-2 py-1.5 text-left text-sm text-error transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
                             onClick={() => {
                               removeFamily(familyIndex);
                               setOpenMenuFamilyIndex(null);
@@ -377,15 +364,17 @@ const CodeLegend = ({
                   </div>
 
                   {isExpanded && (
-                    <div className="code-legend__family-body">
+                    <div className="flex flex-col gap-2.5 p-2.5 pl-3">
                       {codes.length === 0 ? (
-                        <span className="text-muted body-sm">
+                        <span className="text-sm text-paper/70">
                           No codes in this family yet.
                         </span>
                       ) : (
-                        <div className="code-legend__codes-section">
-                          <div className="code-legend__codes-label">Codes</div>
-                          <div className="code-legend__codes-tree">
+                        <div className="flex flex-col gap-2">
+                          <div className="pl-[18px] text-xs font-semibold uppercase tracking-wide text-paper/50">
+                            Codes
+                          </div>
+                          <div className="relative flex flex-col gap-1.5 pl-[18px] before:absolute before:bottom-0.5 before:left-[5px] before:top-0.5 before:w-px before:bg-paper/20 before:content-['']">
                             {codes.map((codeEntry, codeIndex) => {
                               const cname =
                                 typeof codeEntry?.code_name === "string"
@@ -395,17 +384,17 @@ const CodeLegend = ({
                               return (
                                 <div
                                   key={`edit-code-${familyIndex}-${codeIndex}`}
-                                  className="code-legend__code-row"
+                                  className="relative grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 bg-white/[0.03] py-1.5 pl-2 pr-1.5 before:absolute before:left-[-13px] before:top-1/2 before:w-2.5 before:border-t before:border-paper/20 before:content-['']"
                                 >
                                   <div
-                                    className="code-legend__code-color"
+                                    className="h-3 w-3 shrink-0"
                                     style={{
                                       backgroundColor: getCodeColor(displayCode),
                                     }}
                                   />
                                   <input
                                     type="text"
-                                    className="form__input code-legend__code-input"
+                                    className={inputClasses}
                                     value={cname}
                                     onChange={(e) =>
                                       handleCodeNameChange(
@@ -425,7 +414,7 @@ const CodeLegend = ({
                                   />
                                   <button
                                     type="button"
-                                    className="db-button code-legend__remove-code"
+                                    className="min-w-[28px] border border-paper px-1.5 py-0.5 text-sm leading-none transition-colors hover:bg-paper hover:text-ink disabled:opacity-40"
                                     onClick={() =>
                                       removeCode(familyIndex, codeIndex)
                                     }
@@ -453,43 +442,31 @@ const CodeLegend = ({
   }
 
   return (
-    <div style={shellStyle}>
-      <h4 style={{ margin: "0 0 10px 0", color: "#fff" }}>Codes</h4>
+    <div className="w-full border border-paper p-3">
+      <h4 className="mb-2.5 font-semibold">Codes</h4>
 
       {hasTreeLegend ? (
         <div>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              gap: "8px",
-              marginBottom: "8px",
-            }}
-          >
+          <div className="mb-2 flex justify-between gap-2">
             <button
               type="button"
               onClick={() => setExpandedFamilies(buildExpandedState)}
-              className="db-button"
-              style={{ padding: "4px 8px", fontSize: "0.8rem" }}
+              className={btnSmall}
             >
               Expand All
             </button>
             <button
               type="button"
               onClick={() => setExpandedFamilies({})}
-              className="db-button"
-              style={{ padding: "4px 8px", fontSize: "0.8rem" }}
+              className={btnSmall}
             >
               Collapse All
             </button>
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+          <div className="flex flex-col gap-2">
             {treeFamilies.map((family, index) => (
-              <div
-                key={`${family.familyName}-${index}`}
-                style={{ border: "1px solid #333", borderRadius: "6px" }}
-              >
+              <div key={`${family.familyName}-${index}`} className="border border-paper/20">
                 <div
                   onClick={() =>
                     setExpandedFamilies((prev) => ({
@@ -497,32 +474,16 @@ const CodeLegend = ({
                       [index]: !prev[index],
                     }))
                   }
-                  style={{
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    padding: "6px 8px",
-                    backgroundColor: "#111",
-                  }}
+                  className="flex cursor-pointer items-center gap-2 border-b border-paper/20 px-2 py-1.5 transition-colors hover:bg-white/5"
                 >
-                  <span style={{ width: "16px", textAlign: "center" }}>
+                  <span className="w-4 text-center">
                     {expandedFamilies[index] ? "▾" : "▸"}
                   </span>
-                  <strong style={{ color: "#fff", fontSize: "0.9rem" }}>
-                    {family.familyName}
-                  </strong>
+                  <strong className="text-sm">{family.familyName}</strong>
                 </div>
 
                 {expandedFamilies[index] && (
-                  <div
-                    style={{
-                      padding: "8px",
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "6px",
-                    }}
-                  >
+                  <div className="flex flex-col gap-1.5 p-2">
                     {family.codes.map((code) =>
                       renderCodeNode(code, `${family.familyName}-${code}`),
                     )}
@@ -533,9 +494,7 @@ const CodeLegend = ({
           </div>
         </div>
       ) : (
-        <div style={{ color: "#bbbbbb", fontSize: "0.9rem" }}>
-          codebook not found
-        </div>
+        <div className="text-sm text-paper/70">codebook not found</div>
       )}
     </div>
   );

@@ -2,6 +2,15 @@ import { useCallback, useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { apiFetch } from "../../api";
 
+function matchesPreselection(item, value) {
+  return (
+    String(item.id) === String(value) ||
+    item.metadata?.schema === value ||
+    item.display_name === value ||
+    item.name === value
+  );
+}
+
 export default function useViewCodebookPage() {
   const location = useLocation();
   const [availableCodebooks, setAvailableCodebooks] = useState([]);
@@ -50,12 +59,7 @@ export default function useViewCodebookPage() {
 
         const preselected = location?.state?.selected;
         if (!preselected) return;
-        const match = codebookFiles.find(
-          (item) =>
-            String(item.id) === String(preselected) ||
-            item.metadata?.schema === preselected ||
-            item.display_name === preselected,
-        );
+        const match = codebookFiles.find((item) => matchesPreselection(item, preselected));
         if (!match) return;
         setSelectedCodebook(match.id);
         setSelectedCodebookName(match.display_name || match.name || match.id || "");
@@ -71,28 +75,27 @@ export default function useViewCodebookPage() {
       if (codebooks.length === 0) return;
 
       const preselected = location?.state?.selected;
-      if (preselected && codebooks.some((cb) => String(cb.id) === String(preselected))) {
-        const selected = codebooks.find((cb) => String(cb.id) === String(preselected));
-        setSelectedCodebook(String(preselected));
-        setSelectedCodebookName(
-          selected?.display_name || selected?.name || selected?.id || "",
-        );
-        return;
+      if (preselected) {
+        const selected = codebooks.find((cb) => matchesPreselection(cb, preselected));
+        if (selected) {
+          setSelectedCodebook(String(selected.id));
+          setSelectedCodebookName(
+            selected?.display_name || selected?.name || selected?.id || "",
+          );
+          return;
+        }
       }
 
       const urlParams = new URLSearchParams(window.location.search);
       const selectedFromUrl = urlParams.get("selected");
-      if (
-        selectedFromUrl &&
-        codebooks.some((cb) => String(cb.id) === String(selectedFromUrl))
-      ) {
-        const selected = codebooks.find(
-          (cb) => String(cb.id) === String(selectedFromUrl),
-        );
-        setSelectedCodebook(selectedFromUrl);
-        setSelectedCodebookName(
-          selected?.display_name || selected?.name || selected?.id || "",
-        );
+      if (selectedFromUrl) {
+        const selected = codebooks.find((cb) => matchesPreselection(cb, selectedFromUrl));
+        if (selected) {
+          setSelectedCodebook(String(selected.id));
+          setSelectedCodebookName(
+            selected?.display_name || selected?.name || selected?.id || "",
+          );
+        }
       }
     } catch (fetchError) {
       console.error("Error fetching codebooks list:", fetchError);

@@ -1,60 +1,56 @@
-:root {
-  font-family: system-ui, -apple-system, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
-  color: #ffffff;
-  background-color: #000000;
+@import "tailwindcss";
+
+@theme {
+  --color-ink: #000000;
+  --color-paper: #ffffff;
+  --color-error: #ff6666;
+  --color-success: #00aa00;
+
+  --font-sans: system-ui, -apple-system, sans-serif;
+
+  /* This app is deliberately square-cornered everywhere; zero out the
+     default radius scale so no utility can accidentally introduce
+     roundness. */
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
+  --radius-3xl: 0px;
+  --radius-4xl: 0px;
 }
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    line-height: 1.5;
+  }
 
-body {
-  margin: 0;
-  min-width: 320px;
-  min-height: 100vh;
-  background-color: #000000;
-}
+  body {
+    @apply bg-ink text-paper;
+    min-width: 320px;
+    min-height: 100vh;
+  }
 
-#root {
-  width: 100%;
-  margin: 0 auto;
-  min-height: 100vh;
-  background-color: #000000;
-}
+  #root {
+    width: 100%;
+    min-height: 100vh;
+  }
 
-a {
-  color: #ffffff;
-  text-decoration: none;
-}
+  a {
+    @apply text-paper;
+  }
 
-a:hover {
-  color: #cccccc;
-}
+  a:hover {
+    @apply text-paper/70;
+  }
 
-button {
-  border-radius: 4px;
-  border: 1px solid #ffffff;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 400;
-  font-family: inherit;
-  background-color: #000000;
-  color: #ffffff;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-button:hover {
-  background-color: #ffffff;
-  color: #000000;
-}
-
-button:focus,
-button:focus-visible {
-  outline: 2px solid #ffffff;
-  outline-offset: 2px;
+  /* Toggled on <body> during coding-table column-resize drags
+     (frontend/src/components/coding-table/useColumnResize.js) so the
+     col-resize cursor stays correct even when the pointer leaves the
+     resize handle mid-drag. */
+  body.column-resize-active {
+    cursor: col-resize;
+  }
 }

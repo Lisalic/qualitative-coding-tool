@@ -3,6 +3,11 @@ import ArtifactMarkdownSection from "./ArtifactMarkdownSection";
 import ViewModeTabs from "../primitives/ViewModeTabs";
 import PageEmptyState from "../primitives/PageEmptyState";
 
+const tabInactive =
+  "border border-paper px-4 py-2 text-sm transition-colors hover:bg-paper hover:text-ink";
+const tabActive =
+  "cursor-default border border-paper bg-paper px-4 py-2 text-sm font-semibold text-ink";
+
 export default function CodebookWorkspaceSection({
   viewMode,
   onViewModeChange,
@@ -17,47 +22,27 @@ export default function CodebookWorkspaceSection({
   error,
 }) {
   return (
-    <section
-      style={{
-        border: "1px solid #ffffff",
-        borderRadius: "8px",
-        padding: "20px",
-        backgroundColor: "#000000",
-      }}
-    >
+    <section className="border-2 border-paper p-6">
       <ViewModeTabs
         modes={[
           {
             value: "markdown",
             label: "Show Text",
-            className: "view-button",
-            style: {
-              padding: "8px 16px",
-              fontSize: "14px",
-              cursor: viewMode === "markdown" ? "default" : "pointer",
-            },
+            activeClassName: tabActive,
+            inactiveClassName: tabInactive,
             disableWhenActive: true,
           },
           {
             value: "tree",
             label: "Show Tree",
-            className: "view-button",
-            style: {
-              padding: "8px 16px",
-              fontSize: "14px",
-              cursor: viewMode === "tree" ? "default" : "pointer",
-            },
+            activeClassName: tabActive,
+            inactiveClassName: tabInactive,
             disableWhenActive: true,
           },
         ]}
         activeMode={viewMode}
         onChange={onViewModeChange}
-        containerStyle={{
-          display: "flex",
-          justifyContent: "flex-end",
-          gap: 8,
-          marginBottom: 12,
-        }}
+        containerClassName="mb-3 flex justify-end gap-2"
       />
 
       {viewMode === "markdown" ? (

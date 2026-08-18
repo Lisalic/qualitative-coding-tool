@@ -14,7 +14,7 @@ export async function savePromptToLibrary(promptType, promptText) {
 
   let fetchedUserId = null;
   try {
-    const me = await api.get("/api/me");
+    const me = await api.get("/api/me/");
     fetchedUserId = me?.data?.id || me?.data?.sub || null;
   } catch (e) {
     console.warn("Could not fetch /api/me", e);

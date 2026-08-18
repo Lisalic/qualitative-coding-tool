@@ -4,6 +4,12 @@ import { apiFetch } from "../../api";
 import ToastService from "../feedback/ToastService";
 import FileRowActions from "./FileRowActions";
 
+const tabBtn =
+  "border border-paper px-3.5 py-2 text-sm font-medium transition-colors hover:bg-paper hover:text-ink";
+const tabBtnSelected = "bg-paper text-ink";
+const inputClasses =
+  "border border-paper bg-white/5 px-3 py-2.5 text-paper placeholder:text-paper/40 focus:outline-none focus:ring-2 focus:ring-paper";
+
 export default function ProjectFilesSection({ project, onRefreshProject }) {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("database");
@@ -164,57 +170,50 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
   const renderFileRow = (f, onView, allowMergeCheckbox = false) => (
     <div
       key={f.id}
-      style={{
-        backgroundColor: "#000000",
-        border: "1px solid #333",
-        borderRadius: "8px",
-        padding: "16px",
-        display: "flex",
-        alignItems: "flex-start",
-        gap: "12px",
-      }}
+      className="flex items-start gap-3 border border-paper/20 p-4"
     >
       {allowMergeCheckbox && (
         <input
           type="checkbox"
           checked={selectedDatabases.includes(f.schema_name)}
           onChange={() => handleSelectDatabase(f.schema_name)}
-          style={{ marginTop: "4px" }}
+          className="mt-1 accent-paper"
         />
       )}
-      <div style={{ flex: 1 }}>
+      <div className="flex-1">
         {renamingFile === f.schema_name ? (
-          <form onSubmit={saveRenameFile}>
+          <form onSubmit={saveRenameFile} className="flex flex-col gap-2">
             <input
-              className="form-input"
+              className={inputClasses}
               value={newFileName}
               onChange={(e) => setNewFileName(e.target.value)}
               placeholder="File name"
             />
             <textarea
-              className="form-input"
+              className={`${inputClasses} resize-y`}
               value={newFileDescription}
               onChange={(e) => setNewFileDescription(e.target.value)}
               placeholder="Description (optional)"
               rows={2}
-              style={{ marginTop: 8, resize: "vertical" }}
             />
-            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-              <button type="submit" className="project-tab">
+            <div className="flex gap-2">
+              <button type="submit" className={tabBtn}>
                 Save
               </button>
-              <button type="button" className="project-tab" onClick={cancelRenameFile}>
+              <button type="button" className={tabBtn} onClick={cancelRenameFile}>
                 Cancel
               </button>
             </div>
           </form>
         ) : (
           <>
-            <div style={{ fontSize: "1.1em", fontWeight: "bold", color: "#fff" }}>
+            <div className="text-base font-semibold">
               {f.display_name || f.schema_name}
             </div>
-            {f.description && <div style={{ color: "#ccc", marginTop: 4 }}>{f.description}</div>}
-            <div style={{ color: "#888", fontSize: 12, marginTop: 6 }}>
+            {f.description && (
+              <div className="mt-1 text-paper/70">{f.description}</div>
+            )}
+            <div className="mt-1.5 text-xs text-paper/50">
               {f.created_at ? new Date(f.created_at).toLocaleString() : ""}
             </div>
           </>
@@ -233,24 +232,14 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
 
   return (
     <>
-      <div
-        style={{
-          backgroundColor: "#000000",
-          border: "2px solid #ffffff",
-          borderRadius: "12px",
-          padding: "20px",
-          marginBottom: "24px",
-        }}
-      >
-        <h2 style={{ margin: "0 0 16px 0", color: "#ffffff", fontSize: "1.2em" }}>
-          Project Files
-        </h2>
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+      <div className="mb-6 border-2 border-paper p-5">
+        <h2 className="mb-4 text-lg font-semibold">Project Files</h2>
+        <div className="flex flex-wrap gap-3">
           {["database", "filtered", "codebook", "coding", "summary"].map((tab) => (
             <button
               key={tab}
               type="button"
-              className={`project-tab ${activeTab === tab ? "selected" : ""}`}
+              className={`${tabBtn} ${activeTab === tab ? tabBtnSelected : ""}`}
               onClick={() => setActiveTab(tab)}
             >
               {tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -259,23 +248,16 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
         </div>
       </div>
 
-      <div
-        style={{
-          backgroundColor: "#000000",
-          border: "2px solid #ffffff",
-          borderRadius: "12px",
-          padding: "24px",
-        }}
-      >
+      <div className="border-2 border-paper p-6">
         {activeTab === "database" && (
           <>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-              <h2 style={{ margin: 0, color: "#fff" }}>Database Files</h2>
-              <button className="project-tab" onClick={() => navigate("/import")}>
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold">Database Files</h2>
+              <button type="button" className={tabBtn} onClick={() => navigate("/import")}>
                 Add Database
               </button>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div className="flex flex-col gap-3">
               {dbFiles.map((f) =>
                 renderFileRow(
                   f,
@@ -289,16 +271,17 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
 
         {activeTab === "filtered" && (
           <>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-              <h2 style={{ margin: 0, color: "#fff" }}>Filtered Files</h2>
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold">Filtered Files</h2>
               <button
-                className="project-tab"
+                type="button"
+                className={tabBtn}
                 onClick={() => navigate("/filter", { state: { projectId: project.id } })}
               >
                 Add Filtered
               </button>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div className="flex flex-col gap-3">
               {filteredFiles.map((f) =>
                 renderFileRow(
                   f,
@@ -315,27 +298,29 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
 
         {activeTab === "codebook" && (
           <>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-              <h2 style={{ margin: 0, color: "#fff" }}>Codebook Files</h2>
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold">Codebook Files</h2>
               <button
-                className="project-tab"
+                type="button"
+                className={tabBtn}
                 onClick={() => navigate("/codebook-generate", { state: { projectId: project.id } })}
               >
                 Add Codebook
               </button>
             </div>
-            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            <div className="mb-3 flex gap-2">
               {["codebook", "comparisons", "all"].map((f) => (
                 <button
                   key={f}
-                  className={`project-tab ${codebookFilter === f ? "selected" : ""}`}
+                  type="button"
+                  className={`${tabBtn} ${codebookFilter === f ? tabBtnSelected : ""}`}
                   onClick={() => setCodebookFilter(f)}
                 >
                   {f === "all" ? "Show All" : `Show ${f}`}
                 </button>
               ))}
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div className="flex flex-col gap-3">
               {shownCodebooks.map((f) =>
                 renderFileRow(f, () =>
                   navigate("/codebook-view", { state: { selected: String(f.id) } }),
@@ -347,27 +332,29 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
 
         {activeTab === "coding" && (
           <>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-              <h2 style={{ margin: 0, color: "#fff" }}>Coding Files</h2>
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold">Coding Files</h2>
               <button
-                className="project-tab"
+                type="button"
+                className={tabBtn}
                 onClick={() => navigate("/codebook-apply", { state: { projectId: project.id } })}
               >
                 Add Coding
               </button>
             </div>
-            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            <div className="mb-3 flex gap-2">
               {["coding", "comparisons", "all"].map((f) => (
                 <button
                   key={f}
-                  className={`project-tab ${codingFilter === f ? "selected" : ""}`}
+                  type="button"
+                  className={`${tabBtn} ${codingFilter === f ? tabBtnSelected : ""}`}
                   onClick={() => setCodingFilter(f)}
                 >
                   {f === "all" ? "Show All" : `Show ${f}`}
                 </button>
               ))}
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div className="flex flex-col gap-3">
               {shownCodings.map((f) =>
                 renderFileRow(f, () =>
                   navigate("/coding-view", {
@@ -381,16 +368,17 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
 
         {activeTab === "summary" && (
           <>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-              <h2 style={{ margin: 0, color: "#fff" }}>Summary Files</h2>
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold">Summary Files</h2>
               <button
-                className="project-tab"
-                onClick={() => navigate("/summarize-coding", { state: { projectId: project.id } })}
+                type="button"
+                className={tabBtn}
+                onClick={() => navigate("/summarize-coding")}
               >
                 Add Summary
               </button>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div className="flex flex-col gap-3">
               {summaryFiles.map((f) =>
                 renderFileRow(f, () =>
                   navigate("/summaryview", {
@@ -404,19 +392,19 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
 
         {(activeTab === "database" || activeTab === "filtered") &&
           (dbFiles.length > 0 || filteredFiles.length > 0) && (
-            <div style={{ marginTop: 20, textAlign: "center" }}>
+            <div className="mt-5 text-center">
               <input
                 type="text"
                 placeholder="Enter merged database name..."
                 value={mergeName}
                 onChange={(e) => setMergeName(e.target.value)}
                 disabled={mergeLoading}
-                className="form-input"
-                style={{ maxWidth: 320 }}
+                className={`${inputClasses} max-w-xs`}
               />
-              <div style={{ marginTop: 10 }}>
+              <div className="mt-2.5">
                 <button
-                  className="project-tab"
+                  type="button"
+                  className={tabBtn}
                   onClick={handleMergeDatabases}
                   disabled={
                     selectedDatabases.length < 2 || mergeLoading || !mergeName.trim()
@@ -427,8 +415,8 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
                     : `Merge ${selectedDatabases.length} Database${selectedDatabases.length !== 1 ? "s" : ""}`}
                 </button>
               </div>
-              {mergeError && <div style={{ color: "#ff6b6b", marginTop: 8 }}>{mergeError}</div>}
-              {mergeSuccess && <div style={{ color: "#4CAF50", marginTop: 8 }}>{mergeSuccess}</div>}
+              {mergeError && <div className="mt-2 text-error">{mergeError}</div>}
+              {mergeSuccess && <div className="mt-2 text-success">{mergeSuccess}</div>}
             </div>
           )}
       </div>

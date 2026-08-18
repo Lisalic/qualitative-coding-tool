@@ -3,7 +3,9 @@ import PromptManager from "./PromptManager";
 import { savePromptToLibrary } from "../../lib/savePromptToLibrary";
 import ToastService from "../feedback/ToastService";
 import AiLabel from "./AiLabel";
-import "../../styles/Home.css";
+
+const linkBtn =
+  "border border-paper px-3 py-1.5 text-xs transition-colors hover:bg-paper hover:text-ink disabled:opacity-40";
 
 export default function PromptTextareaWithActions({
   id,
@@ -55,27 +57,27 @@ export default function PromptTextareaWithActions({
   };
 
   return (
-    <div className="form-group">
-      <AiLabel htmlFor={id} text={label} />
-      <div style={{ textAlign: "right", marginTop: "-2rem" }}>
-        <button
-          type="button"
-          onClick={handleSave}
-          className="load-prompt-btn"
-          disabled={disabled}
-          style={{ marginLeft: "0.5rem" }}
-        >
-          Save prompt
-        </button>
-        <button
-          type="button"
-          onClick={() => setIsPromptManagerOpen(true)}
-          className="load-prompt-btn"
-          disabled={disabled}
-          style={{ marginLeft: "0.5rem" }}
-        >
-          Load prompt
-        </button>
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <AiLabel htmlFor={id} text={label} />
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={handleSave}
+            className={linkBtn}
+            disabled={disabled}
+          >
+            Save prompt
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsPromptManagerOpen(true)}
+            className={linkBtn}
+            disabled={disabled}
+          >
+            Load prompt
+          </button>
+        </div>
       </div>
       <textarea
         id={id}
@@ -83,7 +85,7 @@ export default function PromptTextareaWithActions({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         rows={rows}
-        className="form-input"
+        className="border border-paper bg-white/5 px-3 py-2.5 text-paper placeholder:text-paper/40 focus:outline-none focus:ring-2 focus:ring-paper disabled:opacity-50"
         disabled={disabled}
       />
       <PromptManager

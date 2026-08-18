@@ -5,25 +5,13 @@ const EXAMPLE_PROMPT =
 
 export default function PromptEditorSection({ value, onChange, onLoadExample }) {
   return (
-    <div style={{ marginBottom: 16 }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          marginBottom: 6,
-        }}
-      >
-        <AiLabel text="Prompt" style={{ marginBottom: 0 }} />
+    <div className="mb-4">
+      <div className="mb-1.5 flex items-center gap-2">
+        <AiLabel text="Prompt" />
         <button
-          className="project-tab"
           type="button"
+          className="shrink-0 border border-paper px-2 py-1 text-xs transition-colors hover:bg-paper hover:text-ink"
           onClick={() => onLoadExample?.(EXAMPLE_PROMPT)}
-          style={{
-            fontSize: "12px",
-            padding: "4px 8px",
-            flexShrink: 0,
-          }}
         >
           Load Example Prompt
         </button>
@@ -32,18 +20,7 @@ export default function PromptEditorSection({ value, onChange, onLoadExample }) 
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder="Enter any specific instructions for the summary..."
-        style={{
-          width: "100%",
-          minHeight: 80,
-          padding: 12,
-          backgroundColor: "#1a1a1a",
-          color: "#fff",
-          border: "1px solid #ffffff",
-          borderRadius: 4,
-          fontFamily: "inherit",
-          resize: "vertical",
-          fontSize: "14px",
-        }}
+        className="min-h-[80px] w-full resize-y border border-paper bg-white/5 px-3 py-3 text-sm text-paper placeholder:text-paper/40 focus:outline-none focus:ring-2 focus:ring-paper"
       />
     </div>
   );

@@ -1,7 +1,9 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { apiFetch } from "../../api";
 import ReactMarkdown from "react-markdown";
-import "../../styles/CodebookTree.css";
+
+const actionBtn =
+  "ml-2 border border-paper px-2.5 py-1.5 text-xs transition-colors hover:bg-paper hover:text-ink";
 
 export default function CodebookTree({
   codebookId = null,
@@ -46,11 +48,13 @@ export default function CodebookTree({
   };
 
   return (
-    <div className="codebook-tree">
-      <div className="codebook-tree-header">
-        <h3>{codebookName || "Codebook"}</h3>
-        <div className="codebook-tree-actions">
+    <div className="border border-paper p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-lg font-semibold">{codebookName || "Codebook"}</h3>
+        <div>
           <button
+            type="button"
+            className={actionBtn}
             onClick={() =>
               setExpanded((s) => {
                 const all = {};
@@ -61,32 +65,42 @@ export default function CodebookTree({
           >
             Expand All
           </button>
-          <button onClick={() => setExpanded({})}>Collapse All</button>
+          <button type="button" className={actionBtn} onClick={() => setExpanded({})}>
+            Collapse All
+          </button>
         </div>
       </div>
 
-      {loading && <div className="cb-loading">Loading...</div>}
-      {error && <div className="cb-error">{error}</div>}
+      {loading && <div className="p-2 text-paper/70">Loading...</div>}
+      {error && <div className="p-2 text-error">{error}</div>}
 
       {!loading && !error && (
-        <div className="cb-list">
+        <div>
           {tree.length === 0 && (
-            <div className="cb-empty">No codebook content found.</div>
+            <div className="p-2 text-paper/70">No codebook content found.</div>
           )}
           {tree.map((family, fi) => (
-            <div className="cb-family" key={fi}>
-              <div className="cb-family-title" onClick={() => toggleFamily(fi)}>
-                <span className="cb-toggle">{expanded[fi] ? "▾" : "▸"}</span>
+            <div className="my-2" key={fi}>
+              <div
+                className="flex cursor-pointer items-center gap-2 border border-paper/20 px-3 py-2 transition-colors hover:bg-white/5"
+                onClick={() => toggleFamily(fi)}
+              >
+                <span className="inline-block w-4 text-center">
+                  {expanded[fi] ? "▾" : "▸"}
+                </span>
                 <strong>{family.family_name || `Family ${fi + 1}`}</strong>
               </div>
               {expanded[fi] && (
-                <ul className="cb-codes">
+                <ul className="mt-1.5 list-none pl-5">
                   {(family.codes || []).map((code, ci) => (
-                    <li className="cb-code" key={ci}>
-                      <div className="cb-code-name">
+                    <li
+                      className="mb-1.5 border-l-2 border-paper/30 py-2 pl-3"
+                      key={ci}
+                    >
+                      <div className="font-semibold">
                         {code.code_name || `Code ${ci + 1}`}
                       </div>
-                      <div className="cb-code-def">
+                      <div className="mt-1 text-sm text-paper/80">
                         {code.content ? (
                           <ReactMarkdown>{code.content}</ReactMarkdown>
                         ) : (
