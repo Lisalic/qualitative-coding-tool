@@ -195,6 +195,36 @@ export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
           disabled={loading}
         />
 
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="name" className="text-sm">
+            Codebook Name
+          </label>
+          <input
+            id="name"
+            type="text"
+            value={codebookName}
+            onChange={(e) => setCodebookName(e.target.value)}
+            placeholder="my-codebook"
+            className={inputClasses}
+            disabled={loading}
+          />
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="description" className="text-sm">
+            Description (optional)
+          </label>
+          <textarea
+            id="description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Optional description for the codebook"
+            rows={2}
+            className={`${inputClasses} resize-y`}
+            disabled={loading}
+          />
+        </div>
+
         <PromptTextareaWithActions
           id="prompt"
           label="Enter Prompt"
@@ -232,36 +262,6 @@ export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
               : `${Math.ceil((getSelectedRecordCount() * samplePercentage) / 100)} of ${getSelectedRecordCount()} records will be selected randomly.`
           }
         />
-
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="name" className="text-sm">
-            Codebook Name
-          </label>
-          <input
-            id="name"
-            type="text"
-            value={codebookName}
-            onChange={(e) => setCodebookName(e.target.value)}
-            placeholder="my-codebook"
-            className={inputClasses}
-            disabled={loading}
-          />
-        </div>
-
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="description" className="text-sm">
-            Description (optional)
-          </label>
-          <textarea
-            id="description"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Optional description for the codebook"
-            rows={2}
-            className={`${inputClasses} resize-y`}
-            disabled={loading}
-          />
-        </div>
       </FormShell>
 
       {createdFile && (

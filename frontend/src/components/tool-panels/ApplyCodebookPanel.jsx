@@ -226,7 +226,9 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
             disabled={loading}
           >
             {codebooks.length === 0 ? (
-              <option value="">No codebooks available</option>
+              <option value="" disabled>
+                No codebooks available
+              </option>
             ) : (
               codebooks.map((cb) => (
                 <option key={cb.id} value={cb.id.toString()}>
@@ -235,6 +237,36 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
               ))
             )}
           </select>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="report_name" className="text-sm">
+            Report Name
+          </label>
+          <input
+            id="report_name"
+            type="text"
+            value={reportName}
+            onChange={(e) => setReportName(e.target.value)}
+            placeholder="Enter report name... "
+            className={inputClasses}
+            disabled={loading}
+          />
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="description" className="text-sm">
+            Description (optional)
+          </label>
+          <textarea
+            id="description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Optional description for the report"
+            rows={2}
+            className={`${inputClasses} resize-y`}
+            disabled={loading}
+          />
         </div>
 
         <PromptTextareaWithActions
@@ -274,36 +306,6 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
               : `${Math.ceil((getSelectedRecordCount() * samplePercentage) / 100)} of ${getSelectedRecordCount()} records will be selected randomly.`
           }
         />
-
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="report_name" className="text-sm">
-            Report Name
-          </label>
-          <input
-            id="report_name"
-            type="text"
-            value={reportName}
-            onChange={(e) => setReportName(e.target.value)}
-            placeholder="Enter report name... "
-            className={inputClasses}
-            disabled={loading}
-          />
-        </div>
-
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="description" className="text-sm">
-            Description (optional)
-          </label>
-          <textarea
-            id="description"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Optional description for the report"
-            rows={2}
-            className={`${inputClasses} resize-y`}
-            disabled={loading}
-          />
-        </div>
       </FormShell>
 
       {createdFile && (
