@@ -10,6 +10,9 @@ export default function CompareModelPromptPanel({
   onModelChange,
   name,
   onNameChange,
+  projects,
+  selectedProject,
+  onProjectChange,
   additionalPrompt,
   onAdditionalPromptChange,
   examplePromptText,
@@ -31,18 +34,41 @@ export default function CompareModelPromptPanel({
             value={name}
             onChange={(e) => onNameChange(e.target.value)}
             placeholder="Enter a name for the comparison"
-            className={`${inputClasses} max-w-[220px]`}
+            className={inputClasses}
           />
         </div>
 
+        <div className="mb-3 flex flex-col gap-1.5">
+          <label htmlFor="compare-project" className="text-sm">
+            Project
+          </label>
+          <select
+            id="compare-project"
+            value={selectedProject}
+            onChange={(e) => onProjectChange(e.target.value)}
+            className={inputClasses}
+          >
+            {!selectedProject && (
+              <option value="" disabled>
+                Select a project
+              </option>
+            )}
+            {(projects || []).map((project) => (
+              <option key={project.id} value={String(project.id)}>
+                {project.projectname}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <AiModelFormGroup
-          className="mb-3 flex max-w-[220px] flex-col gap-1.5"
+          className="mb-3 flex flex-col gap-1.5"
           labelClassName="mb-1 block text-sm"
           label="Model"
           model={model}
           onModelChange={onModelChange}
           selectPlaceholder="compare"
-          selectClassName="w-[220px] max-w-[220px] border border-paper bg-white/5 px-3 py-2 text-paper focus:outline-none focus:ring-2 focus:ring-paper"
+          selectClassName="w-full border border-paper bg-white/5 px-3 py-2.5 text-paper focus:outline-none focus:ring-2 focus:ring-paper"
         />
 
         <div className="mb-3">

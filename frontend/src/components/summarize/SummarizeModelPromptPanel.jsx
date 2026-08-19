@@ -2,7 +2,7 @@ import AiModelFormGroup from "../models/AiModelFormGroup";
 import PromptEditorSection from "./PromptEditorSection";
 
 const selectClasses =
-  "w-full border border-paper bg-white/5 px-3 py-2 text-paper focus:outline-none focus:ring-2 focus:ring-paper";
+  "w-full border border-paper bg-white/5 px-3 py-2.5 text-paper focus:outline-none focus:ring-2 focus:ring-paper";
 const inputClasses =
   "border border-paper bg-white/5 px-3 py-2.5 text-paper placeholder:text-paper/40 focus:outline-none focus:ring-2 focus:ring-paper disabled:opacity-50";
 
@@ -11,6 +11,9 @@ export default function SummarizeModelPromptPanel({
   onModelChange,
   name,
   onNameChange,
+  projects,
+  selectedProject,
+  onProjectChange,
   additionalPrompt,
   onAdditionalPromptChange,
 }) {
@@ -31,8 +34,31 @@ export default function SummarizeModelPromptPanel({
             value={name}
             onChange={(e) => onNameChange(e.target.value)}
             placeholder="Enter a name for the summary"
-            className={`${inputClasses} max-w-[220px]`}
+            className={inputClasses}
           />
+        </div>
+
+        <div className="mb-3 flex flex-col gap-1.5">
+          <label htmlFor="summarize-project" className="text-sm">
+            Project
+          </label>
+          <select
+            id="summarize-project"
+            value={selectedProject}
+            onChange={(e) => onProjectChange(e.target.value)}
+            className={selectClasses}
+          >
+            {!selectedProject && (
+              <option value="" disabled>
+                Select a project
+              </option>
+            )}
+            {(projects || []).map((project) => (
+              <option key={project.id} value={String(project.id)}>
+                {project.projectname}
+              </option>
+            ))}
+          </select>
         </div>
 
         <AiModelFormGroup
@@ -41,7 +67,7 @@ export default function SummarizeModelPromptPanel({
           labelClassName="mb-1 block text-sm"
           model={model}
           onModelChange={onModelChange}
-          selectPlaceholder="dash"
+          selectPlaceholder="compare"
           selectClassName={selectClasses}
         />
 

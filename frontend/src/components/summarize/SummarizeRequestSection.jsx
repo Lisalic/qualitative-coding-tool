@@ -9,6 +9,9 @@ export default function SummarizeRequestSection({
   onModelChange,
   name,
   onNameChange,
+  projects,
+  selectedProject,
+  onProjectChange,
   additionalPrompt,
   onAdditionalPromptChange,
   loading,
@@ -28,6 +31,9 @@ export default function SummarizeRequestSection({
           onModelChange={onModelChange}
           name={name}
           onNameChange={onNameChange}
+          projects={projects}
+          selectedProject={selectedProject}
+          onProjectChange={onProjectChange}
           additionalPrompt={additionalPrompt}
           onAdditionalPromptChange={onAdditionalPromptChange}
         />

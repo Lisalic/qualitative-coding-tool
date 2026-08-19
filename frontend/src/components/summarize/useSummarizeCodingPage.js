@@ -11,6 +11,8 @@ export default function useSummarizeCodingPage() {
   const [error, setError] = useState("");
   const [name, setName] = useState("");
   const [model, setModel] = useState("");
+  const [projects, setProjects] = useState([]);
+  const [selectedProject, setSelectedProject] = useState("");
 
   useEffect(() => {
     let mounted = true;
@@ -31,6 +33,20 @@ export default function useSummarizeCodingPage() {
     };
   }, []);
 
+  useEffect(() => {
+    let mounted = true;
+    apiFetch("/api/projects/")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (!mounted || !data) return;
+        setProjects(data.projects || []);
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   const submitSummarize = async (event) => {
     event.preventDefault();
     setSummary("");
@@ -38,6 +54,7 @@ export default function useSummarizeCodingPage() {
     setError("");
     if (!selectedCoding) return setError("Select a coding to summarize");
     if (!name.trim()) return setError("Enter a name for the summary");
+    if (!selectedProject) return setError("Select a project");
     const apiKey = localStorage.getItem("apiKey");
     if (!apiKey) return setError("Set your API key in the navbar first");
 
@@ -47,6 +64,7 @@ export default function useSummarizeCodingPage() {
     form.append("name", name.trim());
     if (model) form.append("model", model);
     if (additionalPrompt.trim()) form.append("prompt", additionalPrompt.trim());
+    form.append("project_id", selectedProject);
 
     try {
       setLoading(true);
@@ -81,6 +99,9 @@ export default function useSummarizeCodingPage() {
     setName,
     model,
     setModel,
+    projects,
+    selectedProject,
+    setSelectedProject,
     submitSummarize,
   };
 }

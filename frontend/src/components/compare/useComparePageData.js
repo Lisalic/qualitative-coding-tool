@@ -20,6 +20,8 @@ export default function useComparePageData({
   const [model, setModel] = useState("");
   const [name, setName] = useState("");
   const [additionalPrompt, setAdditionalPrompt] = useState("");
+  const [projects, setProjects] = useState([]);
+  const [selectedProject, setSelectedProject] = useState("");
 
   useEffect(() => {
     setA(initialA || "");
@@ -50,6 +52,21 @@ export default function useComparePageData({
     };
   }, [fileType, initialA]);
 
+  useEffect(() => {
+    let mounted = true;
+    apiFetch("/api/projects/")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (!mounted || !data) return;
+        setProjects(data.projects || []);
+      })
+      .catch(() => {});
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   const submitCompare = async (event) => {
     event.preventDefault();
     setComparison("");
@@ -66,6 +83,11 @@ export default function useComparePageData({
       return;
     }
 
+    if (!selectedProject) {
+      setError("Select a project");
+      return;
+    }
+
     const apiKey = localStorage.getItem("apiKey");
     if (!apiKey) {
       setError("Set your API key in the navbar first");
@@ -79,6 +101,7 @@ export default function useComparePageData({
     form.append("name", name.trim());
     if (model) form.append("model", model);
     if (additionalPrompt.trim()) form.append("prompt", additionalPrompt.trim());
+    form.append("project_id", selectedProject);
 
     try {
       setLoading(true);
@@ -141,6 +164,9 @@ export default function useComparePageData({
     setName,
     additionalPrompt,
     setAdditionalPrompt,
+    projects,
+    selectedProject,
+    setSelectedProject,
     submitCompare,
   };
 }

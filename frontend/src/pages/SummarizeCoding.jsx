@@ -20,6 +20,9 @@ export default function SummarizeCoding() {
     setName,
     model,
     setModel,
+    projects,
+    selectedProject,
+    setSelectedProject,
     submitSummarize,
   } = useSummarizeCodingPage();
 
@@ -34,6 +37,9 @@ export default function SummarizeCoding() {
         onModelChange={setModel}
         name={name}
         onNameChange={setName}
+        projects={projects}
+        selectedProject={selectedProject}
+        onProjectChange={setSelectedProject}
         additionalPrompt={additionalPrompt}
         onAdditionalPromptChange={setAdditionalPrompt}
         loading={loading}
