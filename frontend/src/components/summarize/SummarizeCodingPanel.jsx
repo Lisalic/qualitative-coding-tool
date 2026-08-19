@@ -15,7 +15,11 @@ export default function SummarizeCodingPanel({ codings, selectedCoding, onCoding
             value={selectedCoding}
             onChange={(event) => onCodingChange(event.target.value)}
           >
-            <option value="">-- select --</option>
+            {!selectedCoding && (
+              <option value="" disabled>
+                Select a coding
+              </option>
+            )}
             {codings.map((coding) => (
               <option key={coding.value} value={coding.value}>
                 {coding.label}

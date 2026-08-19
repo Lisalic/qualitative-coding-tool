@@ -27,7 +27,11 @@ export default function CompareDualSelectPanel({
             value={valueA}
             onChange={(e) => onChangeA(e.target.value)}
           >
-            <option value="">{placeholderOption}</option>
+            {!valueA && (
+              <option value="" disabled>
+                {placeholderOption}
+              </option>
+            )}
             {options.map((it) => (
               <option key={it.value} value={it.value}>
                 {it.label}
@@ -43,7 +47,11 @@ export default function CompareDualSelectPanel({
             value={valueB}
             onChange={(e) => onChangeB(e.target.value)}
           >
-            <option value="">{placeholderOption}</option>
+            {!valueB && (
+              <option value="" disabled>
+                {placeholderOption}
+              </option>
+            )}
             {options.map((it) => (
               <option key={it.value} value={it.value}>
                 {it.label}

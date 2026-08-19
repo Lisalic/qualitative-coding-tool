@@ -571,7 +571,11 @@ export default function DataTable({
               onChange={(e) => setTargetDb(e.target.value)}
               className="min-w-[280px] max-w-[320px] border border-paper bg-white/5 px-2 py-1.5 text-sm text-paper focus:outline-none focus:ring-2 focus:ring-paper"
             >
-              <option value="">-- select database --</option>
+              {!targetDb && (
+                <option value="" disabled>
+                  Select a database
+                </option>
+              )}
               {projects.map((p) => (
                 <option key={p.schema_name} value={p.schema_name}>
                   {p.display_name || p.schema_name}

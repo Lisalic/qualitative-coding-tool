@@ -269,7 +269,7 @@ export default function FileUpload({ onUploadSuccess, onView }) {
             className={inputClasses}
           >
             <option value="" disabled>
-              Select a project...
+              Select a project
             </option>
             {projects.map((p) => (
               <option key={p.id} value={p.id}>

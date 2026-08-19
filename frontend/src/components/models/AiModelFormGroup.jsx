@@ -79,24 +79,20 @@ export default function AiModelFormGroup({
         ))}
       </>
     );
-  } else if (selectPlaceholder === "compare") {
+  } else {
     selectChildren = (
       <>
-        <option value="">Select a model</option>
+        {!model && (
+          <option value="" disabled>
+            Select a model
+          </option>
+        )}
         {filteredModels.map((opt) => (
           <option key={opt.value} value={opt.value}>
             {opt.label}
           </option>
         ))}
       </>
-    );
-  } else {
-    selectChildren = [{ value: "", label: "-- select model --" }, ...filteredModels].map(
-      (opt) => (
-        <option key={opt.value || "empty"} value={opt.value}>
-          {opt.label}
-        </option>
-      ),
     );
   }
 
