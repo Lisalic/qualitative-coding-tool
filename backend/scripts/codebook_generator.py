@@ -1,5 +1,6 @@
 from backend.app.ai_models import model_slug_at
 from backend.app.external.openrouter_client import chat_completion
+from backend.app.external.response_parsers import strip_markdown_fences
 
 MODEL_1 = model_slug_at(0)
 MODEL_2 = model_slug_at(1)
@@ -14,7 +15,7 @@ MAX_RETRIES = 3
 async def get_client(system_prompt: str, user_prompt: str, api_key: str, MODEL: str) -> str:
     if not api_key:
         raise ValueError("OpenRouter API key is required")
-    return await chat_completion(
+    result = await chat_completion(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         api_key=api_key,
@@ -23,6 +24,11 @@ async def get_client(system_prompt: str, user_prompt: str, api_key: str, MODEL: 
         use_middle_out=True,
         max_retries=MAX_RETRIES,
     )
+    # Every caller (generate_codebook, compare_codebooks, compare_codings,
+    # summarize_coding) treats this as free-form prose/markdown to render
+    # or parse directly -- strip an occasional ``` fence wrapper here once,
+    # rather than relying on each caller to remember to.
+    return strip_markdown_fences(result)
 
 async def generate_codebook(posts_content: str, api_key: str, custom_prompt: str = "", MODEL: str = MODEL_1) -> tuple[str, str, str]:
     system_prompt = """

@@ -36,6 +36,19 @@ class TestGetClient:
         assert kwargs["use_middle_out"] is True
         assert kwargs["max_retries"] == 3
 
+    async def test_strips_markdown_fence_wrapper(self, monkeypatch) -> None:
+        # generate_codebook/compare_codebooks/compare_codings/summarize_coding
+        # all go through this one seam -- an LLM that ignores "return plain
+        # text" and wraps its whole answer in a ```markdown fence should
+        # come out clean here rather than rendering as a raw, unwrapped code
+        # block in every viewer that displays this text.
+        mock = AsyncMock(return_value="```markdown\n# Heading\n\nSome **text**.\n```")
+        monkeypatch.setattr("backend.scripts.codebook_generator.chat_completion", mock)
+
+        result = await get_client("sys prompt", "user prompt", "sk-key", "model-x")
+
+        assert result == "# Heading\n\nSome **text**."
+
 
 class TestGenerateCodebook:
     async def test_builds_prompts_and_returns_triple(self, monkeypatch) -> None:

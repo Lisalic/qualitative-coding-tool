@@ -53,4 +53,23 @@
   body.column-resize-active {
     cursor: col-resize;
   }
+
+  /* react-markdown output (MarkdownDisplay, MarkdownView, CodebookTree) is
+     rendered from LLM text that occasionally comes back wrapped in a
+     ``` fenced code block -- browsers render <pre> with white-space: pre
+     and no wrapping by default, which otherwise lets a single long line
+     spill straight through its container's border instead of wrapping or
+     scrolling. Force it to wrap and stay inside its box everywhere a
+     comparison/codebook/summary/coding artifact gets rendered as
+     markdown, regardless of which view page hosts it. */
+  pre {
+    overflow-x: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-width: 100%;
+  }
+
+  code {
+    overflow-wrap: anywhere;
+  }
 }
