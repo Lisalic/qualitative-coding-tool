@@ -11,9 +11,6 @@ const MODE_CONFIG = {
     selection: {
       wrapperClassName: "mb-4 flex items-center gap-2",
       selectClassName: SELECT_CLASSES,
-      listClassName: "mb-6 flex flex-wrap gap-2.5 border-2 border-paper p-4",
-      buttonClassName:
-        "border border-paper px-4 py-2.5 text-sm transition-colors hover:bg-paper hover:text-ink",
       noProjectFilesMessage: "No raw files in project",
       noDatabaseMessage: "No databases available",
     },
@@ -27,9 +24,6 @@ const MODE_CONFIG = {
     selection: {
       wrapperClassName: "mb-4 flex items-center gap-2",
       selectClassName: SELECT_CLASSES,
-      listClassName: "mb-6 flex flex-wrap gap-2.5 border-2 border-paper p-4",
-      buttonClassName:
-        "border border-paper px-4 py-2.5 text-sm transition-colors hover:bg-paper hover:text-ink",
       noProjectFilesMessage: "No filtered files in project",
       noDatabaseMessage: "No filtered databases available",
     },
