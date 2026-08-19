@@ -544,9 +544,14 @@ async def _run_compare_codings_job(job_id: int, payload: dict) -> dict:
     async with AsyncSessionLocal() as session:
         text_a = await artifact_content_repo.read_content(session, file_id_a) or ""
         text_b = await artifact_content_repo.read_content(session, file_id_b) or ""
+        file_a = await session.get(File, file_id_a)
+        file_b = await session.get(File, file_id_b)
 
     if not text_a and not text_b:
         raise ValidationAppError("No content found in either coding")
+
+    name_a = (file_a.filename if file_a else None) or "Coding A"
+    name_b = (file_b.filename if file_b else None) or "Coding B"
 
     system_prompt = (
         "You are an expert qualitative researcher. Compare the two provided coded datasets.\n"
@@ -555,10 +560,12 @@ async def _run_compare_codings_job(job_id: int, payload: dict) -> dict:
         "- Instances where codes appear inconsistent or misapplied\n"
         "- Suggestions for reconciliation or re-labeling\n"
         "- An overall recommendation and confidence level.\n"
+        f"Refer to the coded datasets by their names, \"{name_a}\" and \"{name_b}\", "
+        "not as \"Coding A\"/\"Coding B\".\n"
         "Return the full comparison in a markdown format."
     )
     user_prompt = (
-        f"Coding A: {text_a} Coding B: {text_b} Please compare them in detail. "
+        f'Coding "{name_a}": {text_a} Coding "{name_b}": {text_b} Please compare them in detail. '
         f"Additional instructions: {prompt}"
     )
     chosen_model = model or MODEL_3

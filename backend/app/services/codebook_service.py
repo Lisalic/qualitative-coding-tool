@@ -422,9 +422,14 @@ async def _run_compare_codebooks_job(job_id: int, payload: dict) -> dict:
     async with AsyncSessionLocal() as session:
         text_a = await artifact_content_repo.read_content(session, file_id_a) or ""
         text_b = await artifact_content_repo.read_content(session, file_id_b) or ""
+        file_a = await session.get(File, file_id_a)
+        file_b = await session.get(File, file_id_b)
 
     if not text_a and not text_b:
         raise ValidationAppError("No content found in either codebook")
+
+    name_a = (file_a.filename if file_a else None) or "Codebook A"
+    name_b = (file_b.filename if file_b else None) or "Codebook B"
 
     system_prompt = (
         "You are an expert qualitative researcher. Compare the two provided codebooks.\n"
@@ -433,10 +438,12 @@ async def _run_compare_codebooks_job(job_id: int, payload: dict) -> dict:
         "- Conflicting or duplicate codes\n"
         "- Suggestions for merging or refining codes\n"
         "- An overall recommendation and confidence level.\n"
+        f"Refer to the codebooks by their names, \"{name_a}\" and \"{name_b}\", "
+        "not as \"Codebook A\"/\"Codebook B\".\n"
         "Return the full comparison as text (no extra JSON or metadata)."
     )
     user_prompt = (
-        f"Codebook A: {text_a} Codebook B: {text_b} "
+        f'Codebook "{name_a}": {text_a} Codebook "{name_b}": {text_b} '
         f"Please compare them in detail. Additional instructions: {prompt}"
     )
 
