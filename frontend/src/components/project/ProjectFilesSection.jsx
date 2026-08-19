@@ -323,7 +323,11 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
             <div className="flex flex-col gap-3">
               {shownCodebooks.map((f) =>
                 renderFileRow(f, () =>
-                  navigate("/codebook-view", { state: { selected: String(f.id) } }),
+                  f.file_type === "codebook_comparison"
+                    ? navigate("/codebook-comparison-view", {
+                        state: { selected: f.schema_name },
+                      })
+                    : navigate("/codebook-view", { state: { selected: String(f.id) } }),
                 ),
               )}
             </div>
@@ -357,9 +361,12 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
             <div className="flex flex-col gap-3">
               {shownCodings.map((f) =>
                 renderFileRow(f, () =>
-                  navigate("/coding-view", {
-                    state: { selectedCodedData: f.schema_name },
-                  }),
+                  navigate(
+                    f.file_type === "coding_comparison"
+                      ? "/coding-comparison-view"
+                      : "/coding-view",
+                    { state: { selectedCodedData: f.schema_name } },
+                  ),
                 ),
               )}
             </div>

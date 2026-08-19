@@ -48,7 +48,7 @@ class TestListFilesForUser:
             rows = await project_service.list_files_for_user(session, user.id)
             assert [r["schema_name"] for r in rows] == ["proj_a"]
 
-    async def test_codebook_file_type_includes_comparisons(self, session_factory) -> None:
+    async def test_codebook_file_type_excludes_comparisons(self, session_factory) -> None:
         async with session_factory() as session:
             user = await _make_user(session)
             session.add(
@@ -68,9 +68,9 @@ class TestListFilesForUser:
             await session.commit()
 
             rows = await project_service.list_files_for_user(session, user.id, "codebook")
-            assert sorted(r["schema_name"] for r in rows) == ["cmp_x", "proj_cb"]
+            assert [r["schema_name"] for r in rows] == ["proj_cb"]
 
-    async def test_coding_file_type_includes_comparisons(self, session_factory) -> None:
+    async def test_coding_file_type_excludes_comparisons(self, session_factory) -> None:
         async with session_factory() as session:
             user = await _make_user(session)
             session.add(
@@ -84,7 +84,30 @@ class TestListFilesForUser:
             await session.commit()
 
             rows = await project_service.list_files_for_user(session, user.id, "coding")
-            assert sorted(r["schema_name"] for r in rows) == ["cmp_c", "proj_c"]
+            assert [r["schema_name"] for r in rows] == ["proj_c"]
+
+    async def test_codebook_comparison_file_type_returns_only_comparisons(
+        self, session_factory
+    ) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            session.add(
+                File(user_id=user.id, filename="cb", schemaname="proj_cb", file_type="codebook")
+            )
+            session.add(
+                File(
+                    user_id=user.id,
+                    filename="cmp",
+                    schemaname="cmp_x",
+                    file_type="codebook_comparison",
+                )
+            )
+            await session.commit()
+
+            rows = await project_service.list_files_for_user(
+                session, user.id, "codebook_comparison"
+            )
+            assert [r["schema_name"] for r in rows] == ["cmp_x"]
 
     async def test_scoped_to_owner(self, session_factory) -> None:
         async with session_factory() as session:

@@ -22,6 +22,12 @@ const SummarizeCoding = React.lazy(
   () => import("./pages/SummarizeCoding")
 );
 const ViewSummary = React.lazy(() => import("./pages/ViewSummary"));
+const ViewCodebookComparisons = React.lazy(
+  () => import("./pages/ViewCodebookComparisons")
+);
+const ViewCodingComparisons = React.lazy(
+  () => import("./pages/ViewCodingComparisons")
+);
 const Login = React.lazy(() => import("./pages/Login"));
 const Register = React.lazy(() => import("./pages/Register"));
 
@@ -145,6 +151,22 @@ function App() {
                   element={
                     <ProtectedRoute>
                       <ViewCoding />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/codebook-comparison-view"
+                  element={
+                    <ProtectedRoute>
+                      <ViewCodebookComparisons />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/coding-comparison-view"
+                  element={
+                    <ProtectedRoute>
+                      <ViewCodingComparisons />
                     </ProtectedRoute>
                   }
                 />

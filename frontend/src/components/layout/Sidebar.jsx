@@ -47,6 +47,8 @@ export default function Sidebar() {
     ["Summarize Coding", "/summarize-coding"],
     ["View Summary", "/summaryview"],
     ["View Coding", "/coding-view"],
+    ["View Codebook Comparisons", "/codebook-comparison-view"],
+    ["View Coding Comparisons", "/coding-comparison-view"],
   ];
 
   const anonButtons = [
@@ -110,6 +112,8 @@ export default function Sidebar() {
             "View Codebook",
             "View Coding",
             "View Summary",
+            "View Codebook Comparisons",
+            "View Coding Comparisons",
           ];
 
           const mapByLabel = Object.fromEntries(

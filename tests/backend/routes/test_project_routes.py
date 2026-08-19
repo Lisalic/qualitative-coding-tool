@@ -151,7 +151,7 @@ class TestMyFiles:
         names = [p["display_name"] for p in resp.json()["projects"]]
         assert names == ["f1"]
 
-    async def test_codebook_file_type_includes_comparisons(
+    async def test_codebook_file_type_excludes_comparisons(
         self, client, make_token, session_factory
     ) -> None:
         async with session_factory() as session:
@@ -174,7 +174,14 @@ class TestMyFiles:
             headers=_auth_headers(make_token, sub=str(uid)),
         )
         names = {p["display_name"] for p in resp.json()["projects"]}
-        assert names == {"cb", "cmp"}
+        assert names == {"cb"}
+
+        resp = client.get(
+            "/api/my-files/?file_type=codebook_comparison",
+            headers=_auth_headers(make_token, sub=str(uid)),
+        )
+        names = {p["display_name"] for p in resp.json()["projects"]}
+        assert names == {"cmp"}
 
 
 class TestRenameFile:

@@ -2,25 +2,38 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { apiFetch } from "../../api";
 
-export default function useViewSummaryPage() {
+/**
+ * Shared read-only "pick one, view its content" hook behind the codebook-
+ * comparison and coding-comparison viewers. Parameterized the same way
+ * ComparePageContainer/useComparePageData are for the two compare modes,
+ * since the two comparison viewers differ only in which file_type/content
+ * endpoint they read from.
+ */
+export default function useViewComparisonPage({
+  fileType,
+  preselectStateKey,
+  contentUrl,
+  contentField,
+}) {
   const location = useLocation();
-  const preselect = location?.state?.selectedSummary || null;
+  const preselect = location?.state?.[preselectStateKey] || null;
 
   const [available, setAvailable] = useState([]);
   const [projectsList, setProjectsList] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
-  const [selected, setSelected] = useState(preselect);
+  const [selected, setSelectedRaw] = useState(preselect);
   const [selectedName, setSelectedName] = useState("");
+  const [selectedDescription, setSelectedDescription] = useState("");
   const [content, setContent] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  // The summary list refetches for reasons unrelated to the initial "view"
-  // navigation (e.g. once the project list finishes loading in), and each
-  // refetch used to unconditionally re-apply the location.state
-  // preselection -- which silently snapped the selection back even after
-  // the user had since clicked a different summary. Track which preselect
-  // value has already been applied so it's only ever consumed once per
-  // distinct navigation, not once per refetch.
+  // The artifact list refetches for reasons unrelated to the initial
+  // "view" navigation (e.g. once the project list finishes loading in),
+  // and each refetch used to unconditionally re-apply `preselect` -- which
+  // silently snapped the selection back even after the user had since
+  // clicked a different item. Track which preselect value has already
+  // been applied so it's only ever consumed once per distinct navigation,
+  // not once per refetch.
   const appliedPreselectRef = useRef(null);
 
   const fetchProjects = useCallback(async () => {
@@ -34,7 +47,7 @@ export default function useViewSummaryPage() {
     }
   }, []);
 
-  const fetchAvailableSummaries = useCallback(async () => {
+  const fetchAvailable = useCallback(async () => {
     try {
       if (projectsList.length > 0 && selectedProject) {
         const projectObj = projectsList.find(
@@ -42,7 +55,7 @@ export default function useViewSummaryPage() {
         );
         const files = (projectObj && projectObj.files) || [];
         const items = files
-          .filter((file) => file.file_type === "summary")
+          .filter((file) => file.file_type === fileType)
           .map((file) => ({
             id: file.schema_name || String(file.id),
             name: file.schema_name || String(file.id),
@@ -55,36 +68,49 @@ export default function useViewSummaryPage() {
         const match = items.find((item) => item.id === preselect);
         if (!match) return;
         appliedPreselectRef.current = preselect;
-        setSelected(preselect);
+        setSelectedRaw(preselect);
         setSelectedName(match.display_name || match.name);
+        setSelectedDescription(match.description || "");
         return;
       }
 
-      const response = await apiFetch("/api/my-files/?file_type=summary");
+      const response = await apiFetch(`/api/my-files/?file_type=${fileType}`);
       if (!response.ok) return;
       const data = await response.json();
       const items = (data.projects || []).map((project) => ({
         id: project.schema_name || project.id,
         name: project.schema_name || String(project.id),
-        display_name:
-          project.display_name || project.schema_name || String(project.id),
+        display_name: project.display_name || project.schema_name || String(project.id),
         description: project.description || "",
       }));
       setAvailable(items);
       if (!preselect || appliedPreselectRef.current === preselect) return;
-      appliedPreselectRef.current = preselect;
-      setSelected(preselect);
       const match = items.find((item) => item.id === preselect);
-      if (match) setSelectedName(match.display_name || match.name);
+      if (match) {
+        appliedPreselectRef.current = preselect;
+        setSelectedRaw(preselect);
+        setSelectedName(match.display_name || match.name);
+        setSelectedDescription(match.description || "");
+      }
     } catch (fetchError) {
-      console.error("Error fetching summaries:", fetchError);
+      console.error("Error fetching comparisons:", fetchError);
     }
-  }, [preselect, projectsList, selectedProject]);
+  }, [fileType, preselect, projectsList, selectedProject]);
+
+  const setSelected = useCallback(
+    (id) => {
+      setSelectedRaw(id);
+      const match = available.find((item) => item.id === id);
+      setSelectedName(match?.display_name || match?.name || id || "");
+      setSelectedDescription(match?.description || "");
+    },
+    [available],
+  );
 
   useEffect(() => {
-    fetchAvailableSummaries();
+    fetchAvailable();
     fetchProjects();
-  }, [fetchAvailableSummaries, fetchProjects]);
+  }, [fetchAvailable, fetchProjects]);
 
   useEffect(() => {
     let mounted = true;
@@ -96,7 +122,7 @@ export default function useViewSummaryPage() {
     }
     setLoading(true);
     setError(null);
-    apiFetch(`/api/summary/${encodeURIComponent(selected)}`)
+    apiFetch(contentUrl(selected))
       .then((response) => {
         if (!mounted) return null;
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -104,13 +130,11 @@ export default function useViewSummaryPage() {
       })
       .then((data) => {
         if (!mounted || !data) return;
-        const summary = data.summary || data || {};
-        setContent(summary.content || summary.summary || JSON.stringify(summary, null, 2));
-        setSelectedName(summary.display_name || summary.name || selected);
+        setContent(data[contentField] || "");
       })
       .catch((fetchError) => {
         if (!mounted) return;
-        setError(fetchError.message || "Failed to load summary");
+        setError(fetchError.message || "Failed to load comparison");
       })
       .finally(() => {
         if (mounted) setLoading(false);
@@ -119,7 +143,8 @@ export default function useViewSummaryPage() {
     return () => {
       mounted = false;
     };
-  }, [selected]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, contentField]);
 
   return {
     available,
@@ -129,6 +154,7 @@ export default function useViewSummaryPage() {
     selected,
     setSelected,
     selectedName,
+    selectedDescription,
     content,
     loading,
     error,

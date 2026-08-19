@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { apiFetch } from "../../../api";
 import {
@@ -38,6 +38,14 @@ export default function useViewCodingPage() {
   const [tableDraftParsedCoding, setTableDraftParsedCoding] = useState([]);
   const [tableDraftCodebookTree, setTableDraftCodebookTree] = useState([]);
   const [tableEditName, setTableEditName] = useState("");
+  // The coded-data list refetches for reasons unrelated to the initial
+  // "view" navigation (e.g. once the project list finishes loading in),
+  // and each refetch used to unconditionally re-apply the location.state
+  // preselection -- which silently snapped the selection back even after
+  // the user had since clicked a different coding. Track which preselect
+  // value has already been applied so it's only ever consumed once per
+  // distinct navigation, not once per refetch.
+  const appliedPreselectRef = useRef(null);
 
   const fetchProjects = useCallback(async () => {
     try {
@@ -60,11 +68,7 @@ export default function useViewCodingPage() {
         );
         const files = (projectObj && projectObj.files) || [];
         const codingFiles = files
-          .filter(
-            (file) =>
-              file.file_type === "coding" ||
-              file.file_type === "coding_comparison",
-          )
+          .filter((file) => file.file_type === "coding")
           .map((file) => ({
             id: file.schema_name || String(file.id),
             name: file.display_name || file.schema_name || String(file.id),
@@ -76,13 +80,14 @@ export default function useViewCodingPage() {
         setAvailableCodedData(codingFiles);
 
         const preselected = location?.state?.selectedCodedData;
-        if (preselected) {
+        if (preselected && appliedPreselectRef.current !== preselected) {
           const match = codingFiles.find(
             (item) =>
               String(item.id) === String(preselected) ||
               String(item?.metadata?.file?.id) === String(preselected),
           );
           if (match) {
+            appliedPreselectRef.current = preselected;
             setSelectedCodedData(match.id);
             setSelectedCodedDataName(
               match?.display_name || match?.name || match?.id || "",
@@ -113,9 +118,10 @@ export default function useViewCodingPage() {
       setAvailableCodedData(items);
 
       const preselected = location?.state?.selectedCodedData;
-      if (!preselected) return;
+      if (!preselected || appliedPreselectRef.current === preselected) return;
       const match = items.find((item) => item.id === preselected);
       if (!match) return;
+      appliedPreselectRef.current = preselected;
       setSelectedCodedData(match.id);
       setSelectedCodedDataName(match?.display_name || match?.name || match?.id || "");
     } catch (error) {

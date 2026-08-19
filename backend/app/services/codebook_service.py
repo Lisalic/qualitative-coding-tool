@@ -140,7 +140,10 @@ async def parse_codebook(session: AsyncSession, user_id: int, codebook_id: str |
 
 
 async def list_codebooks(session: AsyncSession, user_id: int) -> list[File]:
-    """Every ``codebook``/``codebook_comparison`` file owned by ``user_id``.
+    """Every ``codebook`` file owned by ``user_id`` -- comparisons are
+    excluded so the generic codebook picker (View Codebook, Apply Codebook)
+    never offers a comparison as if it were a real codebook; they're only
+    reachable through their own dedicated comparison viewer.
 
     Supersedes the Stage-0 guard-clause patch (which lived directly in the
     route) with a real service-layer implementation -- same query, same
@@ -149,7 +152,7 @@ async def list_codebooks(session: AsyncSession, user_id: int) -> list[File]:
     name, matching the pre-existing wire shape exactly.
     """
     result = await session.execute(
-        select(File).where(File.user_id == user_id, File.file_type.in_(_CODEBOOK_LIST_TYPES))
+        select(File).where(File.user_id == user_id, File.file_type == "codebook")
     )
     return list(result.scalars().all())
 

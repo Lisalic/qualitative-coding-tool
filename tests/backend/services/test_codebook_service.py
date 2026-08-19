@@ -201,7 +201,7 @@ class TestParseCodebook:
 
 
 class TestListCodebooks:
-    async def test_returns_only_codebook_and_comparison_types(self, session_factory) -> None:
+    async def test_excludes_comparisons_and_other_types(self, session_factory) -> None:
         async with session_factory() as session:
             user = await _make_user(session)
             await _make_file(session, user.id, file_type="codebook", schemaname="proj_a", filename="A")
@@ -212,7 +212,7 @@ class TestListCodebooks:
 
             files = await codebook_service.list_codebooks(session, user.id)
             names = sorted(f.filename for f in files)
-            assert names == ["A", "B"]
+            assert names == ["A"]
 
     async def test_scoped_to_calling_user(self, session_factory) -> None:
         async with session_factory() as session:

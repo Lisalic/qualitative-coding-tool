@@ -46,14 +46,13 @@ async def _resolve_parent_files(session: AsyncSession, files: list[File]) -> dic
 
 
 def _file_type_filter(file_type: str) -> tuple[str, ...]:
-    """Matches the old ``my_projects`` handler's mapping: requesting
-    'codebook' or 'coding' also includes the corresponding saved
-    comparison files; anything else is an exact match.
+    """Exact match on ``file_type``. Comparisons (``codebook_comparison``/
+    ``coding_comparison``) are their own type and are only ever surfaced by
+    requesting that type directly -- they no longer fold into a plain
+    ``codebook``/``coding`` listing, so the generic codebook/coding pickers
+    and viewers stay comparison-free; their dedicated comparison viewers
+    request the comparison type explicitly instead.
     """
-    if file_type == "codebook":
-        return ("codebook", "codebook_comparison")
-    if file_type == "coding":
-        return ("coding", "coding_comparison")
     return (file_type,)
 
 

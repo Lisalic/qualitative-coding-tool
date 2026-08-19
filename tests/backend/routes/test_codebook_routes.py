@@ -61,7 +61,7 @@ class TestListCodebooks:
         assert resp.status_code == 200
         assert resp.json() == {"codebooks": []}
 
-    async def test_lists_codebook_and_comparison_types_sorted_by_name(
+    async def test_excludes_comparisons_and_other_types_sorted_by_name(
         self, client, session_factory, make_token
     ) -> None:
         user = await _make_user(session_factory)
@@ -75,7 +75,7 @@ class TestListCodebooks:
             "/api/list-codebooks", cookies={"access_token": make_token(sub=str(user.id))}
         )
         names = [c["name"] for c in resp.json()["codebooks"]]
-        assert names == ["Alpha", "Zeta"]  # sorted, raw_data excluded
+        assert names == ["Zeta"]  # comparison and raw_data excluded
 
     async def test_scoped_to_owner_not_all_users(self, client, session_factory, make_token) -> None:
         owner = await _make_user(session_factory, "owner@b.com")

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { apiFetch } from "../../api";
 
@@ -21,9 +21,17 @@ export default function useViewCodebookPage() {
   const [selectedCodebookName, setSelectedCodebookName] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [viewMode, setViewMode] = useState("markdown");
+  const [viewMode, setViewMode] = useState("tree");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [userPrompt, setUserPrompt] = useState("");
+  // The codebook list refetches for reasons unrelated to the initial
+  // "view" navigation (e.g. once the project list finishes loading in),
+  // and each refetch used to unconditionally re-apply the location.state
+  // preselection -- which silently snapped the selection back even after
+  // the user had since clicked a different codebook. Track which
+  // preselect value has already been applied so it's only ever consumed
+  // once per distinct navigation, not once per refetch.
+  const appliedPreselectRef = useRef(null);
 
   const fetchProjects = useCallback(async () => {
     try {
@@ -44,11 +52,7 @@ export default function useViewCodebookPage() {
         );
         const files = (projectObj && projectObj.files) || [];
         const codebookFiles = files
-          .filter(
-            (file) =>
-              file.file_type === "codebook" ||
-              file.file_type === "codebook_comparison",
-          )
+          .filter((file) => file.file_type === "codebook")
           .map((file) => ({
             id: String(file.id),
             display_name: file.display_name || file.schema_name || String(file.id),
@@ -58,9 +62,10 @@ export default function useViewCodebookPage() {
         setAvailableCodebooks(codebookFiles);
 
         const preselected = location?.state?.selected;
-        if (!preselected) return;
+        if (!preselected || appliedPreselectRef.current === preselected) return;
         const match = codebookFiles.find((item) => matchesPreselection(item, preselected));
         if (!match) return;
+        appliedPreselectRef.current = preselected;
         setSelectedCodebook(match.id);
         setSelectedCodebookName(match.display_name || match.name || match.id || "");
         return;
@@ -75,9 +80,10 @@ export default function useViewCodebookPage() {
       if (codebooks.length === 0) return;
 
       const preselected = location?.state?.selected;
-      if (preselected) {
+      if (preselected && appliedPreselectRef.current !== preselected) {
         const selected = codebooks.find((cb) => matchesPreselection(cb, preselected));
         if (selected) {
+          appliedPreselectRef.current = preselected;
           setSelectedCodebook(String(selected.id));
           setSelectedCodebookName(
             selected?.display_name || selected?.name || selected?.id || "",
@@ -86,11 +92,13 @@ export default function useViewCodebookPage() {
         }
       }
 
+      if (appliedPreselectRef.current !== null) return;
       const urlParams = new URLSearchParams(window.location.search);
       const selectedFromUrl = urlParams.get("selected");
       if (selectedFromUrl) {
         const selected = codebooks.find((cb) => matchesPreselection(cb, selectedFromUrl));
         if (selected) {
+          appliedPreselectRef.current = selectedFromUrl;
           setSelectedCodebook(String(selected.id));
           setSelectedCodebookName(
             selected?.display_name || selected?.name || selected?.id || "",
