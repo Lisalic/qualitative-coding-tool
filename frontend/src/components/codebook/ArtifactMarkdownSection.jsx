@@ -11,15 +11,6 @@ const ARTIFACT_CONFIG = {
     comparePath: "/compare-codebook",
     compareStateKey: "codebookA",
   },
-  coding: {
-    fetchBase: "/api/coded-data",
-    queryParamName: "coded_id",
-    saveUrl: "/api/save-file-coded-data/",
-    saveIdFieldName: "schema_name",
-    emptyLabel: "View Coding",
-    comparePath: "/compare-coding",
-    compareStateKey: "codingA",
-  },
 };
 
 export default function ArtifactMarkdownSection({

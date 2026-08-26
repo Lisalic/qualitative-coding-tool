@@ -46,14 +46,6 @@
     @apply text-paper/70;
   }
 
-  /* Toggled on <body> during coding-table column-resize drags
-     (frontend/src/components/coding-table/useColumnResize.js) so the
-     col-resize cursor stays correct even when the pointer leaves the
-     resize handle mid-drag. */
-  body.column-resize-active {
-    cursor: col-resize;
-  }
-
   /* react-markdown output (MarkdownDisplay, MarkdownView, CodebookTree) is
      rendered from LLM text that occasionally comes back wrapped in a
      ``` fenced code block -- browsers render <pre> with white-space: pre

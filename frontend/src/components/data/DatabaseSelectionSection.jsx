@@ -1,5 +1,4 @@
 import SelectionList from "../primitives/SelectionList";
-import ProjectFilterSelect from "../forms/ProjectFilterSelect";
 
 export default function DatabaseSelectionSection({ page }) {
   const {
@@ -14,36 +13,25 @@ export default function DatabaseSelectionSection({ page }) {
     selectionProps = {},
   } = page;
 
-  const {
-    wrapperClassName = "",
-    selectClassName = "",
-    listClassName,
-    buttonClassName,
-    noProjectFilesMessage,
-    noDatabaseMessage,
-  } = selectionProps;
+  const { listClassName, buttonClassName, noProjectFilesMessage, noDatabaseMessage } =
+    selectionProps;
 
   return (
-    <>
-      <ProjectFilterSelect
-        projects={projects}
-        value={selectedProject}
-        onChange={setSelectedProject}
-        className={wrapperClassName}
-        selectClassName={selectClassName}
-      />
-      <SelectionList
-        items={useProjectFileList ? projectFiles : fallbackItems}
-        selectedId={selectedDatabase}
-        onSelect={setSelectedDatabase}
-        className={listClassName}
-        buttonClass={buttonClassName}
-        emptyMessage={
-          useProjectFileList
-            ? noProjectFilesMessage || "No files in project"
-            : noDatabaseMessage || "No databases available"
-        }
-      />
-    </>
+    <SelectionList
+      items={useProjectFileList ? projectFiles : fallbackItems}
+      selectedId={selectedDatabase}
+      onSelect={setSelectedDatabase}
+      listClassName={listClassName}
+      buttonClass={buttonClassName}
+      showProjectFilter={true}
+      projects={projects}
+      selectedProject={selectedProject}
+      onProjectChange={setSelectedProject}
+      emptyMessage={
+        useProjectFileList
+          ? noProjectFilesMessage || "No files in project"
+          : noDatabaseMessage || "No databases available"
+      }
+    />
   );
 }

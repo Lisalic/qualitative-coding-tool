@@ -2,15 +2,10 @@ import { useEffect, useMemo } from "react";
 import { useLocation } from "react-router-dom";
 import useProjectScopedFiles from "./useProjectScopedFiles";
 
-const SELECT_CLASSES =
-  "border border-paper bg-white/5 px-3 py-2 text-paper focus:outline-none focus:ring-2 focus:ring-paper";
-
 const MODE_CONFIG = {
   raw: {
     fileType: "raw_data",
     selection: {
-      wrapperClassName: "mb-4 flex items-center gap-2",
-      selectClassName: SELECT_CLASSES,
       noProjectFilesMessage: "No raw files in project",
       noDatabaseMessage: "No databases available",
     },
@@ -22,8 +17,6 @@ const MODE_CONFIG = {
   filtered: {
     fileType: "filtered_data",
     selection: {
-      wrapperClassName: "mb-4 flex items-center gap-2",
-      selectClassName: SELECT_CLASSES,
       noProjectFilesMessage: "No filtered files in project",
       noDatabaseMessage: "No filtered databases available",
     },

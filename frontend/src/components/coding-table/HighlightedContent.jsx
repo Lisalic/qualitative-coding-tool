@@ -1,11 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { normalizeEvidenceText } from "../../lib/codingUtils";
 
 const SELECTION_CHANGE_DEBOUNCE_MS = 50;
-
-const escapeRegExp = (value) =>
-  String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const buildNotesByCodeLookup = (codeEvidence) =>
   (codeEvidence || []).reduce((acc, entry) => {
@@ -33,60 +29,34 @@ const addIntervalToSegment = (segment, interval) => {
   segment.notesByCode.get(code).add(notes);
 };
 
-const buildEvidenceIntervals = (content, codeEvidence) => {
-  const intervals = [];
-
+/**
+ * `codeEvidence` is one entry per quote (`{code, quote, start_offset,
+ * end_offset, notes}`, straight from `GET /api/coding/{ref}/rows` -- see
+ * `coding_repo.list_rows_with_codes`), already resolved to exact
+ * character offsets into `content` server-side (either by
+ * `core/evidence_match.py` for an AI coding, or by the real DOM selection
+ * range for a manual one -- see `HighlightedContent`'s own selection
+ * handling below). There is nothing left to search for at render time:
+ * an interval is just `content.slice(start_offset, end_offset)`.
+ */
+const buildEvidenceIntervals = (content, codeEvidence) =>
   (codeEvidence || [])
-    .filter(({ evidence, code }) => evidence && code)
-    .forEach(({ code, evidence, notes }) => {
-      const cleanEvidence = normalizeEvidenceText(evidence);
-      if (!cleanEvidence) return;
-
-      const cleanNotes = String(notes || "").trim();
-
-      let foundAny = false;
-      let searchIndex = 0;
-      while (true) {
-        const index = content.indexOf(cleanEvidence, searchIndex);
-        if (index === -1) break;
-
-        foundAny = true;
-        intervals.push({
-          start: index,
-          end: index + cleanEvidence.length,
-          code,
-          evidence: cleanEvidence,
-          notes: cleanNotes,
-          length: cleanEvidence.length,
-        });
-        searchIndex = index + 1;
-      }
-
-      if (!foundAny) {
-        const relaxedPattern = escapeRegExp(cleanEvidence).replace(
-          /\s+/g,
-          "\\\\s+",
-        );
-        const relaxedRegex = new RegExp(relaxedPattern, "gi");
-        let match;
-        while ((match = relaxedRegex.exec(content)) !== null) {
-          intervals.push({
-            start: match.index,
-            end: match.index + match[0].length,
-            code,
-            evidence: cleanEvidence,
-            notes: cleanNotes,
-            length: match[0].length,
-          });
-          if (match.index === relaxedRegex.lastIndex) {
-            relaxedRegex.lastIndex += 1;
-          }
-        }
-      }
-    });
-
-  return intervals;
-};
+    .filter(
+      ({ code, start_offset, end_offset }) =>
+        code &&
+        Number.isInteger(start_offset) &&
+        Number.isInteger(end_offset) &&
+        end_offset > start_offset &&
+        start_offset >= 0 &&
+        end_offset <= content.length,
+    )
+    .map(({ code, start_offset, end_offset, notes, quote }) => ({
+      start: start_offset,
+      end: end_offset,
+      code,
+      quote,
+      notes: String(notes || "").trim(),
+    }));
 
 const mergeIntervalsToSegments = (intervals) => {
   if (!intervals.length) return [];
@@ -119,6 +89,25 @@ const mergeIntervalsToSegments = (intervals) => {
   return segments;
 };
 
+/**
+ * Character offset of `(node, offset)` within `root`'s rendered plain
+ * text, counting every character of every text node from the start of
+ * `root` up to that point. `root`'s text nodes render `content` verbatim
+ * (just wrapped in `<span>`s for coded segments -- see `textAreaChildren`
+ * below), so this offset lands in the same coordinate system as
+ * `content` itself, and thus the same one `start_offset`/`end_offset`
+ * from the server already use. This is what lets a manual "select text,
+ * click a code" tag store an exact offset pair instead of re-searching
+ * for the selected string later (the DOM selection *is* the ground
+ * truth -- there is nothing to hallucinate here).
+ */
+function getTextOffsetInRoot(root, node, offset) {
+  const preRange = document.createRange();
+  preRange.selectNodeContents(root);
+  preRange.setEnd(node, offset);
+  return preRange.toString().length;
+}
+
 /** Pixel rect at the end of the selection (last character). */
 function getSelectionEndClientRect(range) {
   const clone = range.cloneRange();
@@ -141,7 +130,9 @@ const HighlightedContent = ({
   content,
   codeEvidence,
   getCodeColor,
-  onAddCodeFromSelection,
+  availableCodes,
+  onApplyCode,
+  onSelectionChange,
 }) => {
   const containerRef = useRef(null);
   const textAreaRef = useRef(null);
@@ -152,6 +143,7 @@ const HighlightedContent = ({
   const [marginWidth, setMarginWidth] = useState(CODING_MARGIN_WIDTH_PX);
   const [tooltip, setTooltip] = useState(null); // { codes: [...], notesByCode: { [code]: string[] }, x, y }
   const [selectionPopover, setSelectionPopover] = useState(null); // { left, top, selectedText }
+  const [popoverFilter, setPopoverFilter] = useState("");
 
   const calculateLines = () => {
     if (!containerRef.current) return;
@@ -242,7 +234,7 @@ const HighlightedContent = ({
   }, [tooltip]);
 
   const syncSelectionPopover = useCallback(() => {
-    if (!onAddCodeFromSelection || !textAreaRef.current) {
+    if (!onApplyCode || !textAreaRef.current) {
       setSelectionPopover(null);
       return;
     }
@@ -266,17 +258,25 @@ const HighlightedContent = ({
       return;
     }
 
+    // Compute the selection's offsets into `content` directly from the
+    // real DOM range -- see getTextOffsetInRoot's comment for why this is
+    // exact by construction rather than a search.
+    const startOffset = getTextOffsetInRoot(root, range.startContainer, range.startOffset);
+    const endOffset = startOffset + selectedText.length;
+
     setTooltip(null);
     const endRect = getSelectionEndClientRect(range);
     setSelectionPopover({
       left: endRect.left,
       top: endRect.bottom + 6,
       selectedText,
+      startOffset,
+      endOffset,
     });
-  }, [onAddCodeFromSelection]);
+  }, [onApplyCode]);
 
   useEffect(() => {
-    if (!onAddCodeFromSelection) {
+    if (!onApplyCode) {
       setSelectionPopover(null);
       return undefined;
     }
@@ -310,7 +310,31 @@ const HighlightedContent = ({
         selectionDebounceRef.current = null;
       }
     };
-  }, [onAddCodeFromSelection, syncSelectionPopover]);
+  }, [onApplyCode, syncSelectionPopover]);
+
+  // Report the pending selection (or null when cleared) up to the parent,
+  // so e.g. the codebook sidebar can show a "tagging" banner and apply a
+  // code by click from there too, not just from this popover. Depends on
+  // the primitive text/start/end, not the `selectionPopover` object
+  // reference, and expects `onSelectionChange` to be a stable callback --
+  // otherwise a new reference on every parent re-render would re-fire
+  // this effect every render regardless of whether the selection changed,
+  // which (if the parent's handler updates state unconditionally) is a
+  // feedback loop: re-render -> new callback -> effect fires -> state
+  // update -> re-render -> ...
+  const selectedText = selectionPopover?.selectedText || null;
+  const selectedStart = selectionPopover?.startOffset ?? null;
+  const selectedEnd = selectionPopover?.endOffset ?? null;
+  useEffect(() => {
+    if (!onSelectionChange) return;
+    onSelectionChange(
+      selectedText ? { text: selectedText, start: selectedStart, end: selectedEnd } : null,
+    );
+  }, [onSelectionChange, selectedText, selectedStart, selectedEnd]);
+
+  useEffect(() => {
+    if (!selectionPopover) setPopoverFilter("");
+  }, [selectionPopover]);
 
   useEffect(() => {
     if (!selectionPopover) return;
@@ -415,15 +439,25 @@ const HighlightedContent = ({
     }
   }
 
-  const handleAddCodeClick = (e) => {
+  const handleApplyCodeClick = (code) => (e) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!selectionPopover?.selectedText || !onAddCodeFromSelection) return;
-    const text = selectionPopover.selectedText;
-    onAddCodeFromSelection(text);
+    if (!selectionPopover?.selectedText || !onApplyCode) return;
+    // The parent (useViewCodingPage's applyCodeToSelection) reads the
+    // pending selection from its own state, kept in sync by the
+    // onSelectionChange effect above -- this call just triggers it.
+    onApplyCode(code, {
+      text: selectionPopover.selectedText,
+      start: selectionPopover.startOffset,
+      end: selectionPopover.endOffset,
+    });
     setSelectionPopover(null);
     window.getSelection()?.removeAllRanges();
   };
+
+  const filteredPopoverCodes = (availableCodes || []).filter((code) =>
+    code.toLowerCase().includes(popoverFilter.trim().toLowerCase()),
+  );
 
   return (
     <>
@@ -506,26 +540,49 @@ const HighlightedContent = ({
         </div>
       )}
       {selectionPopover &&
-        onAddCodeFromSelection &&
+        onApplyCode &&
         createPortal(
           <div
             ref={selectionPopoverRef}
-            className="fixed z-[10001] border border-paper bg-ink p-1.5 shadow-lg"
+            className="fixed z-[10001] flex max-h-[260px] w-[220px] flex-col border border-paper bg-ink p-2 shadow-lg"
             style={{
               left: selectionPopover.left,
               top: selectionPopover.top,
             }}
             role="dialog"
-            aria-label="Add code from selection"
+            aria-label="Tag selected text with a code"
           >
-            <button
-              type="button"
-              className="whitespace-nowrap border-2 border-paper px-3 py-1.5 text-xs font-semibold transition-colors hover:bg-paper hover:text-ink"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={handleAddCodeClick}
-            >
-              Add code
-            </button>
+            <input
+              autoFocus
+              type="text"
+              value={popoverFilter}
+              onChange={(e) => setPopoverFilter(e.target.value)}
+              onMouseDown={(e) => e.stopPropagation()}
+              placeholder="Search codes..."
+              className="mb-1.5 border border-paper bg-white/5 px-2 py-1 text-xs text-paper placeholder:text-paper/40 focus:outline-none focus:ring-1 focus:ring-paper"
+            />
+            <div className="flex flex-col gap-1 overflow-y-auto">
+              {filteredPopoverCodes.length === 0 ? (
+                <div className="px-1 py-1 text-xs text-paper/50">No matching codes</div>
+              ) : (
+                filteredPopoverCodes.map((code) => (
+                  <button
+                    key={code}
+                    type="button"
+                    className="flex items-center gap-1.5 truncate border border-transparent px-1.5 py-1 text-left text-xs transition-colors hover:border-paper hover:bg-white/10"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={handleApplyCodeClick(code)}
+                    title={code}
+                  >
+                    <span
+                      className="h-2.5 w-2.5 shrink-0"
+                      style={{ backgroundColor: getCodeColor(code) }}
+                    />
+                    <span className="truncate">{code}</span>
+                  </button>
+                ))
+              )}
+            </div>
           </div>,
           document.body,
         )}

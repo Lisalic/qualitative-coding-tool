@@ -1,56 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
-  normalizeEvidenceText,
   cloneCodebookTree,
   serializeCodebookTreeToText,
+  flattenCodebookCodeNames,
   getCodeColor,
   getUniqueCodes,
   getFilteredCoding,
-  getPostDataById,
-  parseCodingData,
-  formatCodingData,
 } from "../codingUtils";
-
-describe("normalizeEvidenceText", () => {
-  it("returns empty string for falsy input", () => {
-    expect(normalizeEvidenceText("")).toBe("");
-    expect(normalizeEvidenceText(null)).toBe("");
-    expect(normalizeEvidenceText(undefined)).toBe("");
-    expect(normalizeEvidenceText(0)).toBe("");
-  });
-
-  it("strips one leading/trailing quote and trims", () => {
-    expect(normalizeEvidenceText('"hello"')).toBe("hello");
-    expect(normalizeEvidenceText("'hello'")).toBe("hello");
-    expect(normalizeEvidenceText('  "hello"  ')).toBe("hello");
-  });
-
-  it("normalizes smart quotes to straight quotes", () => {
-    expect(normalizeEvidenceText("“hello”")).toBe("hello");
-    expect(normalizeEvidenceText("‘hello’")).toBe("hello");
-  });
-
-  it("strips markdown formatting", () => {
-    expect(normalizeEvidenceText("**bold**")).toBe("bold");
-    expect(normalizeEvidenceText("__u__")).toBe("u");
-    expect(normalizeEvidenceText("`code`")).toBe("code");
-    expect(normalizeEvidenceText("[text](http://x)")).toBe("text");
-  });
-
-  it("strips a single leading bullet marker", () => {
-    expect(normalizeEvidenceText("- item")).toBe("item");
-    expect(normalizeEvidenceText("* item")).toBe("item");
-    expect(normalizeEvidenceText("+ item")).toBe("item");
-  });
-
-  it("collapses internal whitespace to single spaces", () => {
-    expect(normalizeEvidenceText("a   b\n\nc")).toBe("a b c");
-  });
-
-  it("coerces non-string input via String()", () => {
-    expect(normalizeEvidenceText(123)).toBe("123");
-  });
-});
 
 describe("cloneCodebookTree", () => {
   it("returns [] for non-array input", () => {
@@ -136,6 +92,30 @@ describe("serializeCodebookTreeToText", () => {
   });
 });
 
+describe("flattenCodebookCodeNames", () => {
+  it("returns [] for non-array input", () => {
+    expect(flattenCodebookCodeNames(null)).toEqual([]);
+  });
+
+  it("collects code names across families, deduped and sorted", () => {
+    const tree = [
+      { family_name: "F1", codes: [{ code_name: "Zebra" }, { code_name: "apple" }] },
+      { family_name: "F2", codes: [{ code_name: "apple" }, { code_name: "Banana" }] },
+    ];
+    expect(flattenCodebookCodeNames(tree)).toEqual(["apple", "Banana", "Zebra"]);
+  });
+
+  it("accepts a bare-string code entry, not just {code_name}", () => {
+    expect(flattenCodebookCodeNames([{ family_name: "F", codes: ["plain-code"] }])).toEqual([
+      "plain-code",
+    ]);
+  });
+
+  it("skips blank code names", () => {
+    expect(flattenCodebookCodeNames([{ family_name: "F", codes: [{ code_name: "  " }] }])).toEqual([]);
+  });
+});
+
 describe("getCodeColor", () => {
   it("returns a deterministic hsl() string", () => {
     const a = getCodeColor("anxiety");
@@ -177,32 +157,32 @@ describe("getUniqueCodes", () => {
   });
 
   it("dedupes and sorts codes", () => {
-    const parsed = [
-      { codeEvidence: [{ code: "b" }, { code: "a" }] },
-      { codeEvidence: [{ code: "a" }] },
+    const rows = [
+      { codes: [{ code: "b" }, { code: "a" }] },
+      { codes: [{ code: "a" }] },
     ];
-    expect(getUniqueCodes(parsed)).toEqual(["a", "b"]);
+    expect(getUniqueCodes(rows)).toEqual(["a", "b"]);
   });
 
   it("skips falsy code values", () => {
-    const parsed = [{ codeEvidence: [{ code: "" }, { code: null }, { code: "x" }] }];
-    expect(getUniqueCodes(parsed)).toEqual(["x"]);
+    const rows = [{ codes: [{ code: "" }, { code: null }, { code: "x" }] }];
+    expect(getUniqueCodes(rows)).toEqual(["x"]);
   });
 
-  it("defaults missing codeEvidence to []", () => {
+  it("defaults missing codes to []", () => {
     expect(getUniqueCodes([{}])).toEqual([]);
   });
 
   it("sort is case-sensitive (uppercase sorts before lowercase)", () => {
-    const parsed = [{ codeEvidence: [{ code: "apple" }, { code: "Zebra" }] }];
-    expect(getUniqueCodes(parsed)).toEqual(["Zebra", "apple"]);
+    const rows = [{ codes: [{ code: "apple" }, { code: "Zebra" }] }];
+    expect(getUniqueCodes(rows)).toEqual(["Zebra", "apple"]);
   });
 });
 
 describe("getFilteredCoding", () => {
-  const parsed = [
-    { postId: "1", codeEvidence: [{ code: "a" }] },
-    { postId: "2", codeEvidence: [{ code: "b" }] },
+  const rows = [
+    { item_id: "t3_1", codes: [{ code: "a" }] },
+    { item_id: "t3_2", codes: [{ code: "b" }] },
   ];
 
   it("returns [] for non-array input", () => {
@@ -210,192 +190,20 @@ describe("getFilteredCoding", () => {
   });
 
   it("returns the SAME reference when no filter codes are selected", () => {
-    expect(getFilteredCoding(parsed, [])).toBe(parsed);
-    expect(getFilteredCoding(parsed, null)).toBe(parsed);
-    expect(getFilteredCoding(parsed, undefined)).toBe(parsed);
+    expect(getFilteredCoding(rows, [])).toBe(rows);
+    expect(getFilteredCoding(rows, null)).toBe(rows);
+    expect(getFilteredCoding(rows, undefined)).toBe(rows);
   });
 
-  it("filters to posts with at least one matching code", () => {
-    expect(getFilteredCoding(parsed, ["a"])).toEqual([parsed[0]]);
+  it("filters to rows with at least one matching code", () => {
+    expect(getFilteredCoding(rows, ["a"])).toEqual([rows[0]]);
   });
 
   it("returns [] when the filter code matches nothing", () => {
-    expect(getFilteredCoding(parsed, ["nonexistent"])).toEqual([]);
+    expect(getFilteredCoding(rows, ["nonexistent"])).toEqual([]);
   });
 
-  it("excludes posts with no codeEvidence", () => {
-    expect(getFilteredCoding([{ postId: "1" }], ["a"])).toEqual([]);
-  });
-});
-
-describe("getPostDataById", () => {
-  const posts = { ABC123: { title: "t" } };
-
-  it("returns null for falsy postContents or postId", () => {
-    expect(getPostDataById(null, "x")).toBeNull();
-    expect(getPostDataById(posts, "")).toBeNull();
-    expect(getPostDataById(posts, 0)).toBeNull();
-  });
-
-  it("looks up case-insensitively", () => {
-    expect(getPostDataById(posts, "abc123")).toEqual({ title: "t" });
-    expect(getPostDataById(posts, "ABC123")).toEqual({ title: "t" });
-  });
-
-  it("coerces a numeric postId via String()", () => {
-    expect(getPostDataById({ "123": { title: "t" } }, 123)).toEqual({ title: "t" });
-  });
-
-  it("returns null when no key matches", () => {
-    expect(getPostDataById(posts, "nomatch")).toBeNull();
-  });
-});
-
-describe("parseCodingData", () => {
-  it("returns [] for non-string or empty content", () => {
-    expect(parseCodingData(null)).toEqual([]);
-    expect(parseCodingData("")).toEqual([]);
-  });
-
-  it("parses the split POST_ID / CODE / EVIDENCE form", () => {
-    const content = `POST_ID: p1\nCODE: anxiety\nEVIDENCE: "feeling anxious"`;
-    const result = parseCodingData(content);
-    expect(result).toEqual([
-      { postId: "p1", codeEvidence: [{ code: "anxiety", evidence: "feeling anxious" }] },
-    ]);
-  });
-
-  it("parses the inline one-liner form", () => {
-    const content = `POST_ID: p1 - CODE: anxiety - EVIDENCE: "feeling anxious" - NOTES: important`;
-    const result = parseCodingData(content);
-    expect(result).toEqual([
-      {
-        postId: "p1",
-        codeEvidence: [{ code: "anxiety", evidence: "feeling anxious", notes: "important" }],
-      },
-    ]);
-  });
-
-  it("accepts multiple POST_ID header spellings", () => {
-    for (const header of ["POST_ID:", "POST ID:", "POST-ID:", "Post_Id:"]) {
-      const content = `${header} p1\nCODE: c\nEVIDENCE: "e"`;
-      expect(parseCodingData(content)[0].postId).toBe("p1");
-    }
-  });
-
-  it("splits multiple quoted evidence spans into separate entries", () => {
-    const content = `POST_ID: p1\nCODE: c\nEVIDENCE: "first" "second"`;
-    const result = parseCodingData(content);
-    expect(result[0].codeEvidence).toEqual([
-      { code: "c", evidence: "first" },
-      { code: "c", evidence: "second" },
-    ]);
-  });
-
-  it("splits on section-sign when no quotes are present", () => {
-    const content = `POST_ID: p1\nCODE: c\nEVIDENCE: first§second`;
-    const result = parseCodingData(content);
-    expect(result[0].codeEvidence.map((e) => e.evidence)).toEqual(["first", "second"]);
-  });
-
-  it("drops an entry with a code but zero evidence snippets", () => {
-    const content = `POST_ID: p1\nCODE: c\nEVIDENCE:`;
-    expect(parseCodingData(content)).toEqual([]);
-  });
-
-  it("does not create a post for a trailing bare POST_ID with no code/evidence", () => {
-    const content = `POST_ID: p1\nCODE: c\nEVIDENCE: "e"\nPOST_ID: p2`;
-    const result = parseCodingData(content);
-    expect(result.map((p) => p.postId)).toEqual(["p1"]);
-  });
-
-  it("a second CODE before any EVIDENCE discards the pending code", () => {
-    const content = `POST_ID: p1\nCODE: first\nCODE: second\nEVIDENCE: "e"`;
-    const result = parseCodingData(content);
-    expect(result[0].codeEvidence).toEqual([{ code: "second", evidence: "e" }]);
-  });
-
-  it("CODE/EVIDENCE lines before any POST_ID are ignored", () => {
-    const content = `CODE: c\nEVIDENCE: "e"\nPOST_ID: p1\nCODE: c2\nEVIDENCE: "e2"`;
-    const result = parseCodingData(content);
-    expect(result).toEqual([{ postId: "p1", codeEvidence: [{ code: "c2", evidence: "e2" }] }]);
-  });
-
-  it("duplicate POST_ID values produce two separate rows", () => {
-    const content = `POST_ID: p1\nCODE: a\nEVIDENCE: "ea"\nPOST_ID: p1\nCODE: b\nEVIDENCE: "eb"`;
-    const result = parseCodingData(content);
-    expect(result).toHaveLength(2);
-    expect(result[0].postId).toBe("p1");
-    expect(result[1].postId).toBe("p1");
-  });
-
-  it("strips markdown code fences and horizontal rules from input", () => {
-    const content = "```\nPOST_ID: p1\n---\nCODE: c\nEVIDENCE: \"e\"\n```";
-    const result = parseCodingData(content);
-    expect(result[0].postId).toBe("p1");
-  });
-});
-
-describe("formatCodingData", () => {
-  it("returns '' for non-array input", () => {
-    expect(formatCodingData(null)).toBe("");
-  });
-
-  it("formats a simple post", () => {
-    const rows = [{ postId: "p1", codeEvidence: [{ code: "c", evidence: "e" }] }];
-    expect(formatCodingData(rows)).toBe('POST_ID: p1\nCODE: c\nEVIDENCE: "e"');
-  });
-
-  it("includes NOTES only when present", () => {
-    const rows = [
-      { postId: "p1", codeEvidence: [{ code: "c", evidence: "e", notes: "n" }] },
-    ];
-    expect(formatCodingData(rows)).toBe('POST_ID: p1\nCODE: c\nNOTES: n\nEVIDENCE: "e"');
-  });
-
-  it("joins multiple evidence snippets with section-sign, quoting each", () => {
-    const rows = [
-      {
-        postId: "p1",
-        codeEvidence: [{ code: "c", evidence: ["a", "b"].join("§") }],
-      },
-    ];
-    // formatEvidenceBlock re-splits on § and re-wraps each in quotes.
-    expect(formatCodingData(rows)).toContain('"a"§"b"');
-  });
-
-  it("converts inner double quotes to single quotes in evidence", () => {
-    // A matched pair of quotes (`"hi"`) would be treated as a quoted span
-    // by splitEvidenceSnippets and extracted on its own -- use a single,
-    // unmatched quote so the whole string is kept as one snippet and the
-    // quote-conversion step in formatEvidenceBlock is what's exercised.
-    const rows = [{ postId: "p1", codeEvidence: [{ code: "c", evidence: 'she said "hi' }] }];
-    const out = formatCodingData(rows);
-    expect(out).toContain("she said 'hi");
-  });
-
-  it("skips a post with blank postId", () => {
-    const rows = [{ postId: "  ", codeEvidence: [{ code: "c", evidence: "e" }] }];
-    expect(formatCodingData(rows)).toBe("");
-  });
-
-  it("skips a post with zero valid entries", () => {
-    const rows = [{ postId: "p1", codeEvidence: [{ code: "", evidence: "" }] }];
-    expect(formatCodingData(rows)).toBe("");
-  });
-
-  it("round-trips through parseCodingData for a multi-snippet case", () => {
-    const rows = [
-      {
-        postId: "p1",
-        codeEvidence: [
-          { code: "anxiety", evidence: "first snippet" },
-          { code: "anxiety", evidence: "second snippet" },
-        ],
-      },
-    ];
-    const text = formatCodingData(rows);
-    const reparsed = parseCodingData(text);
-    expect(reparsed).toEqual(rows);
+  it("excludes rows with no codes", () => {
+    expect(getFilteredCoding([{ item_id: "t3_1" }], ["a"])).toEqual([]);
   });
 });

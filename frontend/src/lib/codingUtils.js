@@ -1,33 +1,16 @@
-// Utility functions for coding operations
-
-const POST_ID_LINE_RE = /^(?:POST[\s_-]*ID)\s*:\s*(.+)$/i;
-const POST_ID_CODE_EVIDENCE_LINE_RE =
-  /^(?:POST[\s_-]*ID)\s*:\s*(.+?)\s*(?:-|–|—)?\s*CODE\s*:\s*(.+?)\s*(?:-|–|—)\s*EVIDENCE\s*:\s*(.+?)(?:\s*(?:-|–|—)\s*NOTES\s*:\s*(.+))?$/i;
-const CODE_EVIDENCE_LINE_RE =
-  /^CODE\s*:\s*(.+?)\s*(?:-|–|—)\s*EVIDENCE\s*:\s*(.+?)(?:\s*(?:-|–|—)\s*NOTES\s*:\s*(.+))?$/i;
-const CODE_LINE_RE = /^CODE\s*:\s*(.+)$/i;
-const EVIDENCE_LINE_RE = /^EVIDENCE\s*:\s*(.+)$/i;
-const NOTES_LINE_RE = /^NOTES\s*:\s*(.+)$/i;
-const QUOTED_EVIDENCE_RE = /"([^"\n]+)"/g;
-
-const cleanInlineText = (value) => {
-  if (!value) return "";
-  return String(value)
-    .replace(/\u201c|\u201d/g, '"')
-    .replace(/\u2018|\u2019/g, "'")
-    .replace(/\*\*/g, "")
-    .replace(/__/g, "")
-    .replace(/`/g, "")
-    .replace(/\[(.*?)\]\((.*?)\)/g, "$1")
-    .replace(/^\s*[-*+]\s*/, "")
-    .replace(/\s+/g, " ")
-    .trim();
-};
-
-export const normalizeEvidenceText = (value) =>
-  cleanInlineText(value)
-    .replace(/^['"]|['"]$/g, "")
-    .trim();
+// Utility functions for coding operations.
+//
+// A coding artifact's rows and their codes now come from the backend
+// already structured (GET /api/coding/{ref}/rows -- see
+// coding-table/workspace/useViewCodingPage.js), each row shaped as
+// { item_id, row_type, title, content, codes: [{code, quote, start_offset,
+// end_offset, notes}] } -- one entry per quote (coding_entries is now one
+// row per quote, see storage_models.CodingEntry), each already resolved
+// to exact character offsets into `content` server-side. There is no
+// POST_ID/CODE/EVIDENCE text blob to parse on the way in or format on the
+// way out, and (since offsets replace the old §-joined evidence string)
+// no client-side snippet-splitting either -- HighlightedContent renders
+// straight from `start_offset`/`end_offset`, see its own module comment.
 
 /** Deep clone codebook tree (family_name, content, codes[].code_name, codes[].content). */
 export const cloneCodebookTree = (tree) => {
@@ -79,69 +62,21 @@ export const serializeCodebookTreeToText = (tree) => {
   return lines.join("\n").trim();
 };
 
-const preprocessCodingLines = (content) => {
-  if (typeof content !== "string") return [];
-
-  return content
-    .replace(/\r\n?/g, "\n")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .filter((line) => !/^```/.test(line))
-    .filter((line) => !/^(?:-{3,}|\*{3,}|_{3,})$/.test(line))
-    .map((line) => line.replace(/^#{1,6}\s*/, ""))
-    .map((line) =>
-      line.replace(
-        /^\s*[-*+]\s*(?=(?:POST[\s_-]*ID|CODE|EVIDENCE|NOTES)\s*:)/i,
-        "",
-      ),
-    )
-    .map(cleanInlineText)
-    .filter(Boolean)
-    .filter((line) => /^(?:POST[\s_-]*ID|CODE|EVIDENCE|NOTES)\s*:/i.test(line));
-};
-
-const splitEvidenceSnippets = (evidenceText) => {
-  const raw = String(evidenceText || "");
-  const quotedMatches = Array.from(raw.matchAll(QUOTED_EVIDENCE_RE)).map((m) =>
-    normalizeEvidenceText(m[1]),
-  );
-
-  if (quotedMatches.length > 0) {
-    return quotedMatches.filter(Boolean);
-  }
-
-  return raw
-    .split("§")
-    .map((snippet) => normalizeEvidenceText(snippet))
-    .filter(Boolean);
-};
-
-const appendCodeEvidenceEntries = (
-  targetCodeEvidence,
-  codeValue,
-  evidenceValue,
-  notesValue = "",
-) => {
-  const code = cleanInlineText(codeValue);
-  const evidenceSnippets = splitEvidenceSnippets(evidenceValue);
-  const notes = cleanInlineText(notesValue);
-
-  if (!code || evidenceSnippets.length === 0) return;
-
-  evidenceSnippets.forEach((evidence) => {
-    targetCodeEvidence.push(
-      notes ? { code, evidence, notes } : { code, evidence },
-    );
+/** Every code name defined in a codebook tree, deduped and sorted --
+ * used to populate the "pick a code" list for tagging a text selection
+ * (see HighlightedContent's selection popover and CodingCodebookSidebar).
+ */
+export const flattenCodebookCodeNames = (tree) => {
+  if (!Array.isArray(tree)) return [];
+  const names = new Set();
+  tree.forEach((family) => {
+    (Array.isArray(family?.codes) ? family.codes : []).forEach((entry) => {
+      const name =
+        typeof entry === "string" ? entry.trim() : String(entry?.code_name || "").trim();
+      if (name) names.add(name);
+    });
   });
-};
-
-const formatEvidenceBlock = (value) => {
-  const segments = splitEvidenceSnippets(value)
-    .map((segment) => segment.replace(/"/g, "'"))
-    .filter(Boolean);
-
-  return segments.map((segment) => `"${segment}"`).join("§");
+  return Array.from(names).sort((a, b) => a.localeCompare(b));
 };
 
 // Color assignment for codes
@@ -158,185 +93,30 @@ export const getCodeColor = (code) => {
   return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
 };
 
-// Get all unique codes for legend
-export const getUniqueCodes = (parsedCoding) => {
-  if (!Array.isArray(parsedCoding)) return [];
+// Get all unique codes for legend, from a page of rows shaped like
+// GET /api/coding/{ref}/rows's response ({ codes: [{code}] } per row).
+export const getUniqueCodes = (rows) => {
+  if (!Array.isArray(rows)) return [];
   const codes = new Set();
-  parsedCoding.forEach((post) => {
-    (post.codeEvidence || []).forEach(({ code }) => {
+  rows.forEach((row) => {
+    (row.codes || []).forEach(({ code }) => {
       if (code) codes.add(code);
     });
   });
   return Array.from(codes).sort();
 };
 
-// Get filtered coding data based on selected filter codes
-export const getFilteredCoding = (parsedCoding, selectedFilterCodes) => {
-  if (!Array.isArray(parsedCoding)) return [];
+// Get filtered rows based on selected filter codes (client-side filter
+// over an already-fetched page; server-side filtering for the full
+// artifact happens via the `code`/`only`/`q` query params on
+// GET /api/coding/{ref}/rows).
+export const getFilteredCoding = (rows, selectedFilterCodes) => {
+  if (!Array.isArray(rows)) return [];
   if (!selectedFilterCodes || selectedFilterCodes.length === 0) {
-    return parsedCoding;
+    return rows;
   }
   const filterSet = new Set(selectedFilterCodes);
-  return parsedCoding.filter((post) =>
-    (post.codeEvidence || []).some((ev) => filterSet.has(ev.code)),
+  return rows.filter((row) =>
+    (row.codes || []).some((entry) => filterSet.has(entry.code)),
   );
-};
-
-// Case-insensitive lookup helper for post contents mapped by id
-export const getPostDataById = (postContents, postId) => {
-  if (!postContents || !postId) return null;
-  const postIdLower = String(postId).toLowerCase();
-  const matchingKey = Object.keys(postContents).find(
-    (key) => key.toLowerCase() === postIdLower,
-  );
-  return matchingKey ? postContents[matchingKey] : null;
-};
-
-// Parse coding data from raw text content
-export const parseCodingData = (content) => {
-  const lines = preprocessCodingLines(content);
-  if (lines.length === 0) return [];
-
-  const parsed = [];
-  let currentPost = null;
-  let pendingCode = "";
-  let pendingNotes = "";
-
-  const flushCurrentPost = () => {
-    if (
-      currentPost &&
-      currentPost.postId &&
-      currentPost.codeEvidence.length > 0
-    ) {
-      parsed.push(currentPost);
-    }
-    currentPost = null;
-    pendingCode = "";
-    pendingNotes = "";
-  };
-
-  for (const line of lines) {
-    const inlinePostCodeEvidenceMatch = line.match(
-      POST_ID_CODE_EVIDENCE_LINE_RE,
-    );
-    if (inlinePostCodeEvidenceMatch) {
-      flushCurrentPost();
-
-      const postId = cleanInlineText(inlinePostCodeEvidenceMatch[1]);
-
-      if (!postId) continue;
-
-      currentPost = {
-        postId,
-        codeEvidence: [],
-      };
-
-      appendCodeEvidenceEntries(
-        currentPost.codeEvidence,
-        inlinePostCodeEvidenceMatch[2],
-        inlinePostCodeEvidenceMatch[3],
-        inlinePostCodeEvidenceMatch[4],
-      );
-
-      pendingCode = "";
-      pendingNotes = "";
-      continue;
-    }
-
-    const postMatch = line.match(POST_ID_LINE_RE);
-    if (postMatch) {
-      flushCurrentPost();
-
-      const postId = cleanInlineText(postMatch[1]);
-      if (!postId) continue;
-
-      currentPost = {
-        postId,
-        codeEvidence: [],
-      };
-      continue;
-    }
-
-    if (!currentPost) continue;
-
-    const codeEvidenceMatch = line.match(CODE_EVIDENCE_LINE_RE);
-    if (codeEvidenceMatch) {
-      appendCodeEvidenceEntries(
-        currentPost.codeEvidence,
-        codeEvidenceMatch[1],
-        codeEvidenceMatch[2],
-        codeEvidenceMatch[3],
-      );
-      pendingCode = "";
-      pendingNotes = "";
-      continue;
-    }
-
-    const codeOnlyMatch = line.match(CODE_LINE_RE);
-    if (codeOnlyMatch) {
-      pendingCode = cleanInlineText(codeOnlyMatch[1]);
-      pendingNotes = "";
-      continue;
-    }
-
-    const notesOnlyMatch = line.match(NOTES_LINE_RE);
-    if (notesOnlyMatch && pendingCode) {
-      pendingNotes = cleanInlineText(notesOnlyMatch[1]);
-      continue;
-    }
-
-    const evidenceOnlyMatch = line.match(EVIDENCE_LINE_RE);
-    if (evidenceOnlyMatch && pendingCode) {
-      appendCodeEvidenceEntries(
-        currentPost.codeEvidence,
-        pendingCode,
-        evidenceOnlyMatch[1],
-        pendingNotes,
-      );
-      pendingCode = "";
-      pendingNotes = "";
-    }
-  }
-
-  flushCurrentPost();
-
-  return parsed;
-};
-
-// Serialize parsed coding rows back into canonical text format
-export const formatCodingData = (parsedCoding) => {
-  if (!Array.isArray(parsedCoding)) return "";
-
-  const outLines = [];
-
-  parsedCoding.forEach((post) => {
-    const postId = cleanInlineText(post?.postId);
-    const codeEvidence = Array.isArray(post?.codeEvidence)
-      ? post.codeEvidence
-      : [];
-
-    const formattedEntries = codeEvidence
-      .map((entry) => {
-        const code = cleanInlineText(entry?.code);
-        const evidence = formatEvidenceBlock(entry?.evidence);
-        const notes = cleanInlineText(entry?.notes);
-        if (!code || !evidence) return null;
-        return { code, evidence, notes };
-      })
-      .filter(Boolean);
-
-    if (!postId || formattedEntries.length === 0) return;
-
-    outLines.push(`POST_ID: ${postId}`);
-    formattedEntries.forEach(({ code, evidence, notes }) => {
-      outLines.push(`CODE: ${code}`);
-      if (notes) {
-        outLines.push(`NOTES: ${notes}`);
-      }
-      outLines.push(`EVIDENCE: ${evidence}`);
-    });
-    outLines.push("");
-  });
-
-  return outLines.join("\n").trim();
 };
