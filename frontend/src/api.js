@@ -38,27 +38,11 @@ try {
   }
 } catch (e) {}
 
-/**
- * Post `FormData` to `path` and normalize the response into
- * `{ ok, status, data, error }`.
- *
- * `error` is a human-readable string when `ok` is false. For FastAPI 422
- * responses `error` flattens the validation `detail` array; for 4xx/5xx with
- * `{error: "..."}` it returns that field directly.
- */
-export async function postForm(path, formData) {
-  let response;
-  try {
-    response = await apiFetch(path, { method: "POST", body: formData });
-  } catch (err) {
-    return {
-      ok: false,
-      status: 0,
-      data: null,
-      error: err?.message || "Network error",
-    };
-  }
-
+// Normalizes a fetch Response into `{ ok, status, data, error }`, shared by
+// `postForm` and `requestJson`. `error` is a human-readable string when
+// `ok` is false: FastAPI 422 responses flatten the validation `detail`
+// array; a 4xx/5xx with `{error: "..."}` returns that field directly.
+async function _normalizeJsonResponse(response) {
   const rawText = await response.text();
   let parsed = null;
   try {
@@ -93,6 +77,52 @@ export async function postForm(path, formData) {
   return { ok: false, status: response.status, data: parsed, error };
 }
 
+/**
+ * Post `FormData` to `path` and normalize the response into
+ * `{ ok, status, data, error }`. See `_normalizeJsonResponse` for the
+ * error-flattening rules.
+ */
+export async function postForm(path, formData) {
+  let response;
+  try {
+    response = await apiFetch(path, { method: "POST", body: formData });
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      data: null,
+      error: err?.message || "Network error",
+    };
+  }
+  return _normalizeJsonResponse(response);
+}
+
+/**
+ * Send a JSON body to `path` (default `POST`) and normalize the response
+ * into `{ ok, status, data, error }` -- the JSON-body counterpart of
+ * `postForm`, for the coding-artifact routes
+ * (``PUT``/``PATCH``/``POST /api/coding/...``) that take a structured
+ * body (e.g. a list of row edits) rather than flat form fields.
+ */
+export async function requestJson(path, { method = "POST", body } = {}) {
+  let response;
+  try {
+    response = await apiFetch(path, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      data: null,
+      error: err?.message || "Network error",
+    };
+  }
+  return _normalizeJsonResponse(response);
+}
+
 // Resolves `ms` milliseconds later, or immediately if `signal` is already
 // aborted or gets aborted while waiting. Never rejects.
 function _sleepOrAbort(ms, signal) {
@@ -123,17 +153,15 @@ function _sleepOrAbort(ms, signal) {
  * converted to the background-job pattern (see backend/app/jobs/) --
  * `summarize-coding` first, more to follow -- so its shape is meant to
  * stay stable across all of them.
+ *
+ * `onProgress`, if given, is called on every poll with the job's
+ * `progress` field (`{current, total, label}` or `null` if the handler
+ * hasn't reported any yet) -- callers can feed this straight into a
+ * progress-bar component.
  */
-export async function postFormAndPoll(path, formData, {
-  intervalMs = 2000, timeoutMs = 600000, onStatusChange, signal,
+async function _pollJob(jobId, {
+  intervalMs = 2000, timeoutMs = 600000, onStatusChange, onProgress, signal,
 } = {}) {
-  const kickoff = await postForm(path, formData);
-  if (!kickoff.ok) {
-    // Kickoff itself failed (e.g. a 400 validation error) -- nothing to poll.
-    return kickoff;
-  }
-
-  const jobId = kickoff.data && kickoff.data.job_id;
   const deadline = Date.now() + timeoutMs;
 
   for (;;) {
@@ -168,6 +196,7 @@ export async function postFormAndPoll(path, formData, {
 
     const status = job?.status;
     onStatusChange?.(status);
+    onProgress?.(job?.progress || null);
 
     if (status === "succeeded") {
       return { ok: true, status: 200, data: job.result, error: null };
@@ -191,4 +220,27 @@ export async function postFormAndPoll(path, formData, {
       return { ok: false, status: 0, data: null, error: "Aborted" };
     }
   }
+}
+
+export async function postFormAndPoll(path, formData, opts = {}) {
+  const kickoff = await postForm(path, formData);
+  if (!kickoff.ok) {
+    // Kickoff itself failed (e.g. a 400 validation error) -- nothing to poll.
+    return kickoff;
+  }
+  return _pollJob(kickoff.data && kickoff.data.job_id, opts);
+}
+
+/**
+ * JSON-body counterpart of `postFormAndPoll`, for job-kickoff routes that
+ * take a structured JSON body (e.g. ``POST /api/coding/{ref}/recode``'s
+ * list of selected row ids) rather than flat form fields. Same
+ * `{ok, status, data, error}` result shape and polling options.
+ */
+export async function postJsonAndPoll(path, body, opts = {}) {
+  const kickoff = await requestJson(path, { method: "POST", body });
+  if (!kickoff.ok) {
+    return kickoff;
+  }
+  return _pollJob(kickoff.data && kickoff.data.job_id, opts);
 }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { postFormAndPoll } from "../../api";
 import FormShell from "../forms/FormShell";
@@ -7,6 +7,8 @@ import SliderField from "../forms/SliderField";
 import PromptTextareaWithActions from "../forms/PromptTextareaWithActions";
 import AiModelFormGroup from "../models/AiModelFormGroup";
 import ArtifactCreatedMessage from "../feedback/ArtifactCreatedMessage";
+import ProgressBar from "../feedback/ProgressBar";
+import ContentScopeFormGroup from "./ContentScopeFormGroup";
 import { useToolPanelData } from "./useToolPanelData";
 import { useInitialProjectId } from "./useInitialProjectId";
 import {
@@ -27,6 +29,8 @@ export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
   const [selectedProject, setSelectedProject] = useState(initialProjectId);
   const [loading, setLoading] = useState(false);
   const [createdFile, setCreatedFile] = useState(null);
+  const [progress, setProgress] = useState(null);
+  const [partialWarning, setPartialWarning] = useState("");
   const [error, setError] = useState(null);
   const [description, setDescription] = useState("");
   const [saveMessage, setSaveMessage] = useState("");
@@ -34,6 +38,7 @@ export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
   const [model, setModel] = useState("");
   const [samplePercentage, setSamplePercentage] = useState(100);
   const [codebookName, setCodebookName] = useState("");
+  const [contentScope, setContentScope] = useState("both");
   const {
     databases,
     filteredDatabases,
@@ -80,10 +85,40 @@ export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
     }, 0);
   };
 
+  const getTableRowCount = (tableName) => {
+    const selected = getAvailableDatabases().find(
+      (item) => (item.value || item) === database,
+    );
+    const tables = selected?.meta?.tables || [];
+    const table = tables.find((t) => t?.table_name === tableName);
+    return Number(table?.row_count) || 0;
+  };
+
   const handleDatabaseTypeChange = (type) => {
     setDatabaseType(type);
     setDatabase("");
+    setContentScope("both");
   };
+
+  const handleDatabaseChange = (value) => {
+    setDatabase(value);
+    setContentScope("both");
+  };
+
+  const postsAvailable = getTableRowCount("submissions") > 0;
+  const commentsAvailable = getTableRowCount("comments") > 0;
+
+  useEffect(() => {
+    // Auto-select the only content type that actually has rows, so a
+    // posts-only (or comments-only) database doesn't default to a "both"
+    // scope that silently samples nothing from the missing table.
+    if (!postsAvailable && commentsAvailable && contentScope !== "comments") {
+      setContentScope("comments");
+    } else if (postsAvailable && !commentsAvailable && contentScope !== "posts") {
+      setContentScope("posts");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [postsAvailable, commentsAvailable]);
 
   const handleViewCodebook = () => {
     navigate("/codebook-view");
@@ -100,6 +135,8 @@ export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
       setLoading(true);
       setError(null);
       setCreatedFile(null);
+      setProgress(null);
+      setPartialWarning("");
 
       let requestData;
       try {
@@ -112,6 +149,7 @@ export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
           description,
           projectId: selectedProject || null,
           samplePercentage,
+          contentScope,
         });
       } catch (err) {
         if (err instanceof MissingFieldsError) {
@@ -124,6 +162,7 @@ export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
       const { ok, data, error: postError } = await postFormAndPoll(
         "/api/generate-codebook/",
         requestData,
+        { onProgress: setProgress },
       );
 
       if (!ok) {
@@ -131,6 +170,14 @@ export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
         return;
       }
       setCreatedFile(data?.file || null);
+      if (data?.partial) {
+        const reason = data.partial_error
+          ? `Stopped early after an error: ${data.partial_error}`
+          : "This is likely due to a free model's batch limit -- use a paid model or reduce the sample size for complete coverage.";
+        setPartialWarning(
+          `Warning: only ${data.batches_processed}/${data.batches_total} batches completed. ${reason}`,
+        );
+      }
     } catch (err) {
       if (err.name === "AbortError") {
         setError("Request timed out. Please try again.");
@@ -186,7 +233,7 @@ export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
           databaseType={databaseType}
           onDatabaseTypeChange={handleDatabaseTypeChange}
           database={database}
-          onDatabaseChange={setDatabase}
+          onDatabaseChange={handleDatabaseChange}
           databaseOptions={databaseOptions}
           databasePlaceholder="Select a database"
           selectedProject={selectedProject}
@@ -245,6 +292,15 @@ export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
           selectPlaceholder="dash"
         />
 
+        <ContentScopeFormGroup
+          contentScope={contentScope}
+          onContentScopeChange={setContentScope}
+          postsAvailable={postsAvailable}
+          commentsAvailable={commentsAvailable}
+          disabled={loading || !database}
+          radioName="generate-content-scope"
+        />
+
         <SliderField
           id="samplePercentage"
           label="Sample Size"
@@ -263,6 +319,16 @@ export default function GenerateCodebookPanel({ prompt, onPromptChange }) {
           }
         />
       </FormShell>
+
+      {loading && progress && (
+        <ProgressBar current={progress.current} total={progress.total} label={progress.label} />
+      )}
+
+      {partialWarning && (
+        <div className="mt-4 border border-paper bg-white/5 px-4 py-3 text-center text-sm text-paper">
+          {partialWarning}
+        </div>
+      )}
 
       {createdFile && (
         <div className="mt-4">

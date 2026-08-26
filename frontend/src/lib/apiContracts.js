@@ -85,6 +85,7 @@ export function buildFilterDataForm({
   minWords,
   samplePercentage,
   filterTags,
+  contentScope,
 }) {
   assertRequired({ apiKey, database, name, model }, "filter-data");
   const normalizedDatabase = assertProjSchema(
@@ -106,6 +107,7 @@ export function buildFilterDataForm({
   if (!isBlank(prompt)) fd.append("prompt", prompt);
   if (!isBlank(description)) fd.append("description", description);
   if (!isBlank(filterTags)) fd.append("filter_tags", filterTags.trim());
+  if (!isBlank(contentScope)) fd.append("content_scope", contentScope);
 
   const mw = Number(minWords);
   if (Number.isFinite(mw) && mw > 0) fd.append("min_words", String(mw));
@@ -126,6 +128,7 @@ export function buildGenerateCodebookForm({
   description,
   projectId,
   samplePercentage,
+  contentScope,
 }) {
   assertRequired({ apiKey, database, name }, "generate-codebook");
   const normalizedDatabase = assertProjSchema(
@@ -149,6 +152,7 @@ export function buildGenerateCodebookForm({
   if (projectId !== undefined && projectId !== null && projectId !== "") {
     fd.append("project_id", String(projectId));
   }
+  if (!isBlank(contentScope)) fd.append("content_scope", contentScope);
 
   return fd;
 }
@@ -167,6 +171,7 @@ export function buildApplyCodebookForm({
   description,
   projectId,
   samplePercentage,
+  contentScope,
 }) {
   assertRequired(
     { apiKey, database, codebook, reportName },
@@ -201,6 +206,25 @@ export function buildApplyCodebookForm({
   if (projectId !== undefined && projectId !== null && projectId !== "") {
     fd.append("project_id", String(projectId));
   }
+  if (!isBlank(contentScope)) fd.append("content_scope", contentScope);
 
   return fd;
+}
+
+/**
+ * Build the JSON body for POST /api/coding/{ref}/recode. Mirrors
+ * `RecodeItemsRequest` -- unlike the flows above, this one is sent as a
+ * JSON body (via `requestJson`/`postJsonAndPoll`, not `postForm`), since
+ * `itemIds` is a list rather than a flat form field.
+ */
+export function buildRecodeItemsPayload({ apiKey, itemIds, model, methodology }) {
+  assertRequired({ apiKey }, "recode-items");
+  if (!Array.isArray(itemIds) || itemIds.length === 0) {
+    throw new MissingFieldsError(["itemIds"], "recode-items");
+  }
+
+  const payload = { api_key: apiKey, item_ids: itemIds };
+  if (!isBlank(model)) payload.model = model;
+  if (!isBlank(methodology)) payload.methodology = methodology;
+  return payload;
 }

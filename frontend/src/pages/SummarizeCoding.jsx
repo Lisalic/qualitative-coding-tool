@@ -1,5 +1,6 @@
 import React from "react";
 import ErrorDisplay from "../components/feedback/ErrorDisplay";
+import ProgressBar from "../components/feedback/ProgressBar";
 import SummarizeRequestSection from "../components/summarize/SummarizeRequestSection";
 import SummaryOutputSection from "../components/summarize/SummaryOutputSection";
 import PageHeading from "../components/primitives/PageHeading";
@@ -13,6 +14,8 @@ export default function SummarizeCoding() {
     additionalPrompt,
     setAdditionalPrompt,
     loading,
+    progress,
+    partialWarning,
     summary,
     createdFile,
     error,
@@ -48,6 +51,14 @@ export default function SummarizeCoding() {
       <div className="mt-4">
         <ErrorDisplay message={error} variant="message" />
       </div>
+      {loading && progress && (
+        <ProgressBar current={progress.current} total={progress.total} label={progress.label} />
+      )}
+      {partialWarning && (
+        <div className="mt-4 border border-paper bg-white/5 px-4 py-3 text-center text-sm text-paper">
+          {partialWarning}
+        </div>
+      )}
       <SummaryOutputSection summary={summary} createdFile={createdFile} />
     </div>
   );

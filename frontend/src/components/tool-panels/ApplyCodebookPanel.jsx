@@ -7,6 +7,8 @@ import SliderField from "../forms/SliderField";
 import PromptTextareaWithActions from "../forms/PromptTextareaWithActions";
 import AiModelFormGroup from "../models/AiModelFormGroup";
 import ArtifactCreatedMessage from "../feedback/ArtifactCreatedMessage";
+import ProgressBar from "../feedback/ProgressBar";
+import ContentScopeFormGroup from "./ContentScopeFormGroup";
 import { useToolPanelData } from "./useToolPanelData";
 import { useInitialProjectId } from "./useInitialProjectId";
 import {
@@ -28,6 +30,9 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
   const [codebook, setCodebook] = useState("");
   const [loading, setLoading] = useState(false);
   const [createdFile, setCreatedFile] = useState(null);
+  const [progress, setProgress] = useState(null);
+  const [partialWarning, setPartialWarning] = useState("");
+  const [codingSummary, setCodingSummary] = useState("");
   const [error, setError] = useState(null);
   const [description, setDescription] = useState("");
   const [selectedProject, setSelectedProject] = useState(initialProjectId);
@@ -35,6 +40,7 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
   const [saveMessageType, setSaveMessageType] = useState("success");
   const [model, setModel] = useState("");
   const [samplePercentage, setSamplePercentage] = useState(100);
+  const [contentScope, setContentScope] = useState("both");
   const {
     databases,
     filteredDatabases,
@@ -69,6 +75,9 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
       setLoading(true);
       setError(null);
       setCreatedFile(null);
+      setProgress(null);
+      setPartialWarning("");
+      setCodingSummary("");
 
       let requestData;
       try {
@@ -82,6 +91,7 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
           description,
           projectId: selectedProject || null,
           samplePercentage,
+          contentScope,
         });
       } catch (err) {
         if (err instanceof MissingFieldsError) {
@@ -94,6 +104,7 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
       const { ok, data, error: postError } = await postFormAndPoll(
         "/api/apply-codebook/",
         requestData,
+        { onProgress: setProgress },
       );
 
       if (!ok) {
@@ -101,6 +112,24 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
         return;
       }
       setCreatedFile(data?.file || null);
+      if (data?.partial) {
+        const reason = data.partial_error
+          ? `Stopped early after an error: ${data.partial_error}`
+          : "This is likely due to a free model's batch limit -- use a paid model or reduce the sample size for complete coverage.";
+        setPartialWarning(
+          `Warning: only ${data.batches_processed}/${data.batches_total} batches were coded. ${reason}`,
+        );
+      }
+      const rejectedTotal =
+        (data?.rejected_unknown_item || 0) +
+        (data?.rejected_unknown_code || 0) +
+        (data?.rejected_quote_not_found || 0);
+      if (rejectedTotal > 0) {
+        setCodingSummary(
+          `${data.accepted || 0} coding${data.accepted === 1 ? "" : "s"} saved. ` +
+            `${rejectedTotal} rejected as unverifiable (couldn't be matched back to the source text) and were not saved.`,
+        );
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -154,10 +183,41 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
     }, 0);
   };
 
+  const getTableRowCount = (tableName) => {
+    const selected = getAvailableDatabases().find((item) => {
+      const value = typeof item === "string" ? item : item.name;
+      return value === database;
+    });
+    const tables = selected?.metadata?.tables || [];
+    const table = tables.find((t) => t?.table_name === tableName);
+    return Number(table?.row_count) || 0;
+  };
+
   const handleDatabaseTypeChange = (type) => {
     setDatabaseType(type);
     setDatabase("");
+    setContentScope("both");
   };
+
+  const handleDatabaseChange = (value) => {
+    setDatabase(value);
+    setContentScope("both");
+  };
+
+  const postsAvailable = getTableRowCount("submissions") > 0;
+  const commentsAvailable = getTableRowCount("comments") > 0;
+
+  useEffect(() => {
+    // Auto-select the only content type that actually has rows, so a
+    // posts-only (or comments-only) database doesn't default to a "both"
+    // scope that silently samples nothing from the missing table.
+    if (!postsAvailable && commentsAvailable && contentScope !== "comments") {
+      setContentScope("comments");
+    } else if (postsAvailable && !commentsAvailable && contentScope !== "posts") {
+      setContentScope("posts");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [postsAvailable, commentsAvailable]);
 
   const handlePromptSaveFeedback = ({ type, message }) => {
     setSaveMessage(message);
@@ -205,7 +265,7 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
           databaseType={databaseType}
           onDatabaseTypeChange={handleDatabaseTypeChange}
           database={database}
-          onDatabaseChange={setDatabase}
+          onDatabaseChange={handleDatabaseChange}
           databaseOptions={databaseOptions}
           databasePlaceholder="Select a database"
           selectedProject={selectedProject}
@@ -289,6 +349,15 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
           selectPlaceholder="dash"
         />
 
+        <ContentScopeFormGroup
+          contentScope={contentScope}
+          onContentScopeChange={setContentScope}
+          postsAvailable={postsAvailable}
+          commentsAvailable={commentsAvailable}
+          disabled={loading || !database}
+          radioName="apply-content-scope"
+        />
+
         <SliderField
           id="samplePercentage"
           label="Sample Size"
@@ -307,6 +376,22 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
           }
         />
       </FormShell>
+
+      {loading && progress && (
+        <ProgressBar current={progress.current} total={progress.total} label={progress.label} />
+      )}
+
+      {partialWarning && (
+        <div className="mt-4 border border-paper bg-white/5 px-4 py-3 text-center text-sm text-paper">
+          {partialWarning}
+        </div>
+      )}
+
+      {codingSummary && (
+        <div className="mt-4 border border-paper bg-white/5 px-4 py-3 text-center text-sm text-paper">
+          {codingSummary}
+        </div>
+      )}
 
       {createdFile && (
         <div className="mt-4">

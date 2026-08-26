@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { BASE_URL, apiFetch, postForm, postFormAndPoll } from "../api";
+import { BASE_URL, apiFetch, postForm, postFormAndPoll, requestJson, postJsonAndPoll } from "../api";
 
 function mockResponse({ ok, status, body }) {
   const rawText = typeof body === "string" ? body : body === undefined ? "" : JSON.stringify(body);
@@ -253,6 +253,77 @@ describe("postForm", () => {
   });
 });
 
+describe("requestJson", () => {
+  it("sends a JSON body with a Content-Type header, defaulting to POST", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse({ ok: true, status: 200, body: { a: 1 } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await requestJson("/api/coding/proj_1/rows", { body: { rows: [{ item_id: "t3_1" }] } });
+
+    expect(result).toEqual({ ok: true, status: 200, data: { a: 1 }, error: null });
+    const [, opts] = fetchMock.mock.calls[0];
+    expect(opts.method).toBe("POST");
+    expect(opts.headers["Content-Type"]).toBe("application/json");
+    expect(opts.body).toBe(JSON.stringify({ rows: [{ item_id: "t3_1" }] }));
+  });
+
+  it("honors a caller-supplied method (e.g. PUT/PATCH)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse({ ok: true, status: 200, body: {} }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await requestJson("/api/coding/proj_1/codebook", { method: "PUT", body: { content: "x" } });
+
+    const [, opts] = fetchMock.mock.calls[0];
+    expect(opts.method).toBe("PUT");
+  });
+
+  it("network throw -> status 0, error is the message", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("boom")));
+    const result = await requestJson("/api/x", { body: {} });
+    expect(result).toEqual({ ok: false, status: 0, data: null, error: "boom" });
+  });
+
+  it("error response flattens FastAPI 422 detail the same way postForm does", async () => {
+    const body = { detail: [{ loc: ["body", "item_ids"], msg: "field required" }] };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockResponse({ ok: false, status: 422, body })));
+    const result = await requestJson("/api/x", { body: {} });
+    expect(result.error).toBe("item_ids: field required");
+  });
+});
+
+describe("postJsonAndPoll", () => {
+  it("kicks off with a JSON body and polls through to success", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockResponse({ ok: true, status: 202, body: { job_id: 9, status: "pending" } }))
+      .mockResolvedValueOnce(
+        mockResponse({ ok: true, status: 200, body: { status: "succeeded", result: { recoded_item_count: 3 } } }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await postJsonAndPoll(
+      "/api/coding/proj_1/recode",
+      { item_ids: ["t3_1"], api_key: "k" },
+      { intervalMs: 1 },
+    );
+
+    expect(result).toEqual({ ok: true, status: 200, data: { recoded_item_count: 3 }, error: null });
+    const [, opts] = fetchMock.mock.calls[0];
+    expect(opts.headers["Content-Type"]).toBe("application/json");
+    expect(JSON.parse(opts.body)).toEqual({ item_ids: ["t3_1"], api_key: "k" });
+  });
+
+  it("a failing kickoff is returned as-is and never polls", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse({ ok: false, status: 400, body: { error: "bad" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await postJsonAndPoll("/api/x", {}, { intervalMs: 1 });
+
+    expect(result).toEqual({ ok: false, status: 400, data: { error: "bad" }, error: "bad" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("postFormAndPoll", () => {
   it("kicks off, polls through a pending status, and resolves on success", async () => {
     const onStatusChange = vi.fn();
@@ -271,6 +342,27 @@ describe("postFormAndPoll", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock.mock.calls[1][0]).toBe(`${BASE_URL}/api/jobs/42`);
     expect(onStatusChange.mock.calls.map((c) => c[0])).toEqual(["running", "succeeded"]);
+  });
+
+  it("reports progress on every poll via onProgress", async () => {
+    const onProgress = vi.fn();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockResponse({ ok: true, status: 202, body: { job_id: 42, status: "pending" } }))
+      .mockResolvedValueOnce(
+        mockResponse({ ok: true, status: 200, body: { status: "running", progress: { current: 2, total: 5, label: "batches" } } }),
+      )
+      .mockResolvedValueOnce(
+        mockResponse({ ok: true, status: 200, body: { status: "succeeded", result: {} } }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await postFormAndPoll("/api/x", new FormData(), { intervalMs: 1, onProgress });
+
+    expect(onProgress.mock.calls).toEqual([
+      [{ current: 2, total: 5, label: "batches" }],
+      [null],
+    ]);
   });
 
   it("resolves an error result when the job reaches a failed status", async () => {

@@ -8,6 +8,8 @@ import AiLabel from "../forms/AiLabel";
 import SliderField from "../forms/SliderField";
 import AiModelFormGroup from "../models/AiModelFormGroup";
 import ArtifactCreatedMessage from "../feedback/ArtifactCreatedMessage";
+import ProgressBar from "../feedback/ProgressBar";
+import ContentScopeFormGroup from "./ContentScopeFormGroup";
 import { useToolPanelData } from "./useToolPanelData";
 import { useInitialProjectId } from "./useInitialProjectId";
 import {
@@ -28,6 +30,9 @@ export default function FilterDataPanel({
   const initialProjectId = useInitialProjectId();
   const [message, setMessage] = useState("");
   const [createdFile, setCreatedFile] = useState(null);
+  const [partialWarning, setPartialWarning] = useState("");
+  const [orphanedComments, setOrphanedComments] = useState(0);
+  const [progress, setProgress] = useState(null);
   const [saveMessage, setSaveMessage] = useState("");
   const [saveMessageType, setSaveMessageType] = useState("success");
   const [loading, setLoading] = useState(false);
@@ -40,6 +45,7 @@ export default function FilterDataPanel({
   const [minWords, setMinWords] = useState(0);
   const [samplePercentage, setSamplePercentage] = useState(100);
   const [filterTags, setFilterTags] = useState("");
+  const [contentScope, setContentScope] = useState("both");
   const [wordCountRanges, setWordCountRanges] = useState({
     submissions: [],
     comments: [],
@@ -101,7 +107,23 @@ export default function FilterDataPanel({
 
   useEffect(() => {
     fetchWordCountRanges(database);
+    setContentScope("both");
   }, [database, fetchWordCountRanges]);
+
+  const postsAvailable = wordCountRanges.submissions.some((r) => r.count > 0);
+  const commentsAvailable = wordCountRanges.comments.some((r) => r.count > 0);
+
+  useEffect(() => {
+    if (rangesLoading) return;
+    // Auto-select the only content type that actually has rows, so a
+    // posts-only (or comments-only) database doesn't default to a "both"
+    // scope that silently samples nothing from the missing table.
+    if (!postsAvailable && commentsAvailable && contentScope !== "comments") {
+      setContentScope("comments");
+    } else if (postsAvailable && !commentsAvailable && contentScope !== "posts") {
+      setContentScope("posts");
+    }
+  }, [postsAvailable, commentsAvailable, rangesLoading, contentScope]);
 
   const getAvailableDatabases = () => {
     if (databaseType === "filtered") {
@@ -119,6 +141,9 @@ export default function FilterDataPanel({
     setLoading(true);
     setMessage("");
     setCreatedFile(null);
+    setPartialWarning("");
+    setOrphanedComments(0);
+    setProgress(null);
 
     try {
       const savedApiKey = localStorage.getItem("apiKey");
@@ -142,6 +167,7 @@ export default function FilterDataPanel({
           minWords,
           samplePercentage,
           filterTags,
+          contentScope,
         });
       } catch (err) {
         if (err instanceof MissingFieldsError) {
@@ -154,6 +180,7 @@ export default function FilterDataPanel({
       const { ok, data, error } = await postFormAndPoll(
         "/api/filter-data/",
         requestData,
+        { onProgress: setProgress },
       );
 
       if (!ok) {
@@ -162,6 +189,17 @@ export default function FilterDataPanel({
       }
 
       setCreatedFile(data?.file || null);
+      setOrphanedComments(data?.orphaned_comments || 0);
+      if (data?.partial) {
+        const describe = (counts) =>
+          Object.entries(counts || {})
+            .map(([kind, total]) => `${data.batches_processed?.[kind] ?? "?"}/${total} ${kind} batches`)
+            .join(", ");
+        const reason = data.partial_error
+          ? `Stopped early after an error: ${data.partial_error}`
+          : "This is likely due to a free model's batch limit -- use a paid model or reduce the sample size for complete coverage.";
+        setPartialWarning(`Warning: only ${describe(data.batches_total)} were processed. ${reason}`);
+      }
       onFilterPromptChange("");
       setFilterTags("");
     } catch (err) {
@@ -293,6 +331,15 @@ export default function FilterDataPanel({
           selectPlaceholder="filter"
         />
 
+        <ContentScopeFormGroup
+          contentScope={contentScope}
+          onContentScopeChange={setContentScope}
+          postsAvailable={postsAvailable}
+          commentsAvailable={commentsAvailable}
+          disabled={loading || !database}
+          radioName="filter-content-scope"
+        />
+
         <SliderField
           id="minWords"
           label="Minimum Words"
@@ -328,6 +375,10 @@ export default function FilterDataPanel({
         />
       </FormShell>
 
+      {loading && progress && (
+        <ProgressBar current={progress.current} total={progress.total} label={progress.label} />
+      )}
+
       {createdFile && (
         <div className="mt-4">
           <ArtifactCreatedMessage
@@ -335,6 +386,20 @@ export default function FilterDataPanel({
             viewPath="/filtered-data"
             viewState={{ selectedDatabase: createdFile.schema_name }}
           />
+        </div>
+      )}
+
+      {partialWarning && (
+        <div className="mt-4 border border-paper bg-white/5 px-4 py-3 text-center text-sm text-paper">
+          {partialWarning}
+        </div>
+      )}
+
+      {orphanedComments > 0 && (
+        <div className="mt-4 border border-paper bg-white/5 px-4 py-3 text-center text-sm text-paper">
+          {orphanedComments} comment{orphanedComments === 1 ? "" : "s"} kept without{" "}
+          {orphanedComments === 1 ? "its" : "their"} parent post -- posts and comments were
+          filtered independently.
         </div>
       )}
 

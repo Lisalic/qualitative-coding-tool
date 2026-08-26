@@ -4,6 +4,7 @@ import {
   buildFilterDataForm,
   buildGenerateCodebookForm,
   buildApplyCodebookForm,
+  buildRecodeItemsPayload,
 } from "../apiContracts";
 
 function fdEntries(fd) {
@@ -124,6 +125,13 @@ describe("buildFilterDataForm", () => {
   it("throws a TypeError for a non-string name (isBlank passes, .trim() doesn't exist)", () => {
     expect(() => buildFilterDataForm({ ...base, name: 5 })).toThrow(TypeError);
   });
+
+  it("omits content_scope when not given, includes it verbatim when given", () => {
+    expect(fdKeys(buildFilterDataForm(base))).not.toContain("content_scope");
+    expect(buildFilterDataForm({ ...base, contentScope: "posts" }).get("content_scope")).toBe(
+      "posts",
+    );
+  });
 });
 
 describe("buildGenerateCodebookForm", () => {
@@ -166,6 +174,13 @@ describe("buildGenerateCodebookForm", () => {
     expect(
       buildGenerateCodebookForm({ ...base, database: "proj_abc.db" }).get("database"),
     ).toBe("proj_abc");
+  });
+
+  it("omits content_scope when not given, includes it verbatim when given", () => {
+    expect(fdKeys(buildGenerateCodebookForm(base))).not.toContain("content_scope");
+    expect(
+      buildGenerateCodebookForm({ ...base, contentScope: "comments" }).get("content_scope"),
+    ).toBe("comments");
   });
 });
 
@@ -243,5 +258,49 @@ describe("buildApplyCodebookForm", () => {
     expect(fdKeys(fd)).not.toEqual(
       expect.arrayContaining(["methodology", "model", "description"]),
     );
+  });
+
+  it("omits content_scope when not given, includes it verbatim when given", () => {
+    expect(fdKeys(buildApplyCodebookForm(base))).not.toContain("content_scope");
+    expect(buildApplyCodebookForm({ ...base, contentScope: "both" }).get("content_scope")).toBe(
+      "both",
+    );
+  });
+});
+
+describe("buildRecodeItemsPayload", () => {
+  const base = { apiKey: "k", itemIds: ["t3_1", "t1_2"] };
+
+  it("builds a plain object body with api_key and item_ids", () => {
+    expect(buildRecodeItemsPayload(base)).toEqual({
+      api_key: "k",
+      item_ids: ["t3_1", "t1_2"],
+    });
+  });
+
+  it("includes model/methodology only when non-blank", () => {
+    const payload = buildRecodeItemsPayload({
+      ...base,
+      model: "openrouter/model",
+      methodology: "  ",
+    });
+    expect(payload.model).toBe("openrouter/model");
+    expect(payload).not.toHaveProperty("methodology");
+  });
+
+  it("throws MissingFieldsError when apiKey is blank", () => {
+    try {
+      buildRecodeItemsPayload({ ...base, apiKey: "" });
+      expect.fail("did not throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(MissingFieldsError);
+      expect(err.missing).toEqual(["apiKey"]);
+      expect(err.flow).toBe("recode-items");
+    }
+  });
+
+  it("throws MissingFieldsError when itemIds is missing or empty", () => {
+    expect(() => buildRecodeItemsPayload({ ...base, itemIds: [] })).toThrow(MissingFieldsError);
+    expect(() => buildRecodeItemsPayload({ apiKey: "k" })).toThrow(MissingFieldsError);
   });
 });
