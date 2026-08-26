@@ -56,3 +56,17 @@ def is_paid_model(slug: str) -> bool:
     if not metadata:
         return False
     return bool(metadata.get("paid") is True)
+
+
+def context_length_for(slug: str, *, default: int = 32_000) -> int:
+    """Real context length (tokens) for ``slug`` from the model catalog,
+    falling back to ``default`` when the slug is unknown or the catalog
+    entry has no usable ``context_length``.
+    """
+    metadata = _MODEL_META_BY_SLUG.get((slug or "").strip())
+    if not metadata:
+        return default
+    length = metadata.get("context_length")
+    if not isinstance(length, int) or length <= 0:
+        return default
+    return length

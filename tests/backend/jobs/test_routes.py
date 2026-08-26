@@ -68,11 +68,13 @@ class TestGetJobStatus:
         assert body["result"] == {"echo": {"a": 1}}
         assert body["error"] is None
         assert body["error_code"] is None
+        assert body["progress"] is None
         assert set(body.keys()) == {
             "id",
             "job_type",
             "status",
             "result",
+            "progress",
             "error",
             "error_code",
             "created_at",

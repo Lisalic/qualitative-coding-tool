@@ -9,7 +9,7 @@ failures) and the ``ast.literal_eval``-based array parsing
 (``wrap_in_python_array``) are unaffected by that plumbing swap.
 """
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -36,9 +36,15 @@ class TestGetClient:
 
         assert result == "raw response"
         kwargs = mock.call_args.kwargs
-        assert kwargs["timeout"] == 300.0
-        assert kwargs["use_middle_out"] is True
-        assert kwargs["max_retries"] == 3
+        # timeout/max_retries are now consistent across all 4 scripts (see
+        # openrouter_client.chat_completion's docstring): a 30s cap and 2
+        # total attempts bound one batch's worst case to ~60s instead of
+        # the old 300s x 3 = ~15 minutes.
+        assert kwargs["timeout"] == 30.0
+        # middle-out is off now: the script no longer requests it, so
+        # overflow surfaces as a real error instead of a silent truncation.
+        assert kwargs.get("use_middle_out", False) is False
+        assert kwargs["max_retries"] == 2
 
     async def test_empty_completion_error_maps_to_friendly_502(self, monkeypatch) -> None:
         monkeypatch.setattr(
@@ -72,13 +78,14 @@ class TestFilterPostsWithAi:
             AsyncMock(return_value="['t3_abc', 't3_xyz']"),
         )
 
-        ids, system_prompt, user_prompt = await filter_posts_with_ai(
+        ids, system_prompt, user_prompt, coverage = await filter_posts_with_ai(
             "keep the good ones", "[t3_abc] hello\n---\n[t3_xyz] world", "sk-key"
         )
 
         assert ids == ["t3_abc", "t3_xyz"]
         assert "content analyst" in system_prompt
         assert "keep the good ones" in user_prompt
+        assert coverage == {"batches_processed": 1, "batches_total": 1, "error": None}
 
     async def test_first_batch_failure_raises_immediately(self, monkeypatch) -> None:
         monkeypatch.setattr(
@@ -88,6 +95,94 @@ class TestFilterPostsWithAi:
 
         with pytest.raises(AIFilterError):
             await filter_posts_with_ai("criteria", "[t3_abc] hello", "sk-key")
+
+    async def test_free_model_batch_cap_reports_partial_coverage(self, monkeypatch) -> None:
+        # Force many small batches by capping the per-batch char budget, so
+        # a free model hits MAX_BATCHES_FOR_FREE and the drop must be
+        # visible in `coverage` instead of silently vanishing.
+        monkeypatch.setattr(
+            "backend.app.external.context_window.max_prompt_chars", lambda model, **kwargs: 40
+        )
+        monkeypatch.setattr(
+            "backend.scripts.filter_db.chat_completion",
+            AsyncMock(return_value="[]"),
+        )
+
+        content = "\n---\n".join([f"[t3_{i}] " + ("x" * 30) for i in range(10)])
+        ids, _, _, coverage = await filter_posts_with_ai("criteria", content, "sk-key", model="")
+
+        assert coverage["batches_total"] > 3
+        assert coverage["batches_processed"] == 3
+
+    async def test_paid_model_processes_all_batches(self, monkeypatch) -> None:
+        monkeypatch.setattr(
+            "backend.app.external.context_window.max_prompt_chars", lambda model, **kwargs: 40
+        )
+        monkeypatch.setattr("backend.scripts.filter_db.is_paid_model", lambda slug: True)
+        monkeypatch.setattr(
+            "backend.scripts.filter_db.chat_completion",
+            AsyncMock(return_value="[]"),
+        )
+
+        content = "\n---\n".join([f"[t3_{i}] " + ("x" * 30) for i in range(10)])
+        ids, _, _, coverage = await filter_posts_with_ai("criteria", content, "sk-key", model="paid/model")
+
+        assert coverage["batches_processed"] == coverage["batches_total"]
+
+    async def test_reports_progress_once_per_batch(self, monkeypatch) -> None:
+        monkeypatch.setattr(
+            "backend.app.external.context_window.max_prompt_chars", lambda model, **kwargs: 40
+        )
+        monkeypatch.setattr("backend.scripts.filter_db.is_paid_model", lambda slug: True)
+        monkeypatch.setattr(
+            "backend.scripts.filter_db.chat_completion",
+            AsyncMock(return_value="[]"),
+        )
+        progress = MagicMock()
+        progress.advance = AsyncMock()
+        progress.add_total = AsyncMock()
+
+        content = "\n---\n".join([f"[t3_{i}] " + ("x" * 30) for i in range(5)])
+        _, _, _, coverage = await filter_posts_with_ai("criteria", content, "sk-key", progress=progress)
+
+        progress.add_total.assert_called_once_with(coverage["batches_total"])
+        assert progress.advance.await_count == coverage["batches_total"]
+
+    async def test_no_progress_arg_does_not_raise(self, monkeypatch) -> None:
+        monkeypatch.setattr(
+            "backend.scripts.filter_db.chat_completion",
+            AsyncMock(return_value="['t3_abc']"),
+        )
+        await filter_posts_with_ai("criteria", "[t3_abc] hello", "sk-key")
+
+    async def test_mid_run_failure_returns_ids_from_earlier_batches_instead_of_raising(
+        self, monkeypatch
+    ) -> None:
+        # Regression coverage: a later batch failing (e.g. the account ran
+        # out of credits mid-run) must not discard IDs already extracted
+        # from earlier, successful batches.
+        monkeypatch.setattr(
+            "backend.app.external.context_window.max_prompt_chars", lambda model, **kwargs: 40
+        )
+        monkeypatch.setattr("backend.scripts.filter_db.is_paid_model", lambda slug: True)
+        monkeypatch.setattr(
+            "backend.scripts.filter_db.chat_completion",
+            AsyncMock(
+                side_effect=[
+                    "['t3_0']",
+                    ExternalServiceError("Insufficient credits", code=402),
+                    "['t3_2']",
+                ]
+            ),
+        )
+
+        content = "\n---\n".join([f"[t3_{i}] " + ("x" * 30) for i in range(3)])
+        ids, _, _, coverage = await filter_posts_with_ai("criteria", content, "sk-key", model="paid/model")
+
+        assert ids == ["t3_0"]
+        assert coverage["batches_processed"] == 1
+        assert coverage["batches_total"] == 3
+        assert "Insufficient credits" in coverage["error"]
 
 
 class TestWrapInPythonArray:

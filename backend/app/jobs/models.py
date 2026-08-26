@@ -22,6 +22,7 @@ class Job(Base):
     status = Column(String, nullable=False, default="pending")
     payload = Column(JSON, nullable=False, default=dict)
     result = Column(JSON, nullable=True)
+    progress = Column(JSON, nullable=True)
     error = Column(Text, nullable=True)
     error_code = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

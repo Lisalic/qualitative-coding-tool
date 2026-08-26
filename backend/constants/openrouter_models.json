@@ -2,117 +2,140 @@
   {
     "value": "nvidia/nemotron-3-super-120b-a12b:free",
     "label": "NVIDIA – Nemotron 3 Super 120B A12B (free)",
-    "paid": false
+    "paid": false,
+    "context_length": 128000
   },
   {
     "value": "openai/gpt-oss-120b:free",
     "label": "OpenAI – GPT-OSS 120B (free)",
-    "paid": false
+    "paid": false,
+    "context_length": 131072
   },
   {
     "value": "nousresearch/hermes-3-llama-3.1-405b:free",
     "label": "Nous – Hermes 3 Llama 3.1 405B (free)",
-    "paid": false
+    "paid": false,
+    "context_length": 131072
   },
   {
     "value": "qwen/qwen3-next-80b-a3b-instruct:free",
     "label": "Qwen – Qwen3 Next 80B A3B Instruct (free)",
-    "paid": false
+    "paid": false,
+    "context_length": 262144
   },
   {
     "value": "meta-llama/llama-3.3-70b-instruct:free",
     "label": "Meta – Llama 3.3 70B Instruct (free)",
-    "paid": false
+    "paid": false,
+    "context_length": 131072
   },
   {
     "value": "google/gemma-4-31b-it:free",
     "label": "Google – Gemma 4 31B IT (free)",
-    "paid": false
+    "paid": false,
+    "context_length": 131072
   },
   {
     "value": "google/gemma-4-26b-a4b-it:free",
     "label": "Google – Gemma 4 26B A4B IT (free)",
-    "paid": false
+    "paid": false,
+    "context_length": 131072
   },
   {
     "value": "google/gemma-3-27b-it:free",
     "label": "Google – Gemma 3 27B IT (free)",
-    "paid": false
+    "paid": false,
+    "context_length": 131072
   },
   {
     "value": "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
     "label": "Dolphin – Mistral 24B Venice (free)",
-    "paid": false
+    "paid": false,
+    "context_length": 32768
   },
   {
     "value": "minimax/minimax-m2.5:free",
     "label": "MiniMax – M2.5 (free)",
-    "paid": false
+    "paid": false,
+    "context_length": 196608
   },
   {
     "value": "tencent/hy3-preview:free",
     "label": "Tencent – HY3 Preview (free)",
-    "paid": false
+    "paid": false,
+    "context_length": 128000
   },
   {
     "value": "z-ai/glm-4.5-air:free",
     "label": "Z.AI – GLM 4.5 Air (free)",
-    "paid": false
+    "paid": false,
+    "context_length": 128000
   },
   {
     "value": "inclusionai/ling-2.6-flash:free",
     "label": "Inclusion AI – Ling 2.6 Flash (free)",
-    "paid": false
+    "paid": false,
+    "context_length": 128000
   },
   {
     "value": "inclusionai/ling-2.6-1t:free",
     "label": "Inclusion AI – Ling 2.6 1T (free)",
-    "paid": false
+    "paid": false,
+    "context_length": 128000
   },
   {
     "value": "qwen/qwen3-coder:free",
     "label": "Qwen – Qwen3 Coder (free)",
-    "paid": false
+    "paid": false,
+    "context_length": 262144
   },
   {
     "value": "openai/gpt-oss-20b:free",
     "label": "OpenAI – GPT-OSS 20B (free)",
-    "paid": false
+    "paid": false,
+    "context_length": 131072
   },
   {
     "value": "nvidia/nemotron-3-nano-30b-a3b:free",
     "label": "NVIDIA – Nemotron 3 Nano 30B A3B (free)",
-    "paid": false
+    "paid": false,
+    "context_length": 128000
   },
   {
     "value": "nvidia/nemotron-nano-12b-v2-vl:free",
     "label": "NVIDIA – Nemotron Nano 12B V2 VL (free)",
-    "paid": false
+    "paid": false,
+    "context_length": 128000
   },
   {
     "value": "nvidia/nemotron-nano-9b-v2:free",
     "label": "NVIDIA – Nemotron Nano 9B V2 (free)",
-    "paid": false
+    "paid": false,
+    "context_length": 128000
   },
   {
     "value": "meta-llama/llama-3.2-3b-instruct:free",
     "label": "Meta – Llama 3.2 3B Instruct (free)",
-    "paid": false
+    "paid": false,
+    "context_length": 131072
   },
   {
     "value": "liquid/lfm-2.5-1.2b-thinking:free",
     "label": "Liquid – LFM 2.5 1.2B Thinking (free)",
-    "paid": false
+    "paid": false,
+    "context_length": 32768
   },
   {
     "value": "liquid/lfm-2.5-1.2b-instruct:free",
     "label": "Liquid – LFM 2.5 1.2B Instruct (free)",
-    "paid": false
+    "paid": false,
+    "context_length": 32768
   },
   {
     "value": "moonshotai/kimi-k2.6",
     "label": "MoonshotAI – Kimi K2.6",
     "paid": true,
+    "context_length": 262144,
     "pricing": {
       "inputUsdPerMillion": 0.7448,
       "outputUsdPerMillion": 4.655
@@ -122,6 +145,7 @@
     "value": "anthropic/claude-sonnet-4.6",
     "label": "Anthropic – Claude Sonnet 4.6",
     "paid": true,
+    "context_length": 200000,
     "pricing": {
       "inputUsdPerMillion": 3,
       "outputUsdPerMillion": 15
@@ -131,6 +155,7 @@
     "value": "deepseek/deepseek-v3.2",
     "label": "DeepSeek – DeepSeek V3.2",
     "paid": true,
+    "context_length": 128000,
     "pricing": {
       "inputUsdPerMillion": 0.252,
       "outputUsdPerMillion": 0.378
@@ -140,6 +165,7 @@
     "value": "anthropic/claude-opus-4.7",
     "label": "Anthropic – Claude Opus 4.7",
     "paid": true,
+    "context_length": 200000,
     "pricing": {
       "inputUsdPerMillion": 5,
       "outputUsdPerMillion": 25
@@ -149,6 +175,7 @@
     "value": "google/gemini-3-flash-preview",
     "label": "Google – Gemini 3 Flash Preview",
     "paid": true,
+    "context_length": 1000000,
     "pricing": {
       "inputUsdPerMillion": 0.5,
       "outputUsdPerMillion": 3
@@ -158,6 +185,7 @@
     "value": "stepfun/step-3.5-flash",
     "label": "StepFun – Step 3.5 Flash",
     "paid": true,
+    "context_length": 128000,
     "pricing": {
       "inputUsdPerMillion": 0.1,
       "outputUsdPerMillion": 0.3

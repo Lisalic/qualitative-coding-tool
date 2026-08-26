@@ -101,7 +101,6 @@ async def _fetch_expansion_json(system_prompt: str, user_message: str, api_key: 
             temperature=0.2,
             timeout=120.0,
             response_format={"type": "json_object"},
-            use_middle_out=True,
             max_retries=1,
         )
     except Exception:
@@ -113,7 +112,6 @@ async def _fetch_expansion_json(system_prompt: str, user_message: str, api_key: 
             temperature=0.2,
             timeout=120.0,
             response_format=None,
-            use_middle_out=True,
             max_retries=1,
         )
     return _parse_expansion_json(content)
