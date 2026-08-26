@@ -75,15 +75,17 @@ const CodeLegend = ({
 
   useEffect(() => {
     if (isEditMode) {
+      // Editing benefits from seeing everything at once -- expanded by
+      // default there, unlike the read-only view below.
       setExpandedFamilies(buildExpandedState);
       return;
     }
-    if (!hasTreeLegend) {
-      setExpandedFamilies({});
-      return;
-    }
-    setExpandedFamilies(buildExpandedState);
-  }, [isEditMode, hasTreeLegend, buildExpandedState]);
+    // Collapsed by default in the read-only view -- a codebook can have
+    // many families, and a researcher is usually here to read/tag a
+    // document, not browse the whole codebook. Expanding is a deliberate
+    // action (a family row, or "Expand All").
+    setExpandedFamilies({});
+  }, [isEditMode, buildExpandedState]);
 
   useEffect(() => {
     if (!isEditMode) {
