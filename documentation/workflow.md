@@ -209,25 +209,40 @@ Why implemented this way:
 
 User-facing behavior:
 
-- Apply a selected codebook to a selected database and inspect/edit coding output.
+- Apply a selected codebook to a selected database (optionally a sampled subset via the Sample Size slider); the AI codes every sampled post and comment, coded or not.
+- View Coding shows the resulting artifact: the codebook (editable), a paged table of every row the artifact owns — coded or uncoded — with per-row inline code/evidence/notes editing, and a read-only Text View rendering.
+- Select any subset of rows and re-run the AI classifier over just that subset with a chosen model (Recode), replacing only their coding.
+- Duplicate forks the whole saved artifact (codebook snapshot, its own rows, its coding, lineage, project links) under a new name.
 
 Frontend implementation:
 
 - Apply page/panel: `frontend/src/pages/ApplyCodebook.jsx`, `frontend/src/components/tool-panels/ApplyCodebookPanel.jsx`
 - Coding workspace: `frontend/src/pages/ViewCoding.jsx`, `frontend/src/components/coding-table/workspace/useViewCodingPage.js`, `frontend/src/components/coding-table/workspace/CodingWorkspaceSection.jsx`
-- Request builder: `buildApplyCodebookForm` in `frontend/src/lib/apiContracts.js`
+- Row filter/paging toolbar and AI-recode bar: `frontend/src/components/coding-table/workspace/CodingRowsToolbar.jsx`, `frontend/src/components/coding-table/workspace/CodingRecodeBar.jsx`
+- Read-only rendered text tab: `frontend/src/components/coding-table/workspace/CodingTextView.jsx`
+- Fork-the-whole-artifact control: `frontend/src/components/coding-table/workspace/CodingDuplicateControl.jsx`
+- Table itself (select column, inline per-row code/evidence/notes editor): `frontend/src/components/coding-table/CodingTableView.jsx`, `CodingTableRow.jsx`, `CodingTableEditRow.jsx`
+- Request builders: `buildApplyCodebookForm`/`buildRecodeItemsPayload` in `frontend/src/lib/apiContracts.js`
 
 Backend implementation:
 
-- `POST /api/apply-codebook/`
-- `GET /api/coded-data`
-- `POST /api/save-file-coded-data/`
-- `POST /api/save-file-coded-data-duplicate/`
+- `POST /api/apply-codebook/` — kicks off the background job that samples, classifies, and builds the self-contained coding artifact
+- `GET /api/coding/{ref}` — codebook snapshot + parsed tree + row/coded counts + code frequency
+- `GET /api/coding/{ref}/rows` — one page of the artifact's own rows (`limit`/`offset`/`only=all|coded|uncoded`/`code`/`q`), each with its codes
+- `GET /api/coding/{ref}/text` — read-only canonical text, rendered fresh from `coding_entries`
+- `PUT /api/coding/{ref}/codebook` — overwrite the codebook snapshot
+- `PUT /api/coding/{ref}/rows` — replace the coding for exactly the submitted rows
+- `PATCH /api/coding/{ref}` — rename / re-describe
+- `POST /api/coding/{ref}/duplicate` — fork the whole artifact
+- `POST /api/coding/{ref}/recode` — kick off a background job that reclassifies a chosen subset of rows with a chosen model
+- `GET /api/coding-comparison` — a `coding_comparison` artifact's markdown (unchanged by this overhaul; still one `artifact_content` blob)
 
 Why implemented this way:
 
+- a coding artifact is **self-contained**: it owns its own codebook snapshot, its own copy of every sampled submission/comment, and its coding (`coding_entries` — the sole source of truth, including rows with zero codes), so the viewer never re-derives row text or the codebook from a parent artifact at view time (see CLAUDE.md's "Core artifact model"),
 - coding output is stored as a separate artifact (`coding`) to preserve reproducibility and allow edits/versioning,
-- supports both schema-reference and file-id codebook input for flexible source selection.
+- supports both schema-reference and file-id codebook input for flexible source selection,
+- recoding a chosen subset (rather than the whole artifact) keeps AI cost proportional to how much a researcher actually wants re-examined, and never touches rows outside the selection.
 
 ## 7) Compare Codebook and Compare Coding
 
@@ -328,5 +343,5 @@ Main backend endpoints by domain:
 - Project/file metadata: `/api/projects/`, `/api/create-project/`, `/api/update-project/`, `/api/rename-file/`, `/api/my-files/`
 - Filtering: `/api/filter-data/`, `/api/word-count-ranges/`
 - Codebook: `/api/generate-codebook/`, `/api/codebook`, `/api/parse-codebook`, `/api/list-codebooks`, `/api/save-file-codebook/`, `/api/compare-codebooks/`
-- Coding and summarization: `/api/apply-codebook/`, `/api/coded-data`, `/api/save-file-coded-data/`, `/api/save-file-coded-data-duplicate/`, `/api/compare-codings/`, `/api/summarize-coding/`, `/api/save-comparison/`, `/api/save-summary/`, `/api/summary/{summary_id}`
+- Coding and summarization: `/api/apply-codebook/`, `/api/coding/{ref}`, `/api/coding/{ref}/rows`, `/api/coding/{ref}/text`, `/api/coding/{ref}/codebook` (PUT), `/api/coding/{ref}/rows` (PUT), `/api/coding/{ref}` (PATCH), `/api/coding/{ref}/duplicate`, `/api/coding/{ref}/recode`, `/api/coding-comparison`, `/api/compare-codings/`, `/api/summarize-coding/`, `/api/save-comparison/`, `/api/save-summary/`, `/api/summary/{summary_id}`
 
