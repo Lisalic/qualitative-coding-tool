@@ -215,20 +215,23 @@ class TestPostContentsGuard:
         resp = client.post("/api/post-contents/", json={"schema": "proj_a", "post_ids": ["1"]})
         assert resp.status_code == 401
 
-    def test_missing_schema_returns_400(self, client, override_async_db, auth_cookies) -> None:
+    def test_missing_schema_returns_422(self, client, override_async_db, auth_cookies) -> None:
+        # PostContentsRequest is a real Pydantic model now (was a bare
+        # `dict` body) -- a missing required field is FastAPI's own
+        # request-validation 422, matching every other schema-backed route.
         resp = client.post("/api/post-contents/", json={"post_ids": ["1"]}, cookies=auth_cookies)
-        assert resp.status_code == 400
+        assert resp.status_code == 422
 
-    def test_missing_post_ids_returns_400(self, client, override_async_db, auth_cookies) -> None:
+    def test_missing_post_ids_returns_422(self, client, override_async_db, auth_cookies) -> None:
         resp = client.post("/api/post-contents/", json={"schema": "proj_a"}, cookies=auth_cookies)
-        assert resp.status_code == 400
+        assert resp.status_code == 422
 
-    def test_empty_post_ids_list_returns_400(self, client, override_async_db, auth_cookies) -> None:
-        # `not post_ids` is True for an empty list too.
+    def test_empty_post_ids_list_returns_422(self, client, override_async_db, auth_cookies) -> None:
+        # `post_ids` has `min_length=1` on PostContentsRequest.
         resp = client.post(
             "/api/post-contents/", json={"schema": "proj_a", "post_ids": []}, cookies=auth_cookies
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 422
 
     @pytest.mark.parametrize(
         "schema", ["1abc", "proj a", "proj-a", 'proj_a"; DROP TABLE x; --', "not_proj_prefixed"]
@@ -283,7 +286,15 @@ class TestPostContentsGuard:
         )
         assert resp.status_code == 200
         contents = resp.json()["contents"]
-        assert contents == {"s1": {"title": "Title 1", "content": "Body 1"}}
+        assert contents == {
+            "s1": {
+                "type": "submission",
+                "title": "Title 1",
+                "content": "Body 1",
+                "parent_id": None,
+                "parent_title": None,
+            }
+        }
 
 
 class TestFilterDataValidation:

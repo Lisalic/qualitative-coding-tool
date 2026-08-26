@@ -101,6 +101,31 @@ async def sample_comments(
     return list(result.scalars().all())
 
 
+async def parent_post_context_for_comments(
+    session: AsyncSession, file_id: int, comments: list[Comment]
+) -> dict[str, dict[str, str]]:
+    """``{submission_id: {"title", "selftext"}}`` for every distinct
+    ``Comment.link_id`` among ``comments`` that resolves to a submission
+    in ``file_id`` -- one batched query rather than one per comment.
+
+    ``link_id`` already has its ``t3_`` prefix stripped at import
+    (``backend/scripts/import_db.py``), so it matches ``Submission.id``
+    directly. Shared by ``codebook_service`` and ``coding_service`` so a
+    comment sent to either the codebook generator or the classifier can
+    carry its parent post as context.
+    """
+    link_ids = {c.link_id for c in comments if c.link_id}
+    if not link_ids:
+        return {}
+    rows = await session.execute(
+        select(Submission.id, Submission.title, Submission.selftext).where(
+            Submission.file_id == file_id,
+            Submission.id.in_(link_ids),
+        )
+    )
+    return {str(r.id): {"title": r.title or "", "selftext": r.selftext or ""} for r in rows}
+
+
 async def copy_rows_by_id(
     session: AsyncSession,
     *,
@@ -159,5 +184,42 @@ async def copy_rows_by_id(
             )
             await session.execute(insert(Comment).from_select(col_names, src_select))
         counts["comments"] = n
+
+    return counts
+
+
+async def copy_all_rows(session: AsyncSession, *, source_file_id: int, target_file_id: int) -> dict[str, int]:
+    """Set-based copy of *every* submission/comment row from
+    ``source_file_id`` to ``target_file_id``, with no id filter --
+    ``coding_service.duplicate_coding``'s "fork the whole artifact" case,
+    as opposed to ``copy_rows_by_id``'s selective copy of a chosen subset
+    (filtering, moving rows, or sampling into a fresh coding artifact at
+    Apply Codebook time).
+    """
+    counts = {"submissions": 0, "comments": 0}
+
+    sub_non_id_cols = [c for c in Submission.__table__.c if c.name != "file_id"]
+    sub_col_names = ["file_id"] + [c.name for c in sub_non_id_cols]
+    sub_count = (
+        await session.execute(select(func.count()).select_from(Submission).where(Submission.file_id == source_file_id))
+    ).scalar() or 0
+    if sub_count:
+        src_select = select(literal(target_file_id).label("file_id"), *sub_non_id_cols).where(
+            Submission.file_id == source_file_id
+        )
+        await session.execute(insert(Submission).from_select(sub_col_names, src_select))
+    counts["submissions"] = sub_count
+
+    com_non_id_cols = [c for c in Comment.__table__.c if c.name != "file_id"]
+    com_col_names = ["file_id"] + [c.name for c in com_non_id_cols]
+    com_count = (
+        await session.execute(select(func.count()).select_from(Comment).where(Comment.file_id == source_file_id))
+    ).scalar() or 0
+    if com_count:
+        src_select = select(literal(target_file_id).label("file_id"), *com_non_id_cols).where(
+            Comment.file_id == source_file_id
+        )
+        await session.execute(insert(Comment).from_select(com_col_names, src_select))
+    counts["comments"] = com_count
 
     return counts

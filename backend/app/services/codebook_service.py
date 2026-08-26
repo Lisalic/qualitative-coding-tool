@@ -34,8 +34,8 @@ issues disappear structurally here: this module calls
 ``codebook_generator_module.MODEL_3``/``codebook_generator_module.get_client``
 through the one already-module-level-imported reference, the same way
 ``generate_codebook``'s handler below calls
-``codebook_generator_module.generate_codebook`` -- there is no second,
-locally-scoped binding of the same name to shadow.
+``codebook_generator_module.generate_codebook_map_reduce`` -- there is no
+second, locally-scoped binding of the same name to shadow.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ import secrets
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.core.exceptions import NotFoundError, ValidationAppError
+from backend.app.core.exceptions import ContextBudgetError, NotFoundError, ValidationAppError
 from backend.app.core.schema_guard import require_valid_schema
 from backend.app.database import (
     AsyncSessionLocal,
@@ -53,7 +53,9 @@ from backend.app.database import (
     FileDependency,
     async_link_file_to_project,
 )
+from backend.app.external import context_window
 from backend.app.jobs.models import Job
+from backend.app.jobs.progress import ProgressTracker
 from backend.app.jobs.registry import register_handler
 from backend.app.jobs.service import enqueue_job
 from backend.app.repositories import artifact_content_repo, file_repo, project_repo, raw_data_repo
@@ -203,6 +205,7 @@ async def start_generate_codebook_job(
     project_id: int | None,
     model: str | None,
     sample_percentage: float,
+    content_scope: str = "both",
 ) -> Job:
     """Validate and enqueue a ``generate_codebook`` background job.
 
@@ -239,6 +242,7 @@ async def start_generate_codebook_job(
             "description": description,
             "project_id": project_id,
             "sample_percentage": sample_percentage,
+            "content_scope": content_scope,
         },
         runtime_extra={"api_key": api_key},
     )
@@ -270,24 +274,40 @@ async def _run_generate_codebook_job(job_id: int, payload: dict) -> dict:
     description = payload.get("description")
     project_id = payload.get("project_id")
     sample_percentage = payload["sample_percentage"]
+    content_scope = payload.get("content_scope") or "both"
+    include_posts = content_scope in ("both", "posts")
+    include_comments = content_scope in ("both", "comments")
 
     async with AsyncSessionLocal() as session:
-        subs = await raw_data_repo.sample_submissions(session, source_file_id, sample_percentage)
-        comments = await raw_data_repo.sample_comments(session, source_file_id, sample_percentage)
+        subs = (
+            await raw_data_repo.sample_submissions(session, source_file_id, sample_percentage)
+            if include_posts
+            else []
+        )
+        comments = (
+            await raw_data_repo.sample_comments(session, source_file_id, sample_percentage)
+            if include_comments
+            else []
+        )
+        parent_context = await raw_data_repo.parent_post_context_for_comments(session, source_file_id, comments)
 
-        assembled = ""
+        records: list[str] = []
         for sub in subs:
-            assembled += f"Title: {sub.title or ''}\n{sub.selftext or ''}\n\n"
+            records.append(f"[POST] Title: {sub.title or ''}\n{sub.selftext or ''}")
         for comment in comments:
-            assembled += f"{comment.body or ''}\n\n"
+            parent = parent_context.get(comment.link_id) if comment.link_id else None
+            parent_title = (parent or {}).get("title") or ""
+            prefix = f'[COMMENT] (replying to "{parent_title}") ' if parent_title else "[COMMENT] "
+            records.append(f"{prefix}{comment.body or ''}")
+        assembled = context_window.ITEM_SEPARATOR.join(records)
 
         if not assembled.strip():
             raise ValidationAppError(
                 "No records were sampled from the selected database. Increase sample size above 0%."
             )
 
-        codebook_text, system_prompt, user_prompt = await codebook_generator_module.generate_codebook(
-            assembled, api_key, prompt, MODEL=model
+        codebook_text, system_prompt, user_prompt, coverage = await codebook_generator_module.generate_codebook_map_reduce(
+            assembled, api_key, prompt, MODEL=model, progress=ProgressTracker(job_id)
         )
         codebook_text = str(codebook_text or "")
 
@@ -331,6 +351,7 @@ async def _run_generate_codebook_job(job_id: int, payload: dict) -> dict:
             "filename": filename,
             "description": saved_description,
         },
+        **context_window.coverage_result_fields(coverage),
     }
 
 
@@ -446,6 +467,20 @@ async def _run_compare_codebooks_job(job_id: int, payload: dict) -> dict:
         f'Codebook "{name_a}": {text_a} Codebook "{name_b}": {text_b} '
         f"Please compare them in detail. Additional instructions: {prompt}"
     )
+
+    # Codebooks are compact taxonomies -- nothing to aggregate the way a
+    # coding comparison compacts its per-code rows -- so a comparison that
+    # overflows the window can only fail loudly (no batching: a comparison
+    # is inherently over both whole codebooks).
+    if not context_window.prompt_fits(
+        model,
+        prompt_chars=len(system_prompt) + len(user_prompt),
+        output_reserve_tokens=context_window.BOUNDED_OUTPUT_TOKENS,
+    ):
+        raise ContextBudgetError(
+            f"These two codebooks are too large to compare with {model}. "
+            "Choose a larger-context model."
+        )
 
     comparison = await codebook_generator_module.get_client(system_prompt, user_prompt, api_key, model)
 

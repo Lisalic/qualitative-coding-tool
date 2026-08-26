@@ -37,8 +37,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 
 from backend.app.database import File, SessionLocal, engine
-from backend.app.storage_models import ArtifactContent, CodingEntry, Comment, Submission
-from backend.scripts.codebook_apply import _extract_structured_records, _format_evidence_segments
+from backend.app.storage_models import ArtifactContent, Comment, Submission
 
 logger = logging.getLogger(__name__)
 
@@ -138,37 +137,6 @@ def _fetch_content_text(conn: Connection, schemaname: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Parsing the stored classification-output text into structured
-# (post_id, code, evidence) rows for `coding_entries`. Reuses the parser
-# `backend/scripts/codebook_apply.py` already has (the stored text is
-# already in the canonical POST_ID:/CODE:/EVIDENCE: format produced by
-# `normalize_coding_output`, which itself round-trips through
-# `_extract_structured_records`).
-# ---------------------------------------------------------------------------
-
-
-def _parse_coding_entries(raw_text: str) -> list[dict[str, str]]:
-    records = _extract_structured_records(raw_text)
-    merged: dict[tuple[str, str], list[str]] = {}
-    order: list[tuple[str, str]] = []
-    for post_id, entries in records:
-        for code_name, evidence_segments in entries:
-            key = (post_id, code_name)
-            if key not in merged:
-                merged[key] = []
-                order.append(key)
-            merged[key].extend(evidence_segments)
-    return [
-        {
-            "post_id": post_id,
-            "code": code_name,
-            "evidence": _format_evidence_segments(merged[(post_id, code_name)]),
-        }
-        for post_id, code_name in order
-    ]
-
-
-# ---------------------------------------------------------------------------
 # Idempotency
 # ---------------------------------------------------------------------------
 
@@ -202,7 +170,6 @@ class MigrationReport:
             "submissions": 0,
             "comments": 0,
             "artifact_content": 0,
-            "coding_entries": 0,
         }
     )
     errors: list[FileError] = field(default_factory=list)
@@ -290,9 +257,25 @@ def _migrate_content_file(session: Session, file: File, report: MigrationReport)
 
 
 def _migrate_coding_file(session: Session, file: File, report: MigrationReport) -> None:
-    have_content = _already_migrated(session, ArtifactContent, file.id)
-    have_entries = _already_migrated(session, CodingEntry, file.id)
-    if have_content and have_entries:
+    """Copies only the old ``content_store`` blob into ``artifact_content``
+    -- there is deliberately no ``coding_entries`` backfill here any more.
+
+    This function predates the coding-artifact self-containment overhaul
+    (a ``coding`` file back then held nothing but a ``content_store`` text
+    blob, no rows of its own) *and* predates quotes-with-offsets
+    (``coding_entries`` now requires a resolved ``start_offset``/
+    ``end_offset`` into an item's own text for every row -- see
+    ``storage_models.CodingEntry``). Resolving offsets needs the item's
+    real content, which this old per-file dynamic schema never stored
+    alongside its classification blob (no ``submissions``/``comments``
+    tables existed for a ``coding`` file until the later overhaul) --
+    there is no data available here to satisfy the new schema's
+    invariant. Per CLAUDE.md's early-prototyping rule (no legacy
+    compatibility, no production data worth preserving), this is not
+    backfilled: re-run Apply Codebook against the still-live source data
+    to get real, offset-verified ``coding_entries`` instead.
+    """
+    if _already_migrated(session, ArtifactContent, file.id):
         logger.info("file_id=%s (%s) already migrated, skipping", file.id, file.schemaname)
         report.files_skipped += 1
         return
@@ -303,29 +286,8 @@ def _migrate_coding_file(session: Session, file: File, report: MigrationReport) 
     if content is None:
         raise ValueError(f"No content_store text found in schema {file.schemaname!r}")
 
-    if not have_content:
-        session.execute(insert(ArtifactContent), [{"file_id": file.id, "content": content}])
-        report.rows_copied["artifact_content"] += 1
-
-    if not have_entries:
-        try:
-            entries = _parse_coding_entries(content)
-        except Exception as exc:  # noqa: BLE001 - log and continue, don't abort the run
-            logger.error(
-                "file_id=%s (%s): failed to parse coding output, skipping coding_entries: %s",
-                file.id,
-                file.schemaname,
-                exc,
-            )
-            report.errors.append(
-                FileError(file.id, file.schemaname, file.filename, f"coding-output parse failed: {exc}")
-            )
-            entries = []
-        if entries:
-            payload = [{"file_id": file.id, **entry} for entry in entries]
-            session.execute(insert(CodingEntry), payload)
-            report.rows_copied["coding_entries"] += len(payload)
-
+    session.execute(insert(ArtifactContent), [{"file_id": file.id, "content": content}])
+    report.rows_copied["artifact_content"] += 1
     report.files_migrated += 1
 
 

@@ -42,6 +42,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.exceptions import ValidationAppError
+from backend.app.core.item_types import COMMENT, SUBMISSION, split_item_id
 from backend.app.core.schema_guard import require_valid_schema
 from backend.app.database import (
     AsyncSessionLocal,
@@ -51,6 +52,7 @@ from backend.app.database import (
     async_link_file_to_project,
 )
 from backend.app.jobs.models import Job
+from backend.app.jobs.progress import ProgressTracker
 from backend.app.jobs.registry import register_handler
 from backend.app.jobs.service import enqueue_job
 from backend.app.repositories import file_repo, project_repo, raw_data_repo
@@ -186,8 +188,8 @@ async def get_comments_for_submission(
 async def get_post_contents(
     session: AsyncSession, user_id: int, schema: str, post_ids: list[str]
 ) -> dict[str, Any]:
-    """Title/selftext for a set of submission ids in the file identified by
-    ``schema``, owned by ``user_id``.
+    """Title/content for a set of post and/or comment ids in the file
+    identified by ``schema``, owned by ``user_id``.
 
     This is the retirement of the confirmed SQL-injection-adjacent gap:
     ``schema`` never touches a SQL string. ``require_valid_schema`` rejects
@@ -195,22 +197,90 @@ async def get_post_contents(
     predicate is a normal SQLAlchemy Core query parameterized the usual
     way; and the actual scoping is ``file_repo.resolve_file_id``, which
     only ever resolves to a file owned by ``user_id`` in the first place.
+
+    ``post_ids`` may mix qualified ids (``t3_<id>``/``t1_<id>``, see
+    ``core/item_types.py``) with legacy unprefixed ids -- every coding
+    artifact saved before item types existed only ever contains the
+    latter, and an unprefixed id defaults to "submission". Any unprefixed
+    id that doesn't resolve against ``submissions`` is retried against
+    ``comments`` as a legacy-comment-id fallback, so an old artifact that
+    happened to code a comment still resolves instead of silently
+    returning nothing for it (which was the pre-existing bug this whole
+    change fixes).
+
+    Returned dict is keyed by the id exactly as the caller sent it, each
+    value ``{type, title, content, parent_id, parent_title}`` -- ``title``
+    is the post's own title for a submission, or ``None`` for a comment
+    (``parent_title`` carries the comment's parent post's title instead,
+    resolved via ``Comment.link_id``, when that parent is itself in this
+    file).
     """
     if not schema or not post_ids:
         raise ValidationAppError("schema and post_ids are required")
     normalized = require_valid_schema(schema, field_name="schema")
     file_id = await file_repo.resolve_file_id(session, normalized, user_id)
 
-    rows = await session.execute(
-        select(Submission.id, Submission.title, Submission.selftext).where(
-            Submission.file_id == file_id,
-            Submission.id.in_([str(pid) for pid in post_ids]),
+    parsed = [(str(pid), *split_item_id(str(pid))) for pid in post_ids]
+    submission_candidates = {raw_id for _, row_type, raw_id in parsed if row_type == SUBMISSION}
+    comment_candidates = {raw_id for _, row_type, raw_id in parsed if row_type == COMMENT}
+
+    sub_rows: dict[str, dict[str, Any]] = {}
+    if submission_candidates:
+        rows = await session.execute(
+            select(Submission.id, Submission.title, Submission.selftext).where(
+                Submission.file_id == file_id,
+                Submission.id.in_(submission_candidates),
+            )
         )
-    )
-    posts = {
-        str(row.id): {"title": row.title or "", "content": row.selftext or ""} for row in rows
-    }
-    return {"contents": posts}
+        sub_rows = {str(r.id): {"title": r.title or "", "content": r.selftext or ""} for r in rows}
+
+    # Legacy fallback: an unprefixed id that isn't a submission might be an
+    # old, unqualified comment id.
+    unresolved_submission_ids = submission_candidates - sub_rows.keys()
+    all_comment_candidates = comment_candidates | unresolved_submission_ids
+
+    comment_rows: dict[str, dict[str, Any]] = {}
+    if all_comment_candidates:
+        rows = await session.execute(
+            select(Comment.id, Comment.body, Comment.link_id).where(
+                Comment.file_id == file_id,
+                Comment.id.in_(all_comment_candidates),
+            )
+        )
+        comment_rows = {str(r.id): {"content": r.body or "", "link_id": r.link_id} for r in rows}
+
+    parent_ids = {v["link_id"] for v in comment_rows.values() if v.get("link_id")}
+    parent_titles: dict[str, str] = {}
+    if parent_ids:
+        rows = await session.execute(
+            select(Submission.id, Submission.title).where(
+                Submission.file_id == file_id,
+                Submission.id.in_(parent_ids),
+            )
+        )
+        parent_titles = {str(r.id): (r.title or "") for r in rows}
+
+    contents: dict[str, dict[str, Any]] = {}
+    for qualified, _row_type, raw_id in parsed:
+        if raw_id in sub_rows:
+            data = sub_rows[raw_id]
+            contents[qualified] = {
+                "type": SUBMISSION,
+                "title": data["title"],
+                "content": data["content"],
+                "parent_id": None,
+                "parent_title": None,
+            }
+        elif raw_id in comment_rows:
+            data = comment_rows[raw_id]
+            contents[qualified] = {
+                "type": COMMENT,
+                "title": None,
+                "content": data["content"],
+                "parent_id": data["link_id"],
+                "parent_title": parent_titles.get(data["link_id"]) if data["link_id"] else None,
+            }
+    return {"contents": contents}
 
 
 # ---------------------------------------------------------------------------
@@ -251,6 +321,7 @@ async def start_filter_data_job(
     filter_tags: str | None,
     description: str | None,
     project_id: int | None,
+    content_scope: str = "both",
 ) -> Job:
     """Validate and enqueue a ``filter_data`` background job.
 
@@ -282,6 +353,7 @@ async def start_filter_data_job(
             "filter_tags": filter_tags,
             "description": description,
             "project_id": project_id,
+            "content_scope": content_scope,
         },
         runtime_extra={"api_key": api_key},
     )
@@ -299,11 +371,20 @@ async def _sample_source_rows(
     pct: float,
     use_ai_posts: bool,
     use_ai_comments: bool,
+    include_posts: bool = True,
+    include_comments: bool = True,
 ) -> tuple[list, list, str, str]:
     """Count eligible rows (``word_count >= min_words`` and, if tags were
     supplied, a keyword match), random-sample ``ceil(eligible * pct / 100)``
     of them, and build the AI-ready text blob for whichever of
     submissions/comments actually needs an AI call.
+
+    ``include_posts``/``include_comments`` implement ``content_scope``
+    ("both"/"posts"/"comments"): when a type is excluded, its table isn't
+    even queried, so it can never be sampled or filtered into the output
+    -- distinct from ``use_ai_posts``/``use_ai_comments``, which is about
+    whether a type needs an *AI* pass (a tags-only filter still samples
+    and copies rows without ever building AI-ready text for them).
 
     Uses ``text()`` against the fixed ``submissions``/``comments`` tables
     scoped by ``file_id`` -- safe (no identifier interpolation; ``file_id``
@@ -312,56 +393,60 @@ async def _sample_source_rows(
     """
     sub_rows: list = []
     comm_rows: list = []
+    submissions_text = ""
+    comments_text = ""
 
-    subs_params = {"fid": source_file_id, "mw": min_words, **sub_tag_bind}
-    subs_eligible = (
-        await session.execute(
-            text(
-                "SELECT COUNT(*) FROM submissions "
-                f"WHERE file_id = :fid AND word_count >= :mw{sub_tag_sql}"
-            ),
-            subs_params,
-        )
-    ).scalar() or 0
-    subs_limit = math.ceil((subs_eligible * pct) / 100.0)
-    if subs_limit > 0:
-        cols = "id, title, selftext" if use_ai_posts else "id"
-        sub_rows = (
+    if include_posts:
+        subs_params = {"fid": source_file_id, "mw": min_words, **sub_tag_bind}
+        subs_eligible = (
             await session.execute(
                 text(
-                    f"SELECT {cols} FROM submissions "
-                    f"WHERE file_id = :fid AND word_count >= :mw{sub_tag_sql} "
-                    "ORDER BY RANDOM() LIMIT :lim"
+                    "SELECT COUNT(*) FROM submissions "
+                    f"WHERE file_id = :fid AND word_count >= :mw{sub_tag_sql}"
                 ),
-                {**subs_params, "lim": subs_limit},
+                subs_params,
             )
-        ).fetchall()
-    submissions_text = _word_count_expr_ai_ready(sub_rows, "submission") if use_ai_posts else ""
+        ).scalar() or 0
+        subs_limit = math.ceil((subs_eligible * pct) / 100.0)
+        if subs_limit > 0:
+            cols = "id, title, selftext" if use_ai_posts else "id"
+            sub_rows = (
+                await session.execute(
+                    text(
+                        f"SELECT {cols} FROM submissions "
+                        f"WHERE file_id = :fid AND word_count >= :mw{sub_tag_sql} "
+                        "ORDER BY RANDOM() LIMIT :lim"
+                    ),
+                    {**subs_params, "lim": subs_limit},
+                )
+            ).fetchall()
+        submissions_text = _word_count_expr_ai_ready(sub_rows, "submission") if use_ai_posts else ""
 
-    comm_params = {"fid": source_file_id, "mw": min_words, **com_tag_bind}
-    comm_eligible = (
-        await session.execute(
-            text(
-                "SELECT COUNT(*) FROM comments "
-                f"WHERE file_id = :fid AND word_count >= :mw{com_tag_sql}"
-            ),
-            comm_params,
-        )
-    ).scalar() or 0
-    comm_limit = math.ceil((comm_eligible * pct) / 100.0)
-    if comm_limit > 0:
-        cols = "id, body" if use_ai_comments else "id"
-        comm_rows = (
+    if include_comments:
+        comm_params = {"fid": source_file_id, "mw": min_words, **com_tag_bind}
+        comm_eligible = (
             await session.execute(
                 text(
-                    f"SELECT {cols} FROM comments "
-                    f"WHERE file_id = :fid AND word_count >= :mw{com_tag_sql} "
-                    "ORDER BY RANDOM() LIMIT :lim"
+                    "SELECT COUNT(*) FROM comments "
+                    f"WHERE file_id = :fid AND word_count >= :mw{com_tag_sql}"
                 ),
-                {**comm_params, "lim": comm_limit},
+                comm_params,
             )
-        ).fetchall()
-    comments_text = _word_count_expr_ai_ready(comm_rows, "comment") if use_ai_comments else ""
+        ).scalar() or 0
+        comm_limit = math.ceil((comm_eligible * pct) / 100.0)
+        if comm_limit > 0:
+            cols = "id, body" if use_ai_comments else "id"
+            comm_rows = (
+                await session.execute(
+                    text(
+                        f"SELECT {cols} FROM comments "
+                        f"WHERE file_id = :fid AND word_count >= :mw{com_tag_sql} "
+                        "ORDER BY RANDOM() LIMIT :lim"
+                    ),
+                    {**comm_params, "lim": comm_limit},
+                )
+            ).fetchall()
+        comments_text = _word_count_expr_ai_ready(comm_rows, "comment") if use_ai_comments else ""
 
     return sub_rows, comm_rows, submissions_text, comments_text
 
@@ -380,13 +465,21 @@ async def _apply_tag_or_ai_filter(
     has_tags: bool,
     original_tags_meta: list[str],
     expanded_terms_sql: list[str],
-) -> tuple[list[str], list[str], str, str]:
+    progress: ProgressTracker | None = None,
+) -> tuple[list[str], list[str], str, str, dict]:
     """Resolve the final set of submission/comment ids to copy: either the
     tag-matched sample ids directly (tags-only, no AI step) or the AI's
     filtered id list (``filter_db_module.filter_posts_with_ai``/
     ``filter_comments_with_ai``, both native ``async def`` as of Stage 9
     and awaited directly -- no more ``asyncio.to_thread`` wrapper around a
     sync OpenRouter SDK call).
+
+    The 5th return value, ``coverage``, is ``{}`` when no AI filtering ran
+    (tags-only), otherwise has a ``"posts"``/``"comments"`` key (whichever
+    AI path(s) ran) each mapping to that call's
+    ``{"batches_processed", "batches_total"}`` -- lets the caller detect and
+    surface a free-model batch cap or mid-run batch failure instead of
+    silently returning an incomplete id list.
     """
     from backend.scripts import filter_db as filter_db_module
     from backend.scripts.filter_db import AIFilterError
@@ -395,6 +488,7 @@ async def _apply_tag_or_ai_filter(
     comment_ids: list[str] = []
     system_prompt = ""
     user_prompt = ""
+    coverage: dict[str, dict[str, int]] = {}
 
     if not use_ai_posts and sub_rows:
         post_ids = [str(r._mapping["id"]) for r in sub_rows if r._mapping.get("id")]
@@ -403,9 +497,10 @@ async def _apply_tag_or_ai_filter(
 
     if use_ai_posts and submissions_text:
         try:
-            post_ids, system_prompt, user_prompt = await filter_db_module.filter_posts_with_ai(
-                filter_prompt, submissions_text, api_key, model
+            post_ids, system_prompt, user_prompt, posts_coverage = await filter_db_module.filter_posts_with_ai(
+                filter_prompt, submissions_text, api_key, model, progress=progress
             )
+            coverage["posts"] = posts_coverage
         except AIFilterError:
             raise
         except Exception as exc:
@@ -413,9 +508,10 @@ async def _apply_tag_or_ai_filter(
 
     if use_ai_comments and comments_text:
         try:
-            comment_ids, _, _ = await filter_db_module.filter_comments_with_ai(
-                filter_prompt, comments_text, api_key, model
+            comment_ids, _, _, comments_coverage = await filter_db_module.filter_comments_with_ai(
+                filter_prompt, comments_text, api_key, model, progress=progress
             )
+            coverage["comments"] = comments_coverage
         except AIFilterError:
             raise
         except Exception as exc:
@@ -434,7 +530,7 @@ async def _apply_tag_or_ai_filter(
     if not isinstance(comment_ids, list):
         comment_ids = []
 
-    return post_ids, comment_ids, system_prompt, user_prompt
+    return post_ids, comment_ids, system_prompt, user_prompt, coverage
 
 
 async def _materialize_filtered_schema(
@@ -455,6 +551,16 @@ async def _materialize_filtered_schema(
     ``submissions``/``comments`` tables via
     ``raw_data_repo.copy_rows_by_id`` -- the set-based replacement for the
     old per-ID ``SELECT``+``INSERT``+``begin_nested()`` loop.
+
+    Filter Data filters posts and comments independently (two separate
+    AI calls / tag predicates), so the result can legitimately contain a
+    comment whose parent post didn't survive filtering. Rather than
+    silently producing that incoherent-looking dataset, ``counts`` gains
+    an ``"orphaned_comments"`` entry: comments copied into the new file
+    whose ``link_id`` doesn't match any submission id also copied in
+    (comparing against ``post_ids`` directly -- both are bare Reddit ids
+    with the ``t3_`` prefix already stripped at import, so no
+    id-qualification is needed here).
     """
     new_schema = f"proj_{secrets.token_hex(6)}"
     file_rec = File(
@@ -478,6 +584,20 @@ async def _materialize_filtered_schema(
         submission_ids=post_ids or None,
         comment_ids=comment_ids or None,
     )
+
+    orphaned_comments = 0
+    if counts["comments"] and comment_ids:
+        kept_post_ids = set(post_ids or [])
+        link_id_rows = await session.execute(
+            select(Comment.link_id).where(
+                Comment.file_id == file_rec.id,
+                Comment.id.in_(comment_ids),
+            )
+        )
+        orphaned_comments = sum(
+            1 for (link_id,) in link_id_rows if not link_id or link_id not in kept_post_ids
+        )
+    counts["orphaned_comments"] = orphaned_comments
 
     session.add(FileTable(file_id=file_rec.id, tablename="submissions", row_count=counts["submissions"]))
     session.add(FileTable(file_id=file_rec.id, tablename="comments", row_count=counts["comments"]))
@@ -516,6 +636,9 @@ async def _run_filter_data_job(job_id: int, payload: dict) -> dict:
     min_words = payload["min_words"]
     description = payload.get("description")
     project_id = payload.get("project_id")
+    content_scope = payload.get("content_scope") or "both"
+    include_posts = content_scope in ("both", "posts")
+    include_comments = content_scope in ("both", "comments")
 
     user_tags_list = parse_filter_tags_input(payload.get("filter_tags"))
     expanded_terms_sql: list[str] = []
@@ -530,6 +653,7 @@ async def _run_filter_data_job(job_id: int, payload: dict) -> dict:
     use_ai_comments = (not has_tags) or bool(filter_prompt)
     sub_tag_sql, sub_tag_bind = submission_text_tag_predicate_sql(expanded_terms_sql)
     com_tag_sql, com_tag_bind = comment_body_tag_predicate_sql(expanded_terms_sql)
+    progress = ProgressTracker(job_id)
 
     async with AsyncSessionLocal() as session:
         sub_rows, comm_rows, submissions_text, comments_text = await _sample_source_rows(
@@ -543,9 +667,11 @@ async def _run_filter_data_job(job_id: int, payload: dict) -> dict:
             pct=pct,
             use_ai_posts=use_ai_posts,
             use_ai_comments=use_ai_comments,
+            include_posts=include_posts,
+            include_comments=include_comments,
         )
 
-        post_ids, comment_ids, system_prompt, user_prompt = await _apply_tag_or_ai_filter(
+        post_ids, comment_ids, system_prompt, user_prompt, coverage = await _apply_tag_or_ai_filter(
             sub_rows=sub_rows,
             comm_rows=comm_rows,
             use_ai_posts=use_ai_posts,
@@ -558,6 +684,7 @@ async def _run_filter_data_job(job_id: int, payload: dict) -> dict:
             has_tags=has_tags,
             original_tags_meta=original_tags_meta,
             expanded_terms_sql=expanded_terms_sql,
+            progress=progress,
         )
 
         file_rec, counts = await _materialize_filtered_schema(
@@ -581,8 +708,13 @@ async def _run_filter_data_job(job_id: int, payload: dict) -> dict:
         "comments_length": len(comments_text),
         "posts_filtered_count": counts["submissions"],
         "comments_filtered_count": counts["comments"],
+        "orphaned_comments": counts.get("orphaned_comments", 0),
         "file": {"id": str(file_id), "schema_name": schema_name, "filename": filename},
     }
     if has_tags:
         result["tag_filter"] = {"original_tags": original_tags_meta, "expanded_terms": expanded_terms_sql}
+    if coverage:
+        result["batches_processed"] = {k: v["batches_processed"] for k, v in coverage.items()}
+        result["batches_total"] = {k: v["batches_total"] for k, v in coverage.items()}
+        result["partial"] = any(v["batches_processed"] < v["batches_total"] for v in coverage.values())
     return result

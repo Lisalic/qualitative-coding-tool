@@ -12,7 +12,7 @@ field-level validation (422 on bad input) and accurate OpenAPI docs.
 from __future__ import annotations
 
 import inspect
-from typing import Any, Optional, Type, TypeVar
+from typing import Any, Literal, Optional, Type, TypeVar
 
 from fastapi import Form
 from fastapi.exceptions import RequestValidationError
@@ -22,6 +22,22 @@ T = TypeVar("T", bound=BaseModel)
 
 
 _SCHEMA_PATTERN = r"^proj_[A-Za-z0-9_]+$"
+
+ContentScope = Literal["both", "posts", "comments"]
+
+
+def _content_scope_field() -> Any:
+    """Which of a source file's submissions/comments tables an AI tool
+    should sample from. Shared across Filter/Generate/Apply so the three
+    form builders (buildFilterDataForm/buildGenerateCodebookForm/
+    buildApplyCodebookForm in apiContracts.js) send the same field name.
+    Defaults to "both" -- today's behavior for every one of these tools,
+    unchanged for any existing caller that doesn't send this field.
+    """
+    return Field(
+        default="both",
+        description="Which content types to sample: 'both', 'posts', or 'comments'",
+    )
 
 
 def as_form(cls: Type[T]):
@@ -107,6 +123,7 @@ class FilterDataRequest(_StrippingModel):
         default=None,
         description="Comma-separated keywords to pre-filter with tag expansion",
     )
+    content_scope: ContentScope = _content_scope_field()
 
     @field_validator("database", mode="before")
     @classmethod
@@ -138,6 +155,10 @@ class FilterDataResponse(BaseModel):
     comments_filtered_count: int
     file: Optional[FilterDataFileInfo] = None
     tag_filter: Optional[FilterDataTagInfo] = None
+    partial: bool = False
+    batches_processed: Optional[dict[str, int]] = None
+    batches_total: Optional[dict[str, int]] = None
+    orphaned_comments: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -158,6 +179,7 @@ class GenerateCodebookRequest(_StrippingModel):
     description: Optional[str] = Field(default=None)
     project_id: Optional[int] = Field(default=None)
     sample_percentage: float = Field(default=100.0, ge=0.0, le=100.0)
+    content_scope: ContentScope = _content_scope_field()
 
     @field_validator("database", mode="before")
     @classmethod
@@ -222,6 +244,7 @@ class ApplyCodebookRequest(_StrippingModel):
     description: Optional[str] = Field(default=None)
     project_id: Optional[int] = Field(default=None)
     sample_percentage: float = Field(default=100.0, ge=1.0, le=100.0)
+    content_scope: ContentScope = _content_scope_field()
 
     @field_validator("database", mode="before")
     @classmethod
@@ -259,6 +282,142 @@ class ApplyCodebookRequest(_StrippingModel):
 class ApplyCodebookResponse(BaseModel):
     classification_output: str
     file: Optional[GenerateCodebookFileInfo] = None
+
+
+# ---------------------------------------------------------------------------
+# AI coding output (backend/scripts/codebook_apply.py::classify_posts)
+#
+# The shape the model is asked to return: one object per (item, code)
+# pair, each carrying every quote it found in that item's own content
+# supporting that code. Parsed with this model (rather than a bare
+# ``json.loads``) so a malformed entry from a weak model is a normal,
+# per-entry Pydantic ``ValidationError`` -- caught and dropped -- instead
+# of a ``KeyError``/``TypeError`` surfacing from hand-written dict access.
+# Existence/hallucination checks (does ``item_id`` exist? does ``code``
+# exist in the codebook? does each quote actually occur in that item's
+# text?) happen after this parse, in ``coding_service`` -- this model only
+# validates *shape*, not truth.
+# ---------------------------------------------------------------------------
+
+
+class AICodingEntry(BaseModel):
+    item_id: str
+    code: str
+    quotes: list[str] = Field(default_factory=list)
+
+
+class AICodingPayload(BaseModel):
+    codings: list[AICodingEntry] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Coding artifact (structured coding_entries; see storage_models.CodingEntry)
+#
+# A coding artifact now owns its own codebook snapshot, its own copy of
+# every sampled post/comment, and its coding -- these back the editor and
+# recode routes in coding_routes.py, not Apply Codebook's kickoff (that's
+# still ApplyCodebookRequest above). Sent as JSON bodies, not
+# multipart/form-data (unlike the ``as_form`` models above), since a
+# per-row list of code/evidence/notes entries doesn't map onto flat form
+# fields the way FilterData/GenerateCodebook/ApplyCodebook's scalar
+# fields do -- same reasoning as ``PostContentsRequest`` below.
+# ---------------------------------------------------------------------------
+
+
+class CodingEntryIn(_StrippingModel):
+    """One quote coded to one item -- the unit ``coding_entries`` now
+    stores one row per (see ``storage_models.CodingEntry``). ``start_offset``/
+    ``end_offset`` are character offsets into that item's own body text
+    (``Submission.selftext``/``Comment.body``) and must satisfy
+    ``0 <= start_offset < end_offset``; the frontend computes them directly
+    from the real DOM selection range (see ``HighlightedContent.jsx``), so
+    unlike AI output there is no separate existence/offset check at this
+    boundary -- a manual edit is trusted the same way it always has been.
+    """
+
+    code: str = Field(min_length=1)
+    quote: str = Field(min_length=1)
+    start_offset: int = Field(ge=0)
+    end_offset: int = Field(gt=0)
+    notes: Optional[str] = None
+
+    @field_validator("end_offset")
+    @classmethod
+    def _end_after_start(cls, end_offset: int, info) -> int:
+        start_offset = info.data.get("start_offset")
+        if start_offset is not None and end_offset <= start_offset:
+            raise ValueError("end_offset must be greater than start_offset")
+        return end_offset
+
+
+class CodingRowUpdate(_StrippingModel):
+    """One row's full replacement coding. ``item_id`` is the qualified id
+    (``t3_<id>``/``t1_<id>``, see ``core/item_types.py``) as returned by
+    ``GET /api/coding/{ref}/rows``. An empty ``entries`` list clears every
+    code from that row -- the row is not left untouched.
+    """
+
+    item_id: str = Field(min_length=1)
+    entries: list[CodingEntryIn] = Field(default_factory=list)
+
+
+class SaveCodingRowsRequest(_StrippingModel):
+    """Payload for ``PUT /api/coding/{ref}/rows``."""
+
+    rows: list[CodingRowUpdate] = Field(min_length=1)
+
+
+class SaveCodingCodebookRequest(_StrippingModel):
+    """Payload for ``PUT /api/coding/{ref}/codebook``."""
+
+    content: str = Field(min_length=1)
+
+
+class UpdateCodingMetadataRequest(_StrippingModel):
+    """Payload for ``PATCH /api/coding/{ref}``."""
+
+    display_name: Optional[str] = Field(default=None, min_length=1)
+    description: Optional[str] = None
+
+
+class DuplicateCodingRequest(_StrippingModel):
+    """Payload for ``POST /api/coding/{ref}/duplicate``."""
+
+    display_name: str = Field(min_length=1)
+
+
+class RecodeItemsRequest(_StrippingModel):
+    """Payload for ``POST /api/coding/{ref}/recode`` -- re-run the AI
+    classifier over a chosen subset of a coding artifact's own rows with
+    a caller-chosen model, replacing exactly those rows' coding.
+    """
+
+    api_key: str = Field(min_length=1)
+    item_ids: list[str] = Field(min_length=1)
+    model: Optional[str] = None
+    methodology: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# PostContents
+# ---------------------------------------------------------------------------
+
+
+class PostContentsRequest(_StrippingModel):
+    """Payload for ``POST /api/post-contents/``.
+
+    Was a bare ``dict`` body -- moved to a real schema so this route
+    boundary follows the same "no bare dict at a route boundary" rule as
+    the rest of the API. ``post_ids`` may be a mix of qualified ids
+    (``t3_<id>``/``t1_<id>``, see ``backend/app/core/item_types.py``) and
+    legacy unprefixed ids, since coding artifacts saved before item
+    types existed only ever contain the latter.
+    """
+
+    schema_: str = Field(alias="schema", min_length=1)
+    post_ids: list[str] = Field(min_length=1)
+
+    model_config = {"populate_by_name": True}
 
 
 class AiModelPricing(BaseModel):

@@ -130,6 +130,7 @@ async def generate_codebook(
         project_id=payload.project_id,
         model=payload.model,
         sample_percentage=payload.sample_percentage,
+        content_scope=payload.content_scope,
     )
     return JSONResponse({"job_id": job.id, "status": job.status}, status_code=202)
 

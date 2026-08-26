@@ -1,30 +1,42 @@
-import re
+from pydantic import ValidationError
 
 from backend.app.ai_models import model_slug_at
-from backend.app.external.openrouter_client import chat_completion
+from backend.app.api.schemas import AICodingPayload
+from backend.app.external import context_window
+from backend.app.external.openrouter_client import json_chat_completion
+from backend.app.external.response_parsers import parse_json_object
+from backend.app.jobs.progress import ProgressTracker
 
 FREE_MODEL = model_slug_at(0)
-MAX_RETRIES = 3
+MAX_RETRIES = 2
 
-POST_ID_LINE_RE = re.compile(
-    r"^\s*POST[\s_-]*ID\s*:\s*(.+?)\s*$",
-    re.IGNORECASE,
-)
-CODE_EVIDENCE_LINE_RE = re.compile(
-    r"^\s*CODE\s*:\s*(.+?)\s*(?:-|–|—)\s*EVIDENCE\s*:\s*(.+?)\s*$",
-    re.IGNORECASE,
-)
-CODE_LINE_RE = re.compile(r"^\s*CODE\s*:\s*(.+?)\s*$", re.IGNORECASE)
-EVIDENCE_LINE_RE = re.compile(r"^\s*EVIDENCE\s*:\s*(.+?)\s*$", re.IGNORECASE)
-MARKDOWN_HEADER_RE = re.compile(r"^\s*#{1,6}\s*")
-HORIZONTAL_RULE_RE = re.compile(r"^\s*(?:-{3,}|\*{3,}|_{3,})\s*$")
-MARKDOWN_FENCE_RE = re.compile(r"^\s*```")
-LEADING_LABEL_BULLET_RE = re.compile(
-    r"^\s*[-*+]\s*(?=(?:POST[\s_-]*ID|CODE|EVIDENCE)\s*:)",
-    re.IGNORECASE,
-)
-QUOTED_EVIDENCE_BLOCK_RE = re.compile(r'^"[^"\n]+"(?:§"[^"\n]+")*$')
-QUOTED_SNIPPET_RE = re.compile(r'"([^"\n]+)"')
+# JSON Schema for the strict-decoding tier of the compliance ladder (see
+# ``openrouter_client.json_chat_completion``). Flat -- one object per
+# (item, code) pair, item_id repeated across objects for the same item --
+# rather than nested by item: fewer nesting levels is measurably easier
+# for weaker models to produce correctly and trivial to validate
+# per-entry, and it matches ``AICodingPayload``/``AICodingEntry`` exactly.
+CODING_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "codings": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "item_id": {"type": "string"},
+                    "code": {"type": "string"},
+                    "quotes": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["item_id", "code", "quotes"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["codings"],
+    "additionalProperties": False,
+}
+
 
 async def get_client(system_prompt: str, user_prompt: str, api_key: str, model: str = FREE_MODEL) -> str:
     if not api_key:
@@ -34,13 +46,13 @@ async def get_client(system_prompt: str, user_prompt: str, api_key: str, model: 
         print(f"\nAPI call failed (attempt {attempt}/{MAX_RETRIES}): {type(exc).__name__}")
         print(f"Retrying in {wait_seconds}s...")
 
-    result = await chat_completion(
+    result = await json_chat_completion(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         api_key=api_key,
         model=model,
+        json_schema=CODING_JSON_SCHEMA,
         timeout=30.0,
-        use_middle_out=True,
         max_retries=MAX_RETRIES,
         on_retry=_on_retry,
     )
@@ -48,263 +60,145 @@ async def get_client(system_prompt: str, user_prompt: str, api_key: str, model: 
     return result
 
 
-def _clean_inline_text(value: str) -> str:
-    cleaned = (value or "").strip()
-    cleaned = cleaned.replace("\u201c", '"').replace("\u201d", '"')
-    cleaned = cleaned.replace("\u2018", "'").replace("\u2019", "'")
-    cleaned = cleaned.replace("**", "").replace("__", "").replace("`", "")
-    cleaned = re.sub(r"\[(.*?)\]\((.*?)\)", r"\1", cleaned)
-    cleaned = re.sub(r"\s+", " ", cleaned)
-    return cleaned.strip()
+def parse_coding_response(raw_text: str) -> list[dict]:
+    """Parse one batch's raw model output into a list of ``{item_id, code,
+    quotes}`` dicts.
 
+    Uses ``response_parsers.parse_json_object`` (strips markdown fences,
+    requires a JSON object) then validates the ``{"codings": [...]}``
+    shape with :class:`AICodingPayload` -- a malformed *individual* entry
+    (missing field, wrong type) is dropped rather than failing the whole
+    batch, since one bad entry from a weak model shouldn't discard every
+    other entry it got right. Raises ``ValueError`` only when the response
+    isn't valid JSON at all, or isn't a ``{"codings": [...]}`` object --
+    the caller (``classify_posts``) treats that as this batch producing no
+    entries.
+    """
+    obj = parse_json_object(raw_text, error_cls=ValueError)
+    codings_raw = obj.get("codings")
+    if not isinstance(codings_raw, list):
+        raise ValueError("Response JSON must have a 'codings' array")
 
-def _preprocess_output_lines(raw_text: str) -> list[str]:
-    normalized = (raw_text or "").replace("\r\n", "\n").replace("\r", "\n")
-    lines: list[str] = []
-
-    for raw_line in normalized.split("\n"):
-        line = raw_line.strip()
-        if not line:
+    entries: list[dict] = []
+    for raw_entry in codings_raw:
+        try:
+            validated = AICodingPayload.model_validate({"codings": [raw_entry]}).codings[0]
+        except ValidationError:
             continue
-        if MARKDOWN_FENCE_RE.match(line):
-            continue
-        if HORIZONTAL_RULE_RE.match(line):
-            continue
-
-        line = MARKDOWN_HEADER_RE.sub("", line)
-        line = LEADING_LABEL_BULLET_RE.sub("", line)
-        line = _clean_inline_text(line)
-        if not line:
-            continue
-        lines.append(line)
-
-    return lines
+        entries.append({"item_id": validated.item_id, "code": validated.code, "quotes": validated.quotes})
+    return entries
 
 
-def _split_evidence_snippets(raw_evidence: str) -> list[str]:
-    cleaned_input = _clean_inline_text(raw_evidence)
-    if not cleaned_input:
-        return []
-
-    quoted_matches = QUOTED_SNIPPET_RE.findall(cleaned_input)
-    source_segments = quoted_matches if quoted_matches else cleaned_input.split("§")
-
-    snippets = []
-    for segment in source_segments:
-        cleaned = _clean_inline_text(segment)
-        cleaned = cleaned.strip('"').strip("'")
-        cleaned = cleaned.replace('"', "'")
-        if cleaned:
-            snippets.append(cleaned)
-    return snippets
+def _build_classify_user_prompt(codebook: str, posts_batch: str, methodology: str) -> str:
+    return (
+        "Apply CODEBOOK to ITEMS CONTENT and return only the required JSON. "
+        "Use as many relevant codes per item as evidence supports, and as many quotes "
+        "per code as the item's CONTENT actually supports."
+        f"\n\nCODEBOOK:\n{codebook}\n\nITEMS CONTENT:\n{posts_batch}\n\nMETHODOLOGY:\n{methodology}"
+    )
 
 
-def _format_evidence_segments(evidence_segments: list[str]) -> str:
-    formatted = []
-    for segment in evidence_segments:
-        cleaned = _clean_inline_text(segment)
-        cleaned = cleaned.strip('"').strip("'")
-        cleaned = cleaned.replace('"', "'")
-        if cleaned:
-            formatted.append(f'"{cleaned}"')
-    return "§".join(formatted)
+async def classify_posts(
+    codebook: str,
+    posts_content: str,
+    methodology: str,
+    api_key: str,
+    model: str = "",
+    *,
+    progress: ProgressTracker | None = None,
+) -> tuple[list[dict], str, str, dict]:
+    """Classify every item (post or comment) in ``posts_content`` against
+    ``codebook``.
 
+    ``posts_content`` (assembled by
+    ``coding_service._assemble_posts_content`` as one or more
+    ``POST_ID:``/``TYPE:``/``CONTENT:`` records per item, joined with
+    ``context_window.ITEM_SEPARATOR``) is chunked to fit the chosen
+    model's context window when it's too large for one call --
+    classification is independent per item (a fixed codebook applied to
+    each item in isolation), so item ids are disjoint across batches by
+    construction and the per-batch parsed entries are simply concatenated,
+    no cross-batch reconciliation needed (same shape as
+    ``filter_db._run_batched_filter``).
 
-def _is_valid_evidence_block(evidence_block: str) -> bool:
-    raw_block = (evidence_block or "").strip()
-    if not raw_block:
-        return False
-    if not QUOTED_EVIDENCE_BLOCK_RE.fullmatch(raw_block):
-        return False
-    return bool(_split_evidence_snippets(raw_block))
+    A comment's record carries an ``IN_REPLY_TO:`` line with its parent
+    post's title/text for context -- the model must never quote that line,
+    only the comment's own ``CONTENT:``.
 
+    Returns ``(coding_entries, system_prompt, last_user_prompt, coverage)``
+    -- ``coding_entries`` is a flat list of ``{item_id, code, quotes}``
+    dicts merged across every batch (structurally parsed, but *not yet*
+    checked against real data -- that anti-hallucination pass happens in
+    ``coding_service`` via ``core/evidence_match.py``). ``coverage`` (see
+    ``context_window.run_sequential_batches``) reports whether every
+    batch's classification call succeeded; if a later batch fails (e.g.
+    the account runs out of credits mid-run), entries from batches that
+    already succeeded are still returned rather than discarded.
+    """
 
-def _extract_structured_records(raw_text: str) -> list[tuple[str, list[tuple[str, list[str]]]]]:
-    lines = _preprocess_output_lines(raw_text)
-    records: list[tuple[str, list[tuple[str, list[str]]]]] = []
-    current_post_id: str | None = None
-    current_entries: list[tuple[str, list[str]]] = []
-    pending_code: str | None = None
-
-    def flush_current() -> None:
-        nonlocal current_post_id, current_entries, pending_code
-        if current_post_id and current_entries:
-            records.append((current_post_id, current_entries))
-        current_post_id = None
-        current_entries = []
-        pending_code = None
-
-    def append_entry(code_value: str, evidence_value: str) -> None:
-        code_name = _clean_inline_text(code_value)
-        evidence_segments = _split_evidence_snippets(evidence_value)
-        if code_name and evidence_segments:
-            current_entries.append((code_name, evidence_segments))
-
-    for line in lines:
-        post_match = POST_ID_LINE_RE.match(line)
-        if post_match:
-            flush_current()
-            post_id = _clean_inline_text(post_match.group(1))
-            current_post_id = post_id if post_id else None
-            continue
-
-        if not current_post_id:
-            continue
-
-        code_evidence_match = CODE_EVIDENCE_LINE_RE.match(line)
-        if code_evidence_match:
-            append_entry(code_evidence_match.group(1), code_evidence_match.group(2))
-            pending_code = None
-            continue
-
-        code_match = CODE_LINE_RE.match(line)
-        if code_match:
-            pending_code = _clean_inline_text(code_match.group(1))
-            continue
-
-        evidence_match = EVIDENCE_LINE_RE.match(line)
-        if evidence_match and pending_code:
-            append_entry(pending_code, evidence_match.group(1))
-            pending_code = None
-
-    flush_current()
-    return records
-
-
-def normalize_coding_output(raw_text: str) -> str:
-    records = _extract_structured_records(raw_text)
-    out_lines: list[str] = []
-
-    for post_id, entries in records:
-        out_lines.append(f"POST_ID: {post_id}")
-        for code_name, evidence_segments in entries:
-            evidence_text = _format_evidence_segments(evidence_segments)
-            if evidence_text:
-                out_lines.append(f"CODE: {code_name}")
-                out_lines.append(f"EVIDENCE: {evidence_text}")
-        out_lines.append("")
-
-    return "\n".join(out_lines).strip()
-
-
-def validate_coding_output(normalized_text: str) -> bool:
-    lines = [line.strip() for line in (normalized_text or "").splitlines() if line.strip()]
-    if not lines:
-        return False
-
-    saw_post = False
-    current_post_has_code = False
-    pending_code = False
-
-    for line in lines:
-        post_match = POST_ID_LINE_RE.match(line)
-        if post_match:
-            if pending_code:
-                return False
-            if saw_post and not current_post_has_code:
-                return False
-            post_id = _clean_inline_text(post_match.group(1))
-            if not post_id:
-                return False
-            saw_post = True
-            current_post_has_code = False
-            continue
-
-        if not saw_post:
-            return False
-
-        one_line_match = CODE_EVIDENCE_LINE_RE.match(line)
-        if one_line_match:
-            code_name = _clean_inline_text(one_line_match.group(1))
-            evidence_block = one_line_match.group(2)
-            if not code_name or not _is_valid_evidence_block(evidence_block):
-                return False
-            current_post_has_code = True
-            pending_code = False
-            continue
-
-        code_line_match = CODE_LINE_RE.match(line)
-        if code_line_match:
-            code_name = _clean_inline_text(code_line_match.group(1))
-            if not code_name or pending_code:
-                return False
-            pending_code = True
-            continue
-
-        evidence_line_match = EVIDENCE_LINE_RE.match(line)
-        if evidence_line_match:
-            if not pending_code:
-                return False
-            evidence_block = evidence_line_match.group(1)
-            if not _is_valid_evidence_block(evidence_block):
-                return False
-            current_post_has_code = True
-            pending_code = False
-            continue
-
-        return False
-
-    if pending_code:
-        return False
-
-    if saw_post and not current_post_has_code:
-        return False
-
-    return saw_post
-
-async def classify_posts(codebook: str, posts_content: str, methodology: str, api_key: str, model: str = "") -> tuple[str, str, str]:
-    
     print("Starting codebook application process...")
-    
+
     system_prompt = (
         "You are a qualitative data coder.\n"
-        "Apply CODEBOOK to POSTS CONTENT using METHODOLOGY.\n"
-        "Return plain text only in this exact format:\n"
-        "POST_ID: <exact_post_id_from_input>\n"
-        "CODE: <exact_code_name_from_codebook>\n"
-        "EVIDENCE: \"<exact_snippet>\"§\"<exact_snippet>\"\n"
-        "CODE: <exact_code_name_from_codebook>\n"
-        "EVIDENCE: \"<exact_snippet>\"§\"<exact_snippet>\"\n"
-
-        "POST_ID: <exact_post_id_from_input>\n"
-        "CODE: <exact_code_name_from_codebook>\n"
-        "EVIDENCE: \"<exact_snippet>\"§\"<exact_snippet>\"\n"
-        
-        "POST_ID: <exact_post_id_from_input>\n"
-        "CODE: <exact_code_name_from_codebook>\n"
-        "EVIDENCE: \"<exact_snippet>\"§\"<exact_snippet>\"\n"
-
-
+        "Apply CODEBOOK to ITEMS CONTENT using METHODOLOGY.\n"
+        "Each item in ITEMS CONTENT is separated by a line reading exactly \"<<<ITEM>>>\" and has a POST_ID, "
+        "a TYPE (post or comment), and a CONTENT field; a comment item may also have an IN_REPLY_TO field "
+        "giving its parent post's title/text as context only.\n\n"
+        "Return a single JSON object of exactly this shape (no markdown, no code fences, no explanation "
+        "text -- the JSON object and nothing else):\n"
+        '{"codings": [{"item_id": "<exact_post_id_from_input>", '
+        '"code": "<exact_code_name_from_codebook>", '
+        '"quotes": ["<exact_substring_from_that_items_CONTENT>", "..."]}]}\n\n'
         "Rules:\n"
-        "- Use only POST_ID values that appear in POSTS CONTENT.\n"
-        "- Use only exact code names from CODEBOOK WITHOUT code family name.\n"
-        "- For each included post, output one or more CODE EVIDENCE pairs.\n"
-        "- EVIDENCE snippets must be exact contiguous substrings copied from source content.\n"
-        "- Keep each snippet quoted; use § only between snippets for the same code.\n"
-        "- Do not output markdown, bullets, headings, code fences, or explanation text.\n"
-        "- Omit posts with no applicable codes."
-        "- Apply CODEBOOK on as many posts as possible based on evidence in the content"
+        "- item_id must be copied verbatim from that item's own POST_ID line, including any prefix such as "
+        "t3_ or t1_.\n"
+        "- code must be an exact code name from CODEBOOK, without its code family name.\n"
+        "- Output one object per (item, code) pair -- if the same code applies to an item for more than one "
+        "reason, list every supporting quote in that one object's quotes array rather than repeating the "
+        "object.\n"
+        "- Every quote must be an exact, contiguous substring of that item's own CONTENT field -- never from "
+        "TITLE or IN_REPLY_TO, and never paraphrased, summarized, truncated with \"...\", or reformatted. "
+        "Copy the characters exactly as they appear, including original punctuation and capitalization.\n"
+        "- Consider every item in ITEMS CONTENT and attempt to code each one; omit an item from the output "
+        "entirely only if truly no code in CODEBOOK applies to it, not merely because it is ambiguous or "
+        "brief.\n"
+        "- Do not invent an item_id, a code, or a quote that doesn't genuinely appear in the input."
     )
-    
-    user_prompt = (
-        "Apply CODEBOOK to POSTS CONTENT and return only the required format. "
-        "Use as many relevant codes per post as evidence supports. "
-        "Each evidence snippet must be quoted; use § only between snippets for one code. "
-        f"\n\nCODEBOOK:\n{codebook}\n\nPOSTS CONTENT:\n{posts_content}\n\nMETHODOLOGY:\n{methodology}"
-    )
-    
-    print("Prompts prepared. Sending request to AI model...")
-    chosen_model = model or FREE_MODEL
-    raw_result = await get_client(system_prompt, user_prompt, api_key, chosen_model)
-    normalized_result = normalize_coding_output(raw_result)
 
-    if validate_coding_output(normalized_result):
-        result = normalized_result
-    else:
-        print("Coding output failed canonical validation. Returning raw AI output.")
-        result = (raw_result or "").strip() or normalized_result
+    chosen_model = model or FREE_MODEL
+
+    # Reserve room for everything the prompt repeats in every batch (the
+    # codebook and methodology can themselves be large) so only the
+    # remaining budget is spent on posts_content.
+    reserved_chars = len(system_prompt) + len(_build_classify_user_prompt(codebook, "", methodology)) + 1000
+    max_content_chars = context_window.max_prompt_chars(
+        chosen_model,
+        reserved_chars=reserved_chars,
+        # Output is a JSON object with one entry per (item, code) pair,
+        # each quoting the source text back -- the heaviest output-per-
+        # input of any pipeline, so reserve a larger share.
+        output_reserve_tokens=context_window.proportional_output_reserve(chosen_model, 0.35),
+    )
+    batches = context_window.batch_by_separator(posts_content, max_content_chars, separator=context_window.ITEM_SEPARATOR)
+
+    print(f"Prompts prepared. Sending request to AI model across {len(batches)} batch(es)...")
+
+    if progress is not None:
+        await progress.add_total(len(batches))
+
+    user_prompts = [_build_classify_user_prompt(codebook, batch, methodology) for batch in batches]
+
+    async def _run_one_batch(i: int, batch: str) -> list[dict]:
+        raw_result = await get_client(system_prompt, user_prompts[i], api_key, chosen_model)
+        try:
+            return parse_coding_response(raw_result)
+        except ValueError as exc:
+            print(f"Batch {i+1}/{len(batches)} output could not be parsed as JSON: {exc}")
+            return []
+
+    batch_results, coverage = await context_window.run_sequential_batches(batches, _run_one_batch, progress=progress)
+    coding_entries = [entry for batch_entries in batch_results for entry in (batch_entries or [])]
+    last_user_prompt = user_prompts[-1] if user_prompts else ""
 
     print("Response received from AI model. Codebook application completed.")
-    return result, system_prompt, user_prompt
-
-
+    return coding_entries, system_prompt, last_user_prompt, coverage

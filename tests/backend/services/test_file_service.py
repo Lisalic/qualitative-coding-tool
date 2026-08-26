@@ -86,7 +86,7 @@ class TestDeleteDatabase:
             session.add(_submission(f.id, "s1"))
             session.add(_comment(f.id, "c1"))
             session.add(ArtifactContent(file_id=f.id, content="x"))
-            session.add(CodingEntry(file_id=f.id, post_id="p1", code="code1", evidence="e"))
+            session.add(CodingEntry(file_id=f.id, post_id="p1", code="code1", quote="e", start_offset=0, end_offset=1))
             session.add(FileTable(file_id=f.id, tablename="submissions", row_count=1))
             session.add(FileDependency(child_file_id=f.id, parent_file_id=other.id))
             await session.commit()

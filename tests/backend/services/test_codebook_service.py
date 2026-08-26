@@ -689,3 +689,41 @@ class TestCompareCodebooksJobHandlerEndToEnd:
             assert finished.status == "failed"
             assert "No content found" in finished.error
             assert not get_client_mock.called
+
+    async def test_raises_context_budget_error_when_codebooks_dont_fit(self, session_factory, monkeypatch) -> None:
+        # Codebooks are compact taxonomies with nothing to aggregate, so a
+        # comparison that overflows the window fails loudly rather than
+        # leaning on a silent middle-out truncation.
+        get_client_mock = AsyncMock(return_value="should not be called")
+        monkeypatch.setattr(
+            "backend.app.services.codebook_service.codebook_generator_module.get_client",
+            get_client_mock,
+        )
+        monkeypatch.setattr(
+            "backend.app.services.codebook_service.context_window.prompt_fits",
+            lambda model, **kwargs: False,
+        )
+
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_a = await _make_file(session, user.id, file_type="codebook", schemaname="proj_a")
+            file_b = await _make_file(session, user.id, file_type="codebook", schemaname="proj_b")
+            await artifact_content_repo.write_content(session, file_a.id, "codebook A text")
+            await artifact_content_repo.write_content(session, file_b.id, "codebook B text")
+            await session.commit()
+
+            job = await codebook_service.start_compare_codebooks_job(
+                session,
+                user.id,
+                codebook_a=file_a.schemaname,
+                codebook_b=file_b.schemaname,
+                api_key="sk-secret",
+                model=None,
+                prompt="",
+                name="A vs B",
+            )
+
+            finished = await _wait_for_terminal_status(session, job.id, user.id)
+            assert finished.status == "failed"
+            assert "larger-context model" in finished.error
+            assert not get_client_mock.called

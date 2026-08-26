@@ -26,7 +26,6 @@ from backend.scripts.migrate_to_fixed_tables import (
     CODING_FILE_TYPE,
     CONTENT_ONLY_FILE_TYPES,
     RAW_TABLE_FILE_TYPES,
-    _parse_coding_entries,
     _word_count,
     build_arg_parser,
     format_reports,
@@ -162,36 +161,6 @@ class TestWordCount:
 
     def test_collapses_internal_whitespace(self) -> None:
         assert _word_count("hello   world\nfoo") == 3
-
-
-class TestParseCodingEntries:
-    def test_multi_post_multi_code(self) -> None:
-        rows = _parse_coding_entries(CODING_BLOB)
-        assert len(rows) == 3
-        by_key = {(r["post_id"], r["code"]): r["evidence"] for r in rows}
-        assert by_key[("p1", "anxiety")] == '"felt nervous"'
-        assert by_key[("p1", "hope")] == '"things will improve"'
-        assert by_key[("p2", "anxiety")] == '"worried sick"'
-
-    def test_no_records_returns_empty_list(self) -> None:
-        assert _parse_coding_entries("not in the expected format at all") == []
-
-    def test_duplicate_post_code_pair_merges_evidence(self) -> None:
-        blob = (
-            "POST_ID: p1\n"
-            "CODE: anxiety\n"
-            'EVIDENCE: "first snippet"\n'
-            "\n"
-            "POST_ID: p1\n"
-            "CODE: anxiety\n"
-            'EVIDENCE: "second snippet"\n'
-        )
-        rows = _parse_coding_entries(blob)
-        assert len(rows) == 1
-        assert rows[0]["post_id"] == "p1"
-        assert rows[0]["code"] == "anxiety"
-        assert "first snippet" in rows[0]["evidence"]
-        assert "second snippet" in rows[0]["evidence"]
 
 
 class TestBuildArgParser:
@@ -521,7 +490,14 @@ class TestMigrateContentOnlyFileTypes:
 
 
 class TestMigrateCodingFileType:
-    def test_happy_path_copies_content_and_structured_entries(self, db_session, monkeypatch) -> None:
+    """A `coding` file's old `content_store` blob still gets copied into
+    `artifact_content` -- but there is no `coding_entries` backfill any
+    more (see `_migrate_coding_file`'s docstring): the new schema requires
+    a resolved `start_offset`/`end_offset` per row, and this old dynamic
+    schema never stored the item content needed to resolve one.
+    """
+
+    def test_happy_path_copies_content_only(self, db_session, monkeypatch) -> None:
         user = _make_user(db_session)
         file = _make_file(db_session, user, file_type=CODING_FILE_TYPE, schemaname="proj_coding1")
 
@@ -535,15 +511,11 @@ class TestMigrateCodingFileType:
         assert report.files_migrated == 1
         assert report.files_errored == 0
         assert report.rows_copied["artifact_content"] == 1
-        assert report.rows_copied["coding_entries"] == 3
+        assert "coding_entries" not in report.rows_copied
 
         content_row = db_session.query(ArtifactContent).filter(ArtifactContent.file_id == file.id).one()
         assert content_row.content == CODING_BLOB
-
-        entries = db_session.query(CodingEntry).filter(CodingEntry.file_id == file.id).all()
-        assert len(entries) == 3
-        codes = {(e.post_id, e.code) for e in entries}
-        assert codes == {("p1", "anxiety"), ("p1", "hope"), ("p2", "anxiety")}
+        assert db_session.query(CodingEntry).filter(CodingEntry.file_id == file.id).count() == 0
 
     def test_does_not_copy_the_redundant_parent_codebook_table(self, db_session, monkeypatch) -> None:
         """The old schema's `codebook` table (a redundant copy of the
@@ -568,24 +540,6 @@ class TestMigrateCodingFileType:
         assert report.files_migrated == 1
         assert report.files_errored == 0
 
-    def test_malformed_blob_logs_and_continues_without_crashing(self, db_session, monkeypatch) -> None:
-        user = _make_user(db_session)
-        file = _make_file(db_session, user, file_type=CODING_FILE_TYPE, schemaname="proj_coding3")
-
-        engine = _make_mock_engine(
-            {"proj_coding3": {"tables": {"content_store"}, "content_text": "totally not the expected format"}}
-        )
-        monkeypatch.setattr("backend.scripts.migrate_to_fixed_tables.engine", engine)
-
-        report = migrate_file_type(db_session, CODING_FILE_TYPE)
-
-        # Content still gets copied even though no structured records parse out.
-        assert report.files_migrated == 1
-        assert report.rows_copied["artifact_content"] == 1
-        assert report.rows_copied["coding_entries"] == 0
-        assert db_session.query(ArtifactContent).filter(ArtifactContent.file_id == file.id).count() == 1
-        assert db_session.query(CodingEntry).filter(CodingEntry.file_id == file.id).count() == 0
-
     def test_idempotent_rerun_does_not_duplicate(self, db_session, monkeypatch) -> None:
         user = _make_user(db_session)
         file = _make_file(db_session, user, file_type=CODING_FILE_TYPE, schemaname="proj_coding4")
@@ -601,7 +555,6 @@ class TestMigrateCodingFileType:
         assert report2.files_skipped == 1
         assert report2.files_migrated == 0
         assert db_session.query(ArtifactContent).filter(ArtifactContent.file_id == file.id).count() == 1
-        assert db_session.query(CodingEntry).filter(CodingEntry.file_id == file.id).count() == 3
 
 
 # ---------------------------------------------------------------------------

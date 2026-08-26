@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Body, Depends, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.auth_dependency import require_user_id
-from backend.app.api.schemas import FilterDataRequest, as_form
+from backend.app.api.schemas import FilterDataRequest, PostContentsRequest, as_form
 from backend.app.database import get_async_db
 from backend.app.services import data_service
 
@@ -54,19 +54,17 @@ async def get_comments_for_submission(
 
 @router.post("/post-contents/")
 async def get_post_contents(
-    body: dict = Body(...),
+    payload: PostContentsRequest,
     user_id: int = Depends(require_user_id),
     db: AsyncSession = Depends(get_async_db),
 ) -> JSONResponse:
-    """Title/selftext for a set of submission ids, from a file owned by the
-    authenticated user. Structural fix for the old SQL-injection-adjacent
-    gap: the schema name is resolved to an ownership-checked ``file_id``
-    via ``file_repo`` before any query runs -- see
-    ``backend/app/services/data_service.py::get_post_contents``.
+    """Title/content for a set of post and/or comment ids, from a file
+    owned by the authenticated user. Structural fix for the old
+    SQL-injection-adjacent gap: the schema name is resolved to an
+    ownership-checked ``file_id`` via ``file_repo`` before any query runs
+    -- see ``backend/app/services/data_service.py::get_post_contents``.
     """
-    schema = body.get("schema")
-    post_ids = body.get("post_ids", [])
-    contents = await data_service.get_post_contents(db, user_id, schema, post_ids)
+    contents = await data_service.get_post_contents(db, user_id, payload.schema_, payload.post_ids)
     return JSONResponse(contents)
 
 
@@ -94,5 +92,6 @@ async def filter_data(
         filter_tags=payload.filter_tags,
         description=payload.description,
         project_id=payload.project_id,
+        content_scope=payload.content_scope,
     )
     return JSONResponse({"job_id": job.id, "status": job.status}, status_code=202)

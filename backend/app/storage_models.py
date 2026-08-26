@@ -76,22 +76,42 @@ class ArtifactContent(Base):
 
 
 class CodingEntry(Base):
-    """Structured coding output: one row per (post, code) pair.
+    """Structured coding output: one row per (item, code, quote) --
+    i.e. one row per *quote*, not per code, since a single code can be
+    supported by several distinct quotes in the same item.
 
-    Populated from the same POST_ID/CODE/EVIDENCE parse
-    ``backend/scripts/codebook_apply.py`` already does -- this persists
-    the structure that used to be parsed out and then discarded when the
-    classification text was flattened back into one blob. Enables
-    ``SELECT code, COUNT(*) ... GROUP BY code`` directly in SQL.
+    Populated from the AI's JSON output (``backend/scripts/codebook_apply.py::
+    classify_posts``) after it passes every anti-hallucination check in
+    ``backend/app/services/coding_service.py`` (item exists, code exists in
+    the codebook, quote exists verbatim-or-normalized in the item's own
+    text -- see ``backend/app/core/evidence_match.py``), or from a manual
+    edit whose ``quote``/offsets are computed directly from the real DOM
+    selection range (``HighlightedContent.jsx``). Either way, ``quote`` is
+    always the exact substring ``content[start_offset:end_offset]`` of the
+    item's own body text -- there is no unverified free-text evidence
+    column any more, and nothing here is a raw, unparsed AI response.
+
+    ``row_type`` (``"submission"`` or ``"comment"``, see
+    ``backend/app/core/item_types.py``) distinguishes a coded post from a
+    coded comment -- ``post_id`` alone is not enough, since submission and
+    comment ids share one bare-string namespace (both strip their Reddit
+    fullname prefix at import) and a genuine collision between the two
+    tables would otherwise silently merge into one row.
     """
 
     __tablename__ = "coding_entries"
 
-    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), primary_key=True)
-    post_id = Column(String, primary_key=True)
-    code = Column(String, primary_key=True)
-    evidence = Column(Text)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=False)
+    row_type = Column(String, nullable=False, server_default="submission", default="submission")
+    post_id = Column(String, nullable=False)
+    code = Column(String, nullable=False)
+    quote = Column(Text, nullable=False)
+    start_offset = Column(Integer, nullable=False)
+    end_offset = Column(Integer, nullable=False)
+    notes = Column(Text)
 
     __table_args__ = (
         Index("idx_coding_entries_file_id_code", "file_id", "code"),
+        Index("idx_coding_entries_file_id_row", "file_id", "row_type", "post_id"),
     )
