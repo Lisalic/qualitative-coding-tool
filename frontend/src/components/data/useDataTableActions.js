@@ -75,43 +75,6 @@ export function useDataTableActions({
     [keyFor],
   );
 
-  const deleteRow = useCallback(
-    async (table, id) => {
-      if (!currentDatabase || !id) return;
-      const confirmed = await ToastService.confirm(
-        `Delete this ${table === "comments" ? "comment" : "post"} permanently?`,
-      );
-      if (!confirmed) return;
-
-      try {
-        setLoading(true);
-        const form = new FormData();
-        form.append("schema", currentDatabase);
-        form.append("table", table);
-        form.append("row_id", id);
-
-        const response = await apiFetch("/api/delete-row/", {
-          method: "POST",
-          body: form,
-        });
-
-        if (!response.ok) {
-          const text = await response.text();
-          throw new Error(`Delete failed: ${response.status} ${text}`);
-        }
-
-        const data = await response.json();
-        if (data.error) throw new Error(data.error);
-        await fetchEntries();
-      } catch (error) {
-        setError(`Error deleting row: ${error.message}`);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [currentDatabase, fetchEntries, setError, setLoading],
-  );
-
   const deleteSelected = useCallback(async () => {
     if (!currentDatabase || selectedRows.size === 0) return;
     const confirmed = await ToastService.confirm(
@@ -226,7 +189,6 @@ export function useDataTableActions({
     isSelected,
     toggleSelection,
     toggleSelectAll,
-    deleteRow,
     deleteSelected,
     moveSelected,
   };

@@ -93,7 +93,6 @@ export default function DataTable({
     isSelected,
     toggleSelection,
     toggleSelectAll,
-    deleteRow,
     deleteSelected,
     moveSelected,
   } = useDataTableActions({
@@ -104,10 +103,11 @@ export default function DataTable({
     setError,
   });
 
-  // Clear selections when view changes (new DB, page, limit, or search)
+  // Clear selections only when switching databases. Page, page size, and search
+  // changes intentionally do NOT clear selection, so it persists across them.
   useEffect(() => {
     setSelectedRows(new Set());
-  }, [currentDatabase, page, limit, searchTerm, setSelectedRows]);
+  }, [currentDatabase, setSelectedRows]);
 
   const handleRowClick = (entry, type) => {
     setSelectedEntry({ ...entry, type });
@@ -360,7 +360,6 @@ export default function DataTable({
                         <>
                           <th className={thClasses}>Title</th>
                           <th className={thClasses}>Selftext</th>
-                          <th className={thClasses}>Actions</th>
                         </>
                       ) : (
                         <>
@@ -368,7 +367,6 @@ export default function DataTable({
                           <th className={thClasses}>Title</th>
                           <th className={thClasses}>Author</th>
                           <th className={thClasses}>Score</th>
-                          <th className={thClasses}>Actions</th>
                         </>
                       )}
                     </tr>
@@ -400,18 +398,6 @@ export default function DataTable({
                             <td className={`${tdClasses} max-w-[300px] truncate`}>
                               {sub.selftext}
                             </td>
-                            <td className={tdClasses}>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  deleteRow("submissions", sub.id);
-                                }}
-                                className={btnClasses}
-                              >
-                                Delete
-                              </button>
-                            </td>
                           </>
                         ) : (
                           <>
@@ -421,18 +407,6 @@ export default function DataTable({
                             </td>
                             <td className={tdClasses}>{sub.author}</td>
                             <td className={tdClasses}>{sub.score}</td>
-                            <td className={tdClasses}>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  deleteRow("submissions", sub.id);
-                                }}
-                                className={btnClasses}
-                              >
-                                Delete
-                              </button>
-                            </td>
                           </>
                         )}
                       </tr>
@@ -471,7 +445,6 @@ export default function DataTable({
                       <th className={thClasses}>Body</th>
                       <th className={thClasses}>Author</th>
                       <th className={thClasses}>Score</th>
-                      <th className={thClasses}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -499,18 +472,6 @@ export default function DataTable({
                         </td>
                         <td className={tdClasses}>{comment.author}</td>
                         <td className={tdClasses}>{comment.score}</td>
-                        <td className={tdClasses}>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              deleteRow("comments", comment.id);
-                            }}
-                            className={btnClasses}
-                          >
-                            Delete
-                          </button>
-                        </td>
                       </tr>
                     ))}
                   </tbody>
