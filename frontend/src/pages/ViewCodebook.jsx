@@ -11,15 +11,21 @@ export default function ViewCodebook() {
     projectsList,
     selectedProject,
     setSelectedProject,
-    codebookContent,
+    codebookTree,
     selectedCodebookName,
     loading,
     error,
-    viewMode,
-    setViewMode,
     systemPrompt,
-    userPrompt,
-    handleSelectionChangeAfterSave,
+    instructions,
+    promptMeta,
+    isEditMode,
+    codebookDraft,
+    setCodebookDraft,
+    saveState,
+    beginEdit,
+    cancelEdit,
+    saveEdit,
+    duplicateFrom,
   } = useViewCodebookPage();
 
   return (
@@ -35,17 +41,22 @@ export default function ViewCodebook() {
         emptyMessage="No codebooks available"
       />
       <CodebookWorkspaceSection
-        viewMode={viewMode}
-        onViewModeChange={setViewMode}
         selectedCodebook={selectedCodebook}
         selectedCodebookName={selectedCodebookName}
-        availableCodebooks={availableCodebooks}
         systemPrompt={systemPrompt}
-        userPrompt={userPrompt}
-        onSelectionChangeAfterSave={handleSelectionChangeAfterSave}
-        codebookContent={codebookContent}
+        instructions={instructions}
+        promptMeta={promptMeta}
+        codebookTree={codebookTree}
         loading={loading}
         error={error}
+        isEditMode={isEditMode}
+        codebookDraft={codebookDraft}
+        setCodebookDraft={setCodebookDraft}
+        saveState={saveState}
+        onBeginEdit={beginEdit}
+        onCancelEdit={cancelEdit}
+        onSaveEdit={saveEdit}
+        onDuplicateFrom={duplicateFrom}
       />
     </ViewPageShell>
   );

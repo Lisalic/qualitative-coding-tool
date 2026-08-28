@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { apiFetch } from "../../api";
+import { apiFetch, requestJson } from "../../api";
+import { cloneCodebookTree, flattenTreeToCodes, groupCodesByFamily } from "../../lib/codingUtils";
 
 function matchesPreselection(item, value) {
   return (
@@ -17,13 +18,17 @@ export default function useViewCodebookPage() {
   const [selectedCodebook, setSelectedCodebook] = useState(null);
   const [projectsList, setProjectsList] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
-  const [codebookContent, setCodebookContent] = useState("");
+  const [codebookTree, setCodebookTree] = useState([]);
   const [selectedCodebookName, setSelectedCodebookName] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [viewMode, setViewMode] = useState("tree");
   const [systemPrompt, setSystemPrompt] = useState("");
-  const [userPrompt, setUserPrompt] = useState("");
+  const [instructions, setInstructions] = useState("");
+  const [promptMeta, setPromptMeta] = useState(null);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [codebookDraft, setCodebookDraft] = useState([]);
+  const [saveState, setSaveState] = useState({ status: "idle", message: "" });
+  const [refreshKey, setRefreshKey] = useState(0);
   // The codebook list refetches for reasons unrelated to the initial
   // "view" navigation (e.g. once the project list finishes loading in),
   // and each refetch used to unconditionally re-apply the location.state
@@ -117,15 +122,10 @@ export default function useViewCodebookPage() {
       const response = await apiFetch(`/api/codebook?codebook_id=${codebookId}`);
       if (!response.ok) throw new Error("Failed to fetch codebook");
       const data = await response.json();
-      if (!data.codebook) {
-        setCodebookContent("");
-        setSystemPrompt("");
-        setUserPrompt("");
-        return;
-      }
-      setCodebookContent(data.codebook);
+      setCodebookTree(groupCodesByFamily(data.codes));
       setSystemPrompt(data.systemprompt || "");
-      setUserPrompt(data.userprompt || "");
+      setInstructions(data.instructions || "");
+      setPromptMeta(data.prompt_meta || null);
     } catch (fetchError) {
       setError(fetchError.message);
     } finally {
@@ -133,36 +133,80 @@ export default function useViewCodebookPage() {
     }
   }, []);
 
-  const handleSelectionChangeAfterSave = useCallback(
-    (resp) => {
-      if (typeof resp === "string") {
-        if (resp !== selectedCodebook) {
-          setSelectedCodebook(resp);
-          fetchAvailableCodebooks();
-        }
-      } else if (resp && resp.display_name) {
-        setSelectedCodebookName(resp.display_name);
-        fetchAvailableCodebooks();
+  const beginEdit = useCallback(() => {
+    setCodebookDraft(cloneCodebookTree(codebookTree));
+    setIsEditMode(true);
+    setSaveState({ status: "idle", message: "" });
+  }, [codebookTree]);
+
+  const cancelEdit = useCallback(() => {
+    setIsEditMode(false);
+    setCodebookDraft([]);
+    setSaveState({ status: "idle", message: "" });
+  }, []);
+
+  const saveEdit = useCallback(
+    async (displayName) => {
+      if (!selectedCodebook) {
+        setSaveState({ status: "error", message: "No codebook selected." });
+        return;
       }
+      setSaveState({ status: "saving", message: "Saving..." });
+      const codes = flattenTreeToCodes(codebookDraft);
+      const result = await requestJson(`/api/codebook/${encodeURIComponent(selectedCodebook)}`, {
+        method: "PUT",
+        body: { codes, display_name: displayName },
+      });
+      if (!result.ok) {
+        setSaveState({ status: "error", message: result.error || "Failed to save codebook." });
+        return;
+      }
+      setIsEditMode(false);
+      setCodebookDraft([]);
+      setSaveState({ status: "success", message: "Saved." });
+      setRefreshKey((key) => key + 1);
+      await fetchCodebook(selectedCodebook);
+      await fetchAvailableCodebooks();
     },
-    [fetchAvailableCodebooks, selectedCodebook],
+    [selectedCodebook, codebookDraft, fetchCodebook, fetchAvailableCodebooks],
+  );
+
+  const duplicateFrom = useCallback(
+    async (versionNo, displayName) => {
+      if (!selectedCodebook) return { ok: false, error: "No codebook selected." };
+      const result = await requestJson(`/api/codebook/${encodeURIComponent(selectedCodebook)}/duplicate`, {
+        method: "POST",
+        body: { display_name: displayName, from_version_no: versionNo || undefined },
+      });
+      if (!result.ok) return { ok: false, error: result.error };
+      await fetchAvailableCodebooks();
+      return { ok: true };
+    },
+    [selectedCodebook, fetchAvailableCodebooks],
   );
 
   useEffect(() => {
-    fetchAvailableCodebooks();
     fetchProjects();
-  }, [fetchAvailableCodebooks, fetchProjects]);
+  }, [fetchProjects]);
+
+  useEffect(() => {
+    fetchAvailableCodebooks();
+  }, [fetchAvailableCodebooks]);
 
   useEffect(() => {
     if (!selectedCodebook) return;
     fetchCodebook(selectedCodebook);
+  }, [fetchCodebook, selectedCodebook]);
+
+  useEffect(() => {
     const selected = availableCodebooks.find(
       (codebook) => String(codebook.id) === String(selectedCodebook),
     );
+    if (!selected) return;
     setSelectedCodebookName(
-      selected?.display_name || selected?.name || selected?.id || "",
+      selected.display_name || selected.name || selected.id || "",
     );
-  }, [availableCodebooks, fetchCodebook, selectedCodebook]);
+  }, [availableCodebooks, selectedCodebook]);
 
   return {
     availableCodebooks,
@@ -171,14 +215,22 @@ export default function useViewCodebookPage() {
     projectsList,
     selectedProject,
     setSelectedProject,
-    codebookContent,
+    codebookTree,
     selectedCodebookName,
     loading,
     error,
-    viewMode,
-    setViewMode,
     systemPrompt,
-    userPrompt,
-    handleSelectionChangeAfterSave,
+    instructions,
+    promptMeta,
+    isEditMode,
+    codebookDraft,
+    setCodebookDraft,
+    saveState,
+    beginEdit,
+    cancelEdit,
+    saveEdit,
+    refreshKey,
+    refetchCodebook: () => selectedCodebook && fetchCodebook(selectedCodebook),
+    duplicateFrom,
   };
 }

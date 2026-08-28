@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { apiFetch, postJsonAndPoll, requestJson } from "../../../api";
 import { buildRecodeItemsPayload, MissingFieldsError } from "../../../lib/apiContracts";
-import { cloneCodebookTree, serializeCodebookTreeToText } from "../../../lib/codingUtils";
+import { cloneCodebookTree, flattenTreeToCodes, groupCodesByFamily } from "../../../lib/codingUtils";
 import { normalizeCodingRowEdits } from "../../../lib/codingViewHelpers";
 
 const ROWS_PER_PAGE = 25;
@@ -10,14 +10,35 @@ const SEARCH_DEBOUNCE_MS = 400;
 
 /**
  * Backs the 3-pane View Coding workspace (document list / reader pane /
- * codebook sidebar) -- see CodingWorkspaceSection.jsx. Tagging is
- * auto-saved per action (select text, click a code -> immediately
- * PUT /api/coding/{ref}/rows for just that one row) rather than staged
- * into a page-wide draft and saved all at once; this mirrors how a real
- * coding tool behaves and means there is no separate "edit mode" for
- * rows any more -- only the codebook (rename/add/remove families and
- * codes) still has an explicit edit/save step, since that's a batch of
- * related changes a researcher composes before committing.
+ * codebook sidebar) -- see CodingWorkspaceSection.jsx.
+ *
+ * Editing is ONE session, not three: manual tagging (select text, click
+ * a code / remove a code / edit a note), codebook changes (rename/add/
+ * remove a code or family), and accepted AI recode proposals all
+ * accumulate as staged, local changes and nothing reaches the server
+ * until `saveSession` flushes everything in one
+ * `PUT /api/coding/{ref}/revision` call. That call commits at most one
+ * new version server-side (see `coding_service.save_coding_revision`),
+ * however many of the three kinds of change it contains -- there is no
+ * separate save step per concern any more, and no version minted for a
+ * mid-session action.
+ *
+ * State for the two staged pieces:
+ * - `pendingRowEdits` (`Map<item_id, entries[]>`): a row's full desired
+ *   codes, touched by manual tag/untag/note edits AND by an accepted AI
+ *   recode proposal (see `handleRecodeSelected`) -- both replace a row's
+ *   codes wholesale, so they share one staging map. `aiProposedItemIds`
+ *   tracks which of those came from AI, purely for the "N by AI" badge
+ *   in the UI; it does not affect what gets saved.
+ * - `codebookDraft`: the codebook tree, edited in place by
+ *   `CodeLegend`/`CodingCodebookSidebar` regardless of whether the
+ *   sidebar's Edit/Done toggle is currently showing the editor -- the
+ *   toggle only switches presentation (see CodingCodebookSidebar.jsx),
+ *   it is not a save boundary. `isCodebookDirty` tracks whether the
+ *   draft differs from the last-saved `codebookTree`.
+ *
+ * `discardSession` throws both away and refetches from the server;
+ * `saveSession` sends whichever of `codes`/`rows` actually changed.
  */
 export default function useViewCodingPage() {
   const location = useLocation();
@@ -31,7 +52,8 @@ export default function useViewCodingPage() {
 
   // Artifact metadata: GET /api/coding/{ref}
   const [systemPrompt, setSystemPrompt] = useState("");
-  const [userPrompt, setUserPrompt] = useState("");
+  const [instructions, setInstructions] = useState("");
+  const [promptMeta, setPromptMeta] = useState(null);
   const [codebookTree, setCodebookTree] = useState([]);
   const [totalRows, setTotalRows] = useState(0);
   const [totalCoded, setTotalCoded] = useState(0);
@@ -51,11 +73,13 @@ export default function useViewCodingPage() {
   const [activeItemId, setActiveItemId] = useState(null);
   const [pendingSelection, setPendingSelection] = useState(null);
   const [selectedItemIds, setSelectedItemIds] = useState(() => new Set());
-  const [rowActionError, setRowActionError] = useState(null);
 
+  // Codebook draft is ALWAYS live (not just while the sidebar's edit
+  // view is showing) -- see this module's docstring. `isCodebookEditMode`
+  // is purely which presentation CodingCodebookSidebar renders.
   const [isCodebookEditMode, setIsCodebookEditMode] = useState(false);
   const [codebookDraft, setCodebookDraft] = useState([]);
-  const [codebookSaveState, setCodebookSaveState] = useState({ status: "idle", message: "" });
+  const [isCodebookDirty, setIsCodebookDirty] = useState(false);
 
   const [recodeModel, setRecodeModel] = useState("");
   const [recodeMethodology, setRecodeMethodology] = useState("");
@@ -158,15 +182,26 @@ export default function useViewCodingPage() {
     setArtifactLoading(false);
     if (!result.ok) {
       setCodebookTree([]);
+      setCodebookDraft([]);
+      setIsCodebookDirty(false);
       setSystemPrompt("");
-      setUserPrompt("");
+      setInstructions("");
+      setPromptMeta(null);
       setTotalRows(0);
       setTotalCoded(0);
       return;
     }
-    setCodebookTree(Array.isArray(result.data.codebook_tree) ? result.data.codebook_tree : []);
+    const grouped = groupCodesByFamily(result.data.codes);
+    setCodebookTree(grouped);
+    // The draft always tracks the server's codebook as its baseline --
+    // on first load AND after a successful save (this same function is
+    // re-called then, see saveSession) -- so a save leaves nothing
+    // "still dirty" behind.
+    setCodebookDraft(cloneCodebookTree(grouped));
+    setIsCodebookDirty(false);
     setSystemPrompt(result.data.file?.systemprompt || "");
-    setUserPrompt(result.data.file?.userprompt || "");
+    setInstructions(result.data.file?.instructions || "");
+    setPromptMeta(result.data.file?.prompt_meta || null);
     setTotalRows(result.data.total_rows || 0);
     setTotalCoded(result.data.total_coded || 0);
   }, []);
@@ -190,7 +225,16 @@ export default function useViewCodingPage() {
         setRowsTotal(0);
         return;
       }
-      const nextRows = Array.isArray(result.data.rows) ? result.data.rows : [];
+      const fetchedRows = Array.isArray(result.data.rows) ? result.data.rows : [];
+      // Re-apply any not-yet-saved local edits on top of the server's
+      // rows -- a page/filter/search change (or an artifact refetch
+      // after Save) must not silently drop a pending edit for a row
+      // that's still on screen after the refetch.
+      const pending = pendingRowEditsRef.current;
+      const nextRows =
+        pending.size === 0
+          ? fetchedRows
+          : fetchedRows.map((row) => (pending.has(row.item_id) ? { ...row, codes: pending.get(row.item_id) } : row));
       setRows(nextRows);
       setRowsTotal(result.data.total || 0);
       setActiveItemId((prev) => {
@@ -217,41 +261,102 @@ export default function useViewCodingPage() {
   ]);
 
   // ---------------------------------------------------------------------
-  // Row tagging -- auto-saved per action. Every mutation replaces exactly
-  // one row's coding via PUT /api/coding/{ref}/rows (a single-row array),
-  // then patches local state so the reader/list update instantly without
-  // a full page refetch.
+  // Row tagging -- staged locally (manual tags AND accepted AI recode
+  // proposals alike), not auto-saved per action. Nothing reaches the
+  // server until `saveSession` flushes the whole editing session -- see
+  // this module's docstring.
   // ---------------------------------------------------------------------
 
-  const putRowEntries = useCallback(
-    async (itemId, entries) => {
-      const schema = getSelectedCodingSchema();
-      if (!schema) {
-        setRowActionError("Unable to resolve coding schema.");
-        return false;
-      }
-      const normalized = normalizeCodingRowEdits([{ itemId, codes: entries }]);
+  const [pendingRowEdits, setPendingRowEdits] = useState(() => new Map());
+  const pendingRowEditsRef = useRef(pendingRowEdits);
+  useEffect(() => {
+    pendingRowEditsRef.current = pendingRowEdits;
+  }, [pendingRowEdits]);
+  const [aiProposedItemIds, setAiProposedItemIds] = useState(() => new Set());
+  const [sessionSaveState, setSessionSaveState] = useState({ status: "idle", message: "" });
+
+  const stageRowEdit = useCallback((itemId, entries) => {
+    setRows((prev) => prev.map((row) => (row.item_id === itemId ? { ...row, codes: entries } : row)));
+    setPendingRowEdits((prev) => {
+      const next = new Map(prev);
+      next.set(itemId, entries);
+      return next;
+    });
+    setSessionSaveState((prev) => (prev.status === "error" ? { status: "idle", message: "" } : prev));
+  }, []);
+
+  const isSessionDirty = pendingRowEdits.size > 0 || isCodebookDirty;
+  // Pending rows that came from an accepted AI recode proposal, not a
+  // manual edit -- purely for the "N by AI" bit of the bottom bar's
+  // summary (see CodingWorkspaceSection.jsx's sessionSummary); it does
+  // not affect what gets saved.
+  const aiProposedPendingCount = useMemo(() => {
+    let count = 0;
+    pendingRowEdits.forEach((_, itemId) => {
+      if (aiProposedItemIds.has(itemId)) count += 1;
+    });
+    return count;
+  }, [pendingRowEdits, aiProposedItemIds]);
+
+  const saveSession = useCallback(async () => {
+    const schema = getSelectedCodingSchema();
+    if (!schema || !isSessionDirty) return;
+
+    let normalizedRows = null;
+    if (pendingRowEdits.size > 0) {
+      const draft = Array.from(pendingRowEdits.entries()).map(([itemId, codes]) => ({ itemId, codes }));
+      const normalized = normalizeCodingRowEdits(draft);
       if (!normalized.ok) {
-        setRowActionError(normalized.error);
-        return false;
+        setSessionSaveState({ status: "error", message: normalized.error });
+        return;
       }
-      const result = await requestJson(`/api/coding/${encodeURIComponent(schema)}/rows`, {
-        method: "PUT",
-        body: { rows: normalized.rows },
-      });
-      if (!result.ok) {
-        setRowActionError(result.error || "Failed to save coding.");
-        return false;
-      }
-      setRowActionError(null);
-      setRows((prev) =>
-        prev.map((row) => (row.item_id === itemId ? { ...row, codes: entries } : row)),
-      );
-      fetchCodingArtifact(schema);
-      return true;
-    },
-    [fetchCodingArtifact, getSelectedCodingSchema],
-  );
+      normalizedRows = normalized.rows;
+    }
+
+    const body = {};
+    if (isCodebookDirty) body.codes = flattenTreeToCodes(codebookDraft);
+    if (normalizedRows) body.rows = normalizedRows;
+    // Recode's model is provenance for the version, not something the
+    // save itself needs to succeed -- only attach it when this save
+    // actually includes an accepted AI proposal.
+    if (aiProposedItemIds.size > 0 && recodeModel) body.model = recodeModel;
+
+    setSessionSaveState({ status: "saving", message: "Saving..." });
+    const result = await requestJson(`/api/coding/${encodeURIComponent(schema)}/revision`, {
+      method: "PUT",
+      body,
+    });
+    if (!result.ok) {
+      setSessionSaveState({ status: "error", message: result.error || "Failed to save." });
+      return;
+    }
+    setPendingRowEdits(new Map());
+    setAiProposedItemIds(new Set());
+    setSessionSaveState({ status: "success", message: "Saved." });
+    setRefreshKey((key) => key + 1);
+    // Also resets codebookDraft/isCodebookDirty from the freshly saved
+    // tree -- see fetchCodingArtifact.
+    fetchCodingArtifact(schema);
+  }, [
+    aiProposedItemIds,
+    codebookDraft,
+    fetchCodingArtifact,
+    getSelectedCodingSchema,
+    isCodebookDirty,
+    isSessionDirty,
+    pendingRowEdits,
+    recodeModel,
+  ]);
+
+  const discardSession = useCallback(() => {
+    setPendingRowEdits(new Map());
+    setAiProposedItemIds(new Set());
+    setCodebookDraft(cloneCodebookTree(codebookTree));
+    setIsCodebookDirty(false);
+    setIsCodebookEditMode(false);
+    setSessionSaveState({ status: "idle", message: "" });
+    refreshCurrent();
+  }, [codebookTree, refreshCurrent]);
 
   const activeRow = useMemo(
     () => rows.find((row) => row.item_id === activeItemId) || null,
@@ -263,13 +368,24 @@ export default function useViewCodingPage() {
   // every render -- an unstable callback there previously created a
   // feedback loop: new callback -> effect re-fires -> setPendingSelection
   // with a new object -> re-render -> new callback -> ... forever.
-  // `selection` is `{ text, start, end }` (offsets computed directly from
-  // the real DOM range in HighlightedContent -- see its module comment)
-  // or `null` when the selection is cleared.
+  // `selection` is `{ text, start, end, left, top }` (offsets computed
+  // directly from the real DOM range in HighlightedContent, `left`/`top`
+  // its on-screen anchor -- see its module comment) or `null` when
+  // explicitly cleared. Once captured, a selection is STICKY: this does
+  // NOT clear just because the underlying browser selection collapsed --
+  // see HighlightedContent's own comment for why that used to make the
+  // popup flash shut the instant it opened.
   const handleSelectionChange = useCallback((selection) => {
     setPendingSelection((prev) => {
       if (!selection) return prev === null ? prev : null;
-      if (prev && prev.text === selection.text && prev.start === selection.start && prev.end === selection.end) {
+      if (
+        prev &&
+        prev.text === selection.text &&
+        prev.start === selection.start &&
+        prev.end === selection.end &&
+        prev.left === selection.left &&
+        prev.top === selection.top
+      ) {
         return prev;
       }
       return selection;
@@ -277,86 +393,74 @@ export default function useViewCodingPage() {
   }, []);
 
   const applyCodeToSelection = useCallback(
-    async (code) => {
-      if (!activeRow || !pendingSelection?.text || !code) return;
+    (codeUid) => {
+      if (!activeRow || !pendingSelection?.text || !codeUid) return;
       const entries = [
         ...(Array.isArray(activeRow.codes) ? activeRow.codes : []),
         {
-          code,
+          code_uid: codeUid,
           quote: pendingSelection.text,
           start_offset: pendingSelection.start,
           end_offset: pendingSelection.end,
           notes: null,
         },
       ];
-      const ok = await putRowEntries(activeRow.item_id, entries);
-      if (ok) setPendingSelection(null);
+      stageRowEdit(activeRow.item_id, entries);
+      setPendingSelection(null);
     },
-    [activeRow, pendingSelection, putRowEntries],
+    [activeRow, pendingSelection, stageRowEdit],
   );
 
   const removeCodeEntry = useCallback(
-    async (entryIndex) => {
+    (entryIndex) => {
       if (!activeRow) return;
       const entries = (Array.isArray(activeRow.codes) ? activeRow.codes : []).filter(
         (_, idx) => idx !== entryIndex,
       );
-      await putRowEntries(activeRow.item_id, entries);
+      stageRowEdit(activeRow.item_id, entries);
     },
-    [activeRow, putRowEntries],
+    [activeRow, stageRowEdit],
   );
 
   const updateEntryNotes = useCallback(
-    async (entryIndex, notes) => {
+    (entryIndex, notes) => {
       if (!activeRow) return;
       const entries = (Array.isArray(activeRow.codes) ? activeRow.codes : []).map((entry, idx) =>
         idx === entryIndex ? { ...entry, notes } : entry,
       );
-      await putRowEntries(activeRow.item_id, entries);
+      stageRowEdit(activeRow.item_id, entries);
     },
-    [activeRow, putRowEntries],
+    [activeRow, stageRowEdit],
   );
 
   // ---------------------------------------------------------------------
-  // Codebook editing -- still an explicit begin/save/cancel batch, unlike
-  // row tagging: renaming/adding/removing several codes at once is a
-  // single coherent change a researcher composes, not a one-off action.
+  // Codebook editing -- the draft is always live (see this module's
+  // docstring); `isCodebookEditMode` only switches which presentation
+  // CodingCodebookSidebar renders. Cancel reverts the draft to the
+  // last-saved codebookTree (discarding any codebook edits made this
+  // session) and drops back to the read-only view; Done just drops back
+  // to the read-only view, keeping whatever's in the draft for the next
+  // Save Changes.
   // ---------------------------------------------------------------------
 
-  const beginCodebookEdit = useCallback(() => {
-    setCodebookDraft(cloneCodebookTree(codebookTree));
-    setCodebookSaveState({ status: "idle", message: "" });
-    setIsCodebookEditMode(true);
-  }, [codebookTree]);
-
-  const cancelCodebookEdit = useCallback(() => {
-    setIsCodebookEditMode(false);
-    setCodebookDraft([]);
-    setCodebookSaveState({ status: "idle", message: "" });
+  const handleCodebookDraftChange = useCallback((nextTree) => {
+    setCodebookDraft(nextTree);
+    setIsCodebookDirty(true);
   }, []);
 
-  const saveCodebookEdit = useCallback(async () => {
-    const schema = getSelectedCodingSchema();
-    if (!schema) {
-      setCodebookSaveState({ status: "error", message: "Unable to resolve coding schema." });
-      return;
-    }
-    setCodebookSaveState({ status: "saving", message: "Saving..." });
-    const content = serializeCodebookTreeToText(codebookDraft);
-    const result = await requestJson(`/api/coding/${encodeURIComponent(schema)}/codebook`, {
-      method: "PUT",
-      body: { content: content || " " },
-    });
-    if (!result.ok) {
-      setCodebookSaveState({ status: "error", message: result.error || "Failed to save codebook." });
-      return;
-    }
+  const beginCodebookEdit = useCallback(() => {
+    setIsCodebookEditMode(true);
+  }, []);
+
+  const finishCodebookEdit = useCallback(() => {
     setIsCodebookEditMode(false);
-    setCodebookDraft([]);
-    setCodebookSaveState({ status: "success", message: "Saved." });
-    setRefreshKey((key) => key + 1);
-    refreshCurrent();
-  }, [codebookDraft, getSelectedCodingSchema, refreshCurrent]);
+  }, []);
+
+  const cancelCodebookEdit = useCallback(() => {
+    setCodebookDraft(cloneCodebookTree(codebookTree));
+    setIsCodebookDirty(false);
+    setIsCodebookEditMode(false);
+  }, [codebookTree]);
 
   // ---------------------------------------------------------------------
   // Rename / duplicate the whole artifact
@@ -380,12 +484,12 @@ export default function useViewCodingPage() {
   );
 
   const handleDuplicate = useCallback(
-    async (displayName) => {
+    async (displayName, fromVersionNo) => {
       const schema = getSelectedCodingSchema();
       if (!schema) return { ok: false, error: "Unable to resolve coding schema." };
       const result = await requestJson(`/api/coding/${encodeURIComponent(schema)}/duplicate`, {
         method: "POST",
-        body: { display_name: displayName },
+        body: { display_name: displayName, from_version_no: fromVersionNo || undefined },
       });
       if (!result.ok) return { ok: false, error: result.error };
       await fetchAvailableCodedData();
@@ -490,31 +594,65 @@ export default function useViewCodingPage() {
       (data.rejected_unknown_item || 0) + (data.rejected_unknown_code || 0) + (data.rejected_quote_not_found || 0);
     if (rejectedTotal > 0) {
       setRecodeSummary(
-        `${data.accepted || 0} coding${data.accepted === 1 ? "" : "s"} saved. ` +
-          `${rejectedTotal} rejected as unverifiable and were not saved.`,
+        `${data.accepted || 0} coding${data.accepted === 1 ? "" : "s"} proposed. ` +
+          `${rejectedTotal} rejected as unverifiable and were not proposed.`,
       );
     }
 
+    // A recode is a proposal, not a write (see coding_service's
+    // _run_recode_items_job) -- stage each returned row into the same
+    // pending-edits map manual tags use, overwriting whatever was
+    // pending for that row (full-row replacement, same as the
+    // server-side semantics). Nothing is committed until Save Changes.
+    const proposals = Array.isArray(data.proposals) ? data.proposals : [];
+    setPendingRowEdits((prev) => {
+      const next = new Map(prev);
+      proposals.forEach((proposal) => next.set(proposal.item_id, proposal.codes || []));
+      return next;
+    });
+    setRows((prev) =>
+      prev.map((row) => {
+        const proposal = proposals.find((p) => p.item_id === row.item_id);
+        return proposal ? { ...row, codes: proposal.codes || [] } : row;
+      }),
+    );
+    setAiProposedItemIds((prev) => {
+      const next = new Set(prev);
+      proposals.forEach((proposal) => next.add(proposal.item_id));
+      return next;
+    });
+
     clearSelection();
-    setRefreshKey((key) => key + 1);
-    refreshCurrent();
   }, [
     clearSelection,
     getSelectedCodingSchema,
     recodeMethodology,
     recodeModel,
-    refreshCurrent,
     selectedItemIds,
   ]);
 
   const handleCodedDataChange = useCallback(
     (codedDataId) => {
+      if (isSessionDirty && !window.confirm("You have unsaved coding changes. Switch files and discard them?")) {
+        return;
+      }
       setSelectedCodedData(codedDataId);
       const selected = availableCodedData.find((item) => item.id === codedDataId);
       setSelectedCodedDataName(selected?.display_name || selected?.name || codedDataId || "");
     },
-    [availableCodedData],
+    [availableCodedData, isSessionDirty],
   );
+
+  // Warn on tab close/reload while the editing session hasn't been saved.
+  useEffect(() => {
+    if (!isSessionDirty) return undefined;
+    const handler = (event) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isSessionDirty]);
 
   useEffect(() => {
     fetchProjects();
@@ -528,7 +666,8 @@ export default function useViewCodingPage() {
   useEffect(() => {
     setCodebookTree([]);
     setSystemPrompt("");
-    setUserPrompt("");
+    setInstructions("");
+    setPromptMeta(null);
     setTotalRows(0);
     setTotalCoded(0);
     setRows([]);
@@ -541,10 +680,12 @@ export default function useViewCodingPage() {
     setActiveItemId(null);
     setPendingSelection(null);
     setSelectedItemIds(new Set());
-    setRowActionError(null);
+    setPendingRowEdits(new Map());
+    setAiProposedItemIds(new Set());
+    setSessionSaveState({ status: "idle", message: "" });
     setIsCodebookEditMode(false);
     setCodebookDraft([]);
-    setCodebookSaveState({ status: "idle", message: "" });
+    setIsCodebookDirty(false);
     setRecodeError(null);
     setRecodeProgress(null);
     setRecodeSummary("");
@@ -574,12 +715,12 @@ export default function useViewCodingPage() {
   }, [searchInput]);
 
   useEffect(() => {
-    if (codebookSaveState.status !== "success") return;
+    if (sessionSaveState.status !== "success") return;
     const timeoutId = setTimeout(() => {
-      setCodebookSaveState((prev) => (prev.status === "success" ? { status: "idle", message: "" } : prev));
+      setSessionSaveState((prev) => (prev.status === "success" ? { status: "idle", message: "" } : prev));
     }, 2400);
     return () => clearTimeout(timeoutId);
-  }, [codebookSaveState.status]);
+  }, [sessionSaveState.status]);
 
   // Clear a pending text selection whenever the active document changes.
   useEffect(() => {
@@ -606,7 +747,8 @@ export default function useViewCodingPage() {
     selectedProject,
     setSelectedProject,
     systemPrompt,
-    userPrompt,
+    instructions,
+    promptMeta,
     loading: artifactLoading || rowsLoading,
     rows,
     rowsTotal,
@@ -637,7 +779,14 @@ export default function useViewCodingPage() {
     applyCodeToSelection,
     removeCodeEntry,
     updateEntryNotes,
-    rowActionError,
+    aiProposedItemIds,
+    aiProposedPendingCount,
+    pendingRowEditCount: pendingRowEdits.size,
+    isCodebookDirty,
+    isSessionDirty,
+    sessionSaveState,
+    saveSession,
+    discardSession,
     selectedItemIds,
     toggleItemSelected,
     clearSelection,
@@ -655,11 +804,10 @@ export default function useViewCodingPage() {
     handleRecodeSelected,
     isCodebookEditMode,
     codebookDraft,
-    setCodebookDraft,
-    codebookSaveState,
+    setCodebookDraft: handleCodebookDraftChange,
     beginCodebookEdit,
+    finishCodebookEdit,
     cancelCodebookEdit,
-    saveCodebookEdit,
     renameArtifact,
     selectedCodingSchema,
     selectedCodingDescription,

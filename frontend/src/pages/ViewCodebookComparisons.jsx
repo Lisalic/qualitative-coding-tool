@@ -7,7 +7,7 @@ export default function ViewCodebookComparisons() {
       fileType="codebook_comparison"
       preselectStateKey="selected"
       contentUrl={(id) => `/api/codebook?codebook_id=${encodeURIComponent(id)}`}
-      contentField="codebook"
+      contentField="codebook_comparison"
       emptyMessage="No codebook comparisons available"
     />
   );

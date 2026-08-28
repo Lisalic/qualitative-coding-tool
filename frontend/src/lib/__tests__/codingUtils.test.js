@@ -1,12 +1,38 @@
 import { describe, it, expect } from "vitest";
 import {
+  groupCodesByFamily,
   cloneCodebookTree,
-  serializeCodebookTreeToText,
-  flattenCodebookCodeNames,
+  flattenTreeToCodes,
+  flattenCodebookCodes,
   getCodeColor,
-  getUniqueCodes,
-  getFilteredCoding,
 } from "../codingUtils";
+
+describe("groupCodesByFamily", () => {
+  it("returns [] for non-array input", () => {
+    expect(groupCodesByFamily(null)).toEqual([]);
+  });
+
+  it("groups a flat codes list by family_uid, preserving order", () => {
+    const codes = [
+      { code_uid: "c1", family_uid: "f1", family_name: "F1", name: "A" },
+      { code_uid: "c2", family_uid: "f2", family_name: "F2", name: "B" },
+      { code_uid: "c3", family_uid: "f1", family_name: "F1", name: "C" },
+    ];
+    const tree = groupCodesByFamily(codes);
+    expect(tree.map((f) => f.family_uid)).toEqual(["f1", "f2"]);
+    expect(tree[0].codes.map((c) => c.code_uid)).toEqual(["c1", "c3"]);
+    expect(tree[1].codes.map((c) => c.code_uid)).toEqual(["c2"]);
+  });
+
+  it("keeps distinct families with the same name separate (matches backend contract)", () => {
+    const codes = [
+      { code_uid: "c1", family_uid: "fa", family_name: "Dup", name: "A" },
+      { code_uid: "c2", family_uid: "fb", family_name: "Dup", name: "B" },
+    ];
+    const tree = groupCodesByFamily(codes);
+    expect(tree).toHaveLength(2);
+  });
+});
 
 describe("cloneCodebookTree", () => {
   it("returns [] for non-array input", () => {
@@ -15,12 +41,17 @@ describe("cloneCodebookTree", () => {
     expect(cloneCodebookTree("x")).toEqual([]);
   });
 
-  it("deep clones valid trees", () => {
+  it("deep clones valid trees, preserving code_uid/family_uid", () => {
     const tree = [
-      { family_name: "F", content: "fc", codes: [{ code_name: "C", content: "cc" }] },
+      {
+        family_uid: "f1",
+        family_name: "F",
+        codes: [{ code_uid: "c1", family_uid: "f1", family_name: "F", name: "C", body: "cc" }],
+      },
     ];
     const cloned = cloneCodebookTree(tree);
-    expect(cloned).toEqual(tree);
+    expect(cloned[0].family_uid).toBe("f1");
+    expect(cloned[0].codes[0].code_uid).toBe("c1");
     expect(cloned).not.toBe(tree);
     expect(cloned[0]).not.toBe(tree[0]);
     cloned[0].family_name = "mutated";
@@ -28,113 +59,124 @@ describe("cloneCodebookTree", () => {
   });
 
   it("coerces null family entries and non-string fields to empty strings", () => {
-    const cloned = cloneCodebookTree([null, { family_name: 5, content: {} }]);
+    const cloned = cloneCodebookTree([null, { family_name: 5, codes: {} }]);
     expect(cloned).toEqual([
-      { family_name: "", content: "", codes: [] },
-      { family_name: "", content: "", codes: [] },
+      { family_uid: "", family_name: "", codes: [] },
+      { family_uid: "", family_name: "", codes: [] },
     ]);
   });
 
   it("defaults missing/non-array codes to []", () => {
     expect(cloneCodebookTree([{ family_name: "F", codes: "not-array" }])[0].codes).toEqual([]);
   });
-
-  it("drops extra keys not part of the schema", () => {
-    const cloned = cloneCodebookTree([{ family_name: "F", extra: "x" }]);
-    expect(cloned[0]).not.toHaveProperty("extra");
-  });
 });
 
-describe("serializeCodebookTreeToText", () => {
-  it("returns empty string for non-array or empty input", () => {
-    expect(serializeCodebookTreeToText(null)).toBe("");
-    expect(serializeCodebookTreeToText([])).toBe("");
+describe("flattenTreeToCodes", () => {
+  it("returns [] for non-array input", () => {
+    expect(flattenTreeToCodes(null)).toEqual([]);
   });
 
-  it("serializes a family with codes", () => {
+  it("flattens a tree back to a flat codes list with positions", () => {
     const tree = [
       {
-        family_name: "Anxiety",
-        content: "Family desc",
-        codes: [{ code_name: "Panic", content: "Code desc" }],
+        family_uid: "f1",
+        family_name: "F1",
+        codes: [
+          { code_uid: "c1", name: "A", body: "" },
+          { code_uid: "c2", name: "B", body: "" },
+        ],
       },
     ];
-    expect(serializeCodebookTreeToText(tree)).toBe(
-      "### Code Family: Anxiety\nFamily desc\n#### Code Name: Panic\nCode desc",
-    );
+    const flat = flattenTreeToCodes(tree);
+    expect(flat.map((c) => c.code_uid)).toEqual(["c1", "c2"]);
+    expect(flat.map((c) => c.position)).toEqual([0, 1]);
+    expect(flat.every((c) => c.family_uid === "f1")).toBe(true);
   });
 
-  it("falls back to 'Unnamed family' for a blank family_name", () => {
-    expect(serializeCodebookTreeToText([{ family_name: "  " }])).toBe(
-      "### Code Family: Unnamed family",
-    );
+  it("marks a code with no code_uid as is_new rather than inventing one", () => {
+    const tree = [{ family_uid: "f1", family_name: "F", codes: [{ name: "New", body: "" }] }];
+    const flat = flattenTreeToCodes(tree);
+    expect(flat[0].is_new).toBe(true);
+    expect(flat[0]).not.toHaveProperty("code_uid");
   });
 
-  it("emits a bare '#### Code Name: ' header for a blank code_name (no fallback)", () => {
-    const out = serializeCodebookTreeToText([
-      { family_name: "F", codes: [{ code_name: "" }] },
-    ]);
-    expect(out).toBe("### Code Family: F\n#### Code Name:");
+  it("marks a family with no family_uid as family_is_new", () => {
+    const tree = [{ family_name: "New Family", codes: [{ code_uid: "c1", name: "A", body: "" }] }];
+    const flat = flattenTreeToCodes(tree);
+    expect(flat[0].family_is_new).toBe(true);
+    expect(flat[0]).not.toHaveProperty("family_uid");
   });
 
-  it("preserves multi-line content verbatim", () => {
-    const out = serializeCodebookTreeToText([{ family_name: "F", content: "line1\nline2" }]);
-    expect(out).toBe("### Code Family: F\nline1\nline2");
-  });
-
-  it("round-trips with cloneCodebookTree structurally", () => {
-    const tree = cloneCodebookTree([
-      { family_name: "F", content: "fc", codes: [{ code_name: "C", content: "cc" }] },
-    ]);
-    const text = serializeCodebookTreeToText(tree);
-    expect(text).toContain("### Code Family: F");
-    expect(text).toContain("#### Code Name: C");
+  it("round-trips structured fields with cloneCodebookTree/groupCodesByFamily", () => {
+    const original = [
+      {
+        code_uid: "c1",
+        family_uid: "f1",
+        family_name: "F",
+        name: "C",
+        body: "cc",
+        definition: "a def",
+        inclusion: "when",
+        exclusion: "not when",
+        keywords: "kw",
+        example: "ex",
+      },
+    ];
+    const tree = cloneCodebookTree(groupCodesByFamily(original));
+    const flat = flattenTreeToCodes(tree);
+    expect(flat[0].definition).toBe("a def");
+    expect(flat[0].inclusion).toBe("when");
+    expect(flat[0].exclusion).toBe("not when");
+    expect(flat[0].keywords).toBe("kw");
+    expect(flat[0].example).toBe("ex");
   });
 });
 
-describe("flattenCodebookCodeNames", () => {
+describe("flattenCodebookCodes", () => {
   it("returns [] for non-array input", () => {
-    expect(flattenCodebookCodeNames(null)).toEqual([]);
+    expect(flattenCodebookCodes(null)).toEqual([]);
   });
 
-  it("collects code names across families, deduped and sorted", () => {
+  it("collects {code_uid, name} across families, deduped by uid and sorted by name", () => {
     const tree = [
-      { family_name: "F1", codes: [{ code_name: "Zebra" }, { code_name: "apple" }] },
-      { family_name: "F2", codes: [{ code_name: "apple" }, { code_name: "Banana" }] },
+      { family_name: "F1", codes: [{ code_uid: "c3", name: "Zebra" }, { code_uid: "c1", name: "apple" }] },
+      { family_name: "F2", codes: [{ code_uid: "c1", name: "apple" }, { code_uid: "c2", name: "Banana" }] },
     ];
-    expect(flattenCodebookCodeNames(tree)).toEqual(["apple", "Banana", "Zebra"]);
-  });
-
-  it("accepts a bare-string code entry, not just {code_name}", () => {
-    expect(flattenCodebookCodeNames([{ family_name: "F", codes: ["plain-code"] }])).toEqual([
-      "plain-code",
+    expect(flattenCodebookCodes(tree)).toEqual([
+      { code_uid: "c1", name: "apple" },
+      { code_uid: "c2", name: "Banana" },
+      { code_uid: "c3", name: "Zebra" },
     ]);
   });
 
-  it("skips blank code names", () => {
-    expect(flattenCodebookCodeNames([{ family_name: "F", codes: [{ code_name: "  " }] }])).toEqual([]);
+  it("skips entries with a blank name or missing code_uid", () => {
+    expect(
+      flattenCodebookCodes([{ family_name: "F", codes: [{ code_uid: "c1", name: "  " }, { name: "no-uid" }] }]),
+    ).toEqual([]);
   });
 });
 
 describe("getCodeColor", () => {
   it("returns a deterministic hsl() string", () => {
-    const a = getCodeColor("anxiety");
-    const b = getCodeColor("anxiety");
+    const a = getCodeColor("uid-anxiety");
+    const b = getCodeColor("uid-anxiety");
     expect(a).toBe(b);
     expect(a).toMatch(/^hsl\(\d+, 85%, \d+%\)$/);
   });
 
   it("different inputs generally produce different colors", () => {
-    expect(getCodeColor("anxiety")).not.toBe(getCodeColor("depression"));
+    expect(getCodeColor("uid-anxiety")).not.toBe(getCodeColor("uid-depression"));
   });
 
-  it("empty string is deterministic (hash starts at 0)", () => {
+  it("empty/null/undefined input is deterministic (hash starts at 0)", () => {
     expect(getCodeColor("")).toBe("hsl(0, 85%, 55%)");
+    expect(getCodeColor(null)).toBe("hsl(0, 85%, 55%)");
+    expect(getCodeColor(undefined)).toBe("hsl(0, 85%, 55%)");
   });
 
   it("hue is always in [0, 359] and lightness in [55, 74]", () => {
-    for (const code of ["a", "ab", "abc", "a very long code name here", "🎉emoji"]) {
-      const match = getCodeColor(code).match(/^hsl\((\d+), 85%, (\d+)%\)$/);
+    for (const uid of ["a", "ab", "abc", "a very long uid here", "🎉emoji"]) {
+      const match = getCodeColor(uid).match(/^hsl\((\d+), 85%, (\d+)%\)$/);
       expect(match).not.toBeNull();
       const hue = Number(match[1]);
       const lightness = Number(match[2]);
@@ -143,67 +185,5 @@ describe("getCodeColor", () => {
       expect(lightness).toBeGreaterThanOrEqual(55);
       expect(lightness).toBeLessThan(75);
     }
-  });
-
-  it("throws for non-string input (no .length guard)", () => {
-    expect(() => getCodeColor(null)).toThrow();
-    expect(() => getCodeColor(undefined)).toThrow();
-  });
-});
-
-describe("getUniqueCodes", () => {
-  it("returns [] for non-array input", () => {
-    expect(getUniqueCodes(null)).toEqual([]);
-  });
-
-  it("dedupes and sorts codes", () => {
-    const rows = [
-      { codes: [{ code: "b" }, { code: "a" }] },
-      { codes: [{ code: "a" }] },
-    ];
-    expect(getUniqueCodes(rows)).toEqual(["a", "b"]);
-  });
-
-  it("skips falsy code values", () => {
-    const rows = [{ codes: [{ code: "" }, { code: null }, { code: "x" }] }];
-    expect(getUniqueCodes(rows)).toEqual(["x"]);
-  });
-
-  it("defaults missing codes to []", () => {
-    expect(getUniqueCodes([{}])).toEqual([]);
-  });
-
-  it("sort is case-sensitive (uppercase sorts before lowercase)", () => {
-    const rows = [{ codes: [{ code: "apple" }, { code: "Zebra" }] }];
-    expect(getUniqueCodes(rows)).toEqual(["Zebra", "apple"]);
-  });
-});
-
-describe("getFilteredCoding", () => {
-  const rows = [
-    { item_id: "t3_1", codes: [{ code: "a" }] },
-    { item_id: "t3_2", codes: [{ code: "b" }] },
-  ];
-
-  it("returns [] for non-array input", () => {
-    expect(getFilteredCoding("x", [])).toEqual([]);
-  });
-
-  it("returns the SAME reference when no filter codes are selected", () => {
-    expect(getFilteredCoding(rows, [])).toBe(rows);
-    expect(getFilteredCoding(rows, null)).toBe(rows);
-    expect(getFilteredCoding(rows, undefined)).toBe(rows);
-  });
-
-  it("filters to rows with at least one matching code", () => {
-    expect(getFilteredCoding(rows, ["a"])).toEqual([rows[0]]);
-  });
-
-  it("returns [] when the filter code matches nothing", () => {
-    expect(getFilteredCoding(rows, ["nonexistent"])).toEqual([]);
-  });
-
-  it("excludes rows with no codes", () => {
-    expect(getFilteredCoding([{ item_id: "t3_1" }], ["a"])).toEqual([]);
   });
 });

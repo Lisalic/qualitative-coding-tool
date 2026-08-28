@@ -108,9 +108,12 @@ export default function useViewComparisonPage({
   );
 
   useEffect(() => {
-    fetchAvailable();
     fetchProjects();
-  }, [fetchAvailable, fetchProjects]);
+  }, [fetchProjects]);
+
+  useEffect(() => {
+    fetchAvailable();
+  }, [fetchAvailable]);
 
   useEffect(() => {
     let mounted = true;

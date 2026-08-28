@@ -28,6 +28,7 @@ const ViewCodebookComparisons = React.lazy(
 const ViewCodingComparisons = React.lazy(
   () => import("./pages/ViewCodingComparisons")
 );
+const Lineage = React.lazy(() => import("./pages/Lineage"));
 const Login = React.lazy(() => import("./pages/Login"));
 const Register = React.lazy(() => import("./pages/Register"));
 
@@ -167,6 +168,14 @@ function App() {
                   element={
                     <ProtectedRoute>
                       <ViewCodingComparisons />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/lineage"
+                  element={
+                    <ProtectedRoute>
+                      <Lineage />
                     </ProtectedRoute>
                   }
                 />

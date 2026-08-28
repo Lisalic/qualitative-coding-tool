@@ -25,7 +25,7 @@ describe("normalizeCodingRowEdits", () => {
   });
 
   it("rejects code-without-quote (and vice versa)", () => {
-    const rows = [{ itemId: "t3_1", codes: [{ code: "c", quote: "", start_offset: 0, end_offset: 3 }] }];
+    const rows = [{ itemId: "t3_1", codes: [{ code_uid: "c", quote: "", start_offset: 0, end_offset: 3 }] }];
     expect(normalizeCodingRowEdits(rows)).toEqual({
       ok: false,
       error: "Row 1, code 1 must include a code, a quote, and a valid offset range.",
@@ -33,7 +33,7 @@ describe("normalizeCodingRowEdits", () => {
   });
 
   it("rejects a missing or invalid offset range even with a code and quote", () => {
-    const rows = [{ itemId: "t3_1", codes: [{ code: "c", quote: "e" }] }];
+    const rows = [{ itemId: "t3_1", codes: [{ code_uid: "c", quote: "e" }] }];
     expect(normalizeCodingRowEdits(rows)).toEqual({
       ok: false,
       error: "Row 1, code 1 must include a code, a quote, and a valid offset range.",
@@ -41,7 +41,7 @@ describe("normalizeCodingRowEdits", () => {
   });
 
   it("rejects end_offset <= start_offset", () => {
-    const rows = [{ itemId: "t3_1", codes: [{ code: "c", quote: "e", start_offset: 5, end_offset: 5 }] }];
+    const rows = [{ itemId: "t3_1", codes: [{ code_uid: "c", quote: "e", start_offset: 5, end_offset: 5 }] }];
     expect(normalizeCodingRowEdits(rows)).toEqual({
       ok: false,
       error: "Row 1, code 1 must include a code, a quote, and a valid offset range.",
@@ -53,15 +53,15 @@ describe("normalizeCodingRowEdits", () => {
       {
         itemId: "t3_1",
         codes: [
-          { code: "", quote: "", notes: "" },
-          { code: "c", quote: "e", start_offset: 0, end_offset: 1 },
+          { code_uid: "", quote: "", notes: "" },
+          { code_uid: "c", quote: "e", start_offset: 0, end_offset: 1 },
         ],
       },
     ];
     const result = normalizeCodingRowEdits(rows);
     expect(result).toEqual({
       ok: true,
-      rows: [{ item_id: "t3_1", entries: [{ code: "c", quote: "e", start_offset: 0, end_offset: 1 }] }],
+      rows: [{ item_id: "t3_1", entries: [{ code_uid: "c", quote: "e", start_offset: 0, end_offset: 1 }] }],
     });
   });
 
@@ -77,25 +77,25 @@ describe("normalizeCodingRowEdits", () => {
     const rows = [
       {
         itemId: "  t3_1  ",
-        codes: [{ code: "  c  ", quote: "  e  ", notes: "  ", start_offset: 0, end_offset: 1 }],
+        codes: [{ code_uid: "  c  ", quote: "  e  ", notes: "  ", start_offset: 0, end_offset: 1 }],
       },
     ];
     expect(normalizeCodingRowEdits(rows)).toEqual({
       ok: true,
-      rows: [{ item_id: "t3_1", entries: [{ code: "c", quote: "e", start_offset: 0, end_offset: 1 }] }],
+      rows: [{ item_id: "t3_1", entries: [{ code_uid: "c", quote: "e", start_offset: 0, end_offset: 1 }] }],
     });
   });
 
   it("keeps notes when non-empty", () => {
-    const rows = [{ itemId: "t3_1", codes: [{ code: "c", quote: "e", notes: "n", start_offset: 0, end_offset: 1 }] }];
+    const rows = [{ itemId: "t3_1", codes: [{ code_uid: "c", quote: "e", notes: "n", start_offset: 0, end_offset: 1 }] }];
     const result = normalizeCodingRowEdits(rows);
-    expect(result.rows[0].entries[0]).toEqual({ code: "c", quote: "e", start_offset: 0, end_offset: 1, notes: "n" });
+    expect(result.rows[0].entries[0]).toEqual({ code_uid: "c", quote: "e", start_offset: 0, end_offset: 1, notes: "n" });
   });
 
   it("fails on the first bad row without validating later rows", () => {
     const rows = [
       { itemId: "" },
-      { itemId: "also-not-checked", codes: [{ code: "c", quote: "e", start_offset: 0, end_offset: 1 }] },
+      { itemId: "also-not-checked", codes: [{ code_uid: "c", quote: "e", start_offset: 0, end_offset: 1 }] },
     ];
     expect(normalizeCodingRowEdits(rows)).toEqual({
       ok: false,

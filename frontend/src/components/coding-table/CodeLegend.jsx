@@ -1,9 +1,39 @@
 import React, { useEffect, useMemo, useState, useRef, useCallback } from "react";
+import { mintClientCodeUid } from "../../lib/codingUtils";
 
 const btnSmall =
   "border border-paper px-2.5 py-1 text-xs transition-colors hover:bg-paper hover:text-ink disabled:opacity-40";
 const inputClasses =
   "min-w-0 border border-paper bg-white/5 px-2 py-1 text-sm text-paper focus:outline-none focus:ring-2 focus:ring-paper disabled:opacity-50";
+const textareaClasses = `${inputClasses} min-h-[4.5rem] w-full resize-y`;
+
+const DETAIL_FIELDS = [
+  ["definition", "Definition"],
+  ["inclusion", "Inclusion"],
+  ["exclusion", "Exclusion"],
+  ["keywords", "Keywords"],
+  ["example", "Example"],
+];
+
+function codeDetailLines(code) {
+  const lines = [];
+  for (const [key, label] of DETAIL_FIELDS) {
+    const value = typeof code?.[key] === "string" ? code[key].trim() : "";
+    if (value) lines.push({ label, value });
+  }
+  return lines;
+}
+
+function extraFieldsFrom(entry) {
+  return {
+    body: typeof entry?.body === "string" ? entry.body : "",
+    definition: entry?.definition ?? null,
+    inclusion: entry?.inclusion ?? null,
+    exclusion: entry?.exclusion ?? null,
+    keywords: entry?.keywords ?? null,
+    example: entry?.example ?? null,
+  };
+}
 
 // Component for the filterable code legend (read-only) and editable codebook (table edit mode)
 const CodeLegend = ({
@@ -15,11 +45,10 @@ const CodeLegend = ({
   draftTree,
   onDraftTreeChange,
   disabled = false,
-  onCodingRowCodeRename,
+  showDetails = false,
 }) => {
   const [expandedFamilies, setExpandedFamilies] = useState({});
   const [openMenuFamilyIndex, setOpenMenuFamilyIndex] = useState(null);
-  const codeNameSnapshotRef = useRef({});
   const menuRootRef = useRef(null);
 
   const selectedCodeSet = useMemo(
@@ -36,25 +65,25 @@ const CodeLegend = ({
           typeof family?.family_name === "string" && family.family_name.trim()
             ? family.family_name.trim()
             : `Family ${familyIndex + 1}`;
+        const familyUid =
+          typeof family?.family_uid === "string" && family.family_uid
+            ? family.family_uid
+            : `family-${familyIndex}`;
 
         const rawCodes = Array.isArray(family?.codes) ? family.codes : [];
-        const normalizedCodes = rawCodes
-          .map((entry, codeIndex) => {
-            if (typeof entry === "string") return entry.trim();
-            if (
-              entry &&
-              typeof entry.code_name === "string" &&
-              entry.code_name.trim()
-            ) {
-              return entry.code_name.trim();
-            }
-            return `Code ${codeIndex + 1}`;
-          })
-          .filter(Boolean);
+        // Dedupe by code_uid (identity), not by name -- two distinct
+        // codes can share a display name.
+        const byUid = new Map();
+        rawCodes.forEach((entry, codeIndex) => {
+          const uid = typeof entry?.code_uid === "string" && entry.code_uid ? entry.code_uid : `code-${codeIndex}`;
+          const name = typeof entry?.name === "string" && entry.name.trim() ? entry.name.trim() : `Code ${codeIndex + 1}`;
+          if (!byUid.has(uid)) byUid.set(uid, { code_uid: uid, name, ...extraFieldsFrom(entry) });
+        });
 
         return {
+          familyUid,
           familyName,
-          codes: Array.from(new Set(normalizedCodes)),
+          codes: Array.from(byUid.values()),
         };
       })
       .filter((family) => family.codes.length > 0);
@@ -62,7 +91,10 @@ const CodeLegend = ({
 
   const hasTreeLegend = treeFamilies.length > 0;
 
-  const editFamilies = Array.isArray(draftTree) ? draftTree : [];
+  const editFamilies = useMemo(
+    () => (Array.isArray(draftTree) ? draftTree : []),
+    [draftTree],
+  );
 
   const buildExpandedState = useMemo(() => {
     const initial = {};
@@ -73,19 +105,24 @@ const CodeLegend = ({
     return initial;
   }, [isEditMode, editFamilies, treeFamilies]);
 
+  // Reset only when the codebook or edit mode changes -- not when the
+  // derived expand-map is recomputed. Depending on `buildExpandedState`
+  // undid Expand All on the next render.
   useEffect(() => {
     if (isEditMode) {
-      // Editing benefits from seeing everything at once -- expanded by
-      // default there, unlike the read-only view below.
-      setExpandedFamilies(buildExpandedState);
+      const list = Array.isArray(draftTree) ? draftTree : [];
+      const initial = {};
+      list.forEach((_, index) => {
+        initial[index] = true;
+      });
+      setExpandedFamilies(initial);
       return;
     }
-    // Collapsed by default in the read-only view -- a codebook can have
-    // many families, and a researcher is usually here to read/tag a
-    // document, not browse the whole codebook. Expanding is a deliberate
-    // action (a family row, or "Expand All").
     setExpandedFamilies({});
-  }, [isEditMode, buildExpandedState]);
+    // draftTree is read only when entering edit mode; listing it would
+    // re-expand on every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEditMode, codebookTree]);
 
   useEffect(() => {
     if (!isEditMode) {
@@ -135,14 +172,14 @@ const CodeLegend = ({
     [updateDraftTree],
   );
 
-  const handleCodeNameChange = useCallback(
-    (familyIndex, codeIndex, value) => {
+  const handleCodeFieldChange = useCallback(
+    (familyIndex, codeIndex, field, value) => {
       updateDraftTree((tree) =>
         tree.map((fam, fi) => {
           if (fi !== familyIndex) return fam;
           const codes = Array.isArray(fam.codes) ? [...fam.codes] : [];
           const next = codes.map((c, ci) =>
-            ci === codeIndex ? { ...c, code_name: value } : c,
+            ci === codeIndex ? { ...c, [field]: value } : c,
           );
           return { ...fam, codes: next };
         }),
@@ -151,35 +188,19 @@ const CodeLegend = ({
     [updateDraftTree],
   );
 
-  const handleCodeNameFocus = useCallback((familyIndex, codeIndex) => {
-    const key = `${familyIndex}-${codeIndex}`;
-    const tree = Array.isArray(draftTree) ? draftTree : [];
-    const name = (tree[familyIndex]?.codes?.[codeIndex]?.code_name || "").trim();
-    codeNameSnapshotRef.current[key] = name;
-  }, [draftTree]);
-
-  const handleCodeNameBlur = useCallback(
-    (familyIndex, codeIndex) => {
-      const key = `${familyIndex}-${codeIndex}`;
-      const tree = Array.isArray(draftTree) ? draftTree : [];
-      const start = codeNameSnapshotRef.current[key] ?? "";
-      const end = (tree[familyIndex]?.codes?.[codeIndex]?.code_name || "").trim();
-      if (
-        start &&
-        start !== end &&
-        typeof onCodingRowCodeRename === "function"
-      ) {
-        onCodingRowCodeRename(start, end);
-      }
-      codeNameSnapshotRef.current[key] = end;
-    },
-    [draftTree, onCodingRowCodeRename],
-  );
+  // Renaming a code here is just a `name` field edit -- `code_uid` stays
+  // fixed, so nothing else needs to be notified: coding_entries reference
+  // the uid, not the name, so a rename can never orphan an already-tagged
+  // entry (unlike the old name-keyed codebook this replaces).
 
   const addFamily = useCallback(() => {
+    // A client-minted uid (not "no uid until save") so a code added to
+    // this brand-new family is immediately taggable in the reader pane
+    // -- see useViewCodingPage's `availableCodes`, which reads from the
+    // live draft, not the last-saved codebook.
     updateDraftTree((tree) => [
       ...tree,
-      { family_name: "", content: "", codes: [] },
+      { family_uid: mintClientCodeUid(), family_is_new: true, family_name: "", codes: [] },
     ]);
   }, [updateDraftTree]);
 
@@ -192,11 +213,23 @@ const CodeLegend = ({
 
   const addCode = useCallback(
     (familyIndex) => {
+      // Same reasoning as addFamily: mint the uid now, not at save time,
+      // so this code is immediately usable to tag a selection.
       updateDraftTree((tree) =>
         tree.map((fam, fi) => {
           if (fi !== familyIndex) return fam;
           const codes = Array.isArray(fam.codes) ? [...fam.codes] : [];
-          codes.push({ code_name: "", content: "" });
+          codes.push({
+            code_uid: mintClientCodeUid(),
+            is_new: true,
+            name: "",
+            body: "",
+            definition: "",
+            inclusion: "",
+            exclusion: "",
+            keywords: "",
+            example: "",
+          });
           return { ...fam, codes };
         }),
       );
@@ -221,22 +254,61 @@ const CodeLegend = ({
   );
 
   const renderCodeNode = (code, key) => {
-    const isSelected = selectedCodeSet.has(code);
+    // Selection/filtering stays keyed on the display name (the server's
+    // `?code=` row filter is name-based), while color and the toggle
+    // payload carry `code_uid` -- the stable identity. The name row is
+    // the click target so extra detail text doesn't toggle the filter.
+    const isSelected = selectedCodeSet.has(code.name);
+    const details = showDetails ? codeDetailLines(code) : [];
+    const nameRow = (
+      <>
+        <div
+          className="h-3 w-3 shrink-0"
+          style={{ backgroundColor: getCodeColor(code.code_uid) }}
+        />
+        <span className={isSelected ? "font-semibold" : ""}>{code.name}</span>
+      </>
+    );
+    if (!showDetails) {
+      return (
+        <div
+          key={key}
+          onClick={() => onCodeToggle(code)}
+          className={`flex cursor-pointer items-center gap-1.5 px-2 py-1 text-sm transition-colors ${
+            isSelected
+              ? "border-2 border-paper bg-white/10 font-semibold"
+              : "border border-paper/20 hover:bg-white/5"
+          }`}
+        >
+          {nameRow}
+        </div>
+      );
+    }
     return (
       <div
         key={key}
-        onClick={() => onCodeToggle(code)}
-        className={`flex cursor-pointer items-center gap-1.5 px-2 py-1 text-sm transition-colors ${
+        className={
           isSelected
-            ? "border-2 border-paper bg-white/10 font-semibold"
-            : "border border-paper/20 hover:bg-white/5"
-        }`}
+            ? "border-2 border-paper bg-white/10"
+            : "border border-paper/20"
+        }
       >
         <div
-          className="h-3 w-3 shrink-0"
-          style={{ backgroundColor: getCodeColor(code) }}
-        />
-        <span>{code}</span>
+          onClick={() => onCodeToggle(code)}
+          className="flex cursor-pointer items-center gap-1.5 px-2 py-1 text-sm transition-colors hover:bg-white/5"
+        >
+          {nameRow}
+        </div>
+        {details.length > 0 && (
+          <div className="flex flex-col gap-1 px-2 pb-2 pl-7 text-sm text-paper/80">
+            {details.map((line) => (
+              <div key={line.label} className="whitespace-pre-wrap">
+                <span className="font-semibold text-paper/90">{line.label}: </span>
+                {line.value}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   };
@@ -379,53 +451,71 @@ const CodeLegend = ({
                           <div className="relative flex flex-col gap-1.5 pl-[18px] before:absolute before:bottom-0.5 before:left-[5px] before:top-0.5 before:w-px before:bg-paper/20 before:content-['']">
                             {codes.map((codeEntry, codeIndex) => {
                               const cname =
-                                typeof codeEntry?.code_name === "string"
-                                  ? codeEntry.code_name
-                                  : "";
-                              const displayCode = cname.trim() || "(unnamed)";
+                                typeof codeEntry?.name === "string" ? codeEntry.name : "";
+                              const colorKey = codeEntry?.code_uid || `new-${familyIndex}-${codeIndex}`;
                               return (
                                 <div
                                   key={`edit-code-${familyIndex}-${codeIndex}`}
-                                  className="relative grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 bg-white/[0.03] py-1.5 pl-2 pr-1.5 before:absolute before:left-[-13px] before:top-1/2 before:w-2.5 before:border-t before:border-paper/20 before:content-['']"
+                                  className="relative flex flex-col gap-1.5 bg-white/[0.03] py-1.5 pl-2 pr-1.5 before:absolute before:left-[-13px] before:top-4 before:w-2.5 before:border-t before:border-paper/20 before:content-['']"
                                 >
-                                  <div
-                                    className="h-3 w-3 shrink-0"
-                                    style={{
-                                      backgroundColor: getCodeColor(displayCode),
-                                    }}
-                                  />
-                                  <input
-                                    type="text"
-                                    className={inputClasses}
-                                    value={cname}
-                                    onChange={(e) =>
-                                      handleCodeNameChange(
-                                        familyIndex,
-                                        codeIndex,
-                                        e.target.value,
-                                      )
-                                    }
-                                    onFocus={() =>
-                                      handleCodeNameFocus(familyIndex, codeIndex)
-                                    }
-                                    onBlur={() =>
-                                      handleCodeNameBlur(familyIndex, codeIndex)
-                                    }
-                                    placeholder="Code name"
-                                    disabled={disabled}
-                                  />
-                                  <button
-                                    type="button"
-                                    className="min-w-[28px] border border-paper px-1.5 py-0.5 text-sm leading-none transition-colors hover:bg-paper hover:text-ink disabled:opacity-40"
-                                    onClick={() =>
-                                      removeCode(familyIndex, codeIndex)
-                                    }
-                                    disabled={disabled}
-                                    aria-label="Remove code"
-                                    title="Remove code"
-                                  >
-                                    ×
-                                  </button>
+                                  <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2">
+                                    <div
+                                      className="h-3 w-3 shrink-0"
+                                      style={{
+                                        backgroundColor: getCodeColor(colorKey),
+                                      }}
+                                    />
+                                    <input
+                                      type="text"
+                                      className={inputClasses}
+                                      value={cname}
+                                      onChange={(e) =>
+                                        handleCodeFieldChange(
+                                          familyIndex,
+                                          codeIndex,
+                                          "name",
+                                          e.target.value,
+                                        )
+                                      }
+                                      placeholder="Code name"
+                                      disabled={disabled}
+                                    />
+                                    <button
+                                      type="button"
+                                      className="min-w-[28px] border border-paper px-1.5 py-0.5 text-sm leading-none transition-colors hover:bg-paper hover:text-ink disabled:opacity-40"
+                                      onClick={() =>
+                                        removeCode(familyIndex, codeIndex)
+                                      }
+                                      disabled={disabled}
+                                      aria-label="Remove code"
+                                      title="Remove code"
+                                    >
+                                      ×
+                                    </button>
+                                  </div>
+                                  <div className="flex flex-col gap-1.5 pl-5">
+                                    {DETAIL_FIELDS.map(([field, label]) => (
+                                      <label key={field} className="flex flex-col gap-0.5">
+                                        <span className="text-xs font-semibold uppercase tracking-wide text-paper/50">
+                                          {label}
+                                        </span>
+                                        <textarea
+                                          className={textareaClasses}
+                                          value={typeof codeEntry?.[field] === "string" ? codeEntry[field] : ""}
+                                          onChange={(e) =>
+                                            handleCodeFieldChange(
+                                              familyIndex,
+                                              codeIndex,
+                                              field,
+                                              e.target.value,
+                                            )
+                                          }
+                                          placeholder={label}
+                                          disabled={disabled}
+                                        />
+                                      </label>
+                                    ))}
+                                  </div>
                                 </div>
                               );
                             })}
@@ -468,7 +558,7 @@ const CodeLegend = ({
 
           <div className="flex flex-col gap-2">
             {treeFamilies.map((family, index) => (
-              <div key={`${family.familyName}-${index}`} className="border border-paper/20">
+              <div key={family.familyUid} className="border border-paper/20">
                 <div
                   onClick={() =>
                     setExpandedFamilies((prev) => ({
@@ -486,9 +576,7 @@ const CodeLegend = ({
 
                 {expandedFamilies[index] && (
                   <div className="flex flex-col gap-1.5 p-2">
-                    {family.codes.map((code) =>
-                      renderCodeNode(code, `${family.familyName}-${code}`),
-                    )}
+                    {family.codes.map((code) => renderCodeNode(code, code.code_uid))}
                   </div>
                 )}
               </div>

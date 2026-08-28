@@ -19,7 +19,7 @@ function AppliedCodeRow({ entry, getCodeColor, onRemove, onUpdateNotes }) {
       <div className="flex items-start gap-2">
         <span
           className="mt-0.5 h-2.5 w-2.5 shrink-0"
-          style={{ backgroundColor: getCodeColor(entry.code) }}
+          style={{ backgroundColor: getCodeColor(entry.code_uid) }}
         />
         <div className="min-w-0 flex-1">
           <div className="text-sm font-semibold">{entry.code}</div>
@@ -83,7 +83,7 @@ export default function CodingReaderPane({
   onRemoveEntry,
   onUpdateNotes,
   onRecodeThisDocument,
-  rowActionError,
+  isAiProposed,
 }) {
   if (!activeRow) {
     return <PageEmptyState message="Select a row from the list to read and code it." />;
@@ -100,6 +100,11 @@ export default function CodingReaderPane({
         <div className="min-w-0">
           <div className="text-xs uppercase tracking-wide text-paper/50">
             {activeRow.row_type === "comment" ? "Comment" : "Post"} &middot; {activeRow.item_id}
+            {isAiProposed && (
+              <span className="ml-2 border border-paper/40 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-paper/70">
+                AI proposal
+              </span>
+            )}
           </div>
           {activeRow.title && <h3 className="mt-0.5 text-lg font-semibold">{activeRow.title}</h3>}
         </div>
@@ -108,29 +113,13 @@ export default function CodingReaderPane({
         </button>
       </div>
 
-      {pendingSelection && (
-        <div className="border border-paper bg-white/5 px-3 py-2 text-sm">
-          Text selected &mdash; pick a code from the popup or the codebook on the right to tag it.
-          <button
-            type="button"
-            className="ml-2 text-paper/60 underline hover:text-paper"
-            onClick={() => onSelectionChange(null)}
-          >
-            Cancel
-          </button>
-        </div>
-      )}
-
-      {rowActionError && (
-        <div className="border border-error bg-error/10 px-3 py-2 text-sm text-error">{rowActionError}</div>
-      )}
-
       <HighlightedContent
         content={activeRow.content || ""}
         codeEvidence={codes}
         getCodeColor={getCodeColor}
         availableCodes={availableCodes}
         onApplyCode={onApplyCode}
+        pendingSelection={pendingSelection}
         onSelectionChange={onSelectionChange}
       />
 
@@ -146,7 +135,7 @@ export default function CodingReaderPane({
           <div className="flex flex-col gap-1.5">
             {codes.map((entry, index) => (
               <AppliedCodeRow
-                key={`${entry.code}-${index}`}
+                key={`${entry.code_uid}-${index}`}
                 entry={entry}
                 getCodeColor={getCodeColor}
                 onRemove={() => onRemoveEntry(index)}
@@ -156,6 +145,23 @@ export default function CodingReaderPane({
           </div>
         )}
       </div>
+
+      {/* Rendered AFTER the content, not above it -- appearing here can't
+          shift the position of the text the popup is already anchored
+          to (see HighlightedContent's module comment for why that used
+          to make the popup jump the instant it opened). */}
+      {pendingSelection && (
+        <div className="border border-paper bg-white/5 px-3 py-2 text-sm">
+          Text selected &mdash; pick a code from the popup or the codebook on the right to tag it.
+          <button
+            type="button"
+            className="ml-2 text-paper/60 underline hover:text-paper"
+            onClick={() => onSelectionChange(null)}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
     </div>
   );
 }

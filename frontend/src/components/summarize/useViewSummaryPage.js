@@ -82,9 +82,12 @@ export default function useViewSummaryPage() {
   }, [preselect, projectsList, selectedProject]);
 
   useEffect(() => {
-    fetchAvailableSummaries();
     fetchProjects();
-  }, [fetchAvailableSummaries, fetchProjects]);
+  }, [fetchProjects]);
+
+  useEffect(() => {
+    fetchAvailableSummaries();
+  }, [fetchAvailableSummaries]);
 
   useEffect(() => {
     let mounted = true;
