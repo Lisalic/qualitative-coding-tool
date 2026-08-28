@@ -94,12 +94,11 @@ The OpenRouter API key is always supplied per-request by the caller (see [concep
 | `users` | account records |
 | `projects` | user-owned groupings of files |
 | `project_files` | many-to-many between `projects` and `files` |
-| `files` | one row per artifact (`file_type`, `schemaname`, prompts used, description) |
+| `files` | one row per artifact — a git-style **ref**: `file_type`, `schemaname`, description. Identity only; no content and no prompts (those live on the version row, see below) |
 | `file_tables` | per-`file_id` row counts, keyed by table name (`submissions`/`comments`) |
-| `file_dependencies` | parent/child links between artifacts, for lineage |
 | `prompts` | the user's saved prompt library (see [Prompt Manager](tools/prompt-manager.md)) |
 
-### Fixed content tables (`backend/app/storage_models.py`)
+### Fixed content tables (`backend/app/storage_models.py`, `backend/app/versioning_models.py`)
 
 Replaces the old per-artifact dynamic-schema model (see [concepts.md#schemaname](concepts.md#schemaname-an-opaque-identifier-not-a-postgres-schema)) with a handful of normal tables, all keyed by `file_id`:
 
@@ -107,21 +106,33 @@ Replaces the old per-artifact dynamic-schema model (see [concepts.md#schemaname]
 |---|---|---|
 | `submissions` | raw/filtered post rows | `(file_id, id)` PK; `word_count` generated column, indexed with `file_id` |
 | `comments` | raw/filtered comment rows | `(file_id, id)` PK; `word_count` generated column, indexed with `file_id` |
-| `artifact_content` | one text blob per artifact — codebook / codebook_comparison / coding_comparison / summary / the coding classification output | `file_id` PK |
-| `coding_entries` | structured `(file_id, post_id, code, evidence)` rows, one per post/code pair | `(file_id, post_id, code)` PK, indexed on `(file_id, code)` |
+| `artifact_versions` | one **commit** per save, sealed the instant it's created — `version_no`, `origin` (generated/edited/imported/forked), `sealed_at`, `job_id`/`model`/`system_prompt` provenance, plus `user_instructions` (the human-authored fragment only) and `prompt_meta` (a length/hash of the LLM-rendered prompt — the rendered prompt itself is not stored, since it duplicates data already in `submissions`/`comments`), and `content` (used only by blob-storage artifact types: `codebook_comparison` / `coding_comparison` / `summary`) | `UNIQUE(file_id, version_no)`; self-FK `parent_version_id` (cross-file for a fork's v1) |
+| `artifact_edges` | typed, ordered, version-pinned derivation between artifacts — replaces the old untyped `file_dependencies` | `(child_file_id, parent_file_id, parent_version_id, relation, role, position)` |
+| `codebook_codes` | one row per code, keyed by a stable `code_uid`/`family_uid` so renames are recorded rather than inferred — the content of a `codebook` artifact and of a `coding` artifact's own codebook snapshot | `UNIQUE(version_id, code_uid)` |
+| `coding_entries` | structured, SCD-2 range-versioned `(file_id, row_type, post_id, code_uid, evidence, notes, valid_from, valid_to)` rows — a row is **live** iff `valid_to IS NULL`; superseding at version `N` closes the old row with `valid_to = N - 1` rather than deleting it | `(file_id, code_uid)` and liveness-filtered indexes |
 
-`coding_entries` exists so code-frequency queries (`GROUP BY code`) can run directly in SQL instead of re-parsing the `artifact_content` blob client-side — see `backend/app/repositories/coding_repo.py::code_frequency`.
+`coding_entries` exists so code-frequency queries (`GROUP BY code_uid`) can run directly in SQL instead of re-parsing a blob client-side — see `backend/app/repositories/coding_repo.py::code_frequency`. Every read goes through that module's `_live()` helper so a superseded (closed) range never reappears as current coding.
 
-All access to these tables goes through `backend/app/repositories/`: `file_repo.py` (schemaname → `file_id` resolution, ownership checks), `raw_data_repo.py` (bulk insert, sampling, row copy for filter/merge), `artifact_content_repo.py` (read/write the content blob), `coding_repo.py` (bulk insert + frequency queries), `project_repo.py`.
+All access to these tables goes through `backend/app/repositories/`: `file_repo.py` (schemaname → `file_id` resolution, ownership checks), `raw_data_repo.py` (bulk insert, sampling, row copy for filter/merge), `version_repo.py` (dumb CRUD on `artifact_versions`/`artifact_edges`/`codebook_codes` — no policy), `coding_repo.py` (SCD-2 read/write + frequency queries), `project_repo.py`. Policy — no-op suppression, the three `commit_*` write paths, forking — lives one layer up in `backend/app/services/version_service.py`; see that module's docstring. Every commit is sealed the instant it's created (no unsealed "draft" state to open, mutate, or auto-seal) — the `POST /api/artifacts/{ref}/checkpoint` route that once let a user trigger sealing manually has been removed, since there was never anything left for it to do. History is strictly append-only — there is no revert route. Recovering an old state is "duplicate from that version" instead (`POST /api/coding/{ref}/duplicate` / `POST /api/codebook/{ref}/duplicate`, both taking an optional `from_version_no`) — non-destructive, so it needs no guard against another artifact's `parent_version_id` pin.
+
+Not every version owns a `codebook_codes` row set of its own. v1, the 3 most recent versions of any file, and every 10th version ("keyframe") stay fully materialized; everything else is compacted to a field-level delta (`codes_delta`, `backend/app/core/codebook_delta.py::encode_delta`) computed directly against its nearest still-materialized ancestor, checked once per commit (O(1), never a sweep — `version_service._demote_if_eligible`). A coding version born from a row-only edit (`save_coding_rows`, an AI recode) skips materialization from birth rather than storing an empty delta, since its codes are identical to its predecessor's by construction; `version_service.read_codes` resolves either case (a plain inherit or a real compacted delta) by looking up the nearest earlier materialized version and applying `codes_delta` if there is one. Every version that existed before this scheme was added defaults to materialized, so no backfill was needed. See `ArtifactVersion.codes_materialized`'s docstring for the full policy and reasoning (including why each compacted version stores one delta computed directly against its anchor, not a step in a consecutive chain).
 
 ## Migrations
 
 Alembic is used for schema changes (`alembic.ini` at repo root, `backend/alembic/`, revisions under `backend/alembic/versions/`). `Base.metadata.create_all` still runs at startup for convenience and in tests, but any real schema change goes through a new Alembic revision.
 
-Two one-off scripts relate to the storage-model migration itself:
+Revision `a1e6f2c9b3d7` ("baseline untracked schema") is the root of the chain and exists purely so `alembic upgrade head` works against a genuinely empty database — before it, most tables (`users`, `projects`, `files`, `file_tables`, `project_files`, a since-removed `file_dependencies`, `prompts`, `submissions`, `comments`, a since-removed `artifact_content`, `coding_entries`) had never actually been created by any revision, only by `create_all`, so the chain silently depended on that convenience path having already run. **No operator action is needed on any existing database** — a database already stamped past this point in history sees the new root as already-satisfied and `alembic upgrade head` is a no-op for it; only a fresh/empty database exercises this revision's DDL. See its module docstring for the full story, including how a Postgres-only `sa.Computed(...)` column now makes the `word_count` generated-column claim in `backend/app/storage_models.py` actually true.
 
-- `backend/scripts/migrate_to_fixed_tables.py` — idempotent backfill from the old dynamic schemas into the fixed tables.
+Two later revisions, `c2e58b41d7af` ("artifact version spine") and `d4f97a2c6e1b` ("artifact version spine finalize"), replace `file_dependencies`/`artifact_content` with `artifact_versions`/`artifact_edges`/`codebook_codes` and add SCD-2 columns to `coding_entries` — additive first (so the backfill script below can run against both old and new shapes at once), then a second revision drops the old tables/columns once the backfill is confirmed clean. See "One-off scripts" below.
+
+Three more revisions shrink `artifact_versions` itself, in sequence: `e7a3d1c9b482` drops the fully-rendered `user_prompt` (it duplicated data already in `submissions`/`comments` — 119 MB across 61 rows measured on the real dev database, 99.94% of the table) in favor of `user_instructions` (the human-authored fragment only) plus `prompt_meta` (a length/hash of what was actually sent); `f2b6c8e0a913` adds `codes_materialized` so a coding row-only save stops copying the whole codebook snapshot forward; `a4d7f931c8e5` adds `codes_delta` so a genuine codebook edit that ages out of the retained window is compacted to a field-level delta instead of staying materialized forever. None of the three needs a backfill — see each revision's own docstring for why the existing rows are already valid under the new scheme.
+
+One-off scripts relate to storage migrations:
+
 - `backend/scripts/drop_migrated_schemas.py` — irreversible `DROP SCHEMA` for already-migrated schemas; dry-run by default, requires `--confirm`.
+(`backfill_codebook_codes.py`, referenced by the docstrings of `c2e58b41d7af`/`d4f97a2c6e1b` as the manual step between them, has been removed — it read `files.systemprompt`/`userprompt` and `artifact_content`, all of which `d4f97a2c6e1b` itself drops, so it could only ever run in the window between those two revisions. That window is closed on every real database, and a fresh database has nothing to backfill.)
+
+(`migrate_to_fixed_tables.py`, the original dynamic-schema-to-fixed-table backfill, has been removed — its job was already done on every real database, and its target table, `artifact_content`, no longer exists after the version-spine cutover.)
 
 ## Deployment
 

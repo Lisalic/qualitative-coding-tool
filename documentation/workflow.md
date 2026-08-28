@@ -38,14 +38,14 @@ Why this structure:
 
 - API entrypoint in `backend/app/main.py` mounts all routes under `/api`.
 - Domain routers in `backend/app/api/*_routes.py` split features by responsibility (files, data, codebook, coding, content, projects, prompts).
-- Metadata is tracked in relational tables (`users`, `projects`, `files`, `project_files`, `file_dependencies`) in `backend/app/database.py`.
-- Heavy artifact content is stored in a small set of fixed, indexed tables (`submissions`, `comments`, `artifact_content`, `coding_entries` in `backend/app/storage_models.py`), all keyed by `file_id`. `files.schemaname` is retained as an opaque identifier string (`proj_<hex>` / `cmp_<hex>` / `sum_<hex>`) that the frontend still passes around, but it is no longer a real Postgres schema — every repository resolves it to `files.id` via `backend/app/repositories/file_repo.py::resolve_file_id` and queries the fixed tables by `file_id`. The old per-artifact dynamic schemas (`proj_*`/`cmp_*`/`sum_*`, each created via `CREATE SCHEMA IF NOT EXISTS`) still physically exist as a read-only rollback fallback and have not been dropped yet — see `documentation/architecture.md` for the full storage model.
+- Metadata is tracked in relational tables (`users`, `projects`, `files`, `project_files`) in `backend/app/database.py` — a `files` row is a git-style ref (identity only, no content).
+- Heavy artifact content lives in a small set of fixed, indexed tables keyed by `file_id`: `submissions`/`comments` (`backend/app/storage_models.py`) plus the artifact-version spine in `backend/app/versioning_models.py` — `artifact_versions` (one commit per save), `artifact_edges` (typed, ordered, version-pinned derivation between artifacts), and `codebook_codes` (per-version, per-code rows keyed by a stable `code_uid`). `coding_entries` (`backend/app/storage_models.py`) is SCD-2 range-versioned by `code_uid`/`valid_from`/`valid_to`. `files.schemaname` is retained as an opaque identifier string (`proj_<hex>` / `cmp_<hex>` / `sum_<hex>`) that the frontend still passes around, but it is no longer a real Postgres schema — every repository resolves it to `files.id` via `backend/app/repositories/file_repo.py::resolve_file_id` and queries the fixed tables by `file_id`. The old per-artifact dynamic schemas (`proj_*`/`cmp_*`/`sum_*`, each created via `CREATE SCHEMA IF NOT EXISTS`) still physically exist as a read-only rollback fallback and have not been dropped yet — see `documentation/architecture.md` for the full storage model.
 - AI pipelines live in reusable scripts under `backend/scripts/` (`filter_db.py`, `codebook_generator.py`, `codebook_apply.py`, `summarize_coding.py`).
 
 Why this structure:
 
 - separates small relational metadata from large content payloads,
-- supports lineage tracking between artifacts (`file_dependencies`),
+- supports lineage tracking between artifacts via typed, version-pinned `artifact_edges`, and full revision history via `artifact_versions` (see `backend/app/services/version_service.py`),
 - keeps HTTP route handlers thinner while AI workflows remain reusable.
 
 ## Core artifact model
@@ -211,7 +211,8 @@ User-facing behavior:
 
 - Apply a selected codebook to a selected database (optionally a sampled subset via the Sample Size slider); the AI codes every sampled post and comment, coded or not.
 - View Coding shows the resulting artifact: the codebook (editable), a paged table of every row the artifact owns — coded or uncoded — with per-row inline code/evidence/notes editing, and a read-only Text View rendering.
-- Select any subset of rows and re-run the AI classifier over just that subset with a chosen model (Recode), replacing only their coding.
+- Select any subset of rows and re-run the AI classifier over just that subset with a chosen model (Recode); the result is staged as reviewable proposals in the same editing session as manual tags and codebook edits, not written until Save.
+- Manual tagging, codebook edits, and accepted recode proposals all accumulate in one editing session; Save Changes commits everything together as exactly one new version.
 - Duplicate forks the whole saved artifact (codebook snapshot, its own rows, its coding, lineage, project links) under a new name.
 
 Frontend implementation:
@@ -230,12 +231,11 @@ Backend implementation:
 - `GET /api/coding/{ref}` — codebook snapshot + parsed tree + row/coded counts + code frequency
 - `GET /api/coding/{ref}/rows` — one page of the artifact's own rows (`limit`/`offset`/`only=all|coded|uncoded`/`code`/`q`), each with its codes
 - `GET /api/coding/{ref}/text` — read-only canonical text, rendered fresh from `coding_entries`
-- `PUT /api/coding/{ref}/codebook` — overwrite the codebook snapshot
-- `PUT /api/coding/{ref}/rows` — replace the coding for exactly the submitted rows
+- `PUT /api/coding/{ref}/revision` — save the whole editing session (an updated codebook snapshot, updated row coding, or both) as at most one new version
 - `PATCH /api/coding/{ref}` — rename / re-describe
 - `POST /api/coding/{ref}/duplicate` — fork the whole artifact
-- `POST /api/coding/{ref}/recode` — kick off a background job that reclassifies a chosen subset of rows with a chosen model
-- `GET /api/coding-comparison` — a `coding_comparison` artifact's markdown (unchanged by this overhaul; still one `artifact_content` blob)
+- `POST /api/coding/{ref}/recode` — kick off a background job that reclassifies a chosen subset of rows with a chosen model and returns the classification as proposals (nothing is written until the caller saves them via `PUT .../revision`)
+- `GET /api/coding-comparison` — a `coding_comparison` artifact's markdown (a blob-storage artifact type; content lives on `artifact_versions.content`, read via `version_service.read_blob`)
 
 Why implemented this way:
 
@@ -307,13 +307,14 @@ Why implemented this way:
 
 ### Lineage and traceability
 
-- `file_dependencies` (in `backend/app/database.py`) captures parent-child artifact relationships.
-- This supports reproducible analysis chains across import -> filter -> codebook -> coding -> summary.
+- `artifact_edges` (in `backend/app/versioning_models.py`) captures typed, ordered, version-pinned parent-child artifact relationships, replacing the old untyped `file_dependencies` table.
+- `artifact_versions` gives every artifact a full revision history (see "Artifact versioning" above / `documentation/architecture.md`), so lineage and revision are tracked as two separate, explicit concerns rather than one table conflating them.
+- This supports reproducible analysis chains across import -> filter -> codebook -> coding -> summary, and lets the UI walk the DAG via `GET /api/artifacts/{ref}/lineage` (`frontend/src/pages/Lineage.jsx`).
 
 ## Why the overall workflow is implemented this way
 
 - **Pipeline clarity:** each transformation produces a new artifact, avoiding destructive overwrites.
-- **Traceability:** parent-child dependencies preserve provenance for qualitative analysis decisions.
+- **Traceability:** typed, version-pinned edges preserve exact provenance for qualitative analysis decisions.
 - **Modularity:** separate route modules and script modules keep feature growth manageable.
 - **UI consistency:** shared tool-page/panel patterns reduce cognitive load and implementation drift.
 - **Iterative research support:** users can branch from raw or filtered data, compare alternatives, and summarize results without losing intermediate states.
