@@ -5,8 +5,9 @@ import pytest
 from backend.app.core.exceptions import NotFoundError
 from backend.app.database import File, FileTable, User
 from backend.app.repositories.file_repo import (
+    filter_owned_ids,
     get_owned_file,
-    list_files_with_tables_and_deps,
+    list_files_with_tables,
     resolve_file_id,
 )
 
@@ -122,7 +123,7 @@ class TestGetOwnedFile:
                 await get_owned_file(session, "proj_owned", other.id)
 
 
-class TestListFilesWithTablesAndDeps:
+class TestListFilesWithTables:
     async def test_returns_only_user_files(self, session_factory) -> None:
         async with session_factory() as session:
             owner = await make_user(session, "owner@x.com")
@@ -133,7 +134,7 @@ class TestListFilesWithTablesAndDeps:
             session.add_all([f1, f2])
             await session.commit()
 
-            files = await list_files_with_tables_and_deps(session, owner.id)
+            files = await list_files_with_tables(session, owner.id)
             assert [f.id for f in files] == [f1.id]
 
     async def test_relationships_are_populated(self, session_factory) -> None:
@@ -145,14 +146,14 @@ class TestListFilesWithTablesAndDeps:
             session.add(FileTable(file_id=f.id, tablename="submissions", row_count=5))
             await session.commit()
 
-            files = await list_files_with_tables_and_deps(session, user.id)
+            files = await list_files_with_tables(session, user.id)
             assert len(files) == 1
             assert files[0].tables[0].tablename == "submissions"
             assert files[0].tables[0].row_count == 5
 
     async def test_query_count_constant_regardless_of_file_count(self, async_sqlite_engine) -> None:
         """N+1 regression test: a small and a large file set must issue the
-        same number of SQL statements to load files + tables + deps.
+        same number of SQL statements to load files + tables.
         """
         SessionLocal = async_sessionmaker(async_sqlite_engine, expire_on_commit=False)
 
@@ -185,11 +186,9 @@ class TestListFilesWithTablesAndDeps:
             event.listen(sync_engine, "before_cursor_execute", _before_cursor_execute)
             try:
                 async with SessionLocal() as session:
-                    files = await list_files_with_tables_and_deps(session, user_id)
+                    files = await list_files_with_tables(session, user_id)
                     for f in files:
                         list(f.tables)
-                        list(f.child_dependencies)
-                        list(f.parent_dependencies)
             finally:
                 event.remove(sync_engine, "before_cursor_execute", _before_cursor_execute)
             return counter["n"]
@@ -202,5 +201,25 @@ class TestListFilesWithTablesAndDeps:
 
         assert small_count == large_count
         # Sanity: it really did do more than one query per relationship
-        # (files, tables, child_dependencies, parent_dependencies), not zero.
+        # (files, tables), not zero.
         assert small_count >= 2
+
+
+class TestFilterOwnedIds:
+    async def test_returns_only_owned_ids(self, session_factory) -> None:
+        async with session_factory() as session:
+            owner = await make_user(session, "owner@x.com")
+            other = await make_user(session, "other@x.com")
+
+            f1 = File(user_id=owner.id, filename="a.zst", schemaname="proj_a", file_type="raw_data")
+            f2 = File(user_id=other.id, filename="b.zst", schemaname="proj_b", file_type="raw_data")
+            session.add_all([f1, f2])
+            await session.commit()
+
+            owned = await filter_owned_ids(session, {f1.id, f2.id, 999999}, owner.id)
+            assert owned == {f1.id}
+
+    async def test_empty_input_returns_empty_set(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await make_user(session)
+            assert await filter_owned_ids(session, set(), user.id) == set()

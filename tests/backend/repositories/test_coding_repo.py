@@ -28,7 +28,10 @@ def _entry(post_id: str, code: str, quote: str = "q", *, row_type: str | None = 
     don't exercise evidence_match (that's core/test_evidence_match.py's
     job) and just need internally-consistent placeholder offsets.
     """
-    entry = {"post_id": post_id, "code": code, "quote": quote, "start_offset": 0, "end_offset": len(quote)}
+    entry = {
+        "post_id": post_id, "code": code, "code_uid": f"{code}-uid", "quote": quote,
+        "start_offset": 0, "end_offset": len(quote),
+    }
     if row_type is not None:
         entry["row_type"] = row_type
     if notes is not None:
@@ -259,7 +262,7 @@ class TestReplaceEntriesForItems:
                     {
                         "row_type": "submission",
                         "post_id": "p1",
-                        "entries": [{"code": "NEW", "quote": "new ev", "start_offset": 0, "end_offset": 6}],
+                        "entries": [{"code": "NEW", "code_uid": "NEW-uid", "quote": "new ev", "start_offset": 0, "end_offset": 6}],
                     }
                 ],
             )
@@ -310,7 +313,7 @@ class TestReplaceEntriesForItems:
                         "row_type": "submission",
                         "post_id": "p1",
                         "entries": [
-                            {"code": "A", "quote": "e", "start_offset": 0, "end_offset": 1, "notes": "n"}
+                            {"code": "A", "code_uid": "A-uid", "quote": "e", "start_offset": 0, "end_offset": 1, "notes": "n"}
                         ],
                     }
                 ],
@@ -333,8 +336,8 @@ class TestReplaceEntriesForItems:
                         "row_type": "submission",
                         "post_id": "p1",
                         "entries": [
-                            {"code": "A", "quote": "one", "start_offset": 0, "end_offset": 3},
-                            {"code": "A", "quote": "two", "start_offset": 10, "end_offset": 13},
+                            {"code": "A", "code_uid": "A-uid", "quote": "one", "start_offset": 0, "end_offset": 3},
+                            {"code": "A", "code_uid": "A-uid", "quote": "two", "start_offset": 10, "end_offset": 13},
                         ],
                     }
                 ],
@@ -382,6 +385,197 @@ class TestCopyEntries:
             n = await copy_entries(session, source_file_id=source.id, target_file_id=target.id)
             assert n == 0
             assert await get_coding_entries(session, target.id) == []
+
+    async def test_as_of_version_no_copies_the_live_set_from_that_version_not_head(
+        self, session_factory
+    ) -> None:
+        """``as_of_version_no`` is what a codebook/coding fork uses to
+        recover a past state (see version_service.py's module docstring:
+        history is append-only, so "revert" is "duplicate from an older
+        version" instead of a truncating rewind). v1: p1=A. v2: p1
+        recoded to B (A closed at valid_to=1). Forking as-of v1 must copy
+        A, not B -- and leave the source's own rows untouched.
+        """
+        async with session_factory() as session:
+            user = await make_user(session)
+            source = await _make_file(session, user, "coding_src_asof")
+            target = await _make_file(session, user, "coding_target_asof")
+            await bulk_insert_coding_entries(session, source.id, [_entry("p1", "A", "e1")], version_no=1)
+            await session.commit()
+            await replace_entries_for_items(
+                session, source.id,
+                [{"row_type": "submission", "post_id": "p1", "entries": [_entry("p1", "B", "e2")]}],
+                version_no=2,
+            )
+            await session.commit()
+
+            n = await copy_entries(session, source_file_id=source.id, target_file_id=target.id, as_of_version_no=1)
+            await session.commit()
+
+            assert n == 1
+            copied = await get_coding_entries(session, target.id)
+            assert [e.code for e in copied] == ["A"]
+            # Re-stamped as the fork's own v1, not the source's version_no=1.
+            assert copied[0].valid_from == 1
+            assert copied[0].valid_to is None
+
+            # Source is untouched: A is still closed at 1, B is still live.
+            from sqlalchemy import select as _select
+            from backend.app.storage_models import CodingEntry as _CodingEntry
+
+            source_rows = (
+                await session.execute(_select(_CodingEntry).where(_CodingEntry.file_id == source.id))
+            ).scalars().all()
+            assert len(source_rows) == 2
+
+    async def test_as_of_version_no_includes_an_item_untouched_since_that_version(
+        self, session_factory
+    ) -> None:
+        # p2 was never touched by the v1->v2 edit and is still live at v2
+        # -- forking as-of v1 must still include it (it was live then too).
+        async with session_factory() as session:
+            user = await make_user(session)
+            source = await _make_file(session, user, "coding_src_asof2")
+            target = await _make_file(session, user, "coding_target_asof2")
+            await bulk_insert_coding_entries(
+                session, source.id, [_entry("p1", "A", "e1"), _entry("p2", "Z", "e9")], version_no=1,
+            )
+            await session.commit()
+            await replace_entries_for_items(
+                session, source.id,
+                [{"row_type": "submission", "post_id": "p1", "entries": [_entry("p1", "B", "e2")]}],
+                version_no=2,
+            )
+            await session.commit()
+
+            await copy_entries(session, source_file_id=source.id, target_file_id=target.id, as_of_version_no=1)
+            await session.commit()
+
+            copied = await get_coding_entries(session, target.id)
+            assert {(e.post_id, e.code) for e in copied} == {("p1", "A"), ("p2", "Z")}
+
+    async def test_as_of_empty_target_version_copies_zero_entries(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await make_user(session)
+            source = await _make_file(session, user, "coding_src_asof3")
+            target = await _make_file(session, user, "coding_target_asof3")
+            # v1 is empty (no entries at all); v2 codes p1.
+            await replace_entries_for_items(
+                session, source.id,
+                [{"row_type": "submission", "post_id": "p1", "entries": [_entry("p1", "A", "e1")]}],
+                version_no=2,
+            )
+            await session.commit()
+
+            n = await copy_entries(session, source_file_id=source.id, target_file_id=target.id, as_of_version_no=1)
+            await session.commit()
+
+            assert n == 0
+            assert await get_coding_entries(session, target.id) == []
+
+
+class TestSCD2Ranges:
+    """``replace_entries_for_items``'s three-step algorithm --
+    storage_models.py::CodingEntry's range invariant, exercised directly
+    against real version-number arguments rather than through the
+    service layer.
+    """
+
+    async def test_row_born_in_the_same_open_version_is_deleted_not_closed(self, session_factory) -> None:
+        # A row created within version 2 and replaced again still under
+        # version 2 (an in-place edit of an unsealed draft) never existed
+        # in a sealed version -- removing it outright is not history loss.
+        async with session_factory() as session:
+            user = await make_user(session)
+            f = await _make_file(session, user)
+            await bulk_insert_coding_entries(session, f.id, [_entry("p1", "A", "e1")], version_no=2)
+            await session.commit()
+
+            await replace_entries_for_items(
+                session, f.id, [{"row_type": "submission", "post_id": "p1", "entries": []}], version_no=2,
+            )
+            await session.commit()
+
+            all_rows = await get_coding_entries(session, f.id)
+            assert all_rows == []  # gone entirely, not closed -- never existed at any sealed version
+
+    async def test_row_inherited_from_a_sealed_ancestor_is_closed_not_deleted(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await make_user(session)
+            f = await _make_file(session, user)
+            await bulk_insert_coding_entries(session, f.id, [_entry("p1", "A", "e1")], version_no=1)
+            await session.commit()
+
+            await replace_entries_for_items(
+                session, f.id,
+                [{"row_type": "submission", "post_id": "p1", "entries": [_entry("p1", "B", "e2")]}],
+                version_no=2,
+            )
+            await session.commit()
+
+            from sqlalchemy import select as _select
+            from backend.app.storage_models import CodingEntry as _CodingEntry
+
+            all_rows = (
+                await session.execute(_select(_CodingEntry).where(_CodingEntry.file_id == f.id))
+            ).scalars().all()
+            by_code = {r.code: r for r in all_rows}
+            assert by_code["A"].valid_from == 1
+            assert by_code["A"].valid_to == 1  # closed at version_no - 1, never deleted
+            assert by_code["B"].valid_from == 2
+            assert by_code["B"].valid_to is None  # live
+
+    async def test_live_reads_see_only_the_current_version(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await make_user(session)
+            f = await _make_file(session, user)
+            await bulk_insert_coding_entries(session, f.id, [_entry("p1", "A", "e1")], version_no=1)
+            await session.commit()
+
+            await replace_entries_for_items(
+                session, f.id,
+                [{"row_type": "submission", "post_id": "p1", "entries": [_entry("p1", "B", "e2")]}],
+                version_no=2,
+            )
+            await session.commit()
+
+            # get_coding_entries, code_frequency: both route through _live()
+            # and must show only "B", even though "A" still physically
+            # exists as closed history.
+            live = await get_coding_entries(session, f.id)
+            assert [e.code for e in live] == ["B"]
+
+            freq = await code_frequency(session, f.id)
+            assert freq == [("B", 1)]
+
+    async def test_untouched_items_keep_their_range_across_a_version_boundary(self, session_factory) -> None:
+        # Editing item p1 under version 2 must not touch item p2's
+        # version-1 range at all.
+        async with session_factory() as session:
+            user = await make_user(session)
+            f = await _make_file(session, user)
+            await bulk_insert_coding_entries(
+                session, f.id, [_entry("p1", "A", "e1"), _entry("p2", "Z", "e9")], version_no=1,
+            )
+            await session.commit()
+
+            await replace_entries_for_items(
+                session, f.id,
+                [{"row_type": "submission", "post_id": "p1", "entries": [_entry("p1", "B", "e2")]}],
+                version_no=2,
+            )
+            await session.commit()
+
+            from sqlalchemy import select as _select
+            from backend.app.storage_models import CodingEntry as _CodingEntry
+
+            p2_row = (
+                await session.execute(
+                    _select(_CodingEntry).where(_CodingEntry.file_id == f.id, _CodingEntry.post_id == "p2")
+                )
+            ).scalar_one()
+            assert p2_row.valid_from == 1
+            assert p2_row.valid_to is None
 
 
 class TestRenderCodingText:
@@ -470,7 +664,7 @@ class TestListRowsWithCodesAndCountRows:
             assert {r["item_id"] for r in rows} == {"t3_s1", "t3_s2", "t1_c1"}
             by_item = {r["item_id"]: r for r in rows}
             assert by_item["t3_s1"]["codes"] == [
-                {"code": "A", "quote": "e", "start_offset": 0, "end_offset": 1, "notes": None}
+                {"code": "A", "code_uid": "A-uid", "quote": "e", "start_offset": 0, "end_offset": 1, "notes": None}
             ]
             assert by_item["t3_s2"]["codes"] == []
             assert by_item["t1_c1"]["title"] is None

@@ -91,20 +91,31 @@ async def get_owned_file(
     return file_rec
 
 
-async def list_files_with_tables_and_deps(session: AsyncSession, user_id: int) -> list[File]:
-    """All of ``user_id``'s files, with ``.tables``, ``.child_dependencies``,
-    and ``.parent_dependencies`` eagerly loaded via ``selectinload`` -- a
-    small constant number of queries regardless of file count (fixes the
-    N+1 in Stage 2's ``my_projects``/``list_projects``; not wired into any
-    route yet).
+async def list_files_with_tables(session: AsyncSession, user_id: int) -> list[File]:
+    """All of ``user_id``'s files, with ``.tables`` eagerly loaded via
+    ``selectinload`` -- a small constant number of queries regardless of
+    file count. Parent lineage is no longer an ORM relationship read
+    this way; see ``repositories/version_repo.py::list_parent_edges_for_files``
+    and ``filter_owned_ids`` below, called separately by
+    ``services/project_service.py``.
     """
     result = await session.execute(
-        select(File)
-        .where(File.user_id == user_id)
-        .options(
-            selectinload(File.tables),
-            selectinload(File.child_dependencies),
-            selectinload(File.parent_dependencies),
-        )
+        select(File).where(File.user_id == user_id).options(selectinload(File.tables))
     )
     return list(result.scalars().all())
+
+
+async def filter_owned_ids(session: AsyncSession, file_ids: set[int], user_id: int) -> set[int]:
+    """Of ``file_ids``, the subset actually owned by ``user_id``. Used
+    wherever a caller has a set of file ids from an untrusted or
+    cross-user-reachable source (edge parents, client-supplied ids) and
+    needs to scope it down before trusting or serializing anything about
+    them -- see ``version_service.fork_lineage`` and
+    ``services/project_service.py``.
+    """
+    if not file_ids:
+        return set()
+    result = await session.execute(
+        select(File.id).where(File.id.in_(file_ids), File.user_id == user_id)
+    )
+    return set(result.scalars().all())

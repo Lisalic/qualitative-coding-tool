@@ -175,8 +175,6 @@ class File(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     file_type = Column(String)
     description = Column(String)
-    systemprompt = Column(String)
-    userprompt = Column(String)
 
     user = relationship("User", back_populates="files")
     projects = relationship("Project", secondary=project_files_table, back_populates="files")
@@ -191,18 +189,6 @@ class FileTable(Base):
     row_count = Column(Integer, default=0)
 
     file = relationship("File", back_populates="tables")
-
-
-class FileDependency(Base):
-    __tablename__ = "file_dependencies"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    child_file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=False)
-    parent_file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    child_file = relationship("File", foreign_keys=[child_file_id], backref="child_dependencies")
-    parent_file = relationship("File", foreign_keys=[parent_file_id], backref="parent_dependencies")
 
 
 class Prompt(Base):

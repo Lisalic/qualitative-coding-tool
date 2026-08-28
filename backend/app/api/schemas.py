@@ -16,7 +16,7 @@ from typing import Any, Literal, Optional, Type, TypeVar
 
 from fastapi import Form
 from fastapi.exceptions import RequestValidationError
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -333,9 +333,14 @@ class CodingEntryIn(_StrippingModel):
     from the real DOM selection range (see ``HighlightedContent.jsx``), so
     unlike AI output there is no separate existence/offset check at this
     boundary -- a manual edit is trusted the same way it always has been.
+
+    ``code_uid`` (not a name string) identifies the code -- it must
+    resolve against the coding artifact's own current codebook snapshot
+    (``coding_service.save_coding_rows`` rejects one that doesn't), so a
+    code rename never orphans a manually-entered quote.
     """
 
-    code: str = Field(min_length=1)
+    code_uid: str = Field(min_length=1)
     quote: str = Field(min_length=1)
     start_offset: int = Field(ge=0)
     end_offset: int = Field(gt=0)
@@ -361,16 +366,80 @@ class CodingRowUpdate(_StrippingModel):
     entries: list[CodingEntryIn] = Field(default_factory=list)
 
 
-class SaveCodingRowsRequest(_StrippingModel):
-    """Payload for ``PUT /api/coding/{ref}/rows``."""
-
-    rows: list[CodingRowUpdate] = Field(min_length=1)
 
 
-class SaveCodingCodebookRequest(_StrippingModel):
-    """Payload for ``PUT /api/coding/{ref}/codebook``."""
+class CodebookCodeIn(_StrippingModel):
+    """One structured code, as saved from the codebook editor.
 
-    content: str = Field(min_length=1)
+    Identity is explicit, not inferred: a code being kept/edited/moved
+    carries its existing ``code_uid``; a code the editor just created
+    carries ``is_new=True`` instead (and no ``code_uid``) -- the service
+    layer mints a fresh uid for it, but ONLY when told to. A code with
+    neither is rejected rather than silently re-identified, which would
+    otherwise show up as a spurious delete+add in the version history
+    diff. ``family_uid``/``family_is_new`` follow the same rule for the
+    code's family.
+    """
+
+    # Identity is validated in `codebook_service._resolve_code_rows`, not
+    # here -- a Pydantic field_validator's `info.data` only sees fields
+    # validated BEFORE it in declaration order, which makes a robust
+    # "code_uid required unless is_new" check awkward to express as a
+    # field validator (and a model_validator would just duplicate the
+    # service-layer check this schema's one real caller already runs).
+    code_uid: Optional[str] = None
+    is_new: bool = False
+    family_uid: Optional[str] = None
+    family_is_new: bool = False
+    family_name: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    body: str = ""
+    definition: Optional[str] = None
+    inclusion: Optional[str] = None
+    exclusion: Optional[str] = None
+    keywords: Optional[str] = None
+    example: Optional[str] = None
+
+
+class SaveCodebookRequest(_StrippingModel):
+    """Payload for ``PUT /api/codebook/{ref}``."""
+
+    codes: list[CodebookCodeIn] = Field(min_length=1)
+    display_name: Optional[str] = None
+
+
+class ImportCodebookRequest(_StrippingModel):
+    """Payload for ``POST /api/codebook/{ref}/import`` -- pasted/uploaded
+    markdown, parsed into structured rows (see
+    ``core/codebook_render.py::parse_markdown_to_codes``).
+    """
+
+    markdown: str = Field(min_length=1)
+
+
+class SaveCodingRevisionRequest(_StrippingModel):
+    """Payload for ``PUT /api/coding/{ref}/revision`` -- one unified save
+    for a coding artifact's editing session: an updated codebook
+    snapshot, updated row coding, or both together, committed as at most
+    one new ``artifact_versions`` row (see
+    ``coding_service.save_coding_revision``). ``model``/``job_id`` are
+    optional AI provenance to attach to that version when the saved rows
+    include AI-recode proposals the user reviewed and kept.
+
+    At least one of ``codes``/``rows`` must be given -- a request with
+    neither has nothing to save.
+    """
+
+    codes: Optional[list[CodebookCodeIn]] = None
+    rows: Optional[list[CodingRowUpdate]] = None
+    model: Optional[str] = None
+    job_id: Optional[int] = None
+
+    @model_validator(mode="after")
+    def _at_least_one(self):
+        if not self.codes and not self.rows:
+            raise ValueError("At least one of codes/rows is required")
+        return self
 
 
 class UpdateCodingMetadataRequest(_StrippingModel):
@@ -381,9 +450,22 @@ class UpdateCodingMetadataRequest(_StrippingModel):
 
 
 class DuplicateCodingRequest(_StrippingModel):
-    """Payload for ``POST /api/coding/{ref}/duplicate``."""
+    """Payload for ``POST /api/coding/{ref}/duplicate``. ``from_version_no``
+    forks from that point in the artifact's history instead of head --
+    the non-destructive replacement for the old forward-commit revert.
+    """
 
     display_name: str = Field(min_length=1)
+    from_version_no: Optional[int] = Field(default=None, ge=1)
+
+
+class DuplicateCodebookRequest(_StrippingModel):
+    """Payload for ``POST /api/codebook/{ref}/duplicate``. Same shape and
+    same ``from_version_no`` semantics as ``DuplicateCodingRequest``.
+    """
+
+    display_name: str = Field(min_length=1)
+    from_version_no: Optional[int] = Field(default=None, ge=1)
 
 
 class RecodeItemsRequest(_StrippingModel):

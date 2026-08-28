@@ -6,8 +6,11 @@ end-to-end via the real ``jobs/service.py`` pipeline, same style as
 ``tests/backend/jobs/test_service.py``), plus the plain read/write
 service functions backing the coding-artifact editor
 (``get_coding_artifact``, ``list_coding_rows``, ``get_coding_text``,
-``save_coding_codebook``, ``save_coding_rows``, ``update_coding_metadata``,
-``duplicate_coding``, ``get_coding_comparison``).
+``save_coding_revision``, ``update_coding_metadata``,
+``duplicate_coding``, ``get_coding_comparison``). ``recode_items``'s
+handler no longer commits anything itself -- it returns classification
+proposals in the job result, which only ``save_coding_revision`` (a
+user-triggered Save) ever turns into a version.
 
 Since the coding-artifact overhaul, a ``coding`` file is self-contained:
 its own codebook snapshot (``artifact_content``), its own copy of every
@@ -23,12 +26,27 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from backend.app.core.codebook_render import parse_markdown_to_codes
 from backend.app.core.exceptions import NotFoundError, ValidationAppError
-from backend.app.database import File, FileDependency, User
+from backend.app.database import File, User
+from backend.app.repositories import version_repo
 from backend.app.jobs import service as jobs_service
-from backend.app.repositories import artifact_content_repo
-from backend.app.services import coding_service
-from backend.app.storage_models import ArtifactContent, CodingEntry, Submission
+from backend.app.services import coding_service, version_service
+from backend.app.storage_models import CodingEntry, Submission
+from backend.app.versioning_models import ArtifactVersion, CodebookCode
+
+
+async def _seed_codebook_markdown(session, file_id: int, user_id: int, markdown: str) -> None:
+    """Seed a `codebook`/`coding` file's v1 by actually PARSING real
+    ``### Code Family:``/``#### Code Name:`` markdown, unlike
+    ``_make_file``'s ``content=`` (which wraps arbitrary placeholder text
+    as a single fake code's body) -- for tests that need real, separately
+    NAMED codes an apply/recode run can reference by name.
+    """
+    rows = [dict(r) for r in parse_markdown_to_codes(markdown)]
+    await version_service.commit_codebook_version(
+        session, file_id=file_id, author_user_id=user_id, origin="generated", codes=rows,
+    )
 
 
 async def _wait_for_terminal_status(session, job_id: int, user_id: int, timeout: float = 5.0):
@@ -99,16 +117,41 @@ async def _make_file(
     file_type: str = "coding",
     schemaname: str = "proj_a",
     content: str | None = None,
+    skip_version: bool = False,
 ) -> File:
-    """Insert a ``File`` (optionally with an ``artifact_content`` row --
-    a coding file's codebook snapshot, or a coding_comparison's markdown)
-    directly via the ORM, owned by ``owner_id``.
+    """Insert a ``File`` directly via the ORM, owned by ``owner_id``, and
+    (unless ``skip_version=True``) always give it a v1 -- matching the
+    real production invariant that every ``coding``/``codebook`` file is
+    created through a job handler that commits one immediately (there is
+    no path that creates a bare codebook/coding ``File`` row with zero
+    version history). For ``coding``/``codebook``, ``content`` becomes
+    the sole seeded code's ``body`` (empty codes list when ``content`` is
+    ``None`` -- an "empty codebook", not "no version at all", which is
+    what a test asserting on the actual empty-content failure path
+    wants); for any other type it's a blob version (``""`` when
+    ``content`` is ``None``).
+
+    ``skip_version=True`` opts back into the old "no version at all"
+    fixture shape, for the handful of tests that specifically exercise
+    what happens when a referenced file has no version history to pin at
+    all (a genuinely different failure mode from "empty content").
     """
     file_rec = File(user_id=owner_id, filename="f", schemaname=schemaname, file_type=file_type)
     session.add(file_rec)
     await session.flush()
-    if content is not None:
-        session.add(ArtifactContent(file_id=file_rec.id, content=content))
+    if not skip_version:
+        if file_type in ("coding", "codebook"):
+            codes = (
+                [{"code_uid": "u1", "family_uid": "f1", "family_name": "F", "name": "C", "body": content, "position": 0}]
+                if content is not None else []
+            )
+            await version_service.commit_codebook_version(
+                session, file_id=file_rec.id, author_user_id=owner_id, origin="generated", codes=codes,
+            )
+        else:
+            await version_service.commit_blob_version(
+                session, file_id=file_rec.id, author_user_id=owner_id, origin="generated", content=content or "",
+            )
     await session.commit()
     await session.refresh(file_rec)
     return file_rec
@@ -228,7 +271,7 @@ class TestSummarizeCodingJobHandlerEndToEnd:
     async def test_succeeds_and_stores_summary_result(self, session, user_id, monkeypatch) -> None:
         source_file = await _make_file(session, user_id, schemaname="proj_a")
         source_file_id = source_file.id
-        session.add(CodingEntry(file_id=source_file.id, post_id="p1", code="CODE_A", quote="e", start_offset=0, end_offset=1))
+        session.add(CodingEntry(file_id=source_file.id, post_id="p1", code="CODE_A", code_uid="CODE_A-uid", quote="e", start_offset=0, end_offset=1))
         await session.commit()
 
         summarize_mock = AsyncMock(return_value=("the final summary", {"batches_processed": 1, "batches_total": 1, "error": None}))
@@ -266,15 +309,13 @@ class TestSummarizeCodingJobHandlerEndToEnd:
         assert new_file.file_type == "summary"
         assert new_file.description == "notes"
 
-        content = await artifact_content_repo.read_content(session, new_file_id)
+        content = await version_service.read_blob(session, new_file_id)
         assert content == "the final summary"
 
-        deps = (
-            await session.execute(
-                select(FileDependency).where(FileDependency.child_file_id == new_file_id)
-            )
-        ).scalars().all()
-        assert [d.parent_file_id for d in deps] == [source_file_id]
+        edges = await version_repo.list_parent_edges(session, new_file_id)
+        assert [e.parent_file_id for e in edges] == [source_file_id]
+        assert edges[0].relation == "derived_from"
+        assert edges[0].role == "source_data"
 
     async def test_uses_aggregated_coding_data_from_structured_entries(
         self, session, user_id, monkeypatch
@@ -284,8 +325,8 @@ class TestSummarizeCodingJobHandlerEndToEnd:
         # from the SQL-aggregated summary (exact counts + sampled
         # evidence), never from a stored blob.
         source_file = await _make_file(session, user_id, schemaname="proj_a")
-        session.add(CodingEntry(file_id=source_file.id, post_id="p1", code="CODE_A", quote="e1", start_offset=0, end_offset=2))
-        session.add(CodingEntry(file_id=source_file.id, post_id="p2", code="CODE_A", quote="e2", start_offset=0, end_offset=2))
+        session.add(CodingEntry(file_id=source_file.id, post_id="p1", code="CODE_A", code_uid="CODE_A-uid", quote="e1", start_offset=0, end_offset=2))
+        session.add(CodingEntry(file_id=source_file.id, post_id="p2", code="CODE_A", code_uid="CODE_A-uid", quote="e2", start_offset=0, end_offset=2))
         await session.commit()
 
         summarize_mock = AsyncMock(return_value=("the final summary", {"batches_processed": 1, "batches_total": 1, "error": None}))
@@ -340,12 +381,12 @@ class TestGetCodingArtifact:
     async def test_returns_codebook_snapshot_and_counts(self, session, user_id) -> None:
         coding_file = await _make_file(session, user_id, schemaname="proj_read1", content="codebook snapshot")
         session.add(Submission(file_id=coding_file.id, id="s1", title="t", selftext="b", word_count=1))
-        session.add(CodingEntry(file_id=coding_file.id, post_id="s1", code="A", quote="e", start_offset=0, end_offset=1))
+        session.add(CodingEntry(file_id=coding_file.id, post_id="s1", code="A", code_uid="A-uid", quote="e", start_offset=0, end_offset=1))
         await session.commit()
 
         artifact = await coding_service.get_coding_artifact(session, user_id, "proj_read1")
         assert artifact["file"].id == coding_file.id
-        assert artifact["codebook_text"] == "codebook snapshot"
+        assert [c.body for c in artifact["codes"]] == ["codebook snapshot"]
         assert artifact["total_rows"] == 1
         assert artifact["total_coded"] == 1
         assert artifact["code_frequency"] == [{"code": "A", "count": 1}]
@@ -366,14 +407,14 @@ class TestListCodingRows:
         coding_file = await _make_file(session, user_id, schemaname="proj_rows1")
         session.add(Submission(file_id=coding_file.id, id="s1", title="Coded", selftext="b1", word_count=1))
         session.add(Submission(file_id=coding_file.id, id="s2", title="Uncoded", selftext="b2", word_count=1))
-        session.add(CodingEntry(file_id=coding_file.id, post_id="s1", code="A", quote="e", start_offset=0, end_offset=1))
+        session.add(CodingEntry(file_id=coding_file.id, post_id="s1", code="A", code_uid="A-uid", quote="e", start_offset=0, end_offset=1))
         await session.commit()
 
         result = await coding_service.list_coding_rows(session, user_id, "proj_rows1")
         assert result["total"] == 2
         by_item = {row["item_id"]: row for row in result["rows"]}
         assert by_item["t3_s1"]["codes"] == [
-            {"code": "A", "quote": "e", "start_offset": 0, "end_offset": 1, "notes": None}
+            {"code": "A", "code_uid": "A-uid", "quote": "e", "start_offset": 0, "end_offset": 1, "notes": None}
         ]
         assert by_item["t3_s2"]["codes"] == []
 
@@ -395,7 +436,7 @@ class TestListCodingRows:
 class TestGetCodingText:
     async def test_renders_from_coding_entries(self, session, user_id) -> None:
         coding_file = await _make_file(session, user_id, schemaname="proj_text1")
-        session.add(CodingEntry(file_id=coding_file.id, post_id="s1", code="A", quote="e", start_offset=0, end_offset=1, notes="n"))
+        session.add(CodingEntry(file_id=coding_file.id, post_id="s1", code="A", code_uid="A-uid", quote="e", start_offset=0, end_offset=1, notes="n"))
         await session.commit()
 
         text = await coding_service.get_coding_text(session, user_id, "proj_text1")
@@ -410,63 +451,118 @@ class TestGetCodingText:
 
 
 # ---------------------------------------------------------------------------
-# save_coding_codebook / save_coding_rows / update_coding_metadata
+# save_coding_revision / update_coding_metadata
 # ---------------------------------------------------------------------------
 
 
-class TestSaveCodingCodebook:
+class TestSaveCodingRevisionCodebookOnly:
     async def test_overwrites_snapshot(self, session, user_id) -> None:
         coding_file = await _make_file(session, user_id, schemaname="proj_save_cb", content="old")
-        result = await coding_service.save_coding_codebook(session, user_id, "proj_save_cb", "new text")
+        new_codes = [{"code_uid": "u2", "family_uid": "f2", "family_name": "F2", "name": "New", "body": "new text"}]
+        result = await coding_service.save_coding_revision(session, user_id, "proj_save_cb", codes=new_codes, rows=None)
         assert result.id == coding_file.id
-        assert await artifact_content_repo.read_content(session, coding_file.id) == "new text"
+        codes = await version_service.read_codes(session, coding_file.id)
+        assert [c.name for c in codes] == ["New"]
 
-    async def test_blank_content_raises_validation_error(self, session, user_id) -> None:
+    async def test_no_codes_and_no_rows_raises_validation_error(self, session, user_id) -> None:
         await _make_file(session, user_id, schemaname="proj_save_cb2")
         with pytest.raises(ValidationAppError):
-            await coding_service.save_coding_codebook(session, user_id, "proj_save_cb2", "   ")
+            await coding_service.save_coding_revision(session, user_id, "proj_save_cb2", codes=None, rows=None)
 
     async def test_unowned_raises_not_found(self, session, user_id) -> None:
         other_id = await _make_user(session, "other-save-cb@example.com")
         await _make_file(session, other_id, schemaname="proj_not_mine_cb")
         with pytest.raises(NotFoundError):
-            await coding_service.save_coding_codebook(session, user_id, "proj_not_mine_cb", "x")
+            await coding_service.save_coding_revision(
+                session, user_id, "proj_not_mine_cb",
+                codes=[{"code_uid": "u", "family_uid": "f", "family_name": "F", "name": "N"}], rows=None,
+            )
+
+    async def test_identical_codes_are_a_no_op_and_mint_no_version(self, session, user_id) -> None:
+        coding_file = await _make_file(session, user_id, schemaname="proj_save_cb_noop", content="body")
+        codes = await version_service.read_codes(session, coding_file.id)
+        same_codes = [
+            {
+                "code_uid": c.code_uid, "family_uid": c.family_uid, "family_name": c.family_name,
+                "name": c.name, "body": c.body,
+            }
+            for c in codes
+        ]
+        head_before = await version_repo.head_version(session, coding_file.id)
+        result = await coding_service.save_coding_revision(session, user_id, "proj_save_cb_noop", codes=same_codes, rows=None)
+        assert result.id == coding_file.id
+        head_after = await version_repo.head_version(session, coding_file.id)
+        assert head_after.version_no == head_before.version_no
 
 
-class TestSaveCodingRows:
+class TestSaveCodingRevisionRowsOnly:
     async def test_replaces_coding_for_given_rows(self, session, user_id) -> None:
-        coding_file = await _make_file(session, user_id, schemaname="proj_save_rows")
+        coding_file = await _make_file(session, user_id, schemaname="proj_save_rows", content="body")
+        codes = await version_service.read_codes(session, coding_file.id)
+        new_uid = codes[0].code_uid  # the sole seeded code, named "C"
         session.add(Submission(file_id=coding_file.id, id="s1", title="t", selftext="b", word_count=1))
-        session.add(CodingEntry(file_id=coding_file.id, post_id="s1", code="OLD", quote="e", start_offset=0, end_offset=1))
+        session.add(CodingEntry(file_id=coding_file.id, post_id="s1", code="OLD", code_uid="OLD-uid", quote="e", start_offset=0, end_offset=1))
         await session.commit()
 
-        await coding_service.save_coding_rows(
+        await coding_service.save_coding_revision(
             session,
             user_id,
             "proj_save_rows",
-            [
+            codes=None,
+            rows=[
                 {
                     "item_id": "t3_s1",
-                    "entries": [{"code": "NEW", "quote": "e2", "start_offset": 0, "end_offset": 2, "notes": None}],
+                    "entries": [{"code_uid": new_uid, "quote": "e2", "start_offset": 0, "end_offset": 2, "notes": None}],
                 }
             ],
         )
 
-        entries = (
-            await session.execute(select(CodingEntry).where(CodingEntry.file_id == coding_file.id))
+        # The OLD entry is CLOSED (SCD-2), not deleted -- history survives
+        # across the version boundary this save opened.
+        live_entries = (
+            await session.execute(
+                select(CodingEntry).where(CodingEntry.file_id == coding_file.id, CodingEntry.valid_to.is_(None))
+            )
         ).scalars().all()
-        assert [(e.code, e.quote) for e in entries] == [("NEW", "e2")]
+        assert [(e.code, e.code_uid, e.quote) for e in live_entries] == [("C", new_uid, "e2")]
+
+        closed_entries = (
+            await session.execute(
+                select(CodingEntry).where(CodingEntry.file_id == coding_file.id, CodingEntry.valid_to.is_not(None))
+            )
+        ).scalars().all()
+        assert [(e.code, e.valid_from, e.valid_to) for e in closed_entries] == [("OLD", 1, 1)]
+
+    async def test_unknown_code_uid_raises_validation_error(self, session, user_id) -> None:
+        coding_file = await _make_file(session, user_id, schemaname="proj_save_rows_bad_uid", content="body")
+        session.add(Submission(file_id=coding_file.id, id="s1", title="t", selftext="b", word_count=1))
+        await session.commit()
+
+        with pytest.raises(ValidationAppError):
+            await coding_service.save_coding_revision(
+                session,
+                user_id,
+                "proj_save_rows_bad_uid",
+                codes=None,
+                rows=[
+                    {
+                        "item_id": "t3_s1",
+                        "entries": [{"code_uid": "nonexistent", "quote": "e2", "start_offset": 0, "end_offset": 2}],
+                    }
+                ],
+            )
 
     async def test_blank_code_entry_is_dropped(self, session, user_id) -> None:
         coding_file = await _make_file(session, user_id, schemaname="proj_save_rows_blank")
         session.add(Submission(file_id=coding_file.id, id="s1", title="t", selftext="b", word_count=1))
         await session.commit()
 
-        await coding_service.save_coding_rows(
+        await coding_service.save_coding_revision(
             session,
             user_id,
             "proj_save_rows_blank",
-            [{"item_id": "t3_s1", "entries": [{"code": "  ", "quote": "e", "start_offset": 0, "end_offset": 1}]}],
+            codes=None,
+            rows=[{"item_id": "t3_s1", "entries": [{"code_uid": "  ", "quote": "e", "start_offset": 0, "end_offset": 1}]}],
         )
 
         entries = (
@@ -474,10 +570,129 @@ class TestSaveCodingRows:
         ).scalars().all()
         assert entries == []
 
-    async def test_empty_rows_raises_validation_error(self, session, user_id) -> None:
+    async def test_no_codes_and_no_rows_raises_validation_error(self, session, user_id) -> None:
         await _make_file(session, user_id, schemaname="proj_save_rows2")
         with pytest.raises(ValidationAppError):
-            await coding_service.save_coding_rows(session, user_id, "proj_save_rows2", [])
+            await coding_service.save_coding_revision(session, user_id, "proj_save_rows2", codes=None, rows=[])
+
+    async def test_row_only_save_does_not_re_materialize_the_snapshot(self, session, user_id) -> None:
+        """A row-only edit doesn't touch the codebook, so it must not
+        copy a fresh codebook_codes row set -- see
+        version_service.commit_coding_version's docstring and
+        ArtifactVersion.codes_materialized. The snapshot must still read
+        correctly (via the nearest materialized ancestor), but the row
+        COUNT in codebook_codes must not grow with every save.
+        """
+        coding_file = await _make_file(session, user_id, schemaname="proj_save_rows_mat", content="body")
+        v1_codes = await version_service.read_codes(session, coding_file.id)
+        uid = v1_codes[0].code_uid
+        session.add(Submission(file_id=coding_file.id, id="s1", title="t", selftext="b", word_count=1))
+        await session.commit()
+
+        for i in range(3):
+            await coding_service.save_coding_revision(
+                session, user_id, "proj_save_rows_mat", codes=None,
+                rows=[{"item_id": "t3_s1", "entries": [{"code_uid": uid, "quote": "e", "start_offset": 0, "end_offset": 1, "notes": str(i)}]}],
+            )
+
+        head = await version_repo.head_version(session, coding_file.id)
+        assert head.version_no == 4  # v1 (apply) + 3 saves
+        assert head.codes_materialized is False
+
+        # Only v1 ever got a real CodebookCode row set -- the space this
+        # change exists to stop wasting.
+        all_codebook_codes = (
+            await session.execute(select(CodebookCode).where(CodebookCode.version_id.in_(
+                select(ArtifactVersion.id).where(ArtifactVersion.file_id == coding_file.id)
+            )))
+        ).scalars().all()
+        assert len(all_codebook_codes) == 1
+
+        # But read_codes on the (unmaterialized) head still resolves
+        # correctly, via the nearest materialized ancestor (v1).
+        head_codes = await version_service.read_codes(session, coding_file.id)
+        assert [c.code_uid for c in head_codes] == [uid]
+        v2_codes = await version_service.read_codes(session, coding_file.id, version_no=2)
+        assert [c.code_uid for c in v2_codes] == [uid]
+
+
+class TestSaveCodingRevisionCodesAndRowsTogether:
+    async def test_one_save_mints_exactly_one_version(self, session, user_id) -> None:
+        """The whole point of the merge: a codebook edit and a row edit
+        submitted in the same call must land on the SAME new version, not
+        two.
+        """
+        coding_file = await _make_file(session, user_id, schemaname="proj_save_both", content="body")
+        session.add(Submission(file_id=coding_file.id, id="s1", title="t", selftext="b", word_count=1))
+        await session.commit()
+        head_before = await version_repo.head_version(session, coding_file.id)
+
+        new_codes = [{"code_uid": "u2", "family_uid": "f2", "family_name": "F2", "name": "New", "body": ""}]
+        await coding_service.save_coding_revision(
+            session, user_id, "proj_save_both",
+            codes=new_codes,
+            rows=[{"item_id": "t3_s1", "entries": [{"code_uid": "u2", "quote": "e", "start_offset": 0, "end_offset": 1}]}],
+        )
+
+        head_after = await version_repo.head_version(session, coding_file.id)
+        assert head_after.version_no == head_before.version_no + 1
+
+        live_entries = (
+            await session.execute(
+                select(CodingEntry).where(CodingEntry.file_id == coding_file.id, CodingEntry.valid_to.is_(None))
+            )
+        ).scalars().all()
+        assert [(e.code_uid, e.valid_from) for e in live_entries] == [("u2", head_after.version_no)]
+
+    async def test_code_created_in_this_save_resolves_for_a_row_in_the_same_save(self, session, user_id) -> None:
+        coding_file = await _make_file(session, user_id, schemaname="proj_save_both_new_code", content="body")
+        session.add(Submission(file_id=coding_file.id, id="s1", title="t", selftext="b", word_count=1))
+        await session.commit()
+
+        await coding_service.save_coding_revision(
+            session, user_id, "proj_save_both_new_code",
+            codes=[{"is_new": True, "family_is_new": True, "family_name": "F", "name": "Brand New"}],
+            rows=[{"item_id": "t3_s1", "entries": []}],  # codes must resolve before rows are even attempted
+        )
+        codes = await version_service.read_codes(session, coding_file.id)
+        assert [c.name for c in codes] == ["Brand New"]
+
+    async def test_code_removed_in_this_save_is_rejected_on_a_submitted_row(self, session, user_id) -> None:
+        coding_file = await _make_file(session, user_id, schemaname="proj_save_both_removed", content="body")
+        codes = await version_service.read_codes(session, coding_file.id)
+        old_uid = codes[0].code_uid
+        session.add(Submission(file_id=coding_file.id, id="s1", title="t", selftext="b", word_count=1))
+        await session.commit()
+
+        with pytest.raises(ValidationAppError):
+            await coding_service.save_coding_revision(
+                session, user_id, "proj_save_both_removed",
+                codes=[{"is_new": True, "family_is_new": True, "family_name": "F", "name": "Replacement"}],
+                rows=[{"item_id": "t3_s1", "entries": [{"code_uid": old_uid, "quote": "e", "start_offset": 0, "end_offset": 1}]}],
+            )
+
+    async def test_code_removed_in_this_save_closes_entries_on_an_unsubmitted_row(self, session, user_id) -> None:
+        coding_file = await _make_file(session, user_id, schemaname="proj_save_both_orphan", content="body")
+        codes = await version_service.read_codes(session, coding_file.id)
+        old_uid = codes[0].code_uid
+        session.add(Submission(file_id=coding_file.id, id="s1", title="t", selftext="b", word_count=1))
+        session.add(CodingEntry(file_id=coding_file.id, post_id="s1", code="C", code_uid=old_uid, quote="e", start_offset=0, end_offset=1))
+        await session.commit()
+
+        # codebook-only change, dropping the sole code -- s1's live entry
+        # references it but is not itself included in `rows`.
+        await coding_service.save_coding_revision(
+            session, user_id, "proj_save_both_orphan",
+            codes=[{"is_new": True, "family_is_new": True, "family_name": "F", "name": "Replacement"}],
+            rows=None,
+        )
+
+        live_entries = (
+            await session.execute(
+                select(CodingEntry).where(CodingEntry.file_id == coding_file.id, CodingEntry.valid_to.is_(None))
+            )
+        ).scalars().all()
+        assert live_entries == []
 
 
 class TestUpdateCodingMetadata:
@@ -509,16 +724,25 @@ class TestDuplicateCoding:
     async def test_forks_codebook_rows_entries_and_lineage(self, session, user_id) -> None:
         codebook_file = await _make_file(session, user_id, file_type="codebook", schemaname="proj_dup_cb")
         source_file = await _make_file(session, user_id, schemaname="proj_dup_src", content="codebook text")
-        session.add(FileDependency(child_file_id=source_file.id, parent_file_id=codebook_file.id))
+        await version_repo.add_edge(
+            session, child_file_id=source_file.id, parent_file_id=codebook_file.id, parent_version_id=None,
+            relation="derived_from", role="codebook",
+        )
         session.add(Submission(file_id=source_file.id, id="s1", title="t", selftext="b", word_count=1))
-        session.add(CodingEntry(file_id=source_file.id, post_id="s1", code="A", quote="e", start_offset=0, end_offset=1))
+        source_codes = await version_service.read_codes(session, source_file.id)
+        source_uid = source_codes[0].code_uid
+        session.add(CodingEntry(file_id=source_file.id, post_id="s1", code="C", code_uid=source_uid, quote="e", start_offset=0, end_offset=1))
         await session.commit()
 
         new_file = await coding_service.duplicate_coding(session, user_id, "proj_dup_src", display_name="dup")
 
         assert new_file.filename == "dup"
         assert new_file.id != source_file.id
-        assert await artifact_content_repo.read_content(session, new_file.id) == "codebook text"
+        new_codes = await version_service.read_codes(session, new_file.id)
+        assert [c.body for c in new_codes] == ["codebook text"]
+        # code_uid is preserved verbatim across the fork -- the payoff of
+        # stable ids.
+        assert new_codes[0].code_uid == source_uid
 
         copied_subs = (
             await session.execute(select(Submission).where(Submission.file_id == new_file.id))
@@ -528,12 +752,62 @@ class TestDuplicateCoding:
         copied_entries = (
             await session.execute(select(CodingEntry).where(CodingEntry.file_id == new_file.id))
         ).scalars().all()
-        assert [(e.post_id, e.code) for e in copied_entries] == [("s1", "A")]
+        assert [(e.post_id, e.code, e.code_uid) for e in copied_entries] == [("s1", "C", source_uid)]
 
-        deps = (
-            await session.execute(select(FileDependency).where(FileDependency.child_file_id == new_file.id))
+        edges = await version_repo.list_parent_edges(session, new_file.id)
+        assert {e.parent_file_id for e in edges} == {codebook_file.id, source_file.id}
+        by_parent = {e.parent_file_id: e for e in edges}
+        assert by_parent[codebook_file.id].role == "codebook"
+        assert by_parent[source_file.id].relation == "forked_from"
+        assert by_parent[source_file.id].role == "fork_origin"
+
+    async def test_forks_from_a_chosen_version_not_head(self, session, user_id) -> None:
+        """The non-destructive replacement for revert: forking from an
+        older version reads that version's codebook snapshot AND the
+        coding_entries live set AS OF that version -- not head's -- via
+        version_service.read_codes(version_no=...) and
+        coding_repo.copy_entries(as_of_version_no=...).
+        """
+        source_file = await _make_file(session, user_id, schemaname="proj_dup_v", content="v1 body")
+        v1_codes = await version_service.read_codes(session, source_file.id)
+        v1_uid = v1_codes[0].code_uid
+        session.add(
+            CodingEntry(
+                file_id=source_file.id, post_id="s1", code="C", code_uid=v1_uid,
+                quote="e", start_offset=0, end_offset=1, valid_from=1, valid_to=None,
+            )
+        )
+        await session.commit()
+
+        # A later edit (v2): the v1 entry is superseded (closed at v1, per
+        # the SCD-2 invariant) and a new one takes its place.
+        v2 = await version_service.commit_coding_version(session, file_id=source_file.id, author_user_id=user_id, origin="edited")
+        assert v2.version_no == 2
+        await session.execute(
+            CodingEntry.__table__.update()
+            .where(CodingEntry.file_id == source_file.id, CodingEntry.valid_to.is_(None))
+            .values(valid_to=1)
+        )
+        session.add(
+            CodingEntry(
+                file_id=source_file.id, post_id="s1", code="C", code_uid=v1_uid,
+                quote="edited", start_offset=0, end_offset=6, valid_from=2, valid_to=None,
+            )
+        )
+        await session.commit()
+
+        new_file = await coding_service.duplicate_coding(
+            session, user_id, "proj_dup_v", display_name="from-v1", from_version_no=1
+        )
+
+        new_codes = await version_service.read_codes(session, new_file.id)
+        assert [c.body for c in new_codes] == ["v1 body"]
+
+        copied_entries = (
+            await session.execute(select(CodingEntry).where(CodingEntry.file_id == new_file.id))
         ).scalars().all()
-        assert {d.parent_file_id for d in deps} == {codebook_file.id, source_file.id}
+        # The v1 quote, not the v2 edit -- and re-stamped as the fork's own v1.
+        assert [(e.quote, e.valid_from, e.valid_to) for e in copied_entries] == [("e", 1, None)]
 
     async def test_blank_display_name_raises_validation_error(self, session, user_id) -> None:
         await _make_file(session, user_id, schemaname="proj_dup_blank")
@@ -545,6 +819,13 @@ class TestDuplicateCoding:
         await _make_file(session, other_id, schemaname="proj_not_mine_dup")
         with pytest.raises(NotFoundError):
             await coding_service.duplicate_coding(session, user_id, "proj_not_mine_dup", display_name="x")
+
+    async def test_unknown_from_version_no_raises_not_found(self, session, user_id) -> None:
+        await _make_file(session, user_id, schemaname="proj_dup_missing_v")
+        with pytest.raises(NotFoundError):
+            await coding_service.duplicate_coding(
+                session, user_id, "proj_dup_missing_v", display_name="x", from_version_no=99
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -694,9 +975,9 @@ class TestStartApplyCodebookJobEnqueue:
 _CODEBOOK_WITH_ALPHA_BETA = (
     "### Code Family: F\n"
     "#### Code Name: Alpha\n"
-    "about alpha\n"
+    "Definition: about alpha\n"
     "#### Code Name: Beta\n"
-    "about beta\n"
+    "Definition: about beta\n"
 )
 
 
@@ -722,9 +1003,8 @@ class TestApplyCodebookJobHandlerEndToEnd:
         )
         await session.commit()
 
-        codebook_file = await _make_file(
-            session, user_id, file_type="codebook", schemaname="proj_cb4", content=_CODEBOOK_WITH_ALPHA_BETA
-        )
+        codebook_file = await _make_file(session, user_id, file_type="codebook", schemaname="proj_cb4")
+        await _seed_codebook_markdown(session, codebook_file.id, user_id, _CODEBOOK_WITH_ALPHA_BETA)
 
         raw_entries = [
             {"item_id": "t3_s1", "code": "Alpha", "quotes": ["quote one"]},
@@ -764,10 +1044,11 @@ class TestApplyCodebookJobHandlerEndToEnd:
         new_file_id = int(result["file"]["id"])
         assert result["file"]["filename"] == "my report"
 
-        # artifact_content holds the codebook snapshot, not any raw AI
+        # The new coding artifact's own codebook snapshot holds the
+        # applied codebook's codes (code_uid preserved), not any raw AI
         # output -- nothing unverified is ever stored.
-        stored_content = await artifact_content_repo.read_content(session, new_file_id)
-        assert stored_content == _CODEBOOK_WITH_ALPHA_BETA
+        stored_codes = await version_service.read_codes(session, new_file_id)
+        assert [c.name for c in stored_codes] == ["Alpha", "Beta"]
 
         # The coding artifact owns its own copy of every sampled row.
         copied_subs = (
@@ -785,18 +1066,22 @@ class TestApplyCodebookJobHandlerEndToEnd:
             ("s2", "Alpha"): ("quote three", 0, 11),
         }
 
-        deps = (
-            await session.execute(select(FileDependency).where(FileDependency.child_file_id == new_file_id))
-        ).scalars().all()
-        parent_ids = {d.parent_file_id for d in deps}
+        edges = await version_repo.list_parent_edges(session, new_file_id)
+        parent_ids = {e.parent_file_id for e in edges}
         assert parent_ids == {source_id, codebook_file_id}
+        by_parent = {e.parent_file_id: e for e in edges}
+        assert by_parent[source_id].role == "source_data"
+        assert by_parent[codebook_file_id].role == "codebook"
+        # The codebook edge is pinned to the exact revision applied.
+        codebook_head = await version_repo.head_version(session, codebook_file_id)
+        assert by_parent[codebook_file_id].parent_version_id == codebook_head.id
 
         # api_key never persisted to the jobs table, but did reach
         # classify_posts via runtime_extra.
         assert "api_key" not in job.payload
         assert classify_mock.called
         call_args = classify_mock.call_args.args
-        assert call_args[0] == _CODEBOOK_WITH_ALPHA_BETA
+        assert call_args[0] == _CODEBOOK_WITH_ALPHA_BETA.strip()
         assert call_args[3] == "sk-secret"
 
     async def test_rejects_hallucinated_item_code_and_quote(self, session, user_id, monkeypatch) -> None:
@@ -806,9 +1091,8 @@ class TestApplyCodebookJobHandlerEndToEnd:
         source = await _make_file(session, user_id, file_type="raw_data", schemaname="proj_raw4c")
         session.add(Submission(file_id=source.id, id="s1", title="t", selftext="the real content", word_count=3))
         await session.commit()
-        codebook_file = await _make_file(
-            session, user_id, file_type="codebook", schemaname="proj_cb4c", content=_CODEBOOK_WITH_ALPHA_BETA
-        )
+        codebook_file = await _make_file(session, user_id, file_type="codebook", schemaname="proj_cb4c")
+        await _seed_codebook_markdown(session, codebook_file.id, user_id, _CODEBOOK_WITH_ALPHA_BETA)
 
         raw_entries = [
             # unknown item -- not in the run's valid_keys
@@ -854,9 +1138,8 @@ class TestApplyCodebookJobHandlerEndToEnd:
         source = await _make_file(session, user_id, file_type="raw_data", schemaname="proj_raw4b")
         session.add(Submission(file_id=source.id, id="s1", title="t", selftext="one and two both here", word_count=5))
         await session.commit()
-        codebook_file = await _make_file(
-            session, user_id, file_type="codebook", schemaname="proj_cb4b", content=_CODEBOOK_WITH_ALPHA_BETA
-        )
+        codebook_file = await _make_file(session, user_id, file_type="codebook", schemaname="proj_cb4b")
+        await _seed_codebook_markdown(session, codebook_file.id, user_id, _CODEBOOK_WITH_ALPHA_BETA)
 
         raw_entries = [{"item_id": "t3_s1", "code": "Alpha", "quotes": ["one", "two"]}]
         monkeypatch.setattr(
@@ -960,8 +1243,9 @@ class TestStartRecodeItemsJobValidation:
 
 class TestRecodeItemsJobHandlerEndToEnd:
     async def test_recodes_only_the_selected_rows(self, session, user_id, monkeypatch) -> None:
-        coding_file = await _make_file(
-            session, user_id, schemaname="proj_recode1", content=_CODEBOOK_WITH_ALPHA_BETA + "#### Code Name: NEW\n"
+        coding_file = await _make_file(session, user_id, schemaname="proj_recode1")
+        await _seed_codebook_markdown(
+            session, coding_file.id, user_id, _CODEBOOK_WITH_ALPHA_BETA + "#### Code Name: NEW\n"
         )
         session.add_all(
             [
@@ -969,8 +1253,8 @@ class TestRecodeItemsJobHandlerEndToEnd:
                 Submission(file_id=coding_file.id, id="s2", title="t2", selftext="b2", word_count=1),
             ]
         )
-        session.add(CodingEntry(file_id=coding_file.id, post_id="s1", code="OLD", quote="old", start_offset=0, end_offset=3))
-        session.add(CodingEntry(file_id=coding_file.id, post_id="s2", code="UNCHANGED", quote="e", start_offset=0, end_offset=1))
+        session.add(CodingEntry(file_id=coding_file.id, post_id="s1", code="OLD", code_uid="OLD-uid", quote="old", start_offset=0, end_offset=3))
+        session.add(CodingEntry(file_id=coding_file.id, post_id="s2", code="UNCHANGED", code_uid="UNCHANGED-uid", quote="e", start_offset=0, end_offset=1))
         await session.commit()
 
         classify_mock = AsyncMock(
@@ -984,6 +1268,7 @@ class TestRecodeItemsJobHandlerEndToEnd:
         monkeypatch.setattr("backend.app.services.coding_service.classify_posts", classify_mock)
 
         coding_file_id = coding_file.id
+        head_before = await version_repo.head_version(session, coding_file_id)
         job = await coding_service.start_recode_items_job(
             session,
             user_id,
@@ -999,11 +1284,30 @@ class TestRecodeItemsJobHandlerEndToEnd:
         assert finished.result["recoded_item_count"] == 1
         assert finished.result["accepted"] == 1
 
+        # A recode is a proposal, not a write -- neither s1's existing
+        # entry nor s2's untouched one changed, and no new version was
+        # minted. The proposal for s1 is in the job result, shaped like
+        # `list_rows_with_codes`'s per-row `codes` list.
+        assert finished.result["proposals"] == [
+            {
+                "item_id": "t3_s1",
+                "codes": [
+                    {
+                        "code": "NEW", "code_uid": finished.result["proposals"][0]["codes"][0]["code_uid"],
+                        "quote": "new", "start_offset": 10, "end_offset": 13, "notes": None,
+                    }
+                ],
+            }
+        ]
+
         entries = (
             await session.execute(select(CodingEntry).where(CodingEntry.file_id == coding_file_id))
         ).scalars().all()
         by_post = {e.post_id: e.code for e in entries}
-        assert by_post == {"s1": "NEW", "s2": "UNCHANGED"}
+        assert by_post == {"s1": "OLD", "s2": "UNCHANGED"}
+
+        head_after = await version_repo.head_version(session, coding_file_id)
+        assert head_after.version_no == head_before.version_no
 
         assert classify_mock.called
         call_args = classify_mock.call_args.args
@@ -1012,14 +1316,14 @@ class TestRecodeItemsJobHandlerEndToEnd:
         assert "s2" not in call_args[1]  # the unselected row was never sent
         assert call_args[3] == "sk"
 
-    async def test_ai_dropping_an_item_clears_its_codes(self, session, user_id, monkeypatch) -> None:
+    async def test_ai_dropping_an_item_proposes_an_empty_codes_list(self, session, user_id, monkeypatch) -> None:
         coding_file = await _make_file(session, user_id, schemaname="proj_recode2", content="CB")
         session.add(Submission(file_id=coding_file.id, id="s1", title="t", selftext="b", word_count=1))
-        session.add(CodingEntry(file_id=coding_file.id, post_id="s1", code="OLD", quote="e", start_offset=0, end_offset=1))
+        session.add(CodingEntry(file_id=coding_file.id, post_id="s1", code="OLD", code_uid="OLD-uid", quote="e", start_offset=0, end_offset=1))
         await session.commit()
 
-        # The model returns nothing for s1 -- it should end up uncoded,
-        # not left with its old code.
+        # The model returns nothing for s1 -- the proposal should clear
+        # it (an empty codes list), but nothing is written until Save.
         monkeypatch.setattr(
             "backend.app.services.coding_service.classify_posts",
             AsyncMock(return_value=([], "sys", "usr", {"batches_processed": 1, "batches_total": 1, "error": None})),
@@ -1037,11 +1341,16 @@ class TestRecodeItemsJobHandlerEndToEnd:
         )
         finished = await _wait_for_terminal_status(session, job.id, user_id)
         assert finished.status == "succeeded", finished.error
+        assert finished.result["proposals"] == [{"item_id": "t3_s1", "codes": []}]
 
-        entries = (
-            await session.execute(select(CodingEntry).where(CodingEntry.file_id == coding_file_id))
+        # The old entry is untouched -- still live, since nothing was
+        # committed by the job itself.
+        live_entries = (
+            await session.execute(
+                select(CodingEntry).where(CodingEntry.file_id == coding_file_id, CodingEntry.valid_to.is_(None))
+            )
         ).scalars().all()
-        assert entries == []
+        assert [(e.code, e.code_uid) for e in live_entries] == [("OLD", "OLD-uid")]
 
     async def test_no_codebook_snapshot_marks_job_failed(self, session, user_id, monkeypatch) -> None:
         coding_file = await _make_file(session, user_id, schemaname="proj_recode3")  # no content
@@ -1141,8 +1450,8 @@ class TestCompareCodingsJobHandlerEndToEnd:
     async def test_succeeds_with_mocked_llm(self, session, user_id, monkeypatch) -> None:
         file_a = await _make_file(session, user_id, schemaname="proj_cmp_a")
         file_b = await _make_file(session, user_id, schemaname="proj_cmp_b")
-        session.add(CodingEntry(file_id=file_a.id, post_id="p1", code="CODE_A", quote="ev-a", start_offset=0, end_offset=4))
-        session.add(CodingEntry(file_id=file_b.id, post_id="p1", code="CODE_B", quote="ev-b", start_offset=0, end_offset=4))
+        session.add(CodingEntry(file_id=file_a.id, post_id="p1", code="CODE_A", code_uid="CODE_A-uid", quote="ev-a", start_offset=0, end_offset=4))
+        session.add(CodingEntry(file_id=file_b.id, post_id="p1", code="CODE_B", code_uid="CODE_B-uid", quote="ev-b", start_offset=0, end_offset=4))
         await session.commit()
         file_a_id, file_b_id = file_a.id, file_b.id
         llm_mock = AsyncMock(return_value="the comparison")
@@ -1177,15 +1486,14 @@ class TestCompareCodingsJobHandlerEndToEnd:
         assert new_file.file_type == "coding_comparison"
         assert new_file.description == "notes"
 
-        content = await artifact_content_repo.read_content(session, new_file_id)
+        content = await version_service.read_blob(session, new_file_id)
         assert content == "the comparison"
 
-        deps = (
-            await session.execute(
-                select(FileDependency).where(FileDependency.child_file_id == new_file_id)
-            )
-        ).scalars().all()
-        assert {d.parent_file_id for d in deps} == {file_a_id, file_b_id}
+        edges = await version_repo.list_parent_edges(session, new_file_id)
+        assert {e.parent_file_id for e in edges} == {file_a_id, file_b_id}
+        by_role = {e.role: e.parent_file_id for e in edges}
+        assert by_role["side_a"] == file_a_id
+        assert by_role["side_b"] == file_b_id
 
     async def test_no_content_marks_job_failed(self, session, user_id, monkeypatch) -> None:
         await _make_file(session, user_id, schemaname="proj_cmp_empty_a")
@@ -1213,8 +1521,8 @@ class TestCompareCodingsJobHandlerEndToEnd:
         # aggregation only kicks in on overflow.
         file_a = await _make_file(session, user_id, schemaname="proj_cmp_raw_a")
         file_b = await _make_file(session, user_id, schemaname="proj_cmp_raw_b")
-        session.add(CodingEntry(file_id=file_a.id, post_id="p1", code="CODE_A", quote="ev1", start_offset=0, end_offset=3))
-        session.add(CodingEntry(file_id=file_b.id, post_id="p1", code="CODE_B", quote="ev-b1", start_offset=0, end_offset=5))
+        session.add(CodingEntry(file_id=file_a.id, post_id="p1", code="CODE_A", code_uid="CODE_A-uid", quote="ev1", start_offset=0, end_offset=3))
+        session.add(CodingEntry(file_id=file_b.id, post_id="p1", code="CODE_B", code_uid="CODE_B-uid", quote="ev-b1", start_offset=0, end_offset=5))
         await session.commit()
 
         monkeypatch.setattr(
@@ -1251,9 +1559,9 @@ class TestCompareCodingsJobHandlerEndToEnd:
         # by call order rather than a size threshold.
         file_a = await _make_file(session, user_id, schemaname="proj_cmp_agg_a")
         file_b = await _make_file(session, user_id, schemaname="proj_cmp_agg_b")
-        session.add(CodingEntry(file_id=file_a.id, post_id="p1", code="CODE_A", quote="ev-a1", start_offset=0, end_offset=5))
-        session.add(CodingEntry(file_id=file_a.id, post_id="p2", code="CODE_A", quote="ev-a2", start_offset=0, end_offset=5))
-        session.add(CodingEntry(file_id=file_b.id, post_id="p1", code="CODE_B", quote="ev-b1", start_offset=0, end_offset=5))
+        session.add(CodingEntry(file_id=file_a.id, post_id="p1", code="CODE_A", code_uid="CODE_A-uid", quote="ev-a1", start_offset=0, end_offset=5))
+        session.add(CodingEntry(file_id=file_a.id, post_id="p2", code="CODE_A", code_uid="CODE_A-uid", quote="ev-a2", start_offset=0, end_offset=5))
+        session.add(CodingEntry(file_id=file_b.id, post_id="p1", code="CODE_B", code_uid="CODE_B-uid", quote="ev-b1", start_offset=0, end_offset=5))
         await session.commit()
 
         fits_calls: list[dict] = []
@@ -1290,7 +1598,7 @@ class TestCompareCodingsJobHandlerEndToEnd:
         # truncating.
         file_a = await _make_file(session, user_id, schemaname="proj_cmp_of_a")
         file_b = await _make_file(session, user_id, schemaname="proj_cmp_of_b")
-        session.add(CodingEntry(file_id=file_a.id, post_id="p1", code="CODE_A", quote="ev1", start_offset=0, end_offset=3))
+        session.add(CodingEntry(file_id=file_a.id, post_id="p1", code="CODE_A", code_uid="CODE_A-uid", quote="ev1", start_offset=0, end_offset=3))
         await session.commit()
 
         monkeypatch.setattr(

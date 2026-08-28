@@ -1,21 +1,37 @@
-import json
-
-from fastapi import APIRouter, Depends, Form
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.schemas import (
     CompareCodebooksRequest,
+    DuplicateCodebookRequest,
     GenerateCodebookRequest,
+    ImportCodebookRequest,
+    SaveCodebookRequest,
     as_form,
 )
 from backend.app.core.auth_dependency import require_user_id
 from backend.app.database import get_async_db
-from backend.app.repositories import artifact_content_repo
-from backend.app.services import codebook_service
-from backend.scripts.display_codebook import parse_codebook_to_json
+from backend.app.repositories import version_repo
+from backend.app.services import codebook_service, version_service
 
 router = APIRouter()
+
+
+def _code_out(code) -> dict:
+    return {
+        "code_uid": code.code_uid,
+        "family_uid": code.family_uid,
+        "family_name": code.family_name,
+        "name": code.name,
+        "body": code.body,
+        "definition": code.definition,
+        "inclusion": code.inclusion,
+        "exclusion": code.exclusion,
+        "keywords": code.keywords,
+        "example": code.example,
+        "position": code.position,
+    }
 
 
 @router.get("/codebook")
@@ -24,40 +40,35 @@ async def get_codebook(
     user_id: int = Depends(require_user_id),
     db: AsyncSession = Depends(get_async_db),
 ) -> JSONResponse:
-    """Return a codebook (or codebook comparison) file's content, owned by
-    the authenticated user.
+    """Return a codebook's current structured code rows, or a codebook
+    comparison's markdown content, owned by the authenticated user.
     """
     file_rec = await codebook_service.get_codebook(db, user_id, codebook_id)
-    content = await artifact_content_repo.read_content(db, file_rec.id)
-    if content is None:
+    head = await version_repo.head_version(db, file_rec.id)
+    if head is None:
         return JSONResponse({"error": "Codebook content not found in file"}, status_code=404)
 
+    if file_rec.file_type == "codebook_comparison":
+        return JSONResponse(
+            {
+                "codebook_comparison": head.content or "",
+                "systemprompt": head.system_prompt,
+                "instructions": head.user_instructions,
+                "prompt_meta": head.prompt_meta,
+                "version_no": head.version_no,
+            }
+        )
+
+    codes = await version_service.read_codes(db, file_rec.id)
     return JSONResponse(
         {
-            "codebook": content,
-            "systemprompt": file_rec.systemprompt,
-            "userprompt": file_rec.userprompt,
+            "codes": [_code_out(c) for c in codes],
+            "systemprompt": head.system_prompt,
+            "instructions": head.user_instructions,
+            "prompt_meta": head.prompt_meta,
+            "version_no": head.version_no,
         }
     )
-
-
-@router.get("/parse-codebook")
-async def parse_codebook(
-    codebook_id: str = None,
-    user_id: int = Depends(require_user_id),
-    db: AsyncSession = Depends(get_async_db),
-) -> JSONResponse:
-    """Return a parsed JSON structure for a codebook file using the
-    display_codebook helper. The response will be { "parsed": [ ... ] }
-    where parsed is an array of families with codes.
-    """
-    _file_rec, raw = await codebook_service.parse_codebook(db, user_id, codebook_id)
-    try:
-        parsed_text = parse_codebook_to_json(raw)
-        parsed_obj = json.loads(parsed_text)
-        return JSONResponse({"parsed": parsed_obj})
-    except Exception as e:
-        return JSONResponse({"error": f"Failed to parse codebook: {e}", "raw": raw}, status_code=500)
 
 
 @router.get("/list-codebooks")
@@ -87,24 +98,66 @@ async def list_codebooks(
     return JSONResponse({"codebooks": codebooks})
 
 
-@router.post("/save-file-codebook/")
+@router.put("/codebook/{ref}")
 async def save_project_codebook(
-    schema_name: str = Form(...),
-    content: str = Form(...),
-    display_name: str = Form(None),
+    ref: str,
+    payload: SaveCodebookRequest,
     user_id: int = Depends(require_user_id),
     db: AsyncSession = Depends(get_async_db),
 ) -> JSONResponse:
-    """Save codebook content to a file owned by the authenticated user."""
+    """Save a codebook file's structured code rows, owned by the
+    authenticated user. Opens (or extends) a human-edit draft version --
+    see ``version_service.py``'s sealing rules.
+    """
     file_rec = await codebook_service.save_project_codebook(
         db,
         user_id,
-        schema_name=schema_name,
-        content=content,
-        display_name=display_name,
+        schema_name=ref,
+        codes=[c.model_dump() for c in payload.codes],
+        display_name=payload.display_name,
     )
     return JSONResponse(
-        {"message": "File codebook saved", "id": str(file_rec.id), "display_name": file_rec.filename}
+        {"message": "Codebook saved", "id": str(file_rec.id), "display_name": file_rec.filename}
+    )
+
+
+@router.post("/codebook/{ref}/import")
+async def import_codebook_markdown(
+    ref: str,
+    payload: ImportCodebookRequest,
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
+) -> JSONResponse:
+    """Parse pasted/uploaded codebook markdown into structured rows and
+    commit them as a new version -- the recovery path now that markdown
+    is a wire format, not the storage format.
+    """
+    file_rec = await codebook_service.import_codebook_markdown(db, user_id, ref, markdown=payload.markdown)
+    return JSONResponse({"message": "Codebook imported", "id": str(file_rec.id)})
+
+
+@router.post("/codebook/{ref}/duplicate")
+async def duplicate_codebook(
+    ref: str,
+    payload: DuplicateCodebookRequest,
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
+) -> JSONResponse:
+    """Fork a whole codebook into a brand-new file -- from head by
+    default, or from ``from_version_no`` if given (see
+    ``codebook_service.duplicate_codebook``'s docstring; this is the
+    non-destructive replacement for the old revert).
+    """
+    file_rec = await codebook_service.duplicate_codebook(
+        db, user_id, ref, display_name=payload.display_name, from_version_no=payload.from_version_no
+    )
+    return JSONResponse(
+        {
+            "message": "Duplicated",
+            "id": str(file_rec.id),
+            "schema_name": file_rec.schemaname,
+            "display_name": file_rec.filename,
+        }
     )
 
 

@@ -25,9 +25,18 @@ from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.exceptions import ForbiddenError, ValidationAppError
-from backend.app.database import File, FileDependency, FileTable, async_link_file_to_project
-from backend.app.repositories import file_repo, project_repo, raw_data_repo
-from backend.app.storage_models import ArtifactContent, Comment, CodingEntry, Submission
+from backend.app.database import File, FileTable, async_link_file_to_project
+from backend.app.repositories import file_repo, project_repo, raw_data_repo, version_repo
+from backend.app.services import version_service
+from backend.app.services.version_service import EdgeSpec
+from backend.app.storage_models import Comment, CodingEntry, Submission
+from backend.app.versioning_models import (
+    ArtifactVersion,
+    CodebookCode,
+    ORIGIN_IMPORTED,
+    RELATION_MERGED_FROM,
+    ROLE_MERGE_INPUT,
+)
 from backend.scripts.import_db import stream_zst_to_postgres
 
 # Columns read from the old dynamic per-upload schema (mirrors
@@ -163,6 +172,14 @@ async def upload_zst(
     session.add(file_rec)
     await session.flush()
 
+    # raw_data has no artifact content of its own (its "content" is the
+    # submissions/comments rows streamed in below) -- an empty v1 exists
+    # purely so downstream derivation edges (filtered_data, codebook,
+    # coding) have a parent_version_id to pin.
+    await version_service.commit_blob_version(
+        session, file_id=file_rec.id, author_user_id=user_id, origin=ORIGIN_IMPORTED, content="",
+    )
+
     if project_id is not None:
         project = await project_repo.get_owned_project(session, project_id, user_id)
         await async_link_file_to_project(session, file_rec.id, project.id)
@@ -285,13 +302,19 @@ async def _finalize_merge(
     total_counts: dict[str, int],
     project_id: int | None,
 ) -> None:
-    """Link ``FileDependency`` rows for every source schema that resolves
-    to a file owned by ``user_id`` (matches the old handler: looked up by
+    """Link ``artifact_edges`` (``relation="merged_from"``,
+    ``role="merge_input"``) for every source schema that resolves to a
+    file owned by ``user_id`` (matches the old handler: looked up by
     schemaname across the *entire* original ``source_schemas`` list, not
     just the ones that contributed rows, and silently skipped when not
     found/not owned -- no error raised), write ``FileTable`` row-count
     metadata, and link the target project if given.
+
+    ``position`` is assigned from the FILTERED sequence (only schemas
+    that actually resolved), not from ``source_schemas``'s raw index --
+    a skipped entry must not leave a gap in the ordering.
     """
+    parents: list[EdgeSpec] = []
     for schema in source_schemas:
         if not isinstance(schema, str):
             continue
@@ -300,7 +323,14 @@ async def _finalize_merge(
         )
         parent_file = result.scalar_one_or_none()
         if parent_file is not None:
-            session.add(FileDependency(child_file_id=file_rec.id, parent_file_id=parent_file.id))
+            parents.append(
+                EdgeSpec(
+                    parent_file_id=parent_file.id, relation=RELATION_MERGED_FROM,
+                    role=ROLE_MERGE_INPUT, position=len(parents),
+                )
+            )
+    if parents:
+        await version_service.link_parents(session, file_rec.id, parents)
 
     if total_counts["submissions"] > 0:
         session.add(FileTable(file_id=file_rec.id, tablename="submissions", row_count=total_counts["submissions"]))
@@ -359,6 +389,10 @@ async def merge_databases(
     )
     session.add(file_rec)
     await session.flush()
+
+    await version_service.commit_blob_version(
+        session, file_id=file_rec.id, author_user_id=user_id, origin=ORIGIN_IMPORTED, content="",
+    )
 
     seen_submission_ids: set[str] = set()
     seen_comment_ids: set[str] = set()
@@ -427,11 +461,21 @@ async def merge_databases(
 
 async def delete_database(session: AsyncSession, user_id: int, file_ref: str) -> str:
     """Delete a ``File`` row and everything that references its
-    ``file_id``: ``FileDependency`` rows (as either parent or child),
-    ``FileTable`` metadata, and its rows in every fixed content table
-    (``submissions``/``comments``/``artifact_content``/``coding_entries``
-    -- a given file only ever has rows in the subset matching its
-    ``file_type``, so deleting from all four is simplest and harmless).
+    ``file_id``: ``artifact_edges`` (as either parent or child),
+    ``artifact_versions``/``codebook_codes``, ``FileTable`` metadata, and
+    its rows in every fixed content table (``submissions``/``comments``/
+    ``coding_entries`` -- a given file only ever has rows in the subset
+    matching its ``file_type``, so deleting from all of them is simplest
+    and harmless).
+
+    Ordering matters for the new tables in a way it didn't for the old
+    single ``FileDependency`` table: a FORK's v1 ``ArtifactVersion`` can
+    point cross-file at this file's head (``parent_version_id`` -- see
+    ``versioning_models.ArtifactVersion``'s docstring for why), so any
+    such pointer must be nulled out before this file's own versions are
+    deleted, or the FK raises. Edges must go before versions (edges FK
+    into versions), and codes must go before versions too (codes FK into
+    versions).
 
     Per the plan, this **replaces** the old ``DROP SCHEMA ... CASCADE`` --
     it no longer touches the old dynamic Postgres schema at all (left in
@@ -443,15 +487,15 @@ async def delete_database(session: AsyncSession, user_id: int, file_ref: str) ->
     file_id = file_rec.id
     filename = file_rec.filename
 
-    await session.execute(
-        delete(FileDependency).where(
-            or_(FileDependency.child_file_id == file_id, FileDependency.parent_file_id == file_id)
-        )
-    )
+    await version_repo.delete_edges_for_file(session, file_id)
+    version_ids_subq = select(ArtifactVersion.id).where(ArtifactVersion.file_id == file_id)
+    await session.execute(delete(CodebookCode).where(CodebookCode.version_id.in_(version_ids_subq)))
+    await version_repo.null_parent_version_pointers_into_file(session, file_id)
+    await version_repo.delete_versions_for_file(session, file_id)
+
     await session.execute(delete(FileTable).where(FileTable.file_id == file_id))
     await session.execute(delete(Submission).where(Submission.file_id == file_id))
     await session.execute(delete(Comment).where(Comment.file_id == file_id))
-    await session.execute(delete(ArtifactContent).where(ArtifactContent.file_id == file_id))
     await session.execute(delete(CodingEntry).where(CodingEntry.file_id == file_id))
     await session.delete(file_rec)
     await session.commit()

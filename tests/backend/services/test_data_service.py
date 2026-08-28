@@ -25,7 +25,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from backend.app.core.exceptions import NotFoundError, ValidationAppError
-from backend.app.database import File, FileDependency, User
+from backend.app.database import File, User
+from backend.app.repositories import version_repo
 from backend.app.jobs import service as jobs_service
 from backend.app.services import data_service
 from backend.app.storage_models import Comment, Submission
@@ -501,10 +502,19 @@ class TestFilterDataJobHandlerEndToEnd:
             ).scalars().all()
             assert [s.id for s in copied_subs] == ["s1"]
 
-            deps = (
-                await session.execute(select(FileDependency).where(FileDependency.child_file_id == new_file_id))
-            ).scalars().all()
-            assert [d.parent_file_id for d in deps] == [source_file_id]
+            edges = await version_repo.list_parent_edges(session, new_file_id)
+            assert [e.parent_file_id for e in edges] == [source_file_id]
+            assert edges[0].relation == "derived_from"
+            assert edges[0].role == "source_data"
+
+            head = await version_repo.head_version(session, new_file_id)
+            assert head.system_prompt == "sys prompt"
+            # Only the filter criteria the user typed is kept; the rendered
+            # prompt (which embeds every sampled post) is reduced to a
+            # length + hash. Both AI calls ran, so batches sums to 2.
+            assert head.user_instructions == "keep the good ones"
+            assert head.prompt_meta["rendered_chars"] == len("user prompt")
+            assert head.prompt_meta["batches"] == 2
 
     async def test_partial_coverage_from_ai_filter_surfaces_in_result(self, session_factory, monkeypatch) -> None:
         # A free-model batch cap (or a mid-run batch failure) inside

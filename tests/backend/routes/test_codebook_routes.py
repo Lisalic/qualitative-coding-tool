@@ -1,9 +1,7 @@
 """Tests for backend/app/api/codebook_routes.py -- GET /api/list-codebooks,
-GET /api/codebook, GET /api/parse-codebook, POST /api/save-file-codebook/.
+GET /api/codebook, PUT /api/codebook/{ref}, POST /api/codebook/{ref}/import.
 
-Stage 7 moved this module fully onto the async ORM + fixed
-``artifact_content`` table (``repositories/artifact_content_repo.py``), so
-these run against the in-memory async SQLite database
+These run against the in-memory async SQLite database
 (``override_async_db``) rather than a mocked sync ``engine``. The
 AI/job-kickoff routes in this module (generate-codebook, compare-codebooks)
 are covered separately in ``test_ai_and_raw_sql_routes.py`` at the
@@ -13,7 +11,7 @@ covered by ``tests/backend/services/test_codebook_service.py``.
 
 import pytest
 
-from backend.app.repositories import artifact_content_repo
+from backend.app.services import version_service
 
 pytestmark = pytest.mark.usefixtures("override_async_db")
 
@@ -47,6 +45,14 @@ def session_factory(async_sqlite_engine):
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
     return async_sessionmaker(async_sqlite_engine, expire_on_commit=False)
+
+
+_ONE_CODE = [
+    {
+        "code_uid": "u1", "family_uid": "f1", "family_name": "F", "name": "C", "body": "content",
+        "position": 0,
+    }
+]
 
 
 class TestListCodebooks:
@@ -104,7 +110,7 @@ class TestGetCodebook:
         resp = client.get("/api/codebook?codebook_id=nonexistent", cookies=auth_cookies)
         assert resp.status_code == 404
 
-    async def test_matches_by_schemaname_and_reads_content(
+    async def test_matches_by_schemaname_and_reads_codes(
         self, client, session_factory, make_token
     ) -> None:
         user = await _make_user(session_factory)
@@ -114,11 +120,13 @@ class TestGetCodebook:
             filename="cb",
             schemaname="proj_a",
             file_type="codebook",
-            systemprompt="sys",
-            userprompt="usr",
         )
         async with session_factory() as session:
-            await artifact_content_repo.write_content(session, file_rec.id, "codebook text content")
+            await version_service.commit_codebook_version(
+                session, file_id=file_rec.id, author_user_id=user.id, origin="generated",
+                codes=_ONE_CODE, system_prompt="sys", user_instructions="usr",
+                prompt_meta={"rendered_chars": 1234, "rendered_sha256": "abc", "batches": 2},
+            )
             await session.commit()
 
         resp = client.get(
@@ -126,15 +134,19 @@ class TestGetCodebook:
         )
         assert resp.status_code == 200
         body = resp.json()
-        assert body["codebook"] == "codebook text content"
+        assert body["codes"][0]["name"] == "C"
+        assert body["codes"][0]["code_uid"] == "u1"
         assert body["systemprompt"] == "sys"
-        assert body["userprompt"] == "usr"
+        assert body["instructions"] == "usr"
+        assert body["prompt_meta"]["rendered_chars"] == 1234
 
     async def test_matches_by_integer_file_id(self, client, session_factory, make_token) -> None:
         user = await _make_user(session_factory)
         file_rec = await _make_file(session_factory, user.id, filename="cb", schemaname="proj_a", file_type="codebook")
         async with session_factory() as session:
-            await artifact_content_repo.write_content(session, file_rec.id, "content")
+            await version_service.commit_codebook_version(
+                session, file_id=file_rec.id, author_user_id=user.id, origin="generated", codes=_ONE_CODE,
+            )
             await session.commit()
 
         resp = client.get(
@@ -160,7 +172,9 @@ class TestGetCodebook:
             session_factory, owner.id, filename="cb", schemaname="proj_a", file_type="codebook"
         )
         async with session_factory() as session:
-            await artifact_content_repo.write_content(session, file_rec.id, "secret content")
+            await version_service.commit_codebook_version(
+                session, file_id=file_rec.id, author_user_id=owner.id, origin="generated", codes=_ONE_CODE,
+            )
             await session.commit()
 
         resp = client.get(
@@ -169,39 +183,9 @@ class TestGetCodebook:
         assert resp.status_code == 404
 
 
-class TestParseCodebook:
-    def test_requires_auth(self, client) -> None:
-        resp = client.get("/api/parse-codebook?codebook_id=nonexistent")
-        assert resp.status_code == 401
-
-    def test_no_matching_file_returns_404(self, client, auth_cookies) -> None:
-        resp = client.get("/api/parse-codebook?codebook_id=nonexistent", cookies=auth_cookies)
-        assert resp.status_code == 404
-
-    async def test_parses_raw_content_into_json_structure(
-        self, client, session_factory, make_token
-    ) -> None:
-        user = await _make_user(session_factory)
-        file_rec = await _make_file(session_factory, user.id, filename="cb", schemaname="proj_a", file_type="codebook")
-        raw = "### Code Family: F\n#### Code Name: C\ncontent"
-        async with session_factory() as session:
-            await artifact_content_repo.write_content(session, file_rec.id, raw)
-            await session.commit()
-
-        resp = client.get(
-            "/api/parse-codebook?codebook_id=proj_a", cookies={"access_token": make_token(sub=str(user.id))}
-        )
-        assert resp.status_code == 200
-        parsed = resp.json()["parsed"]
-        assert parsed[0]["family_name"] == "F"
-        assert parsed[0]["codes"][0]["code_name"] == "C"
-
-
 class TestSaveProjectCodebook:
     def test_requires_auth(self, client) -> None:
-        resp = client.post(
-            "/api/save-file-codebook/", data={"schema_name": "proj_a", "content": "x"}
-        )
+        resp = client.put("/api/codebook/proj_a", json={"codes": _ONE_CODE})
         assert resp.status_code == 401
 
     async def test_happy_path_updates_content_and_display_name(
@@ -210,9 +194,9 @@ class TestSaveProjectCodebook:
         user = await _make_user(session_factory)
         file_rec = await _make_file(session_factory, user.id, filename="cb", schemaname="proj_a", file_type="codebook")
 
-        resp = client.post(
-            "/api/save-file-codebook/",
-            data={"schema_name": "proj_a", "content": "updated text", "display_name": "renamed"},
+        resp = client.put(
+            "/api/codebook/proj_a",
+            json={"codes": _ONE_CODE, "display_name": "renamed"},
             cookies={"access_token": make_token(sub=str(user.id))},
         )
         assert resp.status_code == 200
@@ -220,17 +204,103 @@ class TestSaveProjectCodebook:
         assert body["display_name"] == "renamed"
 
         async with session_factory() as session:
-            content = await artifact_content_repo.read_content(session, file_rec.id)
-        assert content == "updated text"
+            codes = await version_service.read_codes(session, file_rec.id)
+        assert [c.name for c in codes] == ["C"]
 
     async def test_unowned_schema_returns_404(self, client, session_factory, make_token) -> None:
         owner = await _make_user(session_factory, "owner@b.com")
         other = await _make_user(session_factory, "other@b.com")
         await _make_file(session_factory, owner.id, filename="cb", schemaname="proj_a", file_type="codebook")
 
-        resp = client.post(
-            "/api/save-file-codebook/",
-            data={"schema_name": "proj_a", "content": "x"},
+        resp = client.put(
+            "/api/codebook/proj_a",
+            json={"codes": _ONE_CODE},
             cookies={"access_token": make_token(sub=str(other.id))},
         )
         assert resp.status_code == 404
+
+    async def test_code_without_uid_or_is_new_is_rejected(
+        self, client, session_factory, make_token
+    ) -> None:
+        user = await _make_user(session_factory)
+        await _make_file(session_factory, user.id, filename="cb", schemaname="proj_a", file_type="codebook")
+
+        bad_code = {"family_uid": "f1", "family_name": "F", "name": "C", "body": "x"}
+        resp = client.put(
+            "/api/codebook/proj_a",
+            json={"codes": [bad_code]},
+            cookies={"access_token": make_token(sub=str(user.id))},
+        )
+        assert resp.status_code == 400
+
+
+class TestDuplicateCodebook:
+    def test_requires_auth(self, client) -> None:
+        resp = client.post("/api/codebook/proj_a/duplicate", json={"display_name": "n"})
+        assert resp.status_code == 401
+
+    async def test_no_owned_source_returns_404(self, client, session_factory, make_token) -> None:
+        user = await _make_user(session_factory)
+        resp = client.post(
+            "/api/codebook/proj_missing/duplicate",
+            json={"display_name": "n"},
+            cookies={"access_token": make_token(sub=str(user.id))},
+        )
+        assert resp.status_code == 404
+
+    async def test_forks_codes_and_lineage(self, client, session_factory, make_token) -> None:
+        from backend.app.repositories import version_repo
+
+        user = await _make_user(session_factory)
+        file_rec = await _make_file(session_factory, user.id, schemaname="proj_dup")
+        async with session_factory() as session:
+            await version_service.commit_codebook_version(
+                session, file_id=file_rec.id, author_user_id=user.id, origin="generated", codes=_ONE_CODE,
+            )
+            await session.commit()
+
+        resp = client.post(
+            "/api/codebook/proj_dup/duplicate",
+            json={"display_name": "dup"},
+            cookies={"access_token": make_token(sub=str(user.id))},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["display_name"] == "dup"
+        new_file_id = int(body["id"])
+        assert new_file_id != file_rec.id
+
+        async with session_factory() as session:
+            codes = await version_service.read_codes(session, new_file_id)
+            assert [c.code_uid for c in codes] == ["u1"]
+            edges = await version_repo.list_parent_edges(session, new_file_id)
+            assert [e.parent_file_id for e in edges] == [file_rec.id]
+            assert edges[0].relation == "forked_from"
+
+    async def test_from_version_no_forks_that_version_not_head(
+        self, client, session_factory, make_token
+    ) -> None:
+        user = await _make_user(session_factory)
+        file_rec = await _make_file(session_factory, user.id, schemaname="proj_dup_v")
+        renamed = [{**_ONE_CODE[0], "name": "Renamed"}]
+        async with session_factory() as session:
+            await version_service.commit_codebook_version(
+                session, file_id=file_rec.id, author_user_id=user.id, origin="generated", codes=_ONE_CODE,
+            )
+            await session.commit()
+            await version_service.commit_codebook_version(
+                session, file_id=file_rec.id, author_user_id=user.id, origin="edited", codes=renamed,
+            )
+            await session.commit()
+
+        resp = client.post(
+            "/api/codebook/proj_dup_v/duplicate",
+            json={"display_name": "from-v1", "from_version_no": 1},
+            cookies={"access_token": make_token(sub=str(user.id))},
+        )
+        assert resp.status_code == 200
+        new_file_id = int(resp.json()["id"])
+
+        async with session_factory() as session:
+            codes = await version_service.read_codes(session, new_file_id)
+            assert [c.name for c in codes] == ["C"]

@@ -75,15 +75,20 @@ async def _make_file(
     file_type: str = "coding",
     schemaname: str | None = None,
     content: str | None = None,
+    skip_version: bool = False,
 ):
-    """Insert a ``File`` (optionally with an ``artifact_content`` row --
-    a coding file's codebook snapshot, or a coding_comparison's markdown)
-    directly via the ORM, owned by ``user_id``.
+    """Insert a ``File`` directly via the ORM, owned by ``user_id``, and
+    (unless ``skip_version=True``) always give it a v1 -- matching the
+    real production invariant that every ``coding``/``codebook`` file is
+    created through a job handler that commits one immediately. For
+    ``coding``/``codebook``, ``content`` becomes the sole seeded code's
+    ``body`` (empty codes list when ``content`` is ``None``); for any
+    other type it's a blob version (``""`` when ``content`` is ``None``).
     """
     import secrets
 
     from backend.app.database import File
-    from backend.app.storage_models import ArtifactContent
+    from backend.app.services import version_service
 
     async with SessionLocal() as session:
         file_rec = File(
@@ -94,18 +99,32 @@ async def _make_file(
         )
         session.add(file_rec)
         await session.flush()
-        if content is not None:
-            session.add(ArtifactContent(file_id=file_rec.id, content=content))
+        if not skip_version:
+            if file_type in ("coding", "codebook"):
+                codes = (
+                    [{"code_uid": "u1", "family_uid": "f1", "family_name": "F", "name": "C", "body": content, "position": 0}]
+                    if content is not None else []
+                )
+                await version_service.commit_codebook_version(
+                    session, file_id=file_rec.id, author_user_id=user_id, origin="generated", codes=codes,
+                )
+            else:
+                await version_service.commit_blob_version(
+                    session, file_id=file_rec.id, author_user_id=user_id, origin="generated", content=content or "",
+                )
         await session.commit()
         await session.refresh(file_rec)
         return file_rec
 
 
-async def _link_dependency(SessionLocal, *, child_file_id: int, parent_file_id: int):
-    from backend.app.database import FileDependency
+async def _link_dependency(SessionLocal, *, child_file_id: int, parent_file_id: int, role: str = "source_data"):
+    from backend.app.repositories import version_repo
 
     async with SessionLocal() as session:
-        session.add(FileDependency(child_file_id=child_file_id, parent_file_id=parent_file_id))
+        await version_repo.add_edge(
+            session, child_file_id=child_file_id, parent_file_id=parent_file_id, parent_version_id=None,
+            relation="derived_from", role=role,
+        )
         await session.commit()
 
 
@@ -144,6 +163,7 @@ async def _add_coding_entry(
                 row_type=row_type,
                 post_id=post_id,
                 code=code,
+                code_uid=f"{code}-uid",
                 quote=quote,
                 start_offset=0,
                 end_offset=len(quote),
@@ -172,19 +192,15 @@ class TestGetCodingArtifact:
     ) -> None:
         user = await _make_user(route_backed_by_sqlite_jobs)
         coding_file = await _make_file(
-            route_backed_by_sqlite_jobs, user.id, schemaname="proj_c", content="# Codebook\n- code A"
+            route_backed_by_sqlite_jobs, user.id, schemaname="proj_c", content="codebook body"
         )
         await _add_submission(route_backed_by_sqlite_jobs, coding_file.id, sub_id="s1")
         await _add_coding_entry(route_backed_by_sqlite_jobs, coding_file.id, post_id="s1", code="A")
-        monkeypatch.setattr(
-            "backend.app.api.coding_routes.parse_codebook_to_json", MagicMock(return_value="[]")
-        )
 
         resp = client.get("/api/coding/proj_c", headers=_auth_headers(make_token, sub=str(user.id)))
         assert resp.status_code == 200
         body = resp.json()
-        assert body["codebook_text"] == "# Codebook\n- code A"
-        assert body["codebook_tree"] == []
+        assert [c["body"] for c in body["codes"]] == ["codebook body"]
         assert body["total_rows"] == 1
         assert body["total_coded"] == 1
         assert body["code_frequency"] == [{"code": "A", "count": 1}]
@@ -234,7 +250,7 @@ class TestListCodingRows:
         assert body["total"] == 2
         by_item = {row["item_id"]: row for row in body["rows"]}
         assert by_item["t3_s1"]["codes"] == [
-            {"code": "A", "quote": "e", "start_offset": 0, "end_offset": 1, "notes": None}
+            {"code": "A", "code_uid": "A-uid", "quote": "e", "start_offset": 0, "end_offset": 1, "notes": None}
         ]
         assert by_item["t3_s2"]["codes"] == []
 
@@ -307,9 +323,14 @@ class TestGetCodingText:
         assert resp.json()["text"] == ""
 
 
-class TestSaveCodingCodebook:
+_ONE_CODE = [
+    {"code_uid": "u1", "family_uid": "f1", "family_name": "F", "name": "C", "body": "new codebook text"}
+]
+
+
+class TestSaveCodingRevision:
     def test_requires_auth(self, client) -> None:
-        resp = client.put("/api/coding/proj_a/codebook", json={"content": "x"})
+        resp = client.put("/api/coding/proj_a/revision", json={"codes": _ONE_CODE})
         assert resp.status_code == 401
 
     async def test_no_owned_file_returns_404(
@@ -317,20 +338,20 @@ class TestSaveCodingCodebook:
     ) -> None:
         user = await _make_user(route_backed_by_sqlite_jobs)
         resp = client.put(
-            "/api/coding/proj_missing/codebook",
-            json={"content": "x"},
+            "/api/coding/proj_missing/revision",
+            json={"codes": _ONE_CODE},
             headers=_auth_headers(make_token, sub=str(user.id)),
         )
         assert resp.status_code == 404
 
-    async def test_empty_content_returns_422(
+    async def test_neither_codes_nor_rows_returns_422(
         self, client, route_backed_by_sqlite_jobs, make_token
     ) -> None:
         user = await _make_user(route_backed_by_sqlite_jobs)
         await _make_file(route_backed_by_sqlite_jobs, user.id, schemaname="proj_c", content="old")
         resp = client.put(
-            "/api/coding/proj_c/codebook",
-            json={"content": ""},
+            "/api/coding/proj_c/revision",
+            json={},
             headers=_auth_headers(make_token, sub=str(user.id)),
         )
         assert resp.status_code == 422
@@ -342,8 +363,8 @@ class TestSaveCodingCodebook:
         await _make_file(route_backed_by_sqlite_jobs, user.id, schemaname="proj_c", content="old")
 
         resp = client.put(
-            "/api/coding/proj_c/codebook",
-            json={"content": "new codebook text"},
+            "/api/coding/proj_c/revision",
+            json={"codes": _ONE_CODE},
             headers=_auth_headers(make_token, sub=str(user.id)),
         )
         assert resp.status_code == 200
@@ -351,52 +372,31 @@ class TestSaveCodingCodebook:
         follow_up = client.get(
             "/api/coding/proj_c", headers=_auth_headers(make_token, sub=str(user.id))
         )
-        assert follow_up.json()["codebook_text"] == "new codebook text"
-
-
-class TestSaveCodingRows:
-    def test_requires_auth(self, client) -> None:
-        resp = client.put("/api/coding/proj_a/rows", json={"rows": [{"item_id": "t3_1", "entries": []}]})
-        assert resp.status_code == 401
-
-    async def test_no_owned_file_returns_404(
-        self, client, route_backed_by_sqlite_jobs, make_token
-    ) -> None:
-        user = await _make_user(route_backed_by_sqlite_jobs)
-        resp = client.put(
-            "/api/coding/proj_missing/rows",
-            json={"rows": [{"item_id": "t3_1", "entries": []}]},
-            headers=_auth_headers(make_token, sub=str(user.id)),
-        )
-        assert resp.status_code == 404
-
-    async def test_empty_rows_list_returns_422(
-        self, client, route_backed_by_sqlite_jobs, make_token
-    ) -> None:
-        user = await _make_user(route_backed_by_sqlite_jobs)
-        await _make_file(route_backed_by_sqlite_jobs, user.id, schemaname="proj_c")
-        resp = client.put(
-            "/api/coding/proj_c/rows",
-            json={"rows": []},
-            headers=_auth_headers(make_token, sub=str(user.id)),
-        )
-        assert resp.status_code == 422
+        assert [c["body"] for c in follow_up.json()["codes"]] == ["new codebook text"]
 
     async def test_replaces_coding_for_submitted_rows(
         self, client, route_backed_by_sqlite_jobs, make_token
     ) -> None:
+        from backend.app.services import version_service
+
         user = await _make_user(route_backed_by_sqlite_jobs)
         coding_file = await _make_file(route_backed_by_sqlite_jobs, user.id, schemaname="proj_c")
         await _add_submission(route_backed_by_sqlite_jobs, coding_file.id, sub_id="s1")
         await _add_coding_entry(route_backed_by_sqlite_jobs, coding_file.id, post_id="s1", code="OLD")
+        async with route_backed_by_sqlite_jobs() as session:
+            await version_service.commit_codebook_version(
+                session, file_id=coding_file.id, author_user_id=user.id, origin="edited",
+                codes=[{"code_uid": "new-uid", "family_uid": "f1", "family_name": "F", "name": "NEW", "body": "", "position": 0}],
+            )
+            await session.commit()
 
         resp = client.put(
-            "/api/coding/proj_c/rows",
+            "/api/coding/proj_c/revision",
             json={
                 "rows": [
                     {
                         "item_id": "t3_s1",
-                        "entries": [{"code": "NEW", "quote": "e", "start_offset": 0, "end_offset": 1}],
+                        "entries": [{"code_uid": "new-uid", "quote": "e", "start_offset": 0, "end_offset": 1}],
                     }
                 ]
             },
@@ -408,7 +408,7 @@ class TestSaveCodingRows:
             "/api/coding/proj_c/rows", headers=_auth_headers(make_token, sub=str(user.id))
         )
         codes = rows_resp.json()["rows"][0]["codes"]
-        assert codes == [{"code": "NEW", "quote": "e", "start_offset": 0, "end_offset": 1, "notes": None}]
+        assert codes == [{"code": "NEW", "code_uid": "new-uid", "quote": "e", "start_offset": 0, "end_offset": 1, "notes": None}]
 
     async def test_empty_entries_list_clears_a_rows_codes(
         self, client, route_backed_by_sqlite_jobs, make_token
@@ -419,7 +419,7 @@ class TestSaveCodingRows:
         await _add_coding_entry(route_backed_by_sqlite_jobs, coding_file.id, post_id="s1", code="A")
 
         resp = client.put(
-            "/api/coding/proj_c/rows",
+            "/api/coding/proj_c/revision",
             json={"rows": [{"item_id": "t3_s1", "entries": []}]},
             headers=_auth_headers(make_token, sub=str(user.id)),
         )
@@ -429,6 +429,41 @@ class TestSaveCodingRows:
             "/api/coding/proj_c/rows", headers=_auth_headers(make_token, sub=str(user.id))
         )
         assert rows_resp.json()["rows"][0]["codes"] == []
+
+    async def test_codebook_and_rows_together_mint_exactly_one_version(
+        self, client, route_backed_by_sqlite_jobs, make_token
+    ) -> None:
+        from backend.app.repositories import version_repo
+
+        user = await _make_user(route_backed_by_sqlite_jobs)
+        coding_file = await _make_file(route_backed_by_sqlite_jobs, user.id, schemaname="proj_c")
+        await _add_submission(route_backed_by_sqlite_jobs, coding_file.id, sub_id="s1")
+        async with route_backed_by_sqlite_jobs() as session:
+            head_before = await version_repo.head_version(session, coding_file.id)
+
+        resp = client.put(
+            "/api/coding/proj_c/revision",
+            json={
+                "codes": _ONE_CODE,
+                "rows": [
+                    {
+                        "item_id": "t3_s1",
+                        "entries": [{"code_uid": "u1", "quote": "e", "start_offset": 0, "end_offset": 1}],
+                    }
+                ],
+            },
+            headers=_auth_headers(make_token, sub=str(user.id)),
+        )
+        assert resp.status_code == 200
+
+        async with route_backed_by_sqlite_jobs() as session:
+            head_after = await version_repo.head_version(session, coding_file.id)
+        assert head_after.version_no == head_before.version_no + 1
+
+        rows_resp = client.get(
+            "/api/coding/proj_c/rows", headers=_auth_headers(make_token, sub=str(user.id))
+        )
+        assert rows_resp.json()["rows"][0]["codes"][0]["code_uid"] == "u1"
 
 
 class TestUpdateCodingMetadata:
@@ -481,7 +516,7 @@ class TestDuplicateCoding:
     ) -> None:
         from sqlalchemy import select
 
-        from backend.app.database import FileDependency
+        from backend.app.repositories import version_repo
         from backend.app.storage_models import CodingEntry, Submission
 
         user = await _make_user(route_backed_by_sqlite_jobs)
@@ -490,7 +525,8 @@ class TestDuplicateCoding:
             route_backed_by_sqlite_jobs, user.id, schemaname="proj_src", content="original codebook"
         )
         await _link_dependency(
-            route_backed_by_sqlite_jobs, child_file_id=source_file.id, parent_file_id=codebook_file.id
+            route_backed_by_sqlite_jobs, child_file_id=source_file.id, parent_file_id=codebook_file.id,
+            role="codebook",
         )
         await _add_submission(route_backed_by_sqlite_jobs, source_file.id, sub_id="s1")
         await _add_coding_entry(route_backed_by_sqlite_jobs, source_file.id, post_id="s1", code="A")
@@ -504,10 +540,8 @@ class TestDuplicateCoding:
         new_file_id = int(resp.json()["file"]["id"])
 
         async with route_backed_by_sqlite_jobs() as session:
-            deps = (
-                await session.execute(select(FileDependency).where(FileDependency.child_file_id == new_file_id))
-            ).scalars().all()
-            assert {d.parent_file_id for d in deps} == {codebook_file.id, source_file.id}
+            edges = await version_repo.list_parent_edges(session, new_file_id)
+            assert {e.parent_file_id for e in edges} == {codebook_file.id, source_file.id}
 
             copied_subs = (
                 await session.execute(select(Submission).where(Submission.file_id == new_file_id))
@@ -518,6 +552,47 @@ class TestDuplicateCoding:
                 await session.execute(select(CodingEntry).where(CodingEntry.file_id == new_file_id))
             ).scalars().all()
             assert [(e.post_id, e.code) for e in copied_entries] == [("s1", "A")]
+
+    async def test_from_version_no_forks_that_version_not_head(
+        self, client, route_backed_by_sqlite_jobs, make_token
+    ) -> None:
+        from backend.app.services import version_service
+
+        user = await _make_user(route_backed_by_sqlite_jobs)
+        source_file = await _make_file(
+            route_backed_by_sqlite_jobs, user.id, schemaname="proj_src_v", content="v1 body"
+        )
+        async with route_backed_by_sqlite_jobs() as session:
+            await version_service.commit_codebook_version(
+                session, file_id=source_file.id, author_user_id=user.id, origin="edited",
+                codes=[{"code_uid": "u1", "family_uid": "f1", "family_name": "F", "name": "C", "body": "v2 body", "position": 0}],
+            )
+            await session.commit()
+
+        resp = client.post(
+            "/api/coding/proj_src_v/duplicate",
+            json={"display_name": "from-v1", "from_version_no": 1},
+            headers=_auth_headers(make_token, sub=str(user.id)),
+        )
+        assert resp.status_code == 200
+        new_file_id = int(resp.json()["file"]["id"])
+
+        async with route_backed_by_sqlite_jobs() as session:
+            codes = await version_service.read_codes(session, new_file_id)
+            assert [c.body for c in codes] == ["v1 body"]
+
+    async def test_unknown_from_version_no_returns_404(
+        self, client, route_backed_by_sqlite_jobs, make_token
+    ) -> None:
+        user = await _make_user(route_backed_by_sqlite_jobs)
+        await _make_file(route_backed_by_sqlite_jobs, user.id, schemaname="proj_src_missing_v")
+
+        resp = client.post(
+            "/api/coding/proj_src_missing_v/duplicate",
+            json={"display_name": "x", "from_version_no": 99},
+            headers=_auth_headers(make_token, sub=str(user.id)),
+        )
+        assert resp.status_code == 404
 
 
 class TestRecodeItemsKickoff:

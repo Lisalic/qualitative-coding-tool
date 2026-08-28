@@ -10,15 +10,17 @@ a dynamic schema name spliced into SQL.
 ``word_count`` on ``Submission``/``Comment`` is declared here as a plain
 ``Integer`` for ORM/test purposes (SQLite has no equivalent of Postgres
 generated columns); the real ``GENERATED ALWAYS AS (...) STORED`` DDL is
-added by the Alembic migration that creates these tables against
-Postgres, matching the expression the old per-artifact-schema DDL used.
+added by ``backend/alembic/versions/a1e6f2c9b3d7_baseline_untracked_schema.py``,
+matching the expression the old per-artifact-schema DDL used.
 
-Landed in Stage 0, unused by any route until each domain's stage wires
-its repository in.
+Artifact *content* no longer lives here: the old one-blob-per-file
+``ArtifactContent`` table is gone (see
+``backend/app/versioning_models.py`` -- content now lives on
+``ArtifactVersion.content`` for blob artifacts, or on ``CodebookCode``
+rows for codebooks and a coding artifact's own codebook snapshot).
 """
 
-from sqlalchemy import Column, ForeignKey, Integer, BigInteger, String, Text, DateTime, Index
-from sqlalchemy.sql import func
+from sqlalchemy import Column, ForeignKey, Integer, BigInteger, String, Text, Index
 
 from backend.app.database import Base
 
@@ -61,20 +63,6 @@ class Comment(Base):
     )
 
 
-class ArtifactContent(Base):
-    """One TEXT blob per artifact -- codebook / codebook_comparison /
-    coding_comparison / summary / (for `coding`) the classification output.
-    Replaces the ~10 duplicated ``CREATE SCHEMA`` + ``content_store``
-    blocks that existed for these file types.
-    """
-
-    __tablename__ = "artifact_content"
-
-    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), primary_key=True)
-    content = Column(Text, nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-
 class CodingEntry(Base):
     """Structured coding output: one row per (item, code, quote) --
     i.e. one row per *quote*, not per code, since a single code can be
@@ -97,6 +85,25 @@ class CodingEntry(Base):
     comment ids share one bare-string namespace (both strip their Reddit
     fullname prefix at import) and a genuine collision between the two
     tables would otherwise silently merge into one row.
+
+    ``code_uid`` identifies the code by its stable id in the coding
+    artifact's own ``codebook_codes`` (see ``versioning_models.py``)
+    rather than by name, so a code rename never orphans the entries that
+    use it -- ``code`` (the display name) is kept alongside purely as a
+    denormalized label for reads that don't want to join.
+
+    ``valid_from``/``valid_to`` are SCD-2 revision range columns keyed on
+    the owning coding file's ``artifact_versions.version_no`` (not on
+    ``ArtifactVersion.id`` -- a plain indexed integer range keeps the
+    liveness predicate a cheap ``valid_to IS NULL`` / range comparison
+    rather than a join). A row is live at version ``v`` iff
+    ``valid_from <= v <= coalesce(valid_to, infinity)``; ``valid_to IS
+    NULL`` means "still live". Real multi-version coding history is live:
+    ``coding_service.save_coding_revision`` and an accepted AI recode
+    proposal both mint a new version and stamp their writes with it, so
+    a row's ``valid_from``/``valid_to`` genuinely bracket the versions it
+    was live for -- see ``coding_repo.py::replace_entries_for_items``
+    for the three-step SCD-2 write.
     """
 
     __tablename__ = "coding_entries"
@@ -106,12 +113,17 @@ class CodingEntry(Base):
     row_type = Column(String, nullable=False, server_default="submission", default="submission")
     post_id = Column(String, nullable=False)
     code = Column(String, nullable=False)
+    code_uid = Column(String, nullable=False)
     quote = Column(Text, nullable=False)
     start_offset = Column(Integer, nullable=False)
     end_offset = Column(Integer, nullable=False)
     notes = Column(Text)
+    valid_from = Column(Integer, nullable=False, server_default="1", default=1)
+    valid_to = Column(Integer, nullable=True)
 
     __table_args__ = (
         Index("idx_coding_entries_file_id_code", "file_id", "code"),
         Index("idx_coding_entries_file_id_row", "file_id", "row_type", "post_id"),
+        Index("idx_coding_entries_file_id_code_uid", "file_id", "code_uid"),
+        Index("idx_coding_entries_live", "file_id", "valid_to"),
     )

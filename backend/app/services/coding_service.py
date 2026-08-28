@@ -4,10 +4,9 @@ backend/app/api/coding_routes.py.
 A ``coding`` ``File`` is now a self-contained artifact made of three
 parts, all keyed by its own ``file_id``:
 
-1. its own codebook snapshot (``artifact_content`` -- repurposed: it used
-   to hold the flattened classification blob, now it holds the codebook
-   markdown copied in at Apply Codebook time, via
-   ``artifact_content_repo``);
+1. its own codebook snapshot (structured ``codebook_codes`` rows on its
+   own ``artifact_versions`` v1, copied in at Apply Codebook time via
+   ``version_service.commit_codebook_version``);
 2. its own copy of every sampled post/comment (``submissions``/
    ``comments``, copied in from the source data file via
    ``raw_data_repo.copy_rows_by_id``, read back via
@@ -29,13 +28,17 @@ produces a self-contained one.
 Apply Codebook (``start_apply_codebook_job``) still samples and codes;
 this also adds ``start_recode_items_job``, which re-runs the AI over a
 caller-chosen subset of a coding artifact's *own* rows with a
-caller-chosen model, replacing only that subset's coding
-(``coding_repo.replace_entries_for_items``).
+caller-chosen model and returns the classification as reviewable
+proposals -- it does not itself write to ``coding_entries``.
+``save_coding_revision`` is the single write path for a coding
+artifact's whole editing session (codebook edits, manual row tags, and/or
+accepted recode proposals), committing at most one new
+``artifact_versions`` row per save via
+``coding_repo.replace_entries_for_items``.
 """
 
 from __future__ import annotations
 
-import json
 import secrets
 
 from sqlalchemy import select
@@ -48,7 +51,6 @@ from backend.app.core.item_types import COMMENT, SUBMISSION, qualify_item_id, sp
 from backend.app.database import (
     AsyncSessionLocal,
     File,
-    FileDependency,
     async_link_file_to_project,
 )
 from backend.app.external import context_window
@@ -56,10 +58,23 @@ from backend.app.jobs.models import Job
 from backend.app.jobs.progress import ProgressTracker
 from backend.app.jobs.registry import register_handler
 from backend.app.jobs.service import enqueue_job
-from backend.app.repositories import artifact_content_repo, coding_repo, file_repo, project_repo, raw_data_repo
+from backend.app.repositories import coding_repo, file_repo, project_repo, raw_data_repo, version_repo
+from backend.app.services import codebook_service, version_service
+from backend.app.services.version_service import EdgeSpec
 from backend.app.storage_models import Comment, Submission
+from backend.app.versioning_models import (
+    ORIGIN_EDITED,
+    ORIGIN_FORKED,
+    ORIGIN_GENERATED,
+    ORIGIN_IMPORTED,
+    RELATION_COMPARED,
+    RELATION_DERIVED_FROM,
+    ROLE_CODEBOOK,
+    ROLE_SIDE_A,
+    ROLE_SIDE_B,
+    ROLE_SOURCE_DATA,
+)
 from backend.scripts.codebook_apply import classify_posts
-from backend.scripts.display_codebook import parse_codebook_to_json
 
 _PARENT_TEXT_TRUNCATE_CHARS = 280
 
@@ -69,8 +84,8 @@ _CODEBOOK_FILE_TYPES = ("codebook", "codebook_comparison")
 
 async def _read_coding_content(session: AsyncSession, file_id: int) -> str:
     """Text for a ``coding``/``coding_comparison`` file, appropriate to
-    its type: a ``coding_comparison``'s ``artifact_content`` markdown is
-    unchanged by the coding-artifact overhaul, while a ``coding`` file's
+    its type: a ``coding_comparison``'s content is a blob version
+    (``version_service.read_blob``), while a ``coding`` file's
     classification text no longer exists as a stored blob -- it's
     generated on demand from ``coding_entries``, the sole source of truth
     for its coding.
@@ -78,7 +93,7 @@ async def _read_coding_content(session: AsyncSession, file_id: int) -> str:
     file_rec = await session.get(File, file_id)
     if file_rec is not None and file_rec.file_type == "coding":
         return await coding_repo.render_coding_text(session, file_id)
-    return await artifact_content_repo.read_content(session, file_id) or ""
+    return await version_service.read_blob(session, file_id) or ""
 
 
 async def get_coding_comparison(session: AsyncSession, user_id: int, ref: str | None) -> File:
@@ -122,19 +137,20 @@ async def get_coding_comparison(session: AsyncSession, user_id: int, ref: str | 
 
 async def get_coding_artifact(session: AsyncSession, user_id: int, ref: str) -> dict:
     """Metadata for a coding file owned by ``user_id``: the file record,
-    its own codebook snapshot text, row/coded counts, and code frequency
-    -- everything ``GET /api/coding/{ref}`` needs besides the row page
-    itself (``list_coding_rows``, fetched separately so the frontend can
-    page/filter/search independently of the artifact header).
+    its own codebook snapshot as structured code rows, row/coded counts,
+    and code frequency -- everything ``GET /api/coding/{ref}`` needs
+    besides the row page itself (``list_coding_rows``, fetched separately
+    so the frontend can page/filter/search independently of the artifact
+    header).
     """
     file_rec = await file_repo.get_owned_file(session, ref, user_id, file_types=("coding",))
-    codebook_text = await artifact_content_repo.read_content(session, file_rec.id) or ""
+    codes = await version_service.read_codes(session, file_rec.id)
     total_rows = await coding_repo.count_rows(session, file_rec.id)
     total_coded = await coding_repo.count_rows(session, file_rec.id, only="coded")
     frequency = await coding_repo.code_frequency(session, file_rec.id)
     return {
         "file": file_rec,
-        "codebook_text": codebook_text,
+        "codes": codes,
         "total_rows": total_rows,
         "total_coded": total_coded,
         "code_frequency": [{"code": code, "count": count} for code, count in frequency],
@@ -177,62 +193,125 @@ async def get_coding_text(session: AsyncSession, user_id: int, ref: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-async def save_coding_codebook(session: AsyncSession, user_id: int, ref: str, content: str) -> File:
-    """Overwrite a coding file's own codebook snapshot."""
-    if not content or not content.strip():
-        raise ValidationAppError("content is required")
+async def save_coding_revision(
+    session: AsyncSession,
+    user_id: int,
+    ref: str,
+    *,
+    codes: list[dict] | None,
+    rows: list[dict] | None,
+    model: str | None = None,
+    job_id: int | None = None,
+) -> File:
+    """Save a coding artifact's whole editing session -- an updated
+    codebook snapshot, updated row coding (manual tags and/or reviewed AI
+    recode proposals -- see ``_run_recode_items_job``, which no longer
+    commits on its own), or both -- as **at most one** new
+    ``artifact_versions`` row. Replaces the old separate
+    ``save_coding_codebook``/``save_coding_rows``, which each minted
+    their own version even when a researcher changed both in one sitting.
+
+    Ordering matters and is the correctness crux here:
+
+    1. If ``codes`` is given, commit the codebook version FIRST (see
+       ``codebook_service._resolve_code_rows`` for the identity
+       enforcement this shares with a plain codebook save).
+       ``commit_codebook_version`` no-op-suppresses when the codes are
+       byte-identical to head, returning the existing head instead of a
+       new version -- detected by comparing ids against the pre-save
+       head, so a rows-only change still gets its own version next.
+    2. If no new version was minted yet and ``rows`` is given, commit a
+       coding version via ``commit_coding_version``.
+    3. If neither step produced a new version, there is nothing to save.
+    4. Only once a version number is settled do we resolve each row
+       entry's ``code_uid`` against the (possibly just-updated) codebook
+       snapshot -- so a code created in this very save resolves, and a
+       code removed in this very save is rejected on any row still
+       trying to use it.
+    5. ``coding_repo.replace_entries_for_items`` is stamped with that
+       version's number -- never a number that wasn't just minted, since
+       its first step deletes rows born at that exact ``version_no``
+       (see its docstring); reusing a no-op-suppressed head would delete
+       the *previous* sealed version's entries.
+    6. Any ``code_uid`` removed from the codebook in this save that
+       ``rows`` didn't itself touch is closed the same way a
+       codebook-only save does, so "every live entry's code_uid resolves
+       to a code in the current snapshot" stays true either way.
+    """
+    if not codes and not rows:
+        raise ValidationAppError("codes or rows is required")
 
     file_rec = await file_repo.get_owned_file(session, ref, user_id, file_types=("coding",))
-    await artifact_content_repo.write_content(session, file_rec.id, content)
+
+    head_before = await version_repo.head_version(session, file_rec.id)
+    before_uids = {c.code_uid for c in await version_service.read_codes(session, file_rec.id)}
+
+    version = None
+    after_uids = before_uids
+    if codes:
+        resolved_codes = codebook_service._resolve_code_rows(codes)
+        codebook_version = await version_service.commit_codebook_version(
+            session,
+            file_id=file_rec.id,
+            author_user_id=user_id,
+            origin=ORIGIN_EDITED,
+            codes=resolved_codes,
+            model=model,
+            job_id=job_id,
+        )
+        after_uids = {r["code_uid"] for r in resolved_codes}
+        if head_before is None or codebook_version.id != head_before.id:
+            version = codebook_version
+
+    if version is None and rows:
+        version = await version_service.commit_coding_version(
+            session, file_id=file_rec.id, author_user_id=user_id, origin=ORIGIN_EDITED, model=model, job_id=job_id,
+        )
+
+    if version is None:
+        # Codebook was submitted but hashed identical to head, and there
+        # were no rows to save either -- nothing changed.
+        return file_rec
+
+    if rows:
+        current_codes = await version_service.read_codes(session, file_rec.id)
+        name_by_uid = {c.code_uid: c.name for c in current_codes}
+
+        items = []
+        for row in rows:
+            row_type, post_id = split_item_id(row["item_id"])
+            entries = []
+            for entry in row.get("entries") or []:
+                code_uid = (entry.get("code_uid") or "").strip()
+                if not code_uid:
+                    continue
+                code_name = name_by_uid.get(code_uid)
+                if code_name is None:
+                    raise ValidationAppError(
+                        f"code_uid {code_uid!r} is not in this artifact's current codebook snapshot"
+                    )
+                entries.append(
+                    {
+                        "code": code_name,
+                        "code_uid": code_uid,
+                        "quote": entry.get("quote"),
+                        "start_offset": entry.get("start_offset"),
+                        "end_offset": entry.get("end_offset"),
+                        "notes": entry.get("notes"),
+                    }
+                )
+            items.append({"row_type": row_type, "post_id": post_id, "entries": entries})
+
+        await coding_repo.replace_entries_for_items(session, file_rec.id, items, version_no=version.version_no)
+
+    if codes:
+        for removed_uid in before_uids - after_uids:
+            await coding_repo.close_entries_for_code_uid(
+                session, file_rec.id, removed_uid, version_no=version.version_no
+            )
+
     await session.commit()
     await session.refresh(file_rec)
-    return file_rec
-
-
-async def save_coding_rows(session: AsyncSession, user_id: int, ref: str, rows: list[dict]) -> File:
-    """Replace the coding for exactly the rows given -- a manual table
-    edit's save, parallel to an AI recode
-    (``start_recode_items_job``/``_run_recode_items_job``) using the same
-    ``coding_repo.replace_entries_for_items`` primitive.
-
-    ``rows`` is ``[{"item_id": <qualified id>, "entries": [{"code",
-    "quote", "start_offset", "end_offset", "notes"}]}]`` -- one entry per
-    quote, already shaped and validated by ``CodingEntryIn``
-    (min-length/offset-ordering) at the route boundary. An entry with a
-    blank ``code`` is dropped (a user clearing a code field), and a row
-    with no surviving entries ends up with zero codes rather than being
-    left as-is. Unlike an AI coding, a manual entry's ``quote``/offsets
-    come straight from the real DOM selection range the frontend computed
-    them from (see ``HighlightedContent.jsx``), so there is no separate
-    existence check here -- it is trusted the same way a hand-typed value
-    always has been in this editor.
-    """
-    if not rows:
-        raise ValidationAppError("rows is required")
-
-    file_rec = await file_repo.get_owned_file(session, ref, user_id, file_types=("coding",))
-
-    items = []
-    for row in rows:
-        row_type, post_id = split_item_id(row["item_id"])
-        entries = []
-        for entry in row.get("entries") or []:
-            code = (entry.get("code") or "").strip()
-            if not code:
-                continue
-            entries.append(
-                {
-                    "code": code,
-                    "quote": entry.get("quote"),
-                    "start_offset": entry.get("start_offset"),
-                    "end_offset": entry.get("end_offset"),
-                    "notes": entry.get("notes"),
-                }
-            )
-        items.append({"row_type": row_type, "post_id": post_id, "entries": entries})
-
-    await coding_repo.replace_entries_for_items(session, file_rec.id, items)
-    await session.commit()
     return file_rec
 
 
@@ -257,45 +336,37 @@ async def update_coding_metadata(
 # ---------------------------------------------------------------------------
 
 
-async def _clone_file_dependencies(
-    session: AsyncSession, *, source_file_id: int, target_file_id: int, user_id: int
-) -> None:
-    """Copy every ``FileDependency`` parent link from ``source_file_id``
-    onto ``target_file_id`` (skipping parents not owned by ``user_id``),
-    then link ``target_file_id`` to ``source_file_id`` itself as a parent
-    too, unless that link was already copied above.
-    """
-    result = await session.execute(select(FileDependency).where(FileDependency.child_file_id == source_file_id))
-    source_dependencies = result.scalars().all()
-
-    copied_parent_ids: set[int] = set()
-    for dependency in source_dependencies:
-        parent_result = await session.execute(
-            select(File).where(File.id == dependency.parent_file_id, File.user_id == user_id)
-        )
-        parent_file = parent_result.scalar_one_or_none()
-        if parent_file is None or parent_file.id in copied_parent_ids:
-            continue
-        session.add(FileDependency(child_file_id=target_file_id, parent_file_id=parent_file.id))
-        copied_parent_ids.add(parent_file.id)
-
-    if source_file_id not in copied_parent_ids:
-        session.add(FileDependency(child_file_id=target_file_id, parent_file_id=source_file_id))
-
-
-async def duplicate_coding(session: AsyncSession, user_id: int, ref: str, *, display_name: str) -> File:
+async def duplicate_coding(
+    session: AsyncSession, user_id: int, ref: str, *, display_name: str, from_version_no: int | None = None
+) -> File:
     """Fork a whole coding artifact into a brand-new file: its codebook
-    snapshot, its own submissions/comments rows
-    (``raw_data_repo.copy_all_rows``), its ``coding_entries``
-    (``coding_repo.copy_entries``), its project links, and its
-    dependency lineage.
+    snapshot (codes copied with ``code_uid``/``family_uid`` preserved,
+    starting the fork's own history at v1 -- see
+    ``version_service.fork_lineage``'s docstring for why), its own
+    submissions/comments rows (``raw_data_repo.copy_all_rows``), its
+    ``coding_entries`` (``coding_repo.copy_entries``), its project links,
+    and its lineage (``version_service.fork_lineage``, replacing the old
+    ``FileDependency``-era ``_clone_file_dependencies``).
+
+    ``from_version_no=None`` (the default) forks from the current head.
+    Passing a version number instead forks from that point in history --
+    the codebook snapshot AND the coding_entries live set are both read
+    as of that version, not head -- which is how you "undo" a later edit
+    without destroying it: the original artifact's history is untouched,
+    a new one starts from the old state. This replaces the old
+    forward-commit ``revert``, which used to rewrite the SAME artifact's
+    history in place.
     """
     display_name = (display_name or "").strip()
     if not display_name:
         raise ValidationAppError("display_name is required")
 
     source_file = await file_repo.get_owned_file(session, ref, user_id, file_types=("coding",))
-    codebook_text = await artifact_content_repo.read_content(session, source_file.id) or ""
+    if from_version_no is not None:
+        target = await version_repo.get_version_by_no(session, source_file.id, from_version_no)
+        if target is None:
+            raise NotFoundError(f"No version {from_version_no} for '{ref}'")
+    source_codes = await version_service.read_codes(session, source_file.id, version_no=from_version_no)
 
     new_schema = f"proj_{secrets.token_hex(6)}"
     file_rec = File(
@@ -303,16 +374,34 @@ async def duplicate_coding(session: AsyncSession, user_id: int, ref: str, *, dis
         filename=display_name,
         schemaname=new_schema,
         file_type="coding",
-        systemprompt=source_file.systemprompt,
-        userprompt=source_file.userprompt,
         description=source_file.description,
     )
     session.add(file_rec)
     await session.flush()
 
-    await artifact_content_repo.write_content(session, file_rec.id, codebook_text)
+    code_rows = [
+        {
+            "code_uid": c.code_uid, "family_uid": c.family_uid, "family_name": c.family_name,
+            "name": c.name, "body": c.body, "definition": c.definition, "inclusion": c.inclusion,
+            "exclusion": c.exclusion, "keywords": c.keywords, "example": c.example, "position": c.position,
+        }
+        for c in source_codes
+    ]
+    source_version = (
+        await version_repo.get_version_by_no(session, source_file.id, from_version_no)
+        if from_version_no is not None
+        else await version_repo.head_version(session, source_file.id)
+    )
+    await version_service.commit_codebook_version(
+        session, file_id=file_rec.id, author_user_id=user_id, origin=ORIGIN_FORKED, codes=code_rows,
+        system_prompt=source_version.system_prompt if source_version else None,
+        user_instructions=source_version.user_instructions if source_version else None,
+        prompt_meta=source_version.prompt_meta if source_version else None,
+    )
     await raw_data_repo.copy_all_rows(session, source_file_id=source_file.id, target_file_id=file_rec.id)
-    await coding_repo.copy_entries(session, source_file_id=source_file.id, target_file_id=file_rec.id)
+    await coding_repo.copy_entries(
+        session, source_file_id=source_file.id, target_file_id=file_rec.id, as_of_version_no=from_version_no
+    )
 
     source_with_projects = await session.execute(
         select(File).where(File.id == source_file.id, File.user_id == user_id).options(selectinload(File.projects))
@@ -321,7 +410,7 @@ async def duplicate_coding(session: AsyncSession, user_id: int, ref: str, *, dis
     for project in (source_file_loaded.projects if source_file_loaded else []):
         await async_link_file_to_project(session, file_rec.id, project.id)
 
-    await _clone_file_dependencies(session, source_file_id=source_file.id, target_file_id=file_rec.id, user_id=user_id)
+    await version_service.fork_lineage(session, source_file_id=source_file.id, target_file_id=file_rec.id, user_id=user_id)
 
     await session.commit()
     await session.refresh(file_rec)
@@ -341,34 +430,29 @@ _EMPTY_VALIDATION_COUNTS = {
 }
 
 
-def _codebook_code_names(codebook_text: str) -> dict[str, str]:
-    """Map of normalized (casefolded, stripped) code name -> its canonical
-    spelling exactly as it appears in ``codebook_text``, parsed with the
-    same ``display_codebook.parse_codebook_to_json`` the codebook editor
-    already uses. Lets an AI-produced code name through when it matches
-    case/whitespace-insensitively, while what gets stored is always the
-    codebook's own spelling -- never the model's possibly differently-cased
-    echo of it.
+def _codebook_code_lookup(codes) -> dict[str, tuple[str, str]]:
+    """Map of normalized (casefolded, stripped) code name -> ``(canonical
+    spelling, code_uid)``, built from a codebook's actual
+    ``CodebookCode`` rows rather than re-parsing markdown. Lets an
+    AI-produced code name through when it matches case/whitespace-
+    insensitively, while what gets stored is always the codebook's own
+    spelling and its stable ``code_uid`` -- never the model's possibly
+    differently-cased echo of the name, and never a name-only reference
+    that a later rename would orphan.
     """
-    try:
-        structure = json.loads(parse_codebook_to_json(codebook_text))
-    except Exception:  # noqa: BLE001 - a malformed codebook snapshot just yields no valid codes
-        return {}
-
-    names: dict[str, str] = {}
-    for family in structure or []:
-        for code in family.get("codes") or []:
-            name = str(code.get("code_name") or "").strip()
-            if name:
-                names[name.casefold()] = name
-    return names
+    lookup: dict[str, tuple[str, str]] = {}
+    for code in codes:
+        name = (code.name or "").strip()
+        if name:
+            lookup[name.casefold()] = (name, code.code_uid)
+    return lookup
 
 
 def _validate_and_resolve_coding_entries(
     raw_entries: list[dict],
     *,
     valid_keys: set[tuple[str, str]],
-    codebook_text: str,
+    codes,
     content_by_key: dict[tuple[str, str], str],
 ) -> tuple[list[dict], dict[str, int]]:
     """The anti-hallucination gate every AI coding passes through before
@@ -381,9 +465,10 @@ def _validate_and_resolve_coding_entries(
       must be in ``valid_keys``, the set of items actually sent to the
       model this run -- catches a garbled/invented id.
     - **code exists**: ``code`` must match a code name from the artifact's
-      own codebook snapshot (via :func:`_codebook_code_names`, case/
+      own codebook snapshot (via :func:`_codebook_code_lookup`, case/
       whitespace-insensitive) -- catches an invented or mis-copied code
-      name; the canonical spelling is what gets stored.
+      name; the canonical spelling AND its stable ``code_uid`` are what
+      get stored.
     - **quote exists**: each quote must resolve, via
       ``core.evidence_match.find_quote``, against that item's own content
       -- catches invented or misattributed evidence. The *resolved*
@@ -399,7 +484,7 @@ def _validate_and_resolve_coding_entries(
     rejected_quote_not_found}`` -- surfaced in the job result so silently
     -dropped work is visible rather than invisible.
     """
-    code_names = _codebook_code_names(codebook_text)
+    code_lookup = _codebook_code_lookup(codes)
     counts = dict(_EMPTY_VALIDATION_COUNTS)
     rows: list[dict] = []
 
@@ -414,10 +499,11 @@ def _validate_and_resolve_coding_entries(
             counts["rejected_unknown_item"] += len(quotes)
             continue
 
-        canonical_code = code_names.get(str(entry.get("code") or "").strip().casefold())
-        if not canonical_code:
+        resolved = code_lookup.get(str(entry.get("code") or "").strip().casefold())
+        if not resolved:
             counts["rejected_unknown_code"] += len(quotes)
             continue
+        canonical_code, code_uid = resolved
 
         content = content_by_key.get(key) or ""
         for quote in quotes:
@@ -431,6 +517,7 @@ def _validate_and_resolve_coding_entries(
                     "row_type": row_type,
                     "post_id": post_id,
                     "code": canonical_code,
+                    "code_uid": code_uid,
                     "quote": content[start:end],
                     "start_offset": start,
                     "end_offset": end,
@@ -559,8 +646,10 @@ async def _run_apply_codebook_job(job_id: int, payload: dict) -> dict:
     text is copied into its own ``artifact_content`` as a snapshot, and
     the parsed classification goes into ``coding_entries`` -- no row or
     codebook text is ever borrowed back from a parent file at read time.
-    ``FileDependency`` rows still record lineage back to the source data
-    file and the codebook file, for traceability, not for content lookup.
+    ``artifact_edges`` rows still record lineage back to the source data
+    file and the codebook file, for traceability, not for content lookup;
+    the codebook edge is pinned to the exact version applied (see
+    ``version_service.pin_parent``).
     """
     user_id = payload["user_id"]
     source_file_id = payload["source_file_id"]
@@ -576,9 +665,16 @@ async def _run_apply_codebook_job(job_id: int, payload: dict) -> dict:
     include_comments = content_scope in ("both", "comments")
 
     async with AsyncSessionLocal() as session:
-        codebook_text = await artifact_content_repo.read_content(session, codebook_file_id)
+        # Read-as-parent: seal the codebook's head before reading it, so
+        # this coding artifact's edge pins exactly which revision was
+        # applied -- the one genuine cross-file content read in this
+        # codebase (see version_service.py's module docstring).
+        await version_service.pin_parent(session, codebook_file_id)
+        codebook_text = await version_service.read_codebook_markdown(session, codebook_file_id)
+        codebook_codes = await version_service.read_codes(session, codebook_file_id)
         if not codebook_text:
             raise ValidationAppError("Cannot apply codebook: codebook not found or empty")
+        await session.commit()
 
         submissions = (
             await raw_data_repo.sample_submissions(session, source_file_id, sample_percentage)
@@ -599,11 +695,11 @@ async def _run_apply_codebook_job(job_id: int, payload: dict) -> dict:
 
     valid_keys = set(content_by_key.keys())
 
-    raw_entries, system_prompt, user_prompt, coverage = await classify_posts(
+    raw_entries, system_prompt, rendered_prompt, coverage = await classify_posts(
         codebook_text, assembled, methodology, api_key, model, progress=ProgressTracker(job_id)
     )
     coding_entries, validation_counts = _validate_and_resolve_coding_entries(
-        raw_entries, valid_keys=valid_keys, codebook_text=codebook_text, content_by_key=content_by_key
+        raw_entries, valid_keys=valid_keys, codes=codebook_codes, content_by_key=content_by_key
     )
 
     async with AsyncSessionLocal() as session:
@@ -614,8 +710,6 @@ async def _run_apply_codebook_job(job_id: int, payload: dict) -> dict:
             filename=display_name,
             schemaname=new_schema,
             file_type="coding",
-            systemprompt=system_prompt,
-            userprompt=user_prompt,
         )
         session.add(file_rec)
         await session.flush()
@@ -627,11 +721,45 @@ async def _run_apply_codebook_job(job_id: int, payload: dict) -> dict:
             submission_ids=submission_ids,
             comment_ids=comment_ids,
         )
-        await artifact_content_repo.write_content(session, file_rec.id, codebook_text)
-        await coding_repo.bulk_insert_coding_entries(session, file_rec.id, coding_entries)
 
-        session.add(FileDependency(child_file_id=file_rec.id, parent_file_id=source_file_id))
-        session.add(FileDependency(child_file_id=file_rec.id, parent_file_id=codebook_file_id))
+        # The new coding artifact's OWN codebook snapshot -- codes copied
+        # verbatim (code_uid/family_uid preserved) from the applied
+        # codebook, so coding_entries.code_uid (written just below)
+        # resolves against it immediately.
+        snapshot_rows = [
+            {
+                "code_uid": c.code_uid, "family_uid": c.family_uid, "family_name": c.family_name,
+                "name": c.name, "body": c.body, "definition": c.definition, "inclusion": c.inclusion,
+                "exclusion": c.exclusion, "keywords": c.keywords, "example": c.example, "position": c.position,
+            }
+            for c in codebook_codes
+        ]
+        # ONE version, not two: a coding file's codebook snapshot and its
+        # coding_entries share the SAME artifact_versions.version_no (the
+        # SCD-2 ranges on coding_entries are keyed against it) -- calling
+        # commit_codebook_version then commit_coding_version separately
+        # would mint two different version numbers for what is really one
+        # atomic "this is what apply-codebook produced" commit, leaving
+        # coding_entries.valid_from pointing at a version with zero
+        # codebook_codes rows. So the codebook commit carries job_id/model/
+        # prompts too, and its version_no is what entries are stamped with.
+        codebook_version = await version_service.commit_codebook_version(
+            session, file_id=file_rec.id, author_user_id=user_id, origin=ORIGIN_GENERATED, codes=snapshot_rows,
+            job_id=job_id, model=model, system_prompt=system_prompt,
+            user_instructions=methodology or None,
+            prompt_meta=version_service.prompt_meta(rendered_prompt, batches=coverage["batches_total"]),
+        )
+        await coding_repo.bulk_insert_coding_entries(
+            session, file_rec.id, coding_entries, version_no=codebook_version.version_no
+        )
+
+        await version_service.link_parents(
+            session, file_rec.id,
+            [
+                EdgeSpec(parent_file_id=source_file_id, relation=RELATION_DERIVED_FROM, role=ROLE_SOURCE_DATA),
+                EdgeSpec(parent_file_id=codebook_file_id, relation=RELATION_DERIVED_FROM, role=ROLE_CODEBOOK),
+            ],
+        )
 
         # Matches the old handler's own behavior exactly: link the new
         # coding file to the *source* file's projects, but only when the
@@ -664,6 +792,9 @@ async def _run_apply_codebook_job(job_id: int, payload: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
+_RECODE_MAX_ITEMS = 500
+
+
 async def start_recode_items_job(
     session: AsyncSession,
     user_id: int,
@@ -676,13 +807,17 @@ async def start_recode_items_job(
 ) -> Job:
     """Validate and enqueue a ``recode_items`` background job: re-run the
     AI classifier over a caller-chosen subset of a coding artifact's own
-    rows, with a caller-chosen model, replacing only that subset's
-    coding.
+    rows, with a caller-chosen model. The result is a set of *proposals*
+    the caller reviews and stages into their own editing session (see
+    ``_run_recode_items_job``) -- nothing is written to ``coding_entries``
+    from this job any more.
     """
     if not api_key:
         raise ValidationAppError("api_key is required")
     if not item_ids:
         raise ValidationAppError("item_ids is required")
+    if len(item_ids) > _RECODE_MAX_ITEMS:
+        raise ValidationAppError(f"Cannot recode more than {_RECODE_MAX_ITEMS} rows in one run")
 
     coding_file_id = await file_repo.resolve_file_id(session, ref, user_id, file_types=("coding",))
 
@@ -706,10 +841,16 @@ async def _run_recode_items_job(job_id: int, payload: dict) -> dict:
 
     Reads the codebook snapshot and the requested rows from the coding
     artifact's *own* tables (not the original source data file -- a
-    coding artifact is self-contained), classifies just those rows with
-    the caller's chosen model, and replaces exactly their coding via
-    ``coding_repo.replace_entries_for_items`` -- including clearing codes
-    from a requested row the model no longer applies any code to.
+    coding artifact is self-contained) and classifies just those rows
+    with the caller's chosen model. Returns the classification as
+    *proposals* in the job result rather than writing them to
+    ``coding_entries`` -- a recode is staged into the same editing
+    session as manual tags/codebook edits (see ``useViewCodingPage.js``)
+    and only commits when the user clicks Save
+    (``coding_service.save_coding_revision``), same as any other pending
+    change. A requested row the model no longer applies any code to still
+    gets a proposal entry with an empty ``codes`` list, so accepting it
+    on Save clears that row rather than leaving it untouched.
     """
     coding_file_id = payload["coding_file_id"]
     item_ids: list[str] = payload["item_ids"]
@@ -734,7 +875,8 @@ async def _run_recode_items_job(job_id: int, payload: dict) -> dict:
             comment_ids.add(post_id)
 
     async with AsyncSessionLocal() as session:
-        codebook_text = await artifact_content_repo.read_content(session, coding_file_id)
+        codebook_text = await version_service.read_codebook_markdown(session, coding_file_id)
+        codebook_codes = await version_service.read_codes(session, coding_file_id)
         if not codebook_text:
             raise ValidationAppError("Cannot recode: this coding artifact has no codebook snapshot")
 
@@ -768,7 +910,7 @@ async def _run_recode_items_job(job_id: int, payload: dict) -> dict:
     # Codebook uses, see _validate_and_resolve_coding_entries.
     valid_keys = set(content_by_key.keys())
     coding_entries, validation_counts = _validate_and_resolve_coding_entries(
-        raw_entries, valid_keys=valid_keys, codebook_text=codebook_text, content_by_key=content_by_key
+        raw_entries, valid_keys=valid_keys, codes=codebook_codes, content_by_key=content_by_key
     )
 
     entries_by_item: dict[tuple[str, str], list[dict]] = {}
@@ -776,23 +918,41 @@ async def _run_recode_items_job(job_id: int, payload: dict) -> dict:
         entries_by_item.setdefault((entry["row_type"], entry["post_id"]), []).append(
             {
                 "code": entry["code"],
+                "code_uid": entry["code_uid"],
                 "quote": entry["quote"],
                 "start_offset": entry["start_offset"],
                 "end_offset": entry["end_offset"],
             }
         )
 
-    items_payload = [
-        {"row_type": row_type, "post_id": post_id, "entries": entries_by_item.get((row_type, post_id), [])}
+    # Nothing is committed here any more -- a recode is a *proposal* the
+    # user reviews and stages into the same editing session as their
+    # manual tags (see useViewCodingPage.js), and only
+    # ``save_coding_revision`` ever commits a version for a coding
+    # artifact. Shaped like ``coding_repo.list_rows_with_codes``'s
+    # per-row ``codes`` list so the frontend can drop a proposal straight
+    # into ``rows[].codes`` without reshaping it.
+    proposals = [
+        {
+            "item_id": qualify_item_id(row_type, post_id),
+            "codes": [
+                {
+                    "code": entry["code"],
+                    "code_uid": entry["code_uid"],
+                    "quote": entry["quote"],
+                    "start_offset": entry["start_offset"],
+                    "end_offset": entry["end_offset"],
+                    "notes": None,
+                }
+                for entry in entries_by_item.get((row_type, post_id), [])
+            ],
+        }
         for row_type, post_id in requested_keys
     ]
 
-    async with AsyncSessionLocal() as session:
-        await coding_repo.replace_entries_for_items(session, coding_file_id, items_payload)
-        await session.commit()
-
     return {
-        "recoded_item_count": len(items_payload),
+        "recoded_item_count": len(proposals),
+        "proposals": proposals,
         **validation_counts,
         **context_window.coverage_result_fields(coverage),
     }
@@ -856,7 +1016,8 @@ async def _run_compare_codings_job(job_id: int, payload: dict) -> dict:
     """Handler for ``job_type="compare_codings"``.
 
     Persists the comparison as a ``File`` (``file_type="coding_comparison"``).
-    ``FileDependency`` rows link the new file to BOTH source codings.
+    ``artifact_edges`` rows link the new file to BOTH source codings,
+    ordered ``side_a``/``side_b``.
     """
     from backend.scripts import summarize_coding as summarize_coding_module
     from backend.scripts.codebook_generator import MODEL_3
@@ -873,10 +1034,13 @@ async def _run_compare_codings_job(job_id: int, payload: dict) -> dict:
     project_id = payload.get("project_id")
 
     async with AsyncSessionLocal() as session:
+        await version_service.pin_parent(session, file_id_a)
+        await version_service.pin_parent(session, file_id_b)
         file_a = await session.get(File, file_id_a)
         file_b = await session.get(File, file_id_b)
         text_a = await _read_coding_content(session, file_id_a)
         text_b = await _read_coding_content(session, file_id_b)
+        await session.commit()
 
     if not text_a and not text_b:
         raise ValidationAppError("No content found in either coding")
@@ -956,9 +1120,19 @@ async def _run_compare_codings_job(job_id: int, payload: dict) -> dict:
         session.add(file_rec)
         await session.flush()
 
-        session.add(FileDependency(child_file_id=file_rec.id, parent_file_id=file_id_a))
-        session.add(FileDependency(child_file_id=file_rec.id, parent_file_id=file_id_b))
-        await artifact_content_repo.write_content(session, file_rec.id, comparison)
+        await version_service.commit_blob_version(
+            session,
+            file_id=file_rec.id,
+            author_user_id=user_id,
+            origin=ORIGIN_GENERATED,
+            content=comparison,
+            job_id=job_id,
+            model=chosen_model,
+            parents=[
+                EdgeSpec(parent_file_id=file_id_a, relation=RELATION_COMPARED, role=ROLE_SIDE_A, position=0),
+                EdgeSpec(parent_file_id=file_id_b, relation=RELATION_COMPARED, role=ROLE_SIDE_B, position=1),
+            ],
+        )
 
         if project_id is not None:
             project = await project_repo.get_owned_project(session, project_id, user_id)
@@ -1047,7 +1221,9 @@ async def _run_summarize_coding_job(job_id: int, payload: dict) -> dict:
     project_id = payload.get("project_id")
 
     async with AsyncSessionLocal() as session:
+        await version_service.pin_parent(session, source_file_id)
         code_summaries = await coding_repo.code_summary_with_samples(session, source_file_id)
+        await session.commit()
 
     if not code_summaries:
         raise ValidationAppError("No coded content found in this coding artifact")
@@ -1072,8 +1248,16 @@ async def _run_summarize_coding_job(job_id: int, payload: dict) -> dict:
         session.add(file_rec)
         await session.flush()
 
-        session.add(FileDependency(child_file_id=file_rec.id, parent_file_id=source_file_id))
-        await artifact_content_repo.write_content(session, file_rec.id, summary)
+        await version_service.commit_blob_version(
+            session,
+            file_id=file_rec.id,
+            author_user_id=user_id,
+            origin=ORIGIN_GENERATED,
+            content=summary,
+            job_id=job_id,
+            model=model,
+            parents=[EdgeSpec(parent_file_id=source_file_id, relation=RELATION_DERIVED_FROM, role=ROLE_SOURCE_DATA)],
+        )
 
         if project_id is not None:
             project = await project_repo.get_owned_project(session, project_id, user_id)

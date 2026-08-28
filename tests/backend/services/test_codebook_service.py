@@ -9,6 +9,8 @@ route/auth/response-shape behavior on top of this.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from unittest.mock import AsyncMock
 
 import pytest
@@ -16,11 +18,31 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from backend.app.core.exceptions import NotFoundError, ValidationAppError
-from backend.app.database import File, FileDependency, User
+from backend.app.database import File, User
 from backend.app.jobs import service as jobs_service
-from backend.app.repositories import artifact_content_repo
-from backend.app.services import codebook_service
+from backend.app.repositories import version_repo
+from backend.app.services import codebook_service, version_service
 from backend.app.storage_models import Comment, Submission
+
+
+_ONE_CODE = [
+    {"code_uid": "u1", "family_uid": "f1", "family_name": "F", "name": "C", "body": "content", "position": 0}
+]
+
+
+async def _seed_codes(session, file_id: int, user_id: int, text: str = "codebook text") -> None:
+    """Seed a `codebook` file's structured code rows for a test -- `text`
+    becomes the sole code's `definition`, so it shows up in the
+    rendered markdown a test might assert on (see
+    ``core/codebook_render.py::render_codes_to_markdown``).
+    """
+    rows = [{
+        "code_uid": "u1", "family_uid": "f1", "family_name": "F", "name": "C",
+        "body": f"Definition: {text}", "definition": text, "position": 0,
+    }]
+    await version_service.commit_codebook_version(
+        session, file_id=file_id, author_user_id=user_id, origin="generated", codes=rows,
+    )
 
 
 @pytest.fixture()
@@ -156,46 +178,6 @@ class TestGetCodebook:
 
 
 # ---------------------------------------------------------------------------
-# parse_codebook
-# ---------------------------------------------------------------------------
-
-
-class TestParseCodebook:
-    async def test_returns_file_and_content(self, session_factory) -> None:
-        async with session_factory() as session:
-            user = await _make_user(session)
-            file_rec = await _make_file(session, user.id, file_type="codebook", schemaname="proj_a")
-            await artifact_content_repo.write_content(session, file_rec.id, "raw codebook text")
-            await session.commit()
-
-            found, content = await codebook_service.parse_codebook(session, user.id, file_rec.schemaname)
-            assert found.id == file_rec.id
-            assert content == "raw codebook text"
-
-    async def test_comparison_type_not_matched(self, session_factory) -> None:
-        async with session_factory() as session:
-            user = await _make_user(session)
-            file_rec = await _make_file(
-                session, user.id, file_type="codebook_comparison", schemaname="cmp_a"
-            )
-            with pytest.raises(NotFoundError):
-                await codebook_service.parse_codebook(session, user.id, file_rec.schemaname)
-
-    async def test_missing_content_raises_not_found(self, session_factory) -> None:
-        async with session_factory() as session:
-            user = await _make_user(session)
-            file_rec = await _make_file(session, user.id, file_type="codebook", schemaname="proj_a")
-            with pytest.raises(NotFoundError, match="content"):
-                await codebook_service.parse_codebook(session, user.id, file_rec.schemaname)
-
-    async def test_no_matching_file_raises_not_found(self, session_factory) -> None:
-        async with session_factory() as session:
-            user = await _make_user(session)
-            with pytest.raises(NotFoundError, match="No codebook file found"):
-                await codebook_service.parse_codebook(session, user.id, "nonexistent")
-
-
-# ---------------------------------------------------------------------------
 # list_codebooks
 # ---------------------------------------------------------------------------
 
@@ -248,13 +230,13 @@ class TestSaveProjectCodebook:
                 session,
                 user.id,
                 schema_name=file_rec.schemaname,
-                content="new content",
+                codes=_ONE_CODE,
                 display_name="renamed",
             )
             assert saved.filename == "renamed"
 
-            content = await artifact_content_repo.read_content(session, file_rec.id)
-            assert content == "new content"
+            codes = await version_service.read_codes(session, file_rec.id)
+            assert [c.name for c in codes] == ["C"]
 
     async def test_no_display_name_leaves_filename_unchanged(self, session_factory) -> None:
         async with session_factory() as session:
@@ -263,7 +245,7 @@ class TestSaveProjectCodebook:
                 session, user.id, file_type="codebook", schemaname="proj_a", filename="original"
             )
             saved = await codebook_service.save_project_codebook(
-                session, user.id, schema_name=file_rec.schemaname, content="c", display_name=None
+                session, user.id, schema_name=file_rec.schemaname, codes=_ONE_CODE, display_name=None
             )
             assert saved.filename == "original"
 
@@ -271,14 +253,25 @@ class TestSaveProjectCodebook:
         async with session_factory() as session:
             user = await _make_user(session)
             file_rec = await _make_file(session, user.id, file_type="codebook", schemaname="proj_a")
-            await artifact_content_repo.write_content(session, file_rec.id, "old")
+            await _seed_codes(session, file_rec.id, user.id, "old")
             await session.commit()
 
+            new_codes = [{"code_uid": "u2", "family_uid": "f2", "family_name": "F2", "name": "New", "body": "new", "position": 0}]
             await codebook_service.save_project_codebook(
-                session, user.id, schema_name=file_rec.schemaname, content="new", display_name=None
+                session, user.id, schema_name=file_rec.schemaname, codes=new_codes, display_name=None
             )
-            content = await artifact_content_repo.read_content(session, file_rec.id)
-            assert content == "new"
+            codes = await version_service.read_codes(session, file_rec.id)
+            assert [c.name for c in codes] == ["New"]
+
+    async def test_code_missing_identity_raises_validation_error(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_rec = await _make_file(session, user.id, file_type="codebook", schemaname="proj_a")
+            bad = [{"family_uid": "f1", "family_name": "F", "name": "C", "body": "x"}]
+            with pytest.raises(ValidationAppError):
+                await codebook_service.save_project_codebook(
+                    session, user.id, schema_name=file_rec.schemaname, codes=bad, display_name=None
+                )
 
     async def test_unowned_schema_raises_not_found(self, session_factory) -> None:
         async with session_factory() as session:
@@ -287,7 +280,7 @@ class TestSaveProjectCodebook:
             file_rec = await _make_file(session, owner.id, file_type="codebook", schemaname="proj_a")
             with pytest.raises(NotFoundError):
                 await codebook_service.save_project_codebook(
-                    session, other.id, schema_name=file_rec.schemaname, content="c", display_name=None
+                    session, other.id, schema_name=file_rec.schemaname, codes=_ONE_CODE, display_name=None
                 )
 
     async def test_unknown_schema_raises_not_found(self, session_factory) -> None:
@@ -295,7 +288,81 @@ class TestSaveProjectCodebook:
             user = await _make_user(session)
             with pytest.raises(NotFoundError):
                 await codebook_service.save_project_codebook(
-                    session, user.id, schema_name="proj_missing", content="c", display_name=None
+                    session, user.id, schema_name="proj_missing", codes=_ONE_CODE, display_name=None
+                )
+
+
+# ---------------------------------------------------------------------------
+# duplicate_codebook -- the non-destructive replacement for revert
+# ---------------------------------------------------------------------------
+
+
+class TestDuplicateCodebook:
+    async def test_forks_from_head_by_default(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_rec = await _make_file(session, user.id, file_type="codebook", schemaname="proj_dup_cb")
+            await _seed_codes(session, file_rec.id, user.id, "v1 text")
+            await session.commit()
+
+            new_file = await codebook_service.duplicate_codebook(
+                session, user.id, "proj_dup_cb", display_name="dup"
+            )
+            assert new_file.filename == "dup"
+            assert new_file.id != file_rec.id
+
+            new_codes = await version_service.read_codes(session, new_file.id)
+            assert [c.definition for c in new_codes] == ["v1 text"]
+            # code_uid preserved verbatim -- a later diff between original
+            # and fork reports no changes, not a wholesale add/remove.
+            assert new_codes[0].code_uid == "u1"
+
+            edges = await version_repo.list_parent_edges(session, new_file.id)
+            assert len(edges) == 1
+            assert edges[0].parent_file_id == file_rec.id
+            assert edges[0].relation == "forked_from"
+            assert edges[0].role == "fork_origin"
+
+    async def test_forks_from_a_chosen_version_not_head(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_rec = await _make_file(session, user.id, file_type="codebook", schemaname="proj_dup_cb_v")
+            await _seed_codes(session, file_rec.id, user.id, "v1 text")
+            await _seed_codes(session, file_rec.id, user.id, "v2 text")
+            await session.commit()
+
+            new_file = await codebook_service.duplicate_codebook(
+                session, user.id, "proj_dup_cb_v", display_name="from-v1", from_version_no=1
+            )
+            new_codes = await version_service.read_codes(session, new_file.id)
+            assert [c.definition for c in new_codes] == ["v1 text"]
+
+    async def test_unknown_from_version_no_raises_not_found(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            await _make_file(session, user.id, file_type="codebook", schemaname="proj_dup_cb_missing")
+            with pytest.raises(NotFoundError):
+                await codebook_service.duplicate_codebook(
+                    session, user.id, "proj_dup_cb_missing", display_name="x", from_version_no=99
+                )
+
+    async def test_blank_display_name_raises_validation_error(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            await _make_file(session, user.id, file_type="codebook", schemaname="proj_dup_cb_blank")
+            with pytest.raises(ValidationAppError):
+                await codebook_service.duplicate_codebook(
+                    session, user.id, "proj_dup_cb_blank", display_name="  "
+                )
+
+    async def test_unowned_source_raises_not_found(self, session_factory) -> None:
+        async with session_factory() as session:
+            owner = await _make_user(session, "owner-dupcb@x.com")
+            other = await _make_user(session, "other-dupcb@x.com")
+            await _make_file(session, owner.id, file_type="codebook", schemaname="proj_dup_cb_not_mine")
+            with pytest.raises(NotFoundError):
+                await codebook_service.duplicate_codebook(
+                    session, other.id, "proj_dup_cb_not_mine", display_name="x"
                 )
 
 
@@ -396,7 +463,27 @@ class TestGenerateCodebookJobHandlerEndToEnd:
     async def test_samples_calls_llm_and_persists_new_codebook_file(
         self, session_factory, monkeypatch
     ) -> None:
-        generate_mock = AsyncMock(return_value=("generated codebook", "sys prompt", "user prompt"))
+        generate_mock = AsyncMock(
+            return_value=(
+                json.dumps(
+                    {
+                        "codes": [
+                            {
+                                "family": "F",
+                                "name": "generated codebook",
+                                "definition": "a def",
+                                "inclusion": "when",
+                                "exclusion": "not when",
+                                "keywords": "kw",
+                                "example": "ex",
+                            }
+                        ]
+                    }
+                ),
+                "sys prompt",
+                "user prompt",
+            )
+        )
         monkeypatch.setattr(
             "backend.app.services.codebook_service.codebook_generator_module.generate_codebook",
             generate_mock,
@@ -430,7 +517,7 @@ class TestGenerateCodebookJobHandlerEndToEnd:
             finished = await _wait_for_terminal_status(session, job.id, user.id)
             assert finished.status == "succeeded", finished.error
             result = finished.result
-            assert result["codebook"] == "generated codebook"
+            assert "generated codebook" in result["codebook"]
             assert result["file"]["filename"] == "my codebook"
             assert result["file"]["description"] == "a desc"
 
@@ -440,18 +527,28 @@ class TestGenerateCodebookJobHandlerEndToEnd:
             new_file = await session.get(File, new_file_id)
             assert new_file.file_type == "codebook"
             assert new_file.schemaname.startswith("proj_")
-            assert new_file.systemprompt == "sys prompt"
-            assert new_file.userprompt == "user prompt"
 
-            content = await artifact_content_repo.read_content(session, new_file_id)
-            assert content == "generated codebook"
+            head = await version_repo.head_version(session, new_file_id)
+            assert head.system_prompt == "sys prompt"
+            # The rendered prompt is deliberately NOT stored (it embeds the
+            # whole sampled corpus) -- only the user's own instructions,
+            # plus a length/hash of what was actually sent.
+            assert head.user_instructions == "be thorough"
+            assert head.prompt_meta["rendered_chars"] == len("user prompt")
+            assert head.prompt_meta["rendered_sha256"] == hashlib.sha256(b"user prompt").hexdigest()
 
-            deps = (
-                await session.execute(
-                    select(FileDependency).where(FileDependency.child_file_id == new_file_id)
-                )
-            ).scalars().all()
-            assert [d.parent_file_id for d in deps] == [source_file_id]
+            codes = await version_service.read_codes(session, new_file_id)
+            assert [c.name for c in codes] == ["generated codebook"]
+            assert codes[0].definition == "a def"
+            assert codes[0].inclusion == "when"
+            assert codes[0].exclusion == "not when"
+            assert codes[0].keywords == "kw"
+            assert codes[0].example == "ex"
+
+            edges = await version_repo.list_parent_edges(session, new_file_id)
+            assert [e.parent_file_id for e in edges] == [source_file_id]
+            assert edges[0].relation == "derived_from"
+            assert edges[0].role == "source_data"
 
     async def test_no_records_sampled_marks_job_failed(self, session_factory, monkeypatch) -> None:
         generate_mock = AsyncMock(return_value=("should not run", "", ""))
@@ -614,8 +711,8 @@ class TestCompareCodebooksJobHandlerEndToEnd:
             file_a = await _make_file(session, user.id, file_type="codebook", schemaname="proj_a")
             file_b = await _make_file(session, user.id, file_type="codebook", schemaname="proj_b")
             file_a_id, file_b_id = file_a.id, file_b.id
-            await artifact_content_repo.write_content(session, file_a_id, "codebook A text")
-            await artifact_content_repo.write_content(session, file_b_id, "codebook B text")
+            await _seed_codes(session, file_a_id, user.id, "codebook A text")
+            await _seed_codes(session, file_b_id, user.id, "codebook B text")
             await session.commit()
 
             job = await codebook_service.start_compare_codebooks_job(
@@ -651,16 +748,15 @@ class TestCompareCodebooksJobHandlerEndToEnd:
             assert new_file.file_type == "codebook_comparison"
             assert new_file.description == "a nice comparison"
 
-            content = await artifact_content_repo.read_content(session, new_file_id)
+            content = await version_service.read_blob(session, new_file_id)
             assert content == "the comparison text"
 
-            deps = (
-                await session.execute(
-                    select(FileDependency).where(FileDependency.child_file_id == new_file_id)
-                )
-            ).scalars().all()
-            parent_ids = {d.parent_file_id for d in deps}
+            edges = await version_repo.list_parent_edges(session, new_file_id)
+            parent_ids = {e.parent_file_id for e in edges}
             assert parent_ids == {file_a_id, file_b_id}
+            by_role = {e.role: e.parent_file_id for e in edges}
+            assert by_role["side_a"] == file_a_id
+            assert by_role["side_b"] == file_b_id
 
     async def test_no_content_marks_job_failed(self, session_factory, monkeypatch) -> None:
         get_client_mock = AsyncMock(return_value="should not be called")
@@ -687,7 +783,11 @@ class TestCompareCodebooksJobHandlerEndToEnd:
 
             finished = await _wait_for_terminal_status(session, job.id, user.id)
             assert finished.status == "failed"
-            assert "No content found" in finished.error
+            # A codebook file with zero versions at all fails at the
+            # read-as-parent seal step (version_service.pin_parent) with a
+            # clearer error than the old "no content" -- there's no
+            # content to be missing when there's no version history yet.
+            assert "No version history" in finished.error
             assert not get_client_mock.called
 
     async def test_raises_context_budget_error_when_codebooks_dont_fit(self, session_factory, monkeypatch) -> None:
@@ -708,8 +808,8 @@ class TestCompareCodebooksJobHandlerEndToEnd:
             user = await _make_user(session)
             file_a = await _make_file(session, user.id, file_type="codebook", schemaname="proj_a")
             file_b = await _make_file(session, user.id, file_type="codebook", schemaname="proj_b")
-            await artifact_content_repo.write_content(session, file_a.id, "codebook A text")
-            await artifact_content_repo.write_content(session, file_b.id, "codebook B text")
+            await _seed_codes(session, file_a.id, user.id, "codebook A text")
+            await _seed_codes(session, file_b.id, user.id, "codebook B text")
             await session.commit()
 
             job = await codebook_service.start_compare_codebooks_job(

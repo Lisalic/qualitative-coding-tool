@@ -47,7 +47,6 @@ from backend.app.core.schema_guard import require_valid_schema
 from backend.app.database import (
     AsyncSessionLocal,
     File,
-    FileDependency,
     FileTable,
     async_link_file_to_project,
 )
@@ -56,7 +55,10 @@ from backend.app.jobs.progress import ProgressTracker
 from backend.app.jobs.registry import register_handler
 from backend.app.jobs.service import enqueue_job
 from backend.app.repositories import file_repo, project_repo, raw_data_repo
+from backend.app.services import version_service
+from backend.app.services.version_service import EdgeSpec
 from backend.app.storage_models import Comment, Submission
+from backend.app.versioning_models import ORIGIN_GENERATED, RELATION_DERIVED_FROM, ROLE_SOURCE_DATA
 
 # ---------------------------------------------------------------------------
 # Read paths: word-count ranges / file entries / comments / post contents
@@ -474,7 +476,7 @@ async def _apply_tag_or_ai_filter(
     and awaited directly -- no more ``asyncio.to_thread`` wrapper around a
     sync OpenRouter SDK call).
 
-    The 5th return value, ``coverage``, is ``{}`` when no AI filtering ran
+    The 6th return value, ``coverage``, is ``{}`` when no AI filtering ran
     (tags-only), otherwise has a ``"posts"``/``"comments"`` key (whichever
     AI path(s) ran) each mapping to that call's
     ``{"batches_processed", "batches_total"}`` -- lets the caller detect and
@@ -487,7 +489,8 @@ async def _apply_tag_or_ai_filter(
     post_ids: list[str] = []
     comment_ids: list[str] = []
     system_prompt = ""
-    user_prompt = ""
+    user_instructions = ""
+    rendered_prompt = ""
     coverage: dict[str, dict[str, int]] = {}
 
     if not use_ai_posts and sub_rows:
@@ -497,9 +500,10 @@ async def _apply_tag_or_ai_filter(
 
     if use_ai_posts and submissions_text:
         try:
-            post_ids, system_prompt, user_prompt, posts_coverage = await filter_db_module.filter_posts_with_ai(
+            post_ids, system_prompt, rendered_prompt, posts_coverage = await filter_db_module.filter_posts_with_ai(
                 filter_prompt, submissions_text, api_key, model, progress=progress
             )
+            user_instructions = filter_prompt
             coverage["posts"] = posts_coverage
         except AIFilterError:
             raise
@@ -523,14 +527,24 @@ async def _apply_tag_or_ai_filter(
             ensure_ascii=False,
         )
         system_prompt = "Tag-based pre-filter only (no AI content criteria)."
-        user_prompt = tag_ctx[:8000]
+        # Small and already capped -- this IS the instruction, there is no
+        # separate rendered prompt for a tags-only filter.
+        user_instructions = tag_ctx[:8000]
 
     if not isinstance(post_ids, list):
         post_ids = []
     if not isinstance(comment_ids, list):
         comment_ids = []
 
-    return post_ids, comment_ids, system_prompt, user_prompt, coverage
+    batches = sum(c["batches_total"] for c in coverage.values()) or None
+    return (
+        post_ids,
+        comment_ids,
+        system_prompt,
+        user_instructions,
+        version_service.prompt_meta(rendered_prompt, batches=batches),
+        coverage,
+    )
 
 
 async def _materialize_filtered_schema(
@@ -544,7 +558,8 @@ async def _materialize_filtered_schema(
     post_ids: list[str],
     comment_ids: list[str],
     system_prompt: str,
-    user_prompt: str,
+    user_instructions: str,
+    prompt_meta: dict | None,
 ) -> tuple[File, dict[str, int]]:
     """Create the new ``filtered_data`` ``File`` row, its dependency on the
     source file, and copy the matched rows into the fixed
@@ -568,14 +583,20 @@ async def _materialize_filtered_schema(
         filename=name or new_schema,
         schemaname=new_schema,
         file_type="filtered_data",
-        systemprompt=system_prompt,
-        userprompt=user_prompt,
         description=description or None,
     )
     session.add(file_rec)
     await session.flush()
 
-    session.add(FileDependency(child_file_id=file_rec.id, parent_file_id=source_file_id))
+    # filtered_data has no artifact content of its own (its "content" is
+    # the submissions/comments rows copied below) -- an empty blob
+    # version exists purely so it has a v1 to carry the filter prompts
+    # and to give the source_data edge a parent_version_id to pin.
+    await version_service.commit_blob_version(
+        session, file_id=file_rec.id, author_user_id=user_id, origin=ORIGIN_GENERATED, content="",
+        system_prompt=system_prompt, user_instructions=user_instructions or None, prompt_meta=prompt_meta,
+        parents=[EdgeSpec(parent_file_id=source_file_id, relation=RELATION_DERIVED_FROM, role=ROLE_SOURCE_DATA)],
+    )
 
     counts = await raw_data_repo.copy_rows_by_id(
         session,
@@ -671,7 +692,7 @@ async def _run_filter_data_job(job_id: int, payload: dict) -> dict:
             include_comments=include_comments,
         )
 
-        post_ids, comment_ids, system_prompt, user_prompt, coverage = await _apply_tag_or_ai_filter(
+        post_ids, comment_ids, system_prompt, user_instructions, filter_prompt_meta, coverage = await _apply_tag_or_ai_filter(
             sub_rows=sub_rows,
             comm_rows=comm_rows,
             use_ai_posts=use_ai_posts,
@@ -697,7 +718,8 @@ async def _run_filter_data_job(job_id: int, payload: dict) -> dict:
             post_ids=post_ids,
             comment_ids=comment_ids,
             system_prompt=system_prompt,
-            user_prompt=user_prompt,
+            user_instructions=user_instructions,
+            prompt_meta=filter_prompt_meta,
         )
         await session.commit()
         file_id, schema_name, filename = file_rec.id, file_rec.schemaname, file_rec.filename

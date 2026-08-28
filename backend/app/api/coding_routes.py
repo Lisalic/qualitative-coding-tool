@@ -1,5 +1,3 @@
-import json
-
 from fastapi import APIRouter, Depends, Form
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,39 +6,44 @@ from backend.app.api.schemas import (
     ApplyCodebookRequest,
     DuplicateCodingRequest,
     RecodeItemsRequest,
-    SaveCodingCodebookRequest,
-    SaveCodingRowsRequest,
+    SaveCodingRevisionRequest,
     UpdateCodingMetadataRequest,
     as_form,
 )
 from backend.app.core.auth_dependency import require_user_id
 from backend.app.database import get_async_db
-from backend.app.repositories import artifact_content_repo
-from backend.scripts.display_codebook import parse_codebook_to_json
-from backend.app.services import coding_service
+from backend.app.repositories import version_repo
+from backend.app.services import coding_service, version_service
 
 router = APIRouter()
 
 
-def _codebook_tree(codebook_text: str) -> list:
-    if not codebook_text:
-        return []
-    try:
-        parsed_text = parse_codebook_to_json(codebook_text)
-        parsed_obj = json.loads(parsed_text)
-        return parsed_obj if isinstance(parsed_obj, list) else []
-    except Exception:
-        return []
+def _code_out(code) -> dict:
+    return {
+        "code_uid": code.code_uid,
+        "family_uid": code.family_uid,
+        "family_name": code.family_name,
+        "name": code.name,
+        "body": code.body,
+        "definition": code.definition,
+        "inclusion": code.inclusion,
+        "exclusion": code.exclusion,
+        "keywords": code.keywords,
+        "example": code.example,
+        "position": code.position,
+    }
 
 
-def _file_info(file_rec) -> dict:
+async def _file_info(db: AsyncSession, file_rec) -> dict:
+    head = await version_repo.head_version(db, file_rec.id)
     return {
         "id": str(file_rec.id),
         "schema_name": file_rec.schemaname,
         "filename": file_rec.filename,
         "description": file_rec.description,
-        "systemprompt": file_rec.systemprompt,
-        "userprompt": file_rec.userprompt,
+        "systemprompt": head.system_prompt if head else None,
+        "instructions": head.user_instructions if head else None,
+        "prompt_meta": head.prompt_meta if head else None,
     }
 
 
@@ -51,16 +54,15 @@ async def get_coding_artifact(
     db: AsyncSession = Depends(get_async_db),
 ) -> JSONResponse:
     """Metadata for a coding file owned by the authenticated user: its own
-    codebook snapshot (text + parsed tree), row/coded counts, and code
+    codebook snapshot as structured code rows, row/coded counts, and code
     frequency. Row content itself is fetched separately, paged, via
     ``GET /api/coding/{ref}/rows``.
     """
     artifact = await coding_service.get_coding_artifact(db, user_id, ref)
     return JSONResponse(
         {
-            "file": _file_info(artifact["file"]),
-            "codebook_text": artifact["codebook_text"],
-            "codebook_tree": _codebook_tree(artifact["codebook_text"]),
+            "file": await _file_info(db, artifact["file"]),
+            "codes": [_code_out(c) for c in artifact["codes"]],
             "total_rows": artifact["total_rows"],
             "total_coded": artifact["total_coded"],
             "code_frequency": artifact["code_frequency"],
@@ -82,7 +84,8 @@ async def list_coding_rows(
     """One page of a coding file's own rows -- every submission/comment it
     owns, coded or not -- each with its codes. ``only`` narrows to
     ``coded``/``uncoded``; ``code`` narrows to rows carrying that exact
-    code; ``q`` is a case-insensitive substring search over title/body.
+    code (by display name); ``q`` is a case-insensitive substring search
+    over title/body.
     """
     result = await coding_service.list_coding_rows(
         db, user_id, ref, limit=limit, offset=offset, only=only, code=code, q=q
@@ -103,31 +106,25 @@ async def get_coding_text(
     return JSONResponse({"text": text})
 
 
-@router.put("/coding/{ref}/codebook")
-async def save_coding_codebook(
+@router.put("/coding/{ref}/revision")
+async def save_coding_revision(
     ref: str,
-    payload: SaveCodingCodebookRequest,
+    payload: SaveCodingRevisionRequest,
     user_id: int = Depends(require_user_id),
     db: AsyncSession = Depends(get_async_db),
 ) -> JSONResponse:
-    """Overwrite a coding file's own codebook snapshot."""
-    file_rec = await coding_service.save_coding_codebook(db, user_id, ref, payload.content)
-    return JSONResponse({"message": "Codebook saved", "file": _file_info(file_rec)})
-
-
-@router.put("/coding/{ref}/rows")
-async def save_coding_rows(
-    ref: str,
-    payload: SaveCodingRowsRequest,
-    user_id: int = Depends(require_user_id),
-    db: AsyncSession = Depends(get_async_db),
-) -> JSONResponse:
-    """Replace the coding for exactly the rows submitted -- a manual table
-    edit's save.
+    """Save a coding artifact's editing session -- an updated codebook
+    snapshot, updated row coding (manual edits and/or reviewed AI-recode
+    proposals), or both -- as at most one new version. Replaces the old
+    separate ``PUT .../codebook`` and ``PUT .../rows`` endpoints, which
+    each minted their own version even when both changed together.
     """
-    rows = [row.model_dump() for row in payload.rows]
-    file_rec = await coding_service.save_coding_rows(db, user_id, ref, rows)
-    return JSONResponse({"message": "Coding saved", "file": _file_info(file_rec)})
+    codes = [c.model_dump() for c in payload.codes] if payload.codes else None
+    rows = [row.model_dump() for row in payload.rows] if payload.rows else None
+    file_rec = await coding_service.save_coding_revision(
+        db, user_id, ref, codes=codes, rows=rows, model=payload.model, job_id=payload.job_id
+    )
+    return JSONResponse({"message": "Saved", "file": await _file_info(db, file_rec)})
 
 
 @router.patch("/coding/{ref}")
@@ -141,7 +138,7 @@ async def update_coding_metadata(
     file_rec = await coding_service.update_coding_metadata(
         db, user_id, ref, display_name=payload.display_name, description=payload.description
     )
-    return JSONResponse({"message": "Updated", "file": _file_info(file_rec)})
+    return JSONResponse({"message": "Updated", "file": await _file_info(db, file_rec)})
 
 
 @router.post("/coding/{ref}/duplicate")
@@ -152,10 +149,14 @@ async def duplicate_coding(
     db: AsyncSession = Depends(get_async_db),
 ) -> JSONResponse:
     """Fork a whole coding artifact (codebook snapshot, its own rows, its
-    coding, lineage, and project links) into a brand-new file.
+    coding, lineage, and project links) into a brand-new file -- from head
+    by default, or from ``from_version_no`` if given (see
+    ``coding_service.duplicate_coding``'s docstring).
     """
-    file_rec = await coding_service.duplicate_coding(db, user_id, ref, display_name=payload.display_name)
-    return JSONResponse({"message": "Duplicated", "file": _file_info(file_rec)})
+    file_rec = await coding_service.duplicate_coding(
+        db, user_id, ref, display_name=payload.display_name, from_version_no=payload.from_version_no
+    )
+    return JSONResponse({"message": "Duplicated", "file": await _file_info(db, file_rec)})
 
 
 @router.post("/coding/{ref}/recode")
@@ -189,20 +190,22 @@ async def get_coding_comparison(
     db: AsyncSession = Depends(get_async_db),
 ) -> JSONResponse:
     """Return a coding-comparison file's content, owned by the
-    authenticated user. A coding_comparison is still one
-    ``artifact_content`` markdown blob -- unlike a plain coding artifact,
-    it isn't restructured by the coding-artifact overhaul.
+    authenticated user. A coding_comparison is still one blob-storage
+    artifact -- unlike a plain coding artifact, it isn't restructured by
+    the coding-artifact overhaul.
     """
     file_rec = await coding_service.get_coding_comparison(db, user_id, coding_id)
-    content = await artifact_content_repo.read_content(db, file_rec.id)
+    content = await version_service.read_blob(db, file_rec.id)
     if content is None:
         return JSONResponse({"error": "Comparison content not found in file"}, status_code=404)
 
+    head = await version_repo.head_version(db, file_rec.id)
     return JSONResponse(
         {
             "coding_comparison": content,
-            "systemprompt": file_rec.systemprompt,
-            "userprompt": file_rec.userprompt,
+            "systemprompt": head.system_prompt if head else None,
+            "instructions": head.user_instructions if head else None,
+            "prompt_meta": head.prompt_meta if head else None,
         }
     )
 

@@ -11,7 +11,8 @@ from sqlalchemy import event
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from backend.app.core.exceptions import ForbiddenError, NotFoundError, ValidationAppError
-from backend.app.database import File, FileDependency, FileTable, User
+from backend.app.database import File, FileTable, User
+from backend.app.repositories import version_repo
 from backend.app.services import project_service
 
 
@@ -139,7 +140,11 @@ class TestListFilesForUser:
             session.add(child)
             await session.commit()
             session.add(FileTable(file_id=child.id, tablename="submissions", row_count=3))
-            session.add(FileDependency(child_file_id=child.id, parent_file_id=parent.id))
+            await session.commit()
+            await version_repo.add_edge(
+                session, child_file_id=child.id, parent_file_id=parent.id, parent_version_id=None,
+                relation="derived_from", role="source_data",
+            )
             await session.commit()
 
             rows = await project_service.list_files_for_user(session, user.id)
@@ -223,9 +228,17 @@ class TestListProjectsWithFiles:
 
             from backend.app.database import async_link_file_to_project
 
+            parent = File(user_id=user.id, filename="raw", schemaname="proj_raw", file_type="raw_data")
+            session.add(parent)
+            await session.commit()
+
             f = File(user_id=user.id, filename="a", schemaname="proj_a", file_type="raw_data")
             session.add(f)
             await session.commit()
+            await version_repo.add_edge(
+                session, child_file_id=f.id, parent_file_id=parent.id, parent_version_id=None,
+                relation="derived_from", role="source_data",
+            )
             await async_link_file_to_project(session, f.id, proj.id)
             await session.commit()
 
@@ -233,9 +246,12 @@ class TestListProjectsWithFiles:
             assert len(rows) == 1
             assert rows[0]["projectname"] == "proj"
             assert [f["schema_name"] for f in rows[0]["files"]] == ["proj_a"]
-            # This shape carries id/name/type only -- no schema_name -- unlike
-            # list_files_for_user's parent_files shape.
-            assert "schema_name" not in (rows[0]["files"][0].get("parent_files") or [{}])[0]
+            # Now carries the SAME {id, name, schema_name, type} shape as
+            # list_files_for_user's parent_files -- unified, no longer two
+            # different shapes for the same concept.
+            assert rows[0]["files"][0]["parent_files"] == [
+                {"id": str(parent.id), "name": "raw", "schema_name": "proj_raw", "type": "raw_data"}
+            ]
 
     async def test_scoped_to_owner(self, session_factory) -> None:
         async with session_factory() as session:

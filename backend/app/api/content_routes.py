@@ -7,8 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.core.auth_dependency import require_user_id
 from backend.app.core.exceptions import ValidationAppError
 from backend.app.database import get_async_db
-from backend.app.repositories import artifact_content_repo
-from backend.app.services import content_service
+from backend.app.services import content_service, version_service
 
 router = APIRouter()
 
@@ -93,7 +92,7 @@ async def get_summary_file(
     numeric id. If no id provided, returns the caller's latest summary.
     """
     file_rec = await content_service.get_summary(db, user_id, summary_id)
-    content = await artifact_content_repo.read_content(db, file_rec.id)
+    content = await version_service.read_blob(db, file_rec.id)
     if content is None:
         return JSONResponse({"error": "Summary content not found in file"}, status_code=404)
 
