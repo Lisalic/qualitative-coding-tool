@@ -20,7 +20,7 @@ Artifact *content* no longer lives here: the old one-blob-per-file
 rows for codebooks and a coding artifact's own codebook snapshot).
 """
 
-from sqlalchemy import Column, ForeignKey, Integer, BigInteger, String, Text, Index
+from sqlalchemy import Column, ForeignKey, Integer, BigInteger, String, Text, Index, DateTime, UniqueConstraint, func
 
 from backend.app.database import Base
 
@@ -126,4 +126,61 @@ class CodingEntry(Base):
         Index("idx_coding_entries_file_id_row", "file_id", "row_type", "post_id"),
         Index("idx_coding_entries_file_id_code_uid", "file_id", "code_uid"),
         Index("idx_coding_entries_live", "file_id", "valid_to"),
+    )
+
+
+class RowMemo(Base):
+    """One user-authored analytic memo about one row of one artifact.
+
+    Distinct from ``CodingEntry.notes``, which annotates a single coded
+    *quote* inside a coded item. A memo annotates the row itself, exists
+    for ``raw_data``/``filtered_data``/``coding`` artifacts alike, and
+    needs no codebook or coding to exist first -- it is the "write down
+    what you noticed while reading" surface that the pipeline previously
+    had nowhere to put (GAP-4 in
+    ``documentation/research/qualitative-coding-landscape-and-expansion.md``).
+
+    Scoped by ``file_id`` like every other table in this module, so a
+    memo belongs to *one artifact's copy* of a row rather than to a
+    global row identity. That matches the self-contained-artifact model
+    already used by ``coding`` (see ``services/coding_service.py``): a
+    memo written on a raw-data row is copied forward into a derived
+    artifact when that row is (``repositories/memo_repo.py``'s
+    ``copy_memos_by_id``/``copy_all_memos``, called from every
+    ``raw_data_repo.copy_rows_by_id``/``copy_all_rows`` call site), and
+    editing it afterwards in the child never reaches back into the
+    parent.
+
+    ``row_type`` (``"submission"``/``"comment"``, see
+    ``core/item_types.py``) is part of the identity for the same reason
+    it is on ``CodingEntry``: submission and comment ids share one bare
+    string namespace once their Reddit fullname prefixes are stripped at
+    import, so ``row_id`` alone would silently merge a post's memo with
+    a same-id comment's.
+
+    Deliberately **not** SCD-2 range-versioned like ``Submission``/
+    ``Comment``/``CodingEntry``, and deliberately one row per
+    ``(file_id, row_type, row_id)`` rather than an append-only thread. A
+    memo is commentary *about* an artifact, not part of the artifact's
+    content, so it is not what a version diff is meant to describe;
+    range-versioning it would push a ``version_no`` argument through
+    every write path (and mint a version per keystroke-save) for no
+    analytic gain. ``updated_at`` carries the "when did I last think
+    about this" signal that actually matters here.
+    """
+
+    __tablename__ = "row_memos"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=False)
+    row_type = Column(String, nullable=False)
+    row_id = Column(String, nullable=False)
+    body = Column(Text, nullable=False)
+    author_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("file_id", "row_type", "row_id", name="uq_row_memos_file_row"),
+        Index("idx_row_memos_file_row", "file_id", "row_type", "row_id"),
     )

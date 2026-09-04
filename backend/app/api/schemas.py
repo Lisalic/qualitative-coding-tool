@@ -162,6 +162,52 @@ class FilterDataResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Row memos
+#
+# One memo per (file, row_type, row_id) -- see `storage_models.py::RowMemo`
+# for why memos are neither range-versioned nor threaded.
+# ---------------------------------------------------------------------------
+
+
+class MemoUpsertRequest(_StrippingModel):
+    """Payload for ``PUT /api/memos/``.
+
+    A blank ``body`` clears the memo rather than storing an empty one, so
+    ``body`` is deliberately not ``min_length=1``: "delete this memo" and
+    "save this memo" are the same idempotent call, which is what makes
+    ``PUT`` the right verb.
+    """
+
+    schema_: str = Field(alias="schema", pattern=_SCHEMA_PATTERN)
+    row_type: Literal["submission", "comment"]
+    row_id: str = Field(min_length=1)
+    body: str = Field(default="")
+
+
+class MemoOut(BaseModel):
+    row_type: str
+    row_id: str
+    body: str
+    updated_at: Optional[str] = None
+
+
+class MemoListResponse(BaseModel):
+    """Response for ``GET /api/memos/?schema=...`` -- every memo on one
+    file, fetched once per database rather than once per visible row.
+    """
+
+    memos: list[MemoOut] = Field(default_factory=list)
+
+
+class MemoUpsertResponse(BaseModel):
+    """Response for ``PUT /api/memos/``. A null ``memo`` is the
+    successful "cleared" outcome, not an error.
+    """
+
+    memo: Optional[MemoOut] = None
+
+
+# ---------------------------------------------------------------------------
 # GenerateCodebook
 # ---------------------------------------------------------------------------
 

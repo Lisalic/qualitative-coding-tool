@@ -1,9 +1,18 @@
 import { useState, useEffect } from "react";
 import { apiFetch } from "../../api";
+import MemoEditor from "./MemoEditor";
 
 const navBtn =
   "border border-paper px-3 py-1.5 text-sm transition-colors hover:bg-paper hover:text-ink disabled:opacity-40";
 
+/**
+ * `memo`/`onSaveMemo` are optional: every caller that renders rows from a
+ * real database passes them, and the modal simply omits the memo section
+ * when they are absent. Because the raw viewer, the filtered viewer and
+ * the filter editor all open this same modal, wiring the memo editor here
+ * once is what makes "add a memo to any row" true everywhere rather than
+ * on one screen.
+ */
 export default function EntryModal({
   entry,
   isOpen,
@@ -13,6 +22,8 @@ export default function EntryModal({
   onNext,
   hasPrev = false,
   hasNext = false,
+  memo = null,
+  onSaveMemo = null,
 }) {
   const [comments, setComments] = useState([]);
   const [loadingComments, setLoadingComments] = useState(false);
@@ -183,6 +194,13 @@ export default function EntryModal({
                 </div>
               )}
             </>
+          )}
+          {onSaveMemo && (
+            <MemoEditor
+              key={`${entry.type}:${entry.id}`}
+              memo={memo}
+              onSave={(body) => onSaveMemo(entry.type, entry.id, body)}
+            />
           )}
         </div>
       </div>
