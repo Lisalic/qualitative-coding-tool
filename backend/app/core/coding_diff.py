@@ -31,6 +31,15 @@ class CodingCodeCount:
 
 
 @dataclass
+class CodingEntryChange:
+    row_type: str
+    post_id: str
+    code_uid: str
+    code: str
+    quote: str
+
+
+@dataclass
 class CodingDiff:
     from_total_entries: int = 0
     to_total_entries: int = 0
@@ -44,6 +53,8 @@ class CodingDiff:
     # the most consequential recodes surface without a separate sort in
     # the UI.
     code_counts: list[CodingCodeCount] = field(default_factory=list)
+    applied: list[CodingEntryChange] = field(default_factory=list)
+    removed: list[CodingEntryChange] = field(default_factory=list)
 
     def is_empty(self) -> bool:
         return self.rows_recoded == 0 and self.from_total_entries == 0 and self.to_total_entries == 0
@@ -57,6 +68,20 @@ def _entry_key(entry: Any) -> tuple:
     return (entry.code_uid, entry.quote, entry.start_offset, entry.end_offset)
 
 
+def _change(entry: Any) -> CodingEntryChange:
+    return CodingEntryChange(
+        row_type=entry.row_type,
+        post_id=entry.post_id,
+        code_uid=entry.code_uid,
+        code=entry.code,
+        quote=entry.quote,
+    )
+
+
+def _change_sort_key(entry: Any) -> tuple:
+    return (entry.row_type, entry.post_id, entry.start_offset, entry.end_offset, entry.code)
+
+
 def diff_coding_entries(from_entries: Sequence[Any], to_entries: Sequence[Any]) -> CodingDiff:
     """Diff two lists of ``CodingEntry`` ORM rows (or anything duck-typed
     the same way), each already resolved to one version via
@@ -67,14 +92,18 @@ def diff_coding_entries(from_entries: Sequence[Any], to_entries: Sequence[Any]) 
     name_by_uid: dict[str, str] = {}
     from_count_by_uid: dict[str, int] = {}
     to_count_by_uid: dict[str, int] = {}
+    from_by_key: dict[tuple, Any] = {}
+    to_by_key: dict[tuple, Any] = {}
 
     for entry in from_entries:
         from_by_row.setdefault(_row_key(entry), set()).add(_entry_key(entry))
+        from_by_key[_row_key(entry) + _entry_key(entry)] = entry
         name_by_uid[entry.code_uid] = entry.code
         from_count_by_uid[entry.code_uid] = from_count_by_uid.get(entry.code_uid, 0) + 1
 
     for entry in to_entries:
         to_by_row.setdefault(_row_key(entry), set()).add(_entry_key(entry))
+        to_by_key[_row_key(entry) + _entry_key(entry)] = entry
         name_by_uid[entry.code_uid] = entry.code
         to_count_by_uid[entry.code_uid] = to_count_by_uid.get(entry.code_uid, 0) + 1
 
@@ -104,6 +133,11 @@ def diff_coding_entries(from_entries: Sequence[Any], to_entries: Sequence[Any]) 
     ]
     code_counts.sort(key=lambda c: (-abs(c.delta), c.name))
 
+    applied_entries = [to_by_key[key] for key in to_by_key.keys() - from_by_key.keys()]
+    removed_entries = [from_by_key[key] for key in from_by_key.keys() - to_by_key.keys()]
+    applied = [_change(entry) for entry in sorted(applied_entries, key=_change_sort_key)]
+    removed = [_change(entry) for entry in sorted(removed_entries, key=_change_sort_key)]
+
     return CodingDiff(
         from_total_entries=len(from_entries),
         to_total_entries=len(to_entries),
@@ -113,4 +147,6 @@ def diff_coding_entries(from_entries: Sequence[Any], to_entries: Sequence[Any]) 
         rows_newly_coded=rows_newly_coded,
         rows_newly_uncoded=rows_newly_uncoded,
         code_counts=code_counts,
+        applied=applied,
+        removed=removed,
     )

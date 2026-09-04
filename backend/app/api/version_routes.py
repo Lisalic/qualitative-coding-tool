@@ -61,11 +61,14 @@ async def diff_artifact(
     """Diff between two versions of the same artifact: always a
     structural codebook diff (added/removed/renamed/redefined/moved/
     reordered, keyed on stable ``code_uid`` -- see
-    ``core/codebook_diff.py``), plus, for a ``coding`` file specifically,
-    a content diff of its own ``coding_entries`` (rows recoded, code
-    counts changed -- see ``core/coding_diff.py``) under ``coding``. A
-    codebook/codebook_comparison file has no coding_entries, so
-    ``coding`` is ``null`` for those.
+    ``core/codebook_diff.py``), plus one type-specific content diff:
+    for a ``coding`` file, its own ``coding_entries`` (rows recoded,
+    code counts changed -- see ``core/coding_diff.py``) under
+    ``coding``; for a ``raw_data``/``filtered_data`` file, its own
+    ``submissions``/``comments`` rows (added/removed -- see
+    ``core/data_diff.py``) under ``data``. A file type outside the
+    matching branch gets ``null`` for that key -- a codebook has no
+    coding_entries or data rows of its own, and vice versa.
     """
     file_rec = await file_repo.get_owned_file(db, ref, user_id)
     codebook_diff = await version_service.diff_codebook(db, file_rec.id, from_no=from_no, to_no=to_no)
@@ -101,6 +104,44 @@ async def diff_artifact(
                 }
                 for c in coding_diff.code_counts
             ],
+            "applied": [
+                {
+                    "row_type": entry.row_type,
+                    "post_id": entry.post_id,
+                    "code_uid": entry.code_uid,
+                    "code": entry.code,
+                    "text": entry.quote,
+                }
+                for entry in coding_diff.applied
+            ],
+            "removed": [
+                {
+                    "row_type": entry.row_type,
+                    "post_id": entry.post_id,
+                    "code_uid": entry.code_uid,
+                    "code": entry.code,
+                    "text": entry.quote,
+                }
+                for entry in coding_diff.removed
+            ],
+        }
+
+    data_out = None
+    if file_rec.file_type in ("raw_data", "filtered_data"):
+        data_diff = await version_service.diff_data(db, file_rec.id, from_no=from_no, to_no=to_no)
+        data_out = {
+            "from_submissions": data_diff.from_submissions,
+            "to_submissions": data_diff.to_submissions,
+            "from_comments": data_diff.from_comments,
+            "to_comments": data_diff.to_comments,
+            "submissions_added": data_diff.submissions_added,
+            "submissions_removed": data_diff.submissions_removed,
+            "comments_added": data_diff.comments_added,
+            "comments_removed": data_diff.comments_removed,
+            "sample_submissions_added": data_diff.sample_submissions_added,
+            "sample_submissions_removed": data_diff.sample_submissions_removed,
+            "sample_comments_added": data_diff.sample_comments_added,
+            "sample_comments_removed": data_diff.sample_comments_removed,
         }
 
     return JSONResponse(
@@ -114,6 +155,7 @@ async def diff_artifact(
                 "reordered": [_change_ref(e) for e in codebook_diff.reordered],
             },
             "coding": coding_out,
+            "data": data_out,
         }
     )
 

@@ -63,6 +63,7 @@ export default function useVersionHistory(ref) {
   const clearDiff = useCallback(() => setDiff(null), []);
 
   return {
+    ref,
     versions,
     loading,
     error,

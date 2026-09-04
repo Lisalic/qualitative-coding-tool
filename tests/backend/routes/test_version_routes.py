@@ -193,6 +193,76 @@ class TestDiff:
         assert coding["code_counts"] == [
             {"code_uid": "u1", "name": "A", "from_count": 0, "to_count": 1, "delta": 1}
         ]
+        assert coding["applied"] == [
+            {
+                "row_type": "submission",
+                "post_id": "s1",
+                "code_uid": "u1",
+                "code": "A",
+                "text": "b",
+            }
+        ]
+        assert coding["removed"] == []
+
+
+class TestDiffData:
+    async def test_raw_data_file_reports_rows_added_and_removed(
+        self, client, session_factory, make_token
+    ) -> None:
+        from backend.app.services import file_service
+        from backend.app.storage_models import Submission
+
+        user = await _make_user(session_factory)
+        file_rec = await _make_file(session_factory, user.id, schemaname="proj_diff_data", file_type="raw_data")
+        async with session_factory() as session:
+            await version_service.commit_data_version(
+                session, file_id=file_rec.id, author_user_id=user.id, origin="imported",
+            )
+            session.add_all([
+                Submission(file_id=file_rec.id, id="s1", title="t1", selftext="b", word_count=1),
+                Submission(file_id=file_rec.id, id="s2", title="t2", selftext="b", word_count=1),
+            ])
+            await session.commit()
+
+            deleted = await file_service.delete_rows(
+                session, user.id, schemaname="proj_diff_data", table="submissions", row_ids=["s1"],
+            )
+            assert deleted == 1
+
+        resp = client.get(
+            "/api/artifacts/proj_diff_data/diff?from_no=1&to_no=2",
+            cookies={"access_token": make_token(sub=str(user.id))},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["coding"] is None
+        data = body["data"]
+        assert data is not None
+        assert data["from_submissions"] == 2
+        assert data["to_submissions"] == 1
+        assert data["submissions_removed"] == 1
+        assert data["submissions_added"] == 0
+        assert data["sample_submissions_removed"] == ["s1"]
+
+    async def test_non_data_file_has_null_data_diff(self, client, session_factory, make_token) -> None:
+        user = await _make_user(session_factory)
+        file_rec = await _make_file(session_factory, user.id, schemaname="proj_diff_cb2")
+        async with session_factory() as session:
+            await version_service.commit_codebook_version(
+                session, file_id=file_rec.id, author_user_id=user.id, origin="generated", codes=_CODE_A,
+            )
+            await session.commit()
+            await version_service.commit_codebook_version(
+                session, file_id=file_rec.id, author_user_id=user.id, origin="edited", codes=_CODE_A_RENAMED,
+            )
+            await session.commit()
+
+        resp = client.get(
+            "/api/artifacts/proj_diff_cb2/diff?from_no=1&to_no=2",
+            cookies={"access_token": make_token(sub=str(user.id))},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["data"] is None
 
 
 class TestLineage:

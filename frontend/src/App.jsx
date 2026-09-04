@@ -30,6 +30,7 @@ const ViewCodingComparisons = React.lazy(
   () => import("./pages/ViewCodingComparisons")
 );
 const Lineage = React.lazy(() => import("./pages/Lineage"));
+const VersionHistory = React.lazy(() => import("./pages/VersionHistory"));
 const Login = React.lazy(() => import("./pages/Login"));
 const Register = React.lazy(() => import("./pages/Register"));
 
@@ -185,6 +186,14 @@ function App() {
                   element={
                     <ProtectedRoute>
                       <Lineage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/versions"
+                  element={
+                    <ProtectedRoute>
+                      <VersionHistory />
                     </ProtectedRoute>
                   }
                 />
