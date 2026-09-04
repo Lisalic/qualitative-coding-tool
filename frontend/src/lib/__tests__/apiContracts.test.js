@@ -5,6 +5,8 @@ import {
   buildGenerateCodebookForm,
   buildApplyCodebookForm,
   buildRecodeItemsPayload,
+  buildFilterPreviewPayload,
+  buildManualFilterPayload,
 } from "../apiContracts";
 
 function fdEntries(fd) {
@@ -302,5 +304,142 @@ describe("buildRecodeItemsPayload", () => {
   it("throws MissingFieldsError when itemIds is missing or empty", () => {
     expect(() => buildRecodeItemsPayload({ ...base, itemIds: [] })).toThrow(MissingFieldsError);
     expect(() => buildRecodeItemsPayload({ apiKey: "k" })).toThrow(MissingFieldsError);
+  });
+});
+
+describe("buildFilterPreviewPayload", () => {
+  const base = { apiKey: "k", database: "proj_abc", model: "openrouter/model" };
+
+  it("builds the minimal JSON body", () => {
+    expect(buildFilterPreviewPayload(base)).toEqual({
+      api_key: "k",
+      database: "proj_abc",
+      model: "openrouter/model",
+      sample_percentage: 100,
+      decided_post_ids: [],
+      decided_comment_ids: [],
+    });
+  });
+
+  it("passes the already-decided ids through", () => {
+    const payload = buildFilterPreviewPayload({
+      ...base,
+      decidedPostIds: ["s1", "s2"],
+      decidedCommentIds: ["c1"],
+    });
+    expect(payload.decided_post_ids).toEqual(["s1", "s2"]);
+    expect(payload.decided_comment_ids).toEqual(["c1"]);
+  });
+
+  it("strips a .db suffix from the database", () => {
+    expect(buildFilterPreviewPayload({ ...base, database: "proj_abc.db" }).database).toBe(
+      "proj_abc",
+    );
+  });
+
+  it("omits blank optional fields and a zero minWords", () => {
+    const payload = buildFilterPreviewPayload({
+      ...base,
+      prompt: "  ",
+      filterTags: "  ",
+      minWords: 0,
+      contentScope: "",
+    });
+    expect(payload).not.toHaveProperty("prompt");
+    expect(payload).not.toHaveProperty("filter_tags");
+    expect(payload).not.toHaveProperty("min_words");
+    expect(payload).not.toHaveProperty("content_scope");
+  });
+
+  it("includes non-blank optional fields, trimming keywords", () => {
+    const payload = buildFilterPreviewPayload({
+      ...base,
+      prompt: "keep the good ones",
+      filterTags: "  a, b  ",
+      minWords: 25,
+      contentScope: "posts",
+    });
+    expect(payload.prompt).toBe("keep the good ones");
+    expect(payload.filter_tags).toBe("a, b");
+    expect(payload.min_words).toBe(25);
+    expect(payload.content_scope).toBe("posts");
+  });
+
+  it("clamps sample_percentage into range", () => {
+    expect(buildFilterPreviewPayload({ ...base, samplePercentage: 0 }).sample_percentage).toBe(1);
+    expect(buildFilterPreviewPayload({ ...base, samplePercentage: 250 }).sample_percentage).toBe(100);
+  });
+
+  it("throws MissingFieldsError when apiKey or model is blank", () => {
+    expect(() => buildFilterPreviewPayload({ ...base, apiKey: "" })).toThrow(MissingFieldsError);
+    expect(() => buildFilterPreviewPayload({ ...base, model: "" })).toThrow(MissingFieldsError);
+  });
+
+  it("rejects a non-proj database", () => {
+    try {
+      buildFilterPreviewPayload({ ...base, database: "not_proj" });
+      expect.fail("did not throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(MissingFieldsError);
+      expect(err.flow).toBe("filter-preview");
+    }
+  });
+});
+
+describe("buildManualFilterPayload", () => {
+  const base = { database: "proj_abc", name: "hand picked", postIds: ["s1"] };
+
+  it("builds the minimal JSON body", () => {
+    expect(buildManualFilterPayload(base)).toEqual({
+      database: "proj_abc",
+      name: "hand picked",
+      post_ids: ["s1"],
+      comment_ids: [],
+    });
+  });
+
+  it("carries no api key or model -- submitting involves no LLM call", () => {
+    const payload = buildManualFilterPayload(base);
+    expect(payload).not.toHaveProperty("api_key");
+    expect(payload).not.toHaveProperty("model");
+  });
+
+  it("trims the name and strips a .db suffix from the database", () => {
+    const payload = buildManualFilterPayload({
+      ...base,
+      name: "  hand picked  ",
+      database: "proj_abc.db",
+    });
+    expect(payload.name).toBe("hand picked");
+    expect(payload.database).toBe("proj_abc");
+  });
+
+  it("includes description and a numeric project_id when given", () => {
+    const payload = buildManualFilterPayload({
+      ...base,
+      description: "chosen by hand",
+      projectId: "7",
+    });
+    expect(payload.description).toBe("chosen by hand");
+    expect(payload.project_id).toBe(7);
+  });
+
+  it("omits project_id when it is blank or null", () => {
+    expect(buildManualFilterPayload({ ...base, projectId: "" })).not.toHaveProperty("project_id");
+    expect(buildManualFilterPayload({ ...base, projectId: null })).not.toHaveProperty("project_id");
+  });
+
+  it("throws MissingFieldsError when nothing is selected", () => {
+    try {
+      buildManualFilterPayload({ ...base, postIds: [], commentIds: [] });
+      expect.fail("did not throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(MissingFieldsError);
+      expect(err.flow).toBe("manual-filter");
+    }
+  });
+
+  it("throws MissingFieldsError when the name is blank", () => {
+    expect(() => buildManualFilterPayload({ ...base, name: "  " })).toThrow(MissingFieldsError);
   });
 });

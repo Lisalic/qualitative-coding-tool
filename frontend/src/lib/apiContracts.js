@@ -228,3 +228,96 @@ export function buildRecodeItemsPayload({ apiKey, itemIds, model, methodology })
   if (!isBlank(methodology)) payload.methodology = methodology;
   return payload;
 }
+
+/**
+ * Build the JSON body for POST /api/filter-preview/.
+ * Mirrors `FilterPreviewRequest` in `backend/app/api/schemas.py`.
+ *
+ * `decidedPostIds`/`decidedCommentIds` are the rows the user has already
+ * included or excluded in the filter editor. They are sent so the server
+ * can drop them from the candidate pool before sampling -- which is what
+ * makes re-running the tool propose new rows rather than the same ones.
+ * They are legitimately empty on a first run, so unlike the other
+ * builders they are not `assertRequired`.
+ */
+export function buildFilterPreviewPayload({
+  apiKey,
+  database,
+  model,
+  prompt,
+  filterTags,
+  minWords,
+  samplePercentage,
+  contentScope,
+  decidedPostIds,
+  decidedCommentIds,
+}) {
+  assertRequired({ apiKey, database, model }, "filter-preview");
+  const normalizedDatabase = assertProjSchema(
+    database,
+    "database",
+    "filter-preview",
+  );
+
+  const payload = {
+    api_key: apiKey,
+    database: normalizedDatabase,
+    model,
+    sample_percentage: clampPct(samplePercentage),
+    decided_post_ids: decidedPostIds || [],
+    decided_comment_ids: decidedCommentIds || [],
+  };
+
+  if (!isBlank(prompt)) payload.prompt = prompt;
+  if (!isBlank(filterTags)) payload.filter_tags = filterTags.trim();
+  if (!isBlank(contentScope)) payload.content_scope = contentScope;
+
+  const mw = Number(minWords);
+  if (Number.isFinite(mw) && mw > 0) payload.min_words = mw;
+
+  return payload;
+}
+
+/**
+ * Build the JSON body for POST /api/filtered-data/manual.
+ * Mirrors `ManualFilterRequest` in `backend/app/api/schemas.py`.
+ *
+ * No `apiKey` or `model`: submitting the editor's selection creates the
+ * artifact with no LLM call, whatever role the AI preview tool played in
+ * assembling that selection.
+ */
+export function buildManualFilterPayload({
+  database,
+  name,
+  description,
+  projectId,
+  postIds,
+  commentIds,
+}) {
+  assertRequired({ database, name }, "manual-filter");
+  const normalizedDatabase = assertProjSchema(
+    database,
+    "database",
+    "manual-filter",
+  );
+
+  const post_ids = postIds || [];
+  const comment_ids = commentIds || [];
+  if (post_ids.length === 0 && comment_ids.length === 0) {
+    // The server rejects this too; failing here keeps the message
+    // actionable instead of surfacing a 422 field path.
+    throw new MissingFieldsError(["rows (select at least one)"], "manual-filter");
+  }
+
+  const payload = {
+    database: normalizedDatabase,
+    name: name.trim(),
+    post_ids,
+    comment_ids,
+  };
+  if (!isBlank(description)) payload.description = description;
+  if (projectId !== undefined && projectId !== null && projectId !== "") {
+    payload.project_id = Number(projectId);
+  }
+  return payload;
+}
