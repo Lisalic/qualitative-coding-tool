@@ -639,6 +639,33 @@ class TestRenderCodingText:
             f = await _make_file(session, user)
             assert await render_coding_text(session, f.id) == ""
 
+    async def test_version_no_renders_the_text_as_it_was_then(self, session_factory) -> None:
+        """A closed (superseded) entry still renders when reading AS OF
+        the version it was live in -- "view a previous version".
+        """
+        async with session_factory() as session:
+            user = await make_user(session)
+            f = await _make_file(session, user)
+            await bulk_insert_coding_entries(session, f.id, [_entry("s1", "A", "quote one")], version_no=1)
+            await session.commit()
+
+            await replace_entries_for_items(
+                session, f.id,
+                [{"row_type": "submission", "post_id": "s1", "entries": [
+                    {"code": "B", "code_uid": "B-uid", "quote": "quote two", "start_offset": 0, "end_offset": 9, "notes": None},
+                ]}],
+                version_no=2,
+            )
+            await session.commit()
+
+            as_of_v1 = await render_coding_text(session, f.id, version_no=1)
+            assert "CODE: A" in as_of_v1
+            assert "CODE: B" not in as_of_v1
+
+            live = await render_coding_text(session, f.id)
+            assert "CODE: B" in live
+            assert "CODE: A" not in live
+
 
 class TestListRowsWithCodesAndCountRows:
     async def _seed(self, session, file_id):

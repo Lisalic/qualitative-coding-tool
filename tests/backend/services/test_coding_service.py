@@ -31,7 +31,7 @@ from backend.app.core.exceptions import NotFoundError, ValidationAppError
 from backend.app.database import File, User
 from backend.app.repositories import version_repo
 from backend.app.jobs import service as jobs_service
-from backend.app.services import coding_service, version_service
+from backend.app.services import coding_service, file_service, version_service
 from backend.app.storage_models import CodingEntry, Submission
 from backend.app.versioning_models import ArtifactVersion, CodebookCode
 
@@ -400,6 +400,55 @@ class TestGetCodingArtifact:
         await _make_file(session, other_id, schemaname="proj_not_mine")
         with pytest.raises(NotFoundError):
             await coding_service.get_coding_artifact(session, user_id, "proj_not_mine")
+
+    async def test_version_no_reads_codebook_and_counts_as_of_that_version(self, session, user_id) -> None:
+        """`version_no` backs "view a previous version": every field in
+        the response (codes, total_coded, code_frequency) must reflect
+        the SAME version, not a mix of as-of codes and live counts.
+        """
+        coding_file = await _make_file(session, user_id, schemaname="proj_asof1", content="v1 code")
+        session.add(Submission(file_id=coding_file.id, id="s1", title="t", selftext="b", word_count=1))
+        session.add(Submission(file_id=coding_file.id, id="s2", title="t2", selftext="b2", word_count=1))
+        await session.commit()
+
+        v1_entry = CodingEntry(
+            file_id=coding_file.id, post_id="s1", code="A", code_uid="A-uid",
+            quote="e", start_offset=0, end_offset=1, valid_from=1,
+        )
+        session.add(v1_entry)
+        await session.commit()
+
+        # v2: close the v1 entry, apply a different code to s2 instead,
+        # and change the codebook snapshot -- a real "what changed"
+        # scenario, not just a bookkeeping version bump.
+        v2 = await version_service.commit_codebook_version(
+            session, file_id=coding_file.id, author_user_id=user_id, origin="edited",
+            codes=[
+                {
+                    "code_uid": "A-uid", "family_uid": "f1", "family_name": "Fam", "name": "A",
+                    "body": "v2 code", "position": 0,
+                }
+            ],
+        )
+        v1_entry.valid_to = v2.version_no - 1
+        session.add(CodingEntry(
+            file_id=coding_file.id, post_id="s2", code="A", code_uid="A-uid",
+            quote="e2", start_offset=0, end_offset=2, valid_from=v2.version_no,
+        ))
+        await session.commit()
+
+        as_of_v1 = await coding_service.get_coding_artifact(session, user_id, "proj_asof1", version_no=1)
+        assert [c.body for c in as_of_v1["codes"]] == ["v1 code"]
+        assert as_of_v1["total_coded"] == 1
+        assert as_of_v1["code_frequency"] == [{"code": "A", "count": 1}]
+
+        live = await coding_service.get_coding_artifact(session, user_id, "proj_asof1")
+        assert [c.body for c in live["codes"]] == ["v2 code"]
+        assert live["total_coded"] == 1
+        assert live["code_frequency"] == [{"code": "A", "count": 1}]
+        # total_rows (the coding file's own copied submissions) never
+        # changes with version -- it's identical either way.
+        assert as_of_v1["total_rows"] == live["total_rows"] == 2
 
 
 class TestListCodingRows:
@@ -979,6 +1028,118 @@ _CODEBOOK_WITH_ALPHA_BETA = (
     "#### Code Name: Beta\n"
     "Definition: about beta\n"
 )
+
+
+class TestApplyCodebookJobHandlerParentDeletedMidRun:
+    """A user can delete an artifact while a job that reads it is still
+    waiting on its (minutes-long) LLM call. The two parents are deliberately
+    NOT treated the same: the codebook's codes were already read into the
+    new artifact's own snapshot, so only its lineage edge is lost, while
+    the source data file's rows have yet to be copied in -- proceeding
+    there would ship a coding artifact whose entries reference rows it
+    never received.
+
+    Both tests delete the parent from inside the `classify_posts` mock,
+    which is exactly the window the real handler leaves open.
+    """
+
+    async def _seed(self, session, user_id):
+        source = await _make_file(session, user_id, file_type="raw_data", schemaname="proj_rawmid")
+        session.add(
+            Submission(file_id=source.id, id="s1", title="t1", selftext="quote one here", word_count=3)
+        )
+        await session.commit()
+        codebook_file = await _make_file(session, user_id, file_type="codebook", schemaname="proj_cbmid")
+        await _seed_codebook_markdown(session, codebook_file.id, user_id, _CODEBOOK_WITH_ALPHA_BETA)
+        # SQLite hands a deleted row's id to the next INSERT, so without
+        # a file sitting above the one these tests delete, the coding
+        # artifact the job creates would be born holding the very id its
+        # deleted parent had -- and every assertion below would compare
+        # the new artifact against itself. Postgres never reuses a
+        # sequence value, so this filler exists only to make the SQLite
+        # fixture behave like the real database.
+        await _make_file(session, user_id, file_type="raw_data", schemaname="proj_idfiller")
+        return source, codebook_file
+
+    async def test_codebook_deleted_mid_run_keeps_the_artifact_and_drops_the_edge(
+        self, session, user_id, monkeypatch, SessionLocal
+    ) -> None:
+        source, codebook_file = await self._seed(session, user_id)
+        # Captured before `_wait_for_terminal_status`'s `expire_all()` --
+        # see the note in `TestApplyCodebookJobHandlerEndToEnd`.
+        source_schema, codebook_id = source.schemaname, codebook_file.schemaname
+
+        async def _classify_then_delete(*args, **kwargs):
+            async with SessionLocal() as other:
+                await file_service.delete_database(other, user_id, codebook_id)
+            return (
+                [{"item_id": "t3_s1", "code": "Alpha", "quotes": ["quote one"]}],
+                "sys prompt",
+                "user prompt",
+                {"batches_processed": 1, "batches_total": 1, "error": None},
+            )
+
+        monkeypatch.setattr("backend.app.services.coding_service.classify_posts", _classify_then_delete)
+
+        job = await coding_service.start_apply_codebook_job(
+            session, user_id, database=source_schema, codebook=codebook_id,
+            methodology="", api_key="sk-secret", model="m", sample_percentage=100.0,
+            report_name="survives", project_id=None,
+        )
+        finished = await _wait_for_terminal_status(session, job.id, user_id)
+        assert finished.status == "succeeded", finished.error
+
+        new_file_id = int(finished.result["file"]["id"])
+        # The snapshot is complete even though the codebook is gone.
+        assert [c.name for c in await version_service.read_codes(session, new_file_id)] == ["Alpha", "Beta"]
+        entries = (
+            await session.execute(select(CodingEntry).where(CodingEntry.file_id == new_file_id))
+        ).scalars().all()
+        assert [(e.post_id, e.code) for e in entries] == [("s1", "Alpha")]
+        # Only the source edge remains; no edge points at the deleted codebook.
+        # No edge points at the deleted codebook -- only the source
+        # remains. Compared by schemaname, not id: SQLite hands the
+        # deleted row's id straight to the next INSERT, so an id
+        # comparison here would silently be comparing the new artifact
+        # against itself.
+        edges = await version_repo.list_parent_edges(session, new_file_id)
+        parents = (
+            await session.execute(select(File.schemaname).where(File.id.in_([e.parent_file_id for e in edges])))
+        ).scalars().all()
+        assert parents == [source_schema]
+
+    async def test_source_data_deleted_mid_run_fails_the_job(
+        self, session, user_id, monkeypatch, SessionLocal
+    ) -> None:
+        source, codebook_file = await self._seed(session, user_id)
+        source_schema = source.schemaname
+
+        async def _classify_then_delete(*args, **kwargs):
+            async with SessionLocal() as other:
+                await file_service.delete_database(other, user_id, source_schema)
+            return (
+                [{"item_id": "t3_s1", "code": "Alpha", "quotes": ["quote one"]}],
+                "sys prompt",
+                "user prompt",
+                {"batches_processed": 1, "batches_total": 1, "error": None},
+            )
+
+        monkeypatch.setattr("backend.app.services.coding_service.classify_posts", _classify_then_delete)
+
+        job = await coding_service.start_apply_codebook_job(
+            session, user_id, database=source_schema, codebook=codebook_file.schemaname,
+            methodology="", api_key="sk-secret", model="m", sample_percentage=100.0,
+            report_name="doomed", project_id=None,
+        )
+        finished = await _wait_for_terminal_status(session, job.id, user_id)
+        assert finished.status == "failed"
+        assert "no longer exists" in (finished.error or "")
+
+        # No half-built artifact left behind.
+        codings = (
+            await session.execute(select(File).where(File.user_id == user_id, File.filename == "doomed"))
+        ).scalars().all()
+        assert codings == []
 
 
 class TestApplyCodebookJobHandlerEndToEnd:
