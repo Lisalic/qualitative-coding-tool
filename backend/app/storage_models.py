@@ -18,18 +18,48 @@ Artifact *content* no longer lives here: the old one-blob-per-file
 ``backend/app/versioning_models.py`` -- content now lives on
 ``ArtifactVersion.content`` for blob artifacts, or on ``CodebookCode``
 rows for codebooks and a coding artifact's own codebook snapshot).
+
+``RowMemo`` is the one table here that is *not* artifact content and
+*not* revision-ranged -- see its docstring.
 """
 
-from sqlalchemy import Column, ForeignKey, Integer, BigInteger, String, Text, Index, DateTime, UniqueConstraint, func
+from sqlalchemy import (
+    BigInteger,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 
 from backend.app.database import Base
 
 
 class Submission(Base):
+    """A row is a git-style *ref*'s owned copy of one Reddit submission.
+
+    ``pk`` is a surrogate primary key -- ``(file_id, id)`` is no longer
+    unique on its own, since ``valid_from``/``valid_to`` (SCD-2 revision
+    ranges keyed on the owning file's ``artifact_versions.version_no``,
+    identical semantics to ``CodingEntry`` -- see that model's docstring)
+    let the same ``id`` reappear more than once for the same ``file_id``:
+    a row moved out (closed) and later moved back in would otherwise
+    collide under a composite ``(file_id, id)`` PK. A row is live iff
+    ``valid_to IS NULL``; live *as of* version ``v`` iff ``valid_from <=
+    v AND (valid_to IS NULL OR valid_to >= v)``. Every read in this
+    codebase must apply one of those two predicates -- see
+    ``repositories/raw_data_repo.py``.
+    """
+
     __tablename__ = "submissions"
 
-    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), primary_key=True)
-    id = Column(String, primary_key=True)
+    pk = Column(Integer, primary_key=True, autoincrement=True)
+    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=False)
+    id = Column(String, nullable=False)
     subreddit = Column(String)
     title = Column(String)
     selftext = Column(String)
@@ -38,17 +68,32 @@ class Submission(Base):
     score = Column(Integer)
     num_comments = Column(Integer)
     word_count = Column(Integer)
+    valid_from = Column(Integer, nullable=False, server_default="1", default=1)
+    valid_to = Column(Integer, nullable=True)
 
     __table_args__ = (
         Index("idx_submissions_file_id_word_count", "file_id", "word_count"),
+        Index("idx_submissions_live", "file_id", "valid_to"),
+        Index(
+            "uq_submissions_file_id_id_live",
+            "file_id", "id",
+            unique=True,
+            postgresql_where=(valid_to.is_(None)),
+            sqlite_where=(valid_to.is_(None)),
+        ),
     )
 
 
 class Comment(Base):
+    """Same shape and SCD-2 semantics as ``Submission`` -- see its
+    docstring.
+    """
+
     __tablename__ = "comments"
 
-    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), primary_key=True)
-    id = Column(String, primary_key=True)
+    pk = Column(Integer, primary_key=True, autoincrement=True)
+    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=False)
+    id = Column(String, nullable=False)
     subreddit = Column(String)
     body = Column(String)
     author = Column(String)
@@ -57,9 +102,19 @@ class Comment(Base):
     link_id = Column(String)
     parent_id = Column(String)
     word_count = Column(Integer)
+    valid_from = Column(Integer, nullable=False, server_default="1", default=1)
+    valid_to = Column(Integer, nullable=True)
 
     __table_args__ = (
         Index("idx_comments_file_id_word_count", "file_id", "word_count"),
+        Index("idx_comments_live", "file_id", "valid_to"),
+        Index(
+            "uq_comments_file_id_id_live",
+            "file_id", "id",
+            unique=True,
+            postgresql_where=(valid_to.is_(None)),
+            sqlite_where=(valid_to.is_(None)),
+        ),
     )
 
 

@@ -156,9 +156,137 @@ class FilterDataResponse(BaseModel):
     file: Optional[FilterDataFileInfo] = None
     tag_filter: Optional[FilterDataTagInfo] = None
     partial: bool = False
+    partial_error: Optional[str] = Field(
+        default=None,
+        description=(
+            "Why coverage stopped early, when it was an error rather than a "
+            "free model's batch cap. Read by FilterDataPanel.jsx to explain a "
+            "partial run; a null here means the cap, not a failure."
+        ),
+    )
     batches_processed: Optional[dict[str, int]] = None
     batches_total: Optional[dict[str, int]] = None
     orphaned_comments: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Filter editor: AI preview + manual submit
+#
+# The two halves of the human-in-the-loop filter screen
+# (`frontend/src/components/filter-editor/`), which composes a
+# `filtered_data` artifact from rows the user checked by hand, with the
+# AI filter available inside it as an assistive tool rather than as the
+# whole operation.
+#
+# Both are JSON bodies rather than `as_form` multipart, unlike
+# `FilterDataRequest` above: each carries id lists, and the codebase's
+# rule is multipart for the flat AI-tool forms and JSON for anything
+# with a nested list (same reasoning as `RecodeItemsRequest`).
+#
+# `FilterPreviewRequest` deliberately has no `name`/`project_id`: a
+# preview creates no artifact at all, it only answers "which of the rows
+# I haven't decided on yet would you keep?".
+# ---------------------------------------------------------------------------
+
+
+class FilterPreviewRequest(_StrippingModel):
+    """Payload for ``POST /api/filter-preview/``.
+
+    Same AI-filter knobs as ``FilterDataRequest`` (prompt, tags, model,
+    ``min_words``, sampling, content scope), plus the two lists that make
+    it a *preview*: ``decided_post_ids``/``decided_comment_ids`` are the
+    rows the user has already explicitly included or excluded in the
+    editor, and are removed from the candidate pool before sampling --
+    so re-running the tool never re-litigates a decision the human
+    already made, and each run only proposes rows that are still
+    undecided.
+
+    The frontend builder is ``buildFilterPreviewPayload`` in
+    ``frontend/src/lib/apiContracts.js``.
+    """
+
+    api_key: str = Field(min_length=1, description="OpenRouter API key from the client")
+    database: str = Field(pattern=_SCHEMA_PATTERN, description="Source schema (proj_<hex>)")
+    model: str = Field(min_length=1, description="OpenRouter model slug")
+    prompt: Optional[str] = Field(default=None)
+    filter_tags: Optional[str] = Field(default=None)
+    min_words: int = Field(default=0, ge=0)
+    sample_percentage: float = Field(default=100.0, ge=1.0, le=100.0)
+    content_scope: ContentScope = _content_scope_field()
+    decided_post_ids: list[str] = Field(
+        default_factory=list,
+        description="Submission ids the user already included or excluded",
+    )
+    decided_comment_ids: list[str] = Field(
+        default_factory=list,
+        description="Comment ids the user already included or excluded",
+    )
+
+    @field_validator("database", mode="before")
+    @classmethod
+    def _strip_db_suffix(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        value = value.strip()
+        if value.endswith(".db"):
+            value = value[:-3]
+        return value
+
+
+class FilterPreviewResponse(BaseModel):
+    """Result of a finished ``filter_preview`` job, read back from
+    ``GET /api/jobs/{id}``.
+
+    Ids only -- no ``file``, because nothing was created.
+    """
+
+    post_ids: list[str] = Field(default_factory=list)
+    comment_ids: list[str] = Field(default_factory=list)
+    partial: bool = False
+    partial_error: Optional[str] = None
+    batches_processed: Optional[dict[str, int]] = None
+    batches_total: Optional[dict[str, int]] = None
+
+
+class ManualFilterRequest(_StrippingModel):
+    """Payload for ``POST /api/filtered-data/manual``.
+
+    The submit half of the filter editor: the final set of rows the user
+    checked, whatever mix of hand-picked and AI-suggested-then-accepted
+    produced it. There is no prompt or model here by design -- provenance
+    for an AI assist during editing is not the same claim as "an LLM
+    produced this artifact", so the resulting version is recorded as
+    ``origin="edited"`` with no ``system_prompt``.
+
+    The frontend builder is ``buildManualFilterPayload`` in
+    ``frontend/src/lib/apiContracts.js``.
+    """
+
+    database: str = Field(pattern=_SCHEMA_PATTERN, description="Source schema (proj_<hex>)")
+    name: str = Field(min_length=1, description="Display name for the new filtered file")
+    description: Optional[str] = Field(default=None)
+    project_id: Optional[int] = Field(default=None)
+    post_ids: list[str] = Field(default_factory=list)
+    comment_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("database", mode="before")
+    @classmethod
+    def _strip_db_suffix(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        value = value.strip()
+        if value.endswith(".db"):
+            value = value[:-3]
+        return value
+
+    @model_validator(mode="after")
+    def _at_least_one_row(self):
+        """An empty filtered database is never what the user meant, and
+        it would otherwise be indistinguishable from a lost selection.
+        """
+        if not self.post_ids and not self.comment_ids:
+            raise ValueError("At least one of post_ids/comment_ids is required")
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -544,6 +672,34 @@ class PostContentsRequest(_StrippingModel):
 
     schema_: str = Field(alias="schema", min_length=1)
     post_ids: list[str] = Field(min_length=1)
+
+
+# ---------------------------------------------------------------------------
+# Data (raw_data/filtered_data) row edits + restore
+# ---------------------------------------------------------------------------
+
+
+class DeleteRowsRequest(_StrippingModel):
+    """Payload for ``POST /api/delete-rows/``. Replaces the old
+    single-row, ``Form``-encoded ``/delete-row/`` -- a JSON body so a
+    whole selection closes in one call (one version), not one request
+    per row.
+    """
+
+    schema_name: str = Field(min_length=1)
+    table: str = Field(min_length=1)
+    row_ids: list[str] = Field(min_length=1)
+
+
+class DuplicateDataRequest(_StrippingModel):
+    """Payload for ``POST /api/data/{ref}/duplicate``. Same shape and
+    same ``from_version_no`` semantics as ``DuplicateCodingRequest``/
+    ``DuplicateCodebookRequest`` -- the restore path for
+    ``raw_data``/``filtered_data`` files.
+    """
+
+    display_name: str = Field(min_length=1)
+    from_version_no: Optional[int] = Field(default=None, ge=1)
 
     model_config = {"populate_by_name": True}
 
