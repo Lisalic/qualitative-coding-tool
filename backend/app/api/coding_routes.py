@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Form
+from fastapi import APIRouter, Depends, Form, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -50,15 +50,19 @@ async def _file_info(db: AsyncSession, file_rec) -> dict:
 @router.get("/coding/{ref}")
 async def get_coding_artifact(
     ref: str,
+    version_no: int | None = Query(None, description="Read the codebook snapshot/counts AS OF this version"),
     user_id: int = Depends(require_user_id),
     db: AsyncSession = Depends(get_async_db),
 ) -> JSONResponse:
     """Metadata for a coding file owned by the authenticated user: its own
     codebook snapshot as structured code rows, row/coded counts, and code
     frequency. Row content itself is fetched separately, paged, via
-    ``GET /api/coding/{ref}/rows``.
+    ``GET /api/coding/{ref}/rows``. ``version_no`` reads every field AS
+    OF that version instead of live -- see
+    ``coding_service.get_coding_artifact``'s docstring; backs "view a
+    previous version" in the version-history UI.
     """
-    artifact = await coding_service.get_coding_artifact(db, user_id, ref)
+    artifact = await coding_service.get_coding_artifact(db, user_id, ref, version_no=version_no)
     return JSONResponse(
         {
             "file": await _file_info(db, artifact["file"]),
@@ -78,6 +82,7 @@ async def list_coding_rows(
     only: str = "all",
     code: str = None,
     q: str = None,
+    version_no: int | None = Query(None, description="Read coding entries AS OF this version"),
     user_id: int = Depends(require_user_id),
     db: AsyncSession = Depends(get_async_db),
 ) -> JSONResponse:
@@ -85,10 +90,12 @@ async def list_coding_rows(
     owns, coded or not -- each with its codes. ``only`` narrows to
     ``coded``/``uncoded``; ``code`` narrows to rows carrying that exact
     code (by display name); ``q`` is a case-insensitive substring search
-    over title/body.
+    over title/body. ``version_no`` pins the coding entries to a historical
+    version for the read-only version-history viewer.
     """
     result = await coding_service.list_coding_rows(
-        db, user_id, ref, limit=limit, offset=offset, only=only, code=code, q=q
+        db, user_id, ref, limit=limit, offset=offset, only=only, code=code, q=q,
+        version_no=version_no,
     )
     return JSONResponse(result)
 
@@ -96,14 +103,16 @@ async def list_coding_rows(
 @router.get("/coding/{ref}/text")
 async def get_coding_text(
     ref: str,
+    version_no: int | None = Query(None, description="Render the text AS OF this version"),
     user_id: int = Depends(require_user_id),
     db: AsyncSession = Depends(get_async_db),
 ) -> JSONResponse:
     """Read-only canonical POST_ID/CODE/EVIDENCE text for a coding file,
     generated fresh from ``coding_entries`` -- backs the Text View tab.
+    ``version_no`` remains available for pinned text exports.
     """
-    text = await coding_service.get_coding_text(db, user_id, ref)
-    return JSONResponse({"text": text})
+    text = await coding_service.get_coding_text(db, user_id, ref, version_no=version_no)
+    return JSONResponse({"text": text, "version_no": version_no})
 
 
 @router.put("/coding/{ref}/revision")

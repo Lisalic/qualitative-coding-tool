@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from backend.app.database import File, User
 from backend.app.storage_models import Submission
+from backend.app.versioning_models import ArtifactVersion
 
 pytestmark = pytest.mark.usefixtures("override_async_db")
 
@@ -173,66 +174,83 @@ class TestDeleteDatabase:
 # ---------------------------------------------------------------------------
 
 
-class TestDeleteRow:
+class TestDeleteRows:
     def test_invalid_schema_returns_400(self, client, make_token) -> None:
         resp = client.post(
-            "/api/delete-row/",
+            "/api/delete-rows/",
             headers=_auth_headers(make_token),
-            data={"schemaname": "not_proj", "table": "submissions", "row_id": "1"},
+            json={"schema_name": "not_proj", "table": "submissions", "row_ids": ["1"]},
         )
         assert resp.status_code == 400
 
     def test_invalid_table_returns_400(self, client, make_token) -> None:
         resp = client.post(
-            "/api/delete-row/",
+            "/api/delete-rows/",
             headers=_auth_headers(make_token),
-            data={"schemaname": "proj_a", "table": "users", "row_id": "1"},
+            json={"schema_name": "proj_a", "table": "users", "row_ids": ["1"]},
         )
         assert resp.status_code == 400
         assert resp.json()["error"] == "Invalid table"
 
     def test_no_auth_returns_401(self, client) -> None:
         resp = client.post(
-            "/api/delete-row/",
-            data={"schemaname": "proj_a", "table": "submissions", "row_id": "1"},
+            "/api/delete-rows/",
+            json={"schema_name": "proj_a", "table": "submissions", "row_ids": ["1"]},
         )
         assert resp.status_code == 401
 
     def test_not_owned_returns_403(self, client, make_token) -> None:
         resp = client.post(
-            "/api/delete-row/",
+            "/api/delete-rows/",
             headers=_auth_headers(make_token),
-            data={"schemaname": "proj_missing", "table": "submissions", "row_id": "1"},
+            json={"schema_name": "proj_missing", "table": "submissions", "row_ids": ["1"]},
         )
         assert resp.status_code == 403
 
     async def test_deletes_row_for_owned_file(self, client, make_token, session_factory) -> None:
+        """A "delete" now closes the row's SCD-2 range (``valid_to``)
+        rather than hard-deleting it -- see
+        ``file_service.delete_rows``'s docstring -- so the assertion is
+        "no longer LIVE", not "gone from the table".
+        """
         uid = await _make_user(session_factory)
         fid = await _make_file(session_factory, uid, "proj_a")
         await _add_submission(session_factory, fid, "abc123")
 
         resp = client.post(
-            "/api/delete-row/",
+            "/api/delete-rows/",
             headers=_auth_headers(make_token, sub=str(uid)),
-            data={"schemaname": "proj_a", "table": "submissions", "row_id": "abc123"},
+            json={"schema_name": "proj_a", "table": "submissions", "row_ids": ["abc123"]},
         )
         assert resp.status_code == 200
         assert resp.json()["deleted"] == 1
 
         async with session_factory() as session:
-            remaining = (
+            live = (
+                await session.execute(
+                    select(Submission).where(Submission.file_id == fid, Submission.valid_to.is_(None))
+                )
+            ).scalars().all()
+            assert live == []
+            all_rows = (
                 await session.execute(select(Submission).where(Submission.file_id == fid))
             ).scalars().all()
-            assert remaining == []
+            assert len(all_rows) == 1, "the row is closed, not deleted"
+
+            versions = (
+                await session.execute(select(ArtifactVersion).where(ArtifactVersion.file_id == fid))
+            ).scalars().all()
+            assert len(versions) == 1
+            assert versions[0].origin == "edited"
 
     async def test_deletes_zero_for_missing_row(self, client, make_token, session_factory) -> None:
         uid = await _make_user(session_factory)
         await _make_file(session_factory, uid, "proj_a")
 
         resp = client.post(
-            "/api/delete-row/",
+            "/api/delete-rows/",
             headers=_auth_headers(make_token, sub=str(uid)),
-            data={"schemaname": "proj_a", "table": "submissions", "row_id": "nonexistent"},
+            json={"schema_name": "proj_a", "table": "submissions", "row_ids": ["nonexistent"]},
         )
         assert resp.status_code == 200
         assert resp.json()["deleted"] == 0
@@ -345,10 +363,14 @@ class TestMoveRows:
         assert resp.json()["moved"] == 1
 
         async with session_factory() as session:
-            src_rows = (
-                await session.execute(select(Submission).where(Submission.file_id == src_id))
+            # A move now closes the source's copy (SCD-2) instead of
+            # hard-deleting it -- see file_service.move_rows's docstring.
+            src_live = (
+                await session.execute(
+                    select(Submission).where(Submission.file_id == src_id, Submission.valid_to.is_(None))
+                )
             ).scalars().all()
-            assert [r.id for r in src_rows] == ["keep"]
+            assert [r.id for r in src_live] == ["keep"]
 
             tgt_rows = (
                 await session.execute(select(Submission).where(Submission.file_id == tgt_id))

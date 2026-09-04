@@ -58,7 +58,7 @@ from backend.app.jobs.models import Job
 from backend.app.jobs.progress import ProgressTracker
 from backend.app.jobs.registry import register_handler
 from backend.app.jobs.service import enqueue_job
-from backend.app.repositories import coding_repo, file_repo, project_repo, raw_data_repo, version_repo
+from backend.app.repositories import coding_repo, file_repo, memo_repo, project_repo, raw_data_repo, version_repo
 from backend.app.services import codebook_service, version_service
 from backend.app.services.version_service import EdgeSpec
 from backend.app.storage_models import Comment, Submission
@@ -108,11 +108,14 @@ async def get_coding_comparison(session: AsyncSession, user_id: int, ref: str | 
     base = select(File).where(File.file_type == "coding_comparison", File.user_id == user_id)
     file_rec: File | None = None
     if ref:
-        result = await session.execute(base.where(File.schemaname == ref))
-        file_rec = result.scalar_one_or_none()
-        if file_rec is None:
-            result = await session.execute(base.where(File.filename == ref))
-            file_rec = result.scalar_one_or_none()
+        # Lowest-id match, not scalar_one_or_none -- see
+        # `repositories/file_repo.py::_lookup_file` for why a
+        # non-unique `filename` must not raise here.
+        for condition in (File.schemaname == ref, File.filename == ref):
+            result = await session.execute(base.where(condition).order_by(File.id).limit(1))
+            file_rec = result.scalars().first()
+            if file_rec is not None:
+                break
         if file_rec is None:
             try:
                 fid = int(ref)
@@ -135,19 +138,42 @@ async def get_coding_comparison(session: AsyncSession, user_id: int, ref: str | 
 # ---------------------------------------------------------------------------
 
 
-async def get_coding_artifact(session: AsyncSession, user_id: int, ref: str) -> dict:
+async def get_coding_artifact(
+    session: AsyncSession, user_id: int, ref: str, *, version_no: int | None = None
+) -> dict:
     """Metadata for a coding file owned by ``user_id``: the file record,
     its own codebook snapshot as structured code rows, row/coded counts,
     and code frequency -- everything ``GET /api/coding/{ref}`` needs
     besides the row page itself (``list_coding_rows``, fetched separately
     so the frontend can page/filter/search independently of the artifact
     header).
+
+    ``version_no``, when given, reads the codebook snapshot and coding
+    counts/frequency AS OF that version instead of live -- backs "view a
+    previous version" in the version-history UI. ``total_rows`` is left
+    unconditional even then: it counts the coding artifact's own copied
+    submissions/comments, which (unlike ``coding_entries``) never change
+    after Apply Codebook -- there is no delete/move UI for a coding
+    file's rows -- so there is nothing for a version to be "as of" there.
+    ``total_coded``/``code_frequency`` are derived from
+    ``coding_repo.entries_as_of`` (the same as-of primitive
+    ``version_service.diff_coding`` uses) rather than from the live-only
+    ``count_rows``/``code_frequency``, so every field in the response is
+    consistently as-of the same version.
     """
     file_rec = await file_repo.get_owned_file(session, ref, user_id, file_types=("coding",))
-    codes = await version_service.read_codes(session, file_rec.id)
+    codes = await version_service.read_codes(session, file_rec.id, version_no=version_no)
     total_rows = await coding_repo.count_rows(session, file_rec.id)
-    total_coded = await coding_repo.count_rows(session, file_rec.id, only="coded")
-    frequency = await coding_repo.code_frequency(session, file_rec.id)
+    if version_no is None:
+        total_coded = await coding_repo.count_rows(session, file_rec.id, only="coded")
+        frequency = await coding_repo.code_frequency(session, file_rec.id)
+    else:
+        entries = await coding_repo.entries_as_of(session, file_rec.id, version_no)
+        total_coded = len({(e.row_type, e.post_id) for e in entries})
+        counts: dict[str, int] = {}
+        for entry in entries:
+            counts[entry.code] = counts.get(entry.code, 0) + 1
+        frequency = sorted(counts.items(), key=lambda kv: -kv[1])
     return {
         "file": file_rec,
         "codes": codes,
@@ -167,25 +193,34 @@ async def list_coding_rows(
     only: str = "all",
     code: str | None = None,
     q: str | None = None,
+    version_no: int | None = None,
 ) -> dict:
     """One page of a coding file's own rows (coded or not), each with its
-    codes -- backs ``GET /api/coding/{ref}/rows``.
+    codes -- backs ``GET /api/coding/{ref}/rows``. ``version_no`` reads
+    the coding entries as they existed at that historical version.
     """
     file_id = await file_repo.resolve_file_id(session, ref, user_id, file_types=("coding",))
     rows = await coding_repo.list_rows_with_codes(
-        session, file_id, limit=limit, offset=offset, only=only, code=code, q=q
+        session, file_id, limit=limit, offset=offset, only=only, code=code, q=q,
+        version_no=version_no,
     )
-    total = await coding_repo.count_rows(session, file_id, only=only, code=code, q=q)
+    total = await coding_repo.count_rows(
+        session, file_id, only=only, code=code, q=q, version_no=version_no
+    )
     return {"rows": rows, "total": total}
 
 
-async def get_coding_text(session: AsyncSession, user_id: int, ref: str) -> str:
+async def get_coding_text(
+    session: AsyncSession, user_id: int, ref: str, *, version_no: int | None = None
+) -> str:
     """Read-only canonical POST_ID/CODE/EVIDENCE text for a coding file,
     generated fresh from ``coding_entries`` -- backs the Text View tab
-    and ``GET /api/coding/{ref}/text``.
+    and ``GET /api/coding/{ref}/text``. ``version_no``, when given,
+    renders a pinned text export instead of the live version -- see
+    ``coding_repo.render_coding_text``.
     """
     file_id = await file_repo.resolve_file_id(session, ref, user_id, file_types=("coding",))
-    return await coding_repo.render_coding_text(session, file_id)
+    return await coding_repo.render_coding_text(session, file_id, version_no=version_no)
 
 
 # ---------------------------------------------------------------------------
@@ -399,6 +434,7 @@ async def duplicate_coding(
         prompt_meta=source_version.prompt_meta if source_version else None,
     )
     await raw_data_repo.copy_all_rows(session, source_file_id=source_file.id, target_file_id=file_rec.id)
+    await memo_repo.copy_all_memos(session, source_file_id=source_file.id, target_file_id=file_rec.id)
     await coding_repo.copy_entries(
         session, source_file_id=source_file.id, target_file_id=file_rec.id, as_of_version_no=from_version_no
     )
@@ -711,10 +747,29 @@ async def _run_apply_codebook_job(job_id: int, payload: dict) -> dict:
             schemaname=new_schema,
             file_type="coding",
         )
+        # The source data file was read before the (minutes-long) LLM
+        # call and its rows are copied in below -- if it was deleted in
+        # that window the copy would silently produce zero rows, leaving
+        # a coding artifact whose entries point at rows it doesn't have.
+        # Fail the job instead. (A deleted *codebook* is not fatal the
+        # same way: its codes were already read into `codebook_codes`
+        # above, so the snapshot is complete; only its lineage edge is
+        # lost, which `version_service.link_parents` drops on its own.)
+        await file_repo.require_existing_file_ids(session, {source_file_id})
+
         session.add(file_rec)
         await session.flush()
 
         await raw_data_repo.copy_rows_by_id(
+            session,
+            source_file_id=source_file_id,
+            target_file_id=file_rec.id,
+            submission_ids=submission_ids,
+            comment_ids=comment_ids,
+        )
+        # Memos follow their rows, so a note written while filtering is
+        # still there when the same post is read in the coding workspace.
+        await memo_repo.copy_memos_by_id(
             session,
             source_file_id=source_file_id,
             target_file_id=file_rec.id,
@@ -883,14 +938,18 @@ async def _run_recode_items_job(job_id: int, payload: dict) -> dict:
         submissions = []
         if submission_ids:
             result = await session.execute(
-                select(Submission).where(Submission.file_id == coding_file_id, Submission.id.in_(submission_ids))
+                select(Submission).where(
+                    Submission.file_id == coding_file_id, Submission.id.in_(submission_ids), Submission.valid_to.is_(None),
+                )
             )
             submissions = list(result.scalars().all())
 
         comments = []
         if comment_ids:
             result = await session.execute(
-                select(Comment).where(Comment.file_id == coding_file_id, Comment.id.in_(comment_ids))
+                select(Comment).where(
+                    Comment.file_id == coding_file_id, Comment.id.in_(comment_ids), Comment.valid_to.is_(None),
+                )
             )
             comments = list(result.scalars().all())
 

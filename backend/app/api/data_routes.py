@@ -3,11 +3,33 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.auth_dependency import require_user_id
-from backend.app.api.schemas import FilterDataRequest, PostContentsRequest, as_form
+from backend.app.api.schemas import (
+    DuplicateDataRequest,
+    FilterDataRequest,
+    FilterPreviewRequest,
+    ManualFilterRequest,
+    PostContentsRequest,
+    as_form,
+)
 from backend.app.database import get_async_db
+from backend.app.repositories import version_repo
 from backend.app.services import data_service
 
 router = APIRouter()
+
+
+async def _file_info(db: AsyncSession, file_rec) -> dict:
+    head = await version_repo.head_version(db, file_rec.id)
+    return {
+        "id": str(file_rec.id),
+        "schema_name": file_rec.schemaname,
+        "filename": file_rec.filename,
+        "description": file_rec.description,
+        "file_type": file_rec.file_type,
+        "systemprompt": head.system_prompt if head else None,
+        "instructions": head.user_instructions if head else None,
+        "prompt_meta": head.prompt_meta if head else None,
+    }
 
 
 @router.get("/word-count-ranges/")
@@ -28,14 +50,38 @@ async def project_entries(
     schema: str = Query(..., description="File schema name"),
     limit: int = 10,
     offset: int = 0,
+    version_no: int | None = Query(None, description="Read the file AS OF this version instead of live"),
     user_id: int = Depends(require_user_id),
     db: AsyncSession = Depends(get_async_db),
 ) -> JSONResponse:
     """Paginated submissions/comments rows for a file, owned by the
-    authenticated user.
+    authenticated user. ``version_no`` reads the file as it was at that
+    point in its history (time travel over the SCD-2 ranges on
+    ``submissions``/``comments``); omitted, it reads the currently live
+    rows.
     """
-    entries = await data_service.get_file_entries(db, user_id, schema, limit, offset)
+    entries = await data_service.get_file_entries(db, user_id, schema, limit, offset, version_no)
     return JSONResponse(entries)
+
+
+@router.post("/data/{ref}/duplicate")
+async def duplicate_data(
+    ref: str,
+    payload: DuplicateDataRequest,
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
+) -> JSONResponse:
+    """Fork a whole ``raw_data``/``filtered_data`` artifact (its own
+    rows, its lineage) into a brand-new file -- from head by default, or
+    from ``from_version_no`` if given (see
+    ``data_service.duplicate_data``'s docstring). The restore path for
+    data files, matching ``POST /api/coding/{ref}/duplicate`` /
+    ``POST /api/codebook/{ref}/duplicate``.
+    """
+    file_rec = await data_service.duplicate_data(
+        db, user_id, ref, display_name=payload.display_name, from_version_no=payload.from_version_no
+    )
+    return JSONResponse({"message": "Duplicated", "file": await _file_info(db, file_rec)})
 
 
 @router.get("/comments/{submission_id}")
@@ -95,3 +141,67 @@ async def filter_data(
         content_scope=payload.content_scope,
     )
     return JSONResponse({"job_id": job.id, "status": job.status}, status_code=202)
+
+
+@router.post("/filter-preview/")
+async def filter_preview(
+    payload: FilterPreviewRequest,
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
+) -> JSONResponse:
+    """Kick off a background job that runs the AI filter and returns the
+    row ids it would keep, **without creating anything**.
+
+    The assistive half of the filter editor. Unlike ``/filter-data/``,
+    which is the whole operation, this is a suggestion the user can
+    accept, reject or add to before submitting; the rows they have
+    already ruled on are passed in so a repeated run proposes new
+    candidates instead of re-litigating settled ones. A JSON body rather
+    than ``as_form`` because it carries those id lists.
+    """
+    job = await data_service.start_filter_preview_job(
+        db,
+        user_id,
+        database=payload.database,
+        api_key=payload.api_key,
+        model=payload.model,
+        prompt=payload.prompt,
+        min_words=payload.min_words,
+        sample_percentage=payload.sample_percentage,
+        filter_tags=payload.filter_tags,
+        content_scope=payload.content_scope,
+        decided_post_ids=payload.decided_post_ids,
+        decided_comment_ids=payload.decided_comment_ids,
+    )
+    return JSONResponse({"job_id": job.id, "status": job.status}, status_code=202)
+
+
+@router.post("/filtered-data/manual")
+async def create_manual_filtered_data(
+    payload: ManualFilterRequest,
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
+) -> JSONResponse:
+    """Create a ``filtered_data`` artifact from a hand-picked set of rows.
+
+    The submit half of the filter editor. Synchronous, not a job: no LLM
+    call is involved, only the same set-based row copy the AI path ends
+    with -- see ``data_service.create_manual_filtered_data``.
+    """
+    file_rec, counts = await data_service.create_manual_filtered_data(
+        db,
+        user_id,
+        database=payload.database,
+        name=payload.name,
+        description=payload.description,
+        project_id=payload.project_id,
+        post_ids=payload.post_ids,
+        comment_ids=payload.comment_ids,
+    )
+    return JSONResponse(
+        {
+            "message": "Filtered database created",
+            "file": await _file_info(db, file_rec),
+            "counts": counts,
+        }
+    )

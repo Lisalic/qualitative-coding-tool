@@ -155,6 +155,50 @@ class TestGetCodebook:
         )
         assert resp.status_code == 200
 
+    async def test_version_no_reads_an_earlier_version(self, client, session_factory, make_token) -> None:
+        user = await _make_user(session_factory)
+        file_rec = await _make_file(session_factory, user.id, filename="cb", schemaname="proj_asof", file_type="codebook")
+        async with session_factory() as session:
+            await version_service.commit_codebook_version(
+                session, file_id=file_rec.id, author_user_id=user.id, origin="generated", codes=_ONE_CODE,
+            )
+            await version_service.commit_codebook_version(
+                session, file_id=file_rec.id, author_user_id=user.id, origin="edited",
+                codes=[{**_ONE_CODE[0], "name": "Renamed"}],
+            )
+            await session.commit()
+
+        resp_v1 = client.get(
+            "/api/codebook?codebook_id=proj_asof&version_no=1",
+            cookies={"access_token": make_token(sub=str(user.id))},
+        )
+        assert resp_v1.status_code == 200
+        body_v1 = resp_v1.json()
+        assert body_v1["codes"][0]["name"] == "C"
+        assert body_v1["version_no"] == 1
+
+        resp_live = client.get(
+            "/api/codebook?codebook_id=proj_asof",
+            cookies={"access_token": make_token(sub=str(user.id))},
+        )
+        assert resp_live.json()["codes"][0]["name"] == "Renamed"
+        assert resp_live.json()["version_no"] == 2
+
+    async def test_unknown_version_no_returns_404(self, client, session_factory, make_token) -> None:
+        user = await _make_user(session_factory)
+        file_rec = await _make_file(session_factory, user.id, filename="cb", schemaname="proj_asof2", file_type="codebook")
+        async with session_factory() as session:
+            await version_service.commit_codebook_version(
+                session, file_id=file_rec.id, author_user_id=user.id, origin="generated", codes=_ONE_CODE,
+            )
+            await session.commit()
+
+        resp = client.get(
+            "/api/codebook?codebook_id=proj_asof2&version_no=99",
+            cookies={"access_token": make_token(sub=str(user.id))},
+        )
+        assert resp.status_code == 404
+
     async def test_content_missing_in_file_returns_404(self, client, session_factory, make_token) -> None:
         user = await _make_user(session_factory)
         await _make_file(session_factory, user.id, filename="cb", schemaname="proj_a", file_type="codebook")

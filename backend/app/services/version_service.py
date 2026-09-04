@@ -1,11 +1,12 @@
 """Version/commit policy layer on top of ``repositories/version_repo.py``.
 
-Three commit functions, not one polymorphic ``commit()`` -- the payloads
+Four commit functions, not one polymorphic ``commit()`` -- the payloads
 genuinely differ (a blob string, a list of code rows, or nothing at all
-for coding) and every call site already knows statically which kind of
-artifact it's writing. A single dispatching ``commit()`` would collapse
-to a tagged union with an if-chain at every call site anyway; this is
-the anti-speculative-abstraction reading of CLAUDE.md, not an oversight.
+for coding/data) and every call site already knows statically which kind
+of artifact it's writing. A single dispatching ``commit()`` would
+collapse to a tagged union with an if-chain at every call site anyway;
+this is the anti-speculative-abstraction reading of CLAUDE.md, not an
+oversight.
 
 **Sealing, in one rule: every commit is sealed the instant it's
 created.** There is no unsealed "draft" state -- ``sealed_at`` is
@@ -74,9 +75,10 @@ from backend.app.core.codebook_delta import apply_delta, encode_delta
 from backend.app.core.codebook_diff import CodebookDiff, diff_codes
 from backend.app.core.codebook_render import CodeRow, render_codes_to_markdown
 from backend.app.core.coding_diff import CodingDiff, diff_coding_entries
+from backend.app.core.data_diff import DataDiff, diff_row_ids
 from backend.app.core.exceptions import NotFoundError
 from backend.app.database import File
-from backend.app.repositories import coding_repo, file_repo, version_repo
+from backend.app.repositories import coding_repo, file_repo, raw_data_repo, version_repo
 from backend.app.versioning_models import (
     RELATION_FORKED_FROM,
     ROLE_FORK_ORIGIN,
@@ -438,6 +440,55 @@ async def commit_coding_version(
     return version
 
 
+async def commit_data_version(
+    session: AsyncSession,
+    *,
+    file_id: int,
+    author_user_id: int | None,
+    origin: str,
+    message: str | None = None,
+    job_id: int | None = None,
+    model: str | None = None,
+    system_prompt: str | None = None,
+    user_instructions: str | None = None,
+    prompt_meta: dict | None = None,
+    parents: Sequence[EdgeSpec] = (),
+    now: datetime | None = None,
+) -> ArtifactVersion:
+    """Commit for a ``raw_data``/``filtered_data`` artifact's rows.
+    Shaped like ``commit_coding_version``: it allocates the next version
+    number and returns it; the caller stamps the ``submissions``/
+    ``comments`` rows it writes with ``valid_from``/``valid_to =
+    version.version_no`` (see ``repositories/raw_data_repo.py``). There
+    is no ``content``/``codes`` payload here at all -- a data file's rows
+    are a range table, not a per-version snapshot, exactly like
+    ``coding_entries`` (see that function's docstring for the same
+    asymmetry).
+
+    Deliberately no ``content_hash`` and therefore **no no-op
+    suppression**: hashing a potentially enormous row set on every
+    mutation isn't worth it. Instead every caller is expected to only
+    call this when a mutation actually changed something (e.g. a
+    delete/move with a non-zero affected-row count) -- an empty-result
+    caller should skip the commit entirely rather than relying on this
+    function to detect the no-op.
+    """
+    now = _now(now)
+    version = await _next_version(
+        session, file_id, author_user_id=author_user_id, origin=origin, job_id=job_id,
+        model=model, system_prompt=system_prompt,
+        user_instructions=user_instructions, prompt_meta=prompt_meta, now=now,
+    )
+    if message is not None:
+        version.message = message
+    await session.flush()
+
+    if parents:
+        await link_parents(session, file_id, parents)
+
+    return version
+
+
 # ---------------------------------------------------------------------------
 # Reads
 # ---------------------------------------------------------------------------
@@ -539,6 +590,25 @@ async def diff_coding(session: AsyncSession, file_id: int, *, from_no: int, to_n
     from_entries = await coding_repo.entries_as_of(session, file_id, from_no)
     to_entries = await coding_repo.entries_as_of(session, file_id, to_no)
     return diff_coding_entries(from_entries, to_entries)
+
+
+async def diff_data(session: AsyncSession, file_id: int, *, from_no: int, to_no: int) -> DataDiff:
+    """Content diff between two versions of a ``raw_data``/
+    ``filtered_data`` artifact's own ``submissions``/``comments`` rows --
+    rows added/removed -- as distinct from ``diff_codebook``'s structural
+    codebook diff (meaningless for a file with no codebook) and
+    ``diff_coding``'s classification diff (meaningless for a file with
+    no ``coding_entries``). Only meaningful for ``raw_data``/
+    ``filtered_data``; the route only calls this for those two types.
+    """
+    from_sub_ids = await raw_data_repo.row_ids_as_of(session, file_id, version_no=from_no, table="submissions")
+    to_sub_ids = await raw_data_repo.row_ids_as_of(session, file_id, version_no=to_no, table="submissions")
+    from_com_ids = await raw_data_repo.row_ids_as_of(session, file_id, version_no=from_no, table="comments")
+    to_com_ids = await raw_data_repo.row_ids_as_of(session, file_id, version_no=to_no, table="comments")
+    return diff_row_ids(
+        from_submission_ids=from_sub_ids, to_submission_ids=to_sub_ids,
+        from_comment_ids=from_com_ids, to_comment_ids=to_com_ids,
+    )
 
 
 # ---------------------------------------------------------------------------

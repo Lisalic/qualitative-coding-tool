@@ -311,33 +311,61 @@ async def code_summary_with_samples(
 
 
 def _rows_union_subquery(file_id: int):
-    """One row per submission/comment owned by ``file_id``, in a common
-    ``(row_type, item_id, title, body)`` shape -- ``title`` is ``NULL``
-    for a comment. Kept as a reusable subquery so listing and counting
-    apply the exact same filters.
+    """One row per LIVE submission/comment owned by ``file_id`` (see
+    ``storage_models.py``'s ``Submission``/``Comment`` SCD-2 docstrings),
+    in a common ``(row_type, item_id, title, body)`` shape -- ``title``
+    is ``NULL`` for a comment. Kept as a reusable subquery so listing and
+    counting apply the exact same filters. A coding artifact's own rows
+    are copied in once at Apply Codebook time and never edited/deleted
+    afterward in practice, so this filter is defensive consistency with
+    ``raw_data_repo.py`` rather than something that currently changes
+    any real result.
     """
     submissions_select = select(
         literal(SUBMISSION).label("row_type"),
         Submission.id.label("item_id"),
         Submission.title.label("title"),
         Submission.selftext.label("body"),
-    ).where(Submission.file_id == file_id)
+    ).where(Submission.file_id == file_id, Submission.valid_to.is_(None))
     comments_select = select(
         literal(COMMENT).label("row_type"),
         Comment.id.label("item_id"),
         null().label("title"),
         Comment.body.label("body"),
-    ).where(Comment.file_id == file_id)
+    ).where(Comment.file_id == file_id, Comment.valid_to.is_(None))
     return union_all(submissions_select, comments_select).subquery("coding_rows")
 
 
-def _apply_row_filters(query, rows, file_id: int, *, only: RowFilter, code: str | None, q: str | None):
+def _entry_version_condition(file_id: int, version_no: int | None):
+    conditions = [CodingEntry.file_id == file_id]
+    if version_no is None:
+        conditions.append(CodingEntry.valid_to.is_(None))
+    else:
+        conditions.extend(
+            [
+                CodingEntry.valid_from <= version_no,
+                or_(CodingEntry.valid_to.is_(None), CodingEntry.valid_to >= version_no),
+            ]
+        )
+    return and_(*conditions)
+
+
+def _apply_row_filters(
+    query,
+    rows,
+    file_id: int,
+    *,
+    only: RowFilter,
+    code: str | None,
+    q: str | None,
+    version_no: int | None = None,
+):
+    entry_scope = _entry_version_condition(file_id, version_no)
     has_coding = exists().where(
         and_(
-            CodingEntry.file_id == file_id,
+            entry_scope,
             CodingEntry.row_type == rows.c.row_type,
             CodingEntry.post_id == rows.c.item_id,
-            CodingEntry.valid_to.is_(None),
         )
     )
     if only == "coded":
@@ -349,11 +377,10 @@ def _apply_row_filters(query, rows, file_id: int, *, only: RowFilter, code: str 
         query = query.where(
             exists().where(
                 and_(
-                    CodingEntry.file_id == file_id,
+                    entry_scope,
                     CodingEntry.row_type == rows.c.row_type,
                     CodingEntry.post_id == rows.c.item_id,
                     CodingEntry.code == code,
-                    CodingEntry.valid_to.is_(None),
                 )
             )
         )
@@ -372,13 +399,17 @@ async def count_rows(
     only: RowFilter = "all",
     code: str | None = None,
     q: str | None = None,
+    version_no: int | None = None,
 ) -> int:
     """Count of a coding artifact's own submissions+comments matching the
     same ``only``/``code``/``q`` filters ``list_rows_with_codes`` applies
     -- used to compute total pages for View Coding's row list.
     """
     rows = _rows_union_subquery(file_id)
-    query = _apply_row_filters(select(func.count()).select_from(rows), rows, file_id, only=only, code=code, q=q)
+    query = _apply_row_filters(
+        select(func.count()).select_from(rows), rows, file_id,
+        only=only, code=code, q=q, version_no=version_no,
+    )
     result = await session.execute(query)
     return result.scalar() or 0
 
@@ -392,6 +423,7 @@ async def list_rows_with_codes(
     only: RowFilter = "all",
     code: str | None = None,
     q: str | None = None,
+    version_no: int | None = None,
 ) -> list[dict]:
     """One page of a coding artifact's own submissions+comments -- every
     row it owns, coded or not -- each with its list of ``{code, quote,
@@ -401,7 +433,8 @@ async def list_rows_with_codes(
     ``only`` narrows to ``"coded"``/``"uncoded"`` rows; ``code`` narrows to
     rows carrying that exact code; ``q`` is a case-insensitive substring
     match against title/body. Ordered by ``(row_type, item_id)`` for a
-    stable, deterministic page boundary.
+    stable, deterministic page boundary. ``version_no`` applies the SCD-2
+    validity range to both filtering and returned code evidence.
     """
     rows = _rows_union_subquery(file_id)
     query = _apply_row_filters(
@@ -411,6 +444,7 @@ async def list_rows_with_codes(
         only=only,
         code=code,
         q=q,
+        version_no=version_no,
     ).order_by(rows.c.row_type, rows.c.item_id).limit(limit).offset(offset)
 
     page_rows = (await session.execute(query)).all()
@@ -420,7 +454,11 @@ async def list_rows_with_codes(
     keys = [(r.row_type, r.item_id) for r in page_rows]
     entries_condition = or_(*[and_(CodingEntry.row_type == rt, CodingEntry.post_id == pid) for rt, pid in keys])
     entries = (
-        await session.execute(_live(select(CodingEntry).where(CodingEntry.file_id == file_id, entries_condition)))
+        await session.execute(
+            select(CodingEntry).where(
+                _entry_version_condition(file_id, version_no), entries_condition
+            )
+        )
     ).scalars().all()
 
     codes_by_key: dict[tuple[str, str], list[dict]] = {}
@@ -449,7 +487,7 @@ async def list_rows_with_codes(
     ]
 
 
-async def render_coding_text(session: AsyncSession, file_id: int) -> str:
+async def render_coding_text(session: AsyncSession, file_id: int, *, version_no: int | None = None) -> str:
     """Canonical ``POST_ID:``/``CODE:``/``NOTES:``/``EVIDENCE:`` text for
     the read-only Text View, generated from ``coding_entries`` rows --
     the sole source of truth for a coding artifact's classification, so
@@ -460,9 +498,23 @@ async def render_coding_text(session: AsyncSession, file_id: int) -> str:
     ``CODE:``/``EVIDENCE:`` blocks in a row -- simplest lossless rendering,
     and consistent with how ``list_rows_with_codes`` already returns one
     entry per quote rather than merging them.
+
+    ``version_no``, when given, renders the text AS OF that version
+    (the SCD-2 range invariant ``valid_from <= version_no <=
+    coalesce(valid_to, infinity)``, same condition ``entries_as_of``
+    uses) instead of the current LIVE set.
     """
+    condition = (
+        and_(
+            CodingEntry.valid_from <= version_no,
+            or_(CodingEntry.valid_to.is_(None), CodingEntry.valid_to >= version_no),
+        )
+        if version_no is not None
+        else CodingEntry.valid_to.is_(None)
+    )
     result = await session.execute(
-        _live(select(CodingEntry).where(CodingEntry.file_id == file_id))
+        select(CodingEntry)
+        .where(CodingEntry.file_id == file_id, condition)
         .order_by(CodingEntry.row_type, CodingEntry.post_id, CodingEntry.code)
     )
     entries = result.scalars().all()

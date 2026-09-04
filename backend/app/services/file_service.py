@@ -21,18 +21,19 @@ import os
 import secrets
 import tempfile
 
-from sqlalchemy import delete, func, or_, select, text
+from sqlalchemy import delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.exceptions import ForbiddenError, ValidationAppError
 from backend.app.database import File, FileTable, async_link_file_to_project
-from backend.app.repositories import file_repo, project_repo, raw_data_repo, version_repo
+from backend.app.repositories import file_repo, memo_repo, project_repo, raw_data_repo, version_repo
 from backend.app.services import version_service
 from backend.app.services.version_service import EdgeSpec
 from backend.app.storage_models import Comment, CodingEntry, Submission
 from backend.app.versioning_models import (
     ArtifactVersion,
     CodebookCode,
+    ORIGIN_EDITED,
     ORIGIN_IMPORTED,
     RELATION_MERGED_FROM,
     ROLE_MERGE_INPUT,
@@ -172,12 +173,13 @@ async def upload_zst(
     session.add(file_rec)
     await session.flush()
 
-    # raw_data has no artifact content of its own (its "content" is the
-    # submissions/comments rows streamed in below) -- an empty v1 exists
-    # purely so downstream derivation edges (filtered_data, codebook,
-    # coding) have a parent_version_id to pin.
-    await version_service.commit_blob_version(
-        session, file_id=file_rec.id, author_user_id=user_id, origin=ORIGIN_IMPORTED, content="",
+    # raw_data's actual content is the submissions/comments rows
+    # streamed in below (a range table, not a blob) -- this v1 exists so
+    # downstream derivation edges (filtered_data, codebook, coding) have
+    # a parent_version_id to pin, and so later deletes/moves have a v1
+    # to be versioned against.
+    await version_service.commit_data_version(
+        session, file_id=file_rec.id, author_user_id=user_id, origin=ORIGIN_IMPORTED,
     )
 
     if project_id is not None:
@@ -369,13 +371,18 @@ async def merge_databases(
     if not name or not name.strip():
         raise ValidationAppError("Database name is required")
 
+    # `.first()`, not `scalar_one_or_none()`: `filename` isn't unique, so
+    # a user who already has two files sharing `name` would have hit
+    # `MultipleResultsFound` (an unhandled 500) instead of this check's
+    # own 400 -- the name-collision guard must not itself break on a
+    # name collision.
     existing = await session.execute(
-        select(File).where(
+        select(File.id).where(
             File.user_id == user_id,
             or_(File.filename == name, File.schemaname == name),
-        )
+        ).limit(1)
     )
-    if existing.scalar_one_or_none() is not None:
+    if existing.scalars().first() is not None:
         raise ValidationAppError(f"A file with name '{name}' already exists")
 
     schema_name = f"proj_{secrets.token_hex(6)}"
@@ -390,8 +397,8 @@ async def merge_databases(
     session.add(file_rec)
     await session.flush()
 
-    await version_service.commit_blob_version(
-        session, file_id=file_rec.id, author_user_id=user_id, origin=ORIGIN_IMPORTED, content="",
+    await version_service.commit_data_version(
+        session, file_id=file_rec.id, author_user_id=user_id, origin=ORIGIN_IMPORTED,
     )
 
     seen_submission_ids: set[str] = set()
@@ -464,9 +471,9 @@ async def delete_database(session: AsyncSession, user_id: int, file_ref: str) ->
     ``file_id``: ``artifact_edges`` (as either parent or child),
     ``artifact_versions``/``codebook_codes``, ``FileTable`` metadata, and
     its rows in every fixed content table (``submissions``/``comments``/
-    ``coding_entries`` -- a given file only ever has rows in the subset
-    matching its ``file_type``, so deleting from all of them is simplest
-    and harmless).
+    ``coding_entries``/``row_memos`` -- a given file only ever has rows
+    in the subset matching its ``file_type``, so deleting from all of
+    them is simplest and harmless).
 
     Ordering matters for the new tables in a way it didn't for the old
     single ``FileDependency`` table: a FORK's v1 ``ArtifactVersion`` can
@@ -476,6 +483,18 @@ async def delete_database(session: AsyncSession, user_id: int, file_ref: str) ->
     deleted, or the FK raises. Edges must go before versions (edges FK
     into versions), and codes must go before versions too (codes FK into
     versions).
+
+    **What survives.** Artifacts derived from this one are not touched
+    and stay fully readable: every derived type owns a complete copy of
+    what it needs (a ``coding`` file carries its own codebook snapshot,
+    its own submissions/comments and its own ``coding_entries``; a
+    summary/comparison carries its own markdown blob), so deleting a
+    codebook cannot compromise a coding produced from it. What they lose
+    is the recorded *lineage* -- the ``artifact_edges`` rows naming this
+    file as their parent go with it, because ``parent_file_id`` is a
+    NOT NULL foreign key with nothing sensible to point at afterwards.
+    ``ProjectFilesSection.jsx`` names the affected artifacts in the
+    delete confirmation so that is a decision rather than a surprise.
 
     Per the plan, this **replaces** the old ``DROP SCHEMA ... CASCADE`` --
     it no longer touches the old dynamic Postgres schema at all (left in
@@ -497,6 +516,7 @@ async def delete_database(session: AsyncSession, user_id: int, file_ref: str) ->
     await session.execute(delete(Submission).where(Submission.file_id == file_id))
     await session.execute(delete(Comment).where(Comment.file_id == file_id))
     await session.execute(delete(CodingEntry).where(CodingEntry.file_id == file_id))
+    await memo_repo.delete_memos_for_file(session, file_id)
     await session.delete(file_rec)
     await session.commit()
 
@@ -504,40 +524,71 @@ async def delete_database(session: AsyncSession, user_id: int, file_ref: str) ->
 
 
 # ---------------------------------------------------------------------------
-# delete_row
+# delete_rows
 # ---------------------------------------------------------------------------
 
 
-async def delete_row(session: AsyncSession, user_id: int, *, schemaname: str, table: str, row_id: str) -> int:
-    """Delete one row from the fixed ``submissions``/``comments`` table
-    (filtered by ``file_id`` AND ``id``), replacing the old
-    ``DELETE FROM "<schema>"."<table>" WHERE id = :id`` raw SQL. Returns
-    the deleted row count (0 or 1).
+async def delete_rows(session: AsyncSession, user_id: int, *, schemaname: str, table: str, row_ids: list[str]) -> int:
+    """Close (SCD-2 ``valid_to``, never a hard ``DELETE``) the given
+    rows in ``submissions``/``comments`` for one owned file, minting a
+    single ``artifact_versions`` row for the whole batch via
+    ``version_service.commit_data_version`` -- deleting 12 rows in one
+    call is one version, not twelve (mirrors
+    ``coding_repo.replace_entries_for_items``'s "one save, one version"
+    policy for ``coding_entries``).
+
+    Replaces the old single-row ``delete_row`` (hard ``DELETE FROM
+    "<schema>"."<table>" WHERE id = :id`` raw SQL, no version, no
+    trail) -- per CLAUDE.md's early-prototyping/no-legacy-compatibility
+    rule, this is a straight replacement, not an addition. Returns the
+    number of rows actually closed (0 if none matched, in which case no
+    version is minted at all -- ``commit_data_version`` has no no-op
+    suppression of its own, so this checks BEFORE minting one rather
+    than minting-then-rolling-back: a session-wide rollback would also
+    discard anything else the caller had already staged on the same
+    session, which ``version_service``'s own module docstring flags as
+    exactly the hazard to avoid).
     """
     schema = (schemaname or "").strip()
     if schema.endswith(".db"):
         schema = schema[:-3]
+    row_ids = list(row_ids or [])
+    if not row_ids:
+        return 0
 
     file_rec = await _get_owned_file_by_schemaname(session, schema, user_id)
     file_id = file_rec.id
     model = Submission if table == "submissions" else Comment
+    match_condition = (model.file_id == file_id, model.id.in_(row_ids), model.valid_to.is_(None))
 
-    result = await session.execute(delete(model).where(model.file_id == file_id, model.id == row_id))
-    deleted = int(result.rowcount or 0)
+    matching = (
+        await session.execute(select(func.count()).select_from(model).where(*match_condition))
+    ).scalar() or 0
+    if matching == 0:
+        return 0
+
+    version = await version_service.commit_data_version(
+        session, file_id=file_id, author_user_id=user_id, origin=ORIGIN_EDITED,
+        message=f"Deleted {matching} {table}",
+    )
+    result = await session.execute(
+        update(model).where(*match_condition).values(valid_to=version.version_no - 1)
+    )
+    closed = int(result.rowcount or 0)
     await session.commit()
 
     # Best-effort FileTable row-count refresh -- non-fatal, matching the
     # old handler's own "continue even if metadata update fails" comment.
     try:
         count_result = await session.execute(
-            select(func.count()).select_from(model).where(model.file_id == file_id)
+            select(func.count()).select_from(model).where(model.file_id == file_id, model.valid_to.is_(None))
         )
         await _upsert_file_table_count(session, file_id, table, int(count_result.scalar() or 0))
         await session.commit()
     except Exception:
         await session.rollback()
 
-    return deleted
+    return closed
 
 
 # ---------------------------------------------------------------------------
@@ -554,10 +605,20 @@ async def move_rows(
     table: str,
     row_ids: list,
 ) -> int:
-    """Move (copy then delete-from-source) specific rows between two
-    owned files' fixed tables, via ``raw_data_repo.copy_rows_by_id``
-    (set-based) instead of the old per-id ``SELECT``+``INSERT`` Python
-    loop. Returns the moved row count.
+    """Move (copy then close-in-source, never hard-delete) specific rows
+    between two owned files' fixed tables, via
+    ``raw_data_repo.copy_rows_by_id`` (set-based) instead of the old
+    per-id ``SELECT``+``INSERT`` Python loop. Mints one
+    ``artifact_versions`` row on EACH side (target gets the rows first,
+    so the copy can stamp them with the target's own new version number;
+    source then closes its copies under its own new version) -- both
+    sides' history says something happened, even though neither side's
+    own row *content* changed shape. A pre-check for "any source row
+    actually matches" runs BEFORE either version is minted, so a
+    no-match call touches no version history at all rather than minting
+    then rolling back (a session-wide rollback would also discard
+    anything else the caller had staged -- see ``delete_rows``'s
+    docstring for the same reasoning). Returns the moved row count.
     """
     source = (source_schema or "").strip()
     target = (target_schema or "").strip()
@@ -570,25 +631,57 @@ async def move_rows(
     file_tgt = await _get_owned_file_by_schemaname(session, target, user_id)
     model = Submission if table == "submissions" else Comment
 
-    id_kwarg = {"submission_ids": row_ids} if table == "submissions" else {"comment_ids": row_ids}
-    counts = await raw_data_repo.copy_rows_by_id(
-        session, source_file_id=file_src.id, target_file_id=file_tgt.id, **id_kwarg
-    )
-    moved = counts["submissions"] if table == "submissions" else counts["comments"]
-
-    if moved == 0:
+    matching = (
+        await session.execute(
+            select(func.count()).select_from(model).where(
+                model.file_id == file_src.id, model.id.in_(row_ids), model.valid_to.is_(None)
+            )
+        )
+    ).scalar() or 0
+    if matching == 0:
         return 0
 
-    await session.execute(delete(model).where(model.file_id == file_src.id, model.id.in_(row_ids)))
+    target_version = await version_service.commit_data_version(
+        session, file_id=file_tgt.id, author_user_id=user_id, origin=ORIGIN_EDITED,
+        message=f"Received {matching} {table} from {file_src.filename}",
+    )
+
+    id_kwarg = {"submission_ids": row_ids} if table == "submissions" else {"comment_ids": row_ids}
+    counts = await raw_data_repo.copy_rows_by_id(
+        session, source_file_id=file_src.id, target_file_id=file_tgt.id,
+        target_version_no=target_version.version_no, **id_kwarg,
+    )
+    moved = counts["submissions"] if table == "submissions" else counts["comments"]
+    # Memos travel with their rows (see `repositories/memo_repo.py`). The
+    # source's copies are left in place rather than deleted: the source
+    # row itself is only soft-closed below, so its memo stays readable in
+    # that file's history exactly as the row does.
+    await memo_repo.copy_memos_by_id(
+        session, source_file_id=file_src.id, target_file_id=file_tgt.id, **id_kwarg,
+    )
+
+    source_version = await version_service.commit_data_version(
+        session, file_id=file_src.id, author_user_id=user_id, origin=ORIGIN_EDITED,
+        message=f"Moved {moved} {table} to {file_tgt.filename}",
+    )
+    await session.execute(
+        update(model)
+        .where(model.file_id == file_src.id, model.id.in_(row_ids), model.valid_to.is_(None))
+        .values(valid_to=source_version.version_no - 1)
+    )
 
     # Best-effort FileTable row-count refresh for both sides -- non-fatal,
     # matching the old handler's own try/except-and-continue behavior.
     try:
         src_count = (
-            await session.execute(select(func.count()).select_from(model).where(model.file_id == file_src.id))
+            await session.execute(
+                select(func.count()).select_from(model).where(model.file_id == file_src.id, model.valid_to.is_(None))
+            )
         ).scalar() or 0
         tgt_count = (
-            await session.execute(select(func.count()).select_from(model).where(model.file_id == file_tgt.id))
+            await session.execute(
+                select(func.count()).select_from(model).where(model.file_id == file_tgt.id, model.valid_to.is_(None))
+            )
         ).scalar() or 0
         await _upsert_file_table_count(session, file_src.id, table, int(src_count))
         await _upsert_file_table_count(session, file_tgt.id, table, int(tgt_count))

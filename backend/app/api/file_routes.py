@@ -5,6 +5,7 @@ from fastapi import APIRouter, File as FastAPIFile, HTTPException, UploadFile, F
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.api.schemas import DeleteRowsRequest
 from backend.app.core.auth_dependency import optional_user_id, require_user_id
 from backend.app.core.exceptions import AppError
 from backend.app.database import get_async_db
@@ -158,27 +159,33 @@ async def delete_database(
     return JSONResponse({"message": f"File '{filename}' deleted"})
 
 
-@router.post("/delete-row/")
-async def delete_row(
-    schemaname: str = Form(...),
-    table: str = Form(...),
-    row_id: str = Form(...),
+@router.post("/delete-rows/")
+async def delete_rows(
+    payload: DeleteRowsRequest,
     user_id: int = Depends(require_user_id),
     db: AsyncSession = Depends(get_async_db),
 ):
-    """Delete a row from submissions or comments table."""
-    schema = (schemaname or "").strip()
+    """Close (soft-delete) one or more rows from a file's submissions or
+    comments table, minting a single version for the whole batch --
+    replaces the old single-row ``/delete-row/`` (hard delete, no
+    version, and a request-shape bug: the frontend posted ``schema`` but
+    this route used to declare ``schemaname``, a mismatch the tests
+    never caught -- see ``file_service.delete_rows``'s docstring).
+    """
+    schema = (payload.schema_name or "").strip()
     if schema.endswith('.db'):
         schema = schema[:-3]
 
     if not schema or not schema.startswith('proj_'):
         return JSONResponse({"error": "Invalid file schema"}, status_code=400)
 
-    if table not in ("submissions", "comments"):
+    if payload.table not in ("submissions", "comments"):
         return JSONResponse({"error": "Invalid table"}, status_code=400)
 
     try:
-        deleted = await file_service.delete_row(db, user_id, schemaname=schema, table=table, row_id=row_id)
+        deleted = await file_service.delete_rows(
+            db, user_id, schemaname=schema, table=payload.table, row_ids=payload.row_ids
+        )
     except AppError:
         raise
     except Exception as exc:

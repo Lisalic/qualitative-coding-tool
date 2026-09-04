@@ -66,6 +66,25 @@ def route_backed_by_sqlite_jobs(async_sqlite_engine, monkeypatch):
         fastapi_app.dependency_overrides.pop(get_async_db, None)
 
 
+async def _ensure_user(SessionLocal, user_id: int) -> None:
+    """Insert the ``users`` row a fabricated ``user_id`` stands for, if
+    it isn't there yet. The fixtures enforce foreign keys (see
+    ``tests/conftest.py::_enable_sqlite_foreign_keys``), so a ``File``
+    owned by a user id with no ``users`` row is rejected here exactly as
+    it would be by Postgres.
+    """
+    from sqlalchemy import select
+
+    from backend.app.database import User
+
+    async with SessionLocal() as session:
+        existing = await session.execute(select(User.id).where(User.id == user_id))
+        if existing.scalars().first() is not None:
+            return
+        session.add(User(id=user_id, email=f"user{user_id}@example.com", password="hash"))
+        await session.commit()
+
+
 async def _make_file(SessionLocal, user_id: int, *, file_type: str = "raw_data", submissions=None, comments=None):
     """Insert a ``File`` (plus optional ``Submission``/``Comment`` rows)
     directly via the ORM, owned by ``user_id`` -- no real upload pipeline
@@ -76,6 +95,7 @@ async def _make_file(SessionLocal, user_id: int, *, file_type: str = "raw_data",
     from backend.app.database import File
     from backend.app.storage_models import Comment, Submission
 
+    await _ensure_user(SessionLocal, user_id)
     async with SessionLocal() as session:
         file_rec = File(
             user_id=user_id,
@@ -379,6 +399,133 @@ class TestFilterDataKickoff:
         assert isinstance(body["job_id"], int)
 
 
+class TestFilterPreviewGuards:
+    """``/api/filter-preview/`` is the filter editor's assistive AI run:
+    same guards as ``/filter-data/``, but a JSON body (it carries id
+    lists) and a job whose result is ids rather than an artifact.
+    """
+
+    def test_requires_auth(self, client) -> None:
+        resp = client.post(
+            "/api/filter-preview/",
+            json={"api_key": "k", "database": "proj_a", "model": "m"},
+        )
+        assert resp.status_code == 401
+
+    def test_non_proj_database_returns_422(self, client, auth_cookies) -> None:
+        resp = client.post(
+            "/api/filter-preview/",
+            json={"api_key": "k", "database": "not_proj", "model": "m"},
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 422
+
+    def test_missing_model_returns_422(self, client, auth_cookies) -> None:
+        resp = client.post(
+            "/api/filter-preview/",
+            json={"api_key": "k", "database": "proj_a"},
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 422
+
+    def test_unowned_database_returns_404(self, client, override_async_db, auth_cookies) -> None:
+        resp = client.post(
+            "/api/filter-preview/",
+            json={"api_key": "k", "database": "proj_missing", "model": "m"},
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 404
+
+    async def test_valid_kickoff_returns_202_with_job_id(
+        self, client, route_backed_by_sqlite_jobs, make_token
+    ) -> None:
+        file_rec = await _make_file(
+            route_backed_by_sqlite_jobs,
+            user_id=1,
+            submissions=[{"id": "s1", "title": "t", "selftext": "x", "word_count": 1}],
+        )
+        resp = client.post(
+            "/api/filter-preview/",
+            json={
+                "api_key": "k",
+                "database": file_rec.schemaname,
+                "model": "m",
+                "decided_post_ids": ["s1"],
+            },
+            cookies={"access_token": make_token(sub="1")},
+        )
+        assert resp.status_code == 202
+        body = resp.json()
+        assert body["status"] == "pending"
+        assert isinstance(body["job_id"], int)
+
+
+class TestManualFilterRoute:
+    """``POST /api/filtered-data/manual`` -- the filter editor's submit.
+    Synchronous, since composing the artifact involves no LLM call.
+    """
+
+    def test_requires_auth(self, client) -> None:
+        resp = client.post(
+            "/api/filtered-data/manual",
+            json={"database": "proj_a", "name": "n", "post_ids": ["s1"]},
+        )
+        assert resp.status_code == 401
+
+    def test_empty_selection_returns_422(self, client, auth_cookies) -> None:
+        resp = client.post(
+            "/api/filtered-data/manual",
+            json={"database": "proj_a", "name": "n", "post_ids": [], "comment_ids": []},
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 422
+
+    def test_missing_name_returns_422(self, client, auth_cookies) -> None:
+        resp = client.post(
+            "/api/filtered-data/manual",
+            json={"database": "proj_a", "post_ids": ["s1"]},
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 422
+
+    def test_unowned_database_returns_404(self, client, override_async_db, auth_cookies) -> None:
+        resp = client.post(
+            "/api/filtered-data/manual",
+            json={"database": "proj_missing", "name": "n", "post_ids": ["s1"]},
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 404
+
+    async def test_creates_the_file_and_returns_it(
+        self, client, route_backed_by_sqlite_jobs, make_token
+    ) -> None:
+        file_rec = await _make_file(
+            route_backed_by_sqlite_jobs,
+            user_id=1,
+            submissions=[
+                {"id": "s1", "title": "t1", "selftext": "x", "word_count": 1},
+                {"id": "s2", "title": "t2", "selftext": "x", "word_count": 1},
+            ],
+        )
+        resp = client.post(
+            "/api/filtered-data/manual",
+            json={
+                "database": file_rec.schemaname,
+                "name": "hand picked",
+                "description": "chosen by hand",
+                "post_ids": ["s1"],
+            },
+            cookies={"access_token": make_token(sub="1")},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["message"] == "Filtered database created"
+        assert body["file"]["filename"] == "hand picked"
+        assert body["file"]["file_type"] == "filtered_data"
+        assert body["file"]["systemprompt"] is None
+        assert body["counts"]["submissions"] == 1
+
+
 # ---------------------------------------------------------------------------
 # codebook_routes.py -- generate-codebook / compare-codebooks
 #
@@ -426,6 +573,7 @@ async def _make_codebook_file(SessionLocal, user_id: int, *, file_type: str = "r
 
     from backend.app.database import File
 
+    await _ensure_user(SessionLocal, user_id)
     async with SessionLocal() as session:
         file_rec = File(
             user_id=user_id,
@@ -597,7 +745,7 @@ class TestGetSummaryFile:
         assert resp.status_code == 404
 
     def test_cannot_read_another_users_summary(
-        self, client, override_async_db, make_token
+        self, client, override_async_db, default_user, make_token
     ) -> None:
         # Save a summary as user 1, then confirm user 2 can't fetch it by
         # schemaname -- proves get_summary_file is ownership-scoped, not
@@ -615,7 +763,9 @@ class TestGetSummaryFile:
         )
         assert resp.status_code == 404
 
-    def test_owner_can_read_own_summary(self, client, override_async_db, make_token) -> None:
+    def test_owner_can_read_own_summary(
+        self, client, override_async_db, default_user, make_token
+    ) -> None:
         save_resp = client.post(
             "/api/save-summary/",
             data={"content": "my content", "name": "mine"},

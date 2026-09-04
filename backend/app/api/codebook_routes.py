@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,36 +37,44 @@ def _code_out(code) -> dict:
 @router.get("/codebook")
 async def get_codebook(
     codebook_id: str = None,
+    version_no: int | None = Query(None, description="Read the codebook AS OF this version instead of head"),
     user_id: int = Depends(require_user_id),
     db: AsyncSession = Depends(get_async_db),
 ) -> JSONResponse:
-    """Return a codebook's current structured code rows, or a codebook
+    """Return a codebook's structured code rows, or a codebook
     comparison's markdown content, owned by the authenticated user.
+    ``version_no`` reads the file AS OF that version instead of head --
+    backs "view a previous version" in the version-history UI.
     """
     file_rec = await codebook_service.get_codebook(db, user_id, codebook_id)
-    head = await version_repo.head_version(db, file_rec.id)
-    if head is None:
-        return JSONResponse({"error": "Codebook content not found in file"}, status_code=404)
+    version = (
+        await version_repo.get_version_by_no(db, file_rec.id, version_no)
+        if version_no is not None
+        else await version_repo.head_version(db, file_rec.id)
+    )
+    if version is None:
+        message = f"No version {version_no} for this codebook" if version_no is not None else "Codebook content not found in file"
+        return JSONResponse({"error": message}, status_code=404)
 
     if file_rec.file_type == "codebook_comparison":
         return JSONResponse(
             {
-                "codebook_comparison": head.content or "",
-                "systemprompt": head.system_prompt,
-                "instructions": head.user_instructions,
-                "prompt_meta": head.prompt_meta,
-                "version_no": head.version_no,
+                "codebook_comparison": version.content or "",
+                "systemprompt": version.system_prompt,
+                "instructions": version.user_instructions,
+                "prompt_meta": version.prompt_meta,
+                "version_no": version.version_no,
             }
         )
 
-    codes = await version_service.read_codes(db, file_rec.id)
+    codes = await version_service.read_codes(db, file_rec.id, version_no=version.version_no)
     return JSONResponse(
         {
             "codes": [_code_out(c) for c in codes],
-            "systemprompt": head.system_prompt,
-            "instructions": head.user_instructions,
-            "prompt_meta": head.prompt_meta,
-            "version_no": head.version_no,
+            "systemprompt": version.system_prompt,
+            "instructions": version.user_instructions,
+            "prompt_meta": version.prompt_meta,
+            "version_no": version.version_no,
         }
     )
 

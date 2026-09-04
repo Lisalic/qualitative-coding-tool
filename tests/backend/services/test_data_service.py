@@ -165,7 +165,41 @@ class TestGetFileEntries:
 
             entries = await data_service.get_file_entries(session, user.id, file_rec.schemaname, limit=10, offset=0)
             assert "file_id" not in entries["submissions"][0]
+            assert "pk" not in entries["submissions"][0]
+            assert "valid_from" not in entries["submissions"][0]
+            assert "valid_to" not in entries["submissions"][0]
             assert entries["submissions"][0]["id"] == "s1"
+
+    async def test_version_no_reads_the_file_as_of_that_version(self, session_factory) -> None:
+        """A row closed by a later delete still shows up when reading as
+        of an earlier version (time travel over the SCD-2 range) --
+        omitting ``version_no`` reads the current LIVE state instead.
+        """
+        from backend.app.services import file_service
+
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_rec = await _make_file(session, user.id)
+            await data_service.version_service.commit_data_version(
+                session, file_id=file_rec.id, author_user_id=user.id, origin="imported",
+            )
+            session.add(Submission(file_id=file_rec.id, id="s1", title="t", word_count=1))
+            await session.commit()
+
+            await file_service.delete_rows(
+                session, user.id, schemaname=file_rec.schemaname, table="submissions", row_ids=["s1"],
+            )
+
+            live = await data_service.get_file_entries(session, user.id, file_rec.schemaname, limit=10, offset=0)
+            assert live["total_submissions"] == 0
+            assert live["version_no"] is None
+
+            as_of_v1 = await data_service.get_file_entries(
+                session, user.id, file_rec.schemaname, limit=10, offset=0, version_no=1
+            )
+            assert as_of_v1["total_submissions"] == 1
+            assert as_of_v1["submissions"][0]["id"] == "s1"
+            assert as_of_v1["version_no"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -689,3 +723,458 @@ class TestFilterDataJobHandlerEndToEnd:
             assert result["posts_filtered_count"] == 1
             assert result["comments_filtered_count"] == 0
             assert not filter_comments_mock.called
+
+
+# ---------------------------------------------------------------------------
+# duplicate_data
+# ---------------------------------------------------------------------------
+
+
+class TestDuplicateData:
+    async def test_forks_live_rows_and_lineage_from_head(self, session_factory) -> None:
+        from backend.app.repositories import version_repo as _version_repo
+        from backend.app.services import file_service
+
+        async with session_factory() as session:
+            user = await _make_user(session)
+            source = await _make_file(session, user.id, schemaname="proj_src")
+            await data_service.version_service.commit_data_version(
+                session, file_id=source.id, author_user_id=user.id, origin="imported",
+            )
+            session.add_all([
+                Submission(file_id=source.id, id="s1", title="t1", word_count=1),
+                Submission(file_id=source.id, id="s2", title="t2", word_count=1),
+            ])
+            await session.commit()
+
+            # Close one row so head != v1's row set.
+            await file_service.delete_rows(
+                session, user.id, schemaname="proj_src", table="submissions", row_ids=["s1"],
+            )
+
+            forked = await data_service.duplicate_data(session, user.id, "proj_src", display_name="Copy of src")
+            assert forked.file_type == "raw_data"
+            assert forked.filename == "Copy of src"
+
+            live = (
+                await session.execute(select(Submission).where(Submission.file_id == forked.id))
+            ).scalars().all()
+            assert [r.id for r in live] == ["s2"]
+            assert live[0].valid_from == 1
+            assert live[0].valid_to is None
+
+            head = await _version_repo.head_version(session, forked.id)
+            assert head.version_no == 1
+            assert head.origin == "forked"
+
+    async def test_from_version_no_forks_the_state_as_of_that_version(self, session_factory) -> None:
+        from backend.app.services import file_service
+
+        async with session_factory() as session:
+            user = await _make_user(session)
+            source = await _make_file(session, user.id, schemaname="proj_src2")
+            await data_service.version_service.commit_data_version(
+                session, file_id=source.id, author_user_id=user.id, origin="imported",
+            )
+            session.add(Submission(file_id=source.id, id="s1", title="t1", word_count=1))
+            await session.commit()
+
+            await file_service.delete_rows(
+                session, user.id, schemaname="proj_src2", table="submissions", row_ids=["s1"],
+            )
+
+            forked = await data_service.duplicate_data(
+                session, user.id, "proj_src2", display_name="Restored", from_version_no=1
+            )
+            live = (
+                await session.execute(select(Submission).where(Submission.file_id == forked.id))
+            ).scalars().all()
+            assert [r.id for r in live] == ["s1"]
+
+    async def test_blank_display_name_raises_validation_error(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            await _make_file(session, user.id, schemaname="proj_src3")
+            with pytest.raises(ValidationAppError):
+                await data_service.duplicate_data(session, user.id, "proj_src3", display_name="  ")
+
+    async def test_missing_version_raises_not_found(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            await _make_file(session, user.id, schemaname="proj_src4")
+            with pytest.raises(NotFoundError):
+                await data_service.duplicate_data(
+                    session, user.id, "proj_src4", display_name="x", from_version_no=99
+                )
+
+
+# ---------------------------------------------------------------------------
+# Filter editor: sampling exclusions, the preview job, and the manual submit
+# ---------------------------------------------------------------------------
+
+
+async def _seed_rows(session, file_id: int, *, submissions: int = 0, comments: int = 0) -> None:
+    session.add_all(
+        [
+            Submission(file_id=file_id, id=f"s{i}", title=f"t{i}", selftext=f"x{i}", word_count=5)
+            for i in range(1, submissions + 1)
+        ]
+        + [
+            Comment(file_id=file_id, id=f"c{i}", body=f"b{i}", word_count=3)
+            for i in range(1, comments + 1)
+        ]
+    )
+    await session.commit()
+
+
+class TestSampleSourceRowsExclusions:
+    """The rule that makes the filter editor's AI tool re-runnable: rows
+    the user already ruled on are never sampled again.
+    """
+
+    async def _sample(self, session, file_id: int, **kwargs):
+        return await data_service._sample_source_rows(
+            session,
+            source_file_id=file_id,
+            min_words=0,
+            sub_tag_sql="",
+            sub_tag_bind={},
+            com_tag_sql="",
+            com_tag_bind={},
+            pct=100.0,
+            use_ai_posts=True,
+            use_ai_comments=True,
+            **kwargs,
+        )
+
+    async def test_without_exclusions_every_row_is_a_candidate(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_rec = await _make_file(session, user.id)
+            await _seed_rows(session, file_rec.id, submissions=3, comments=2)
+
+            sub_rows, comm_rows, _, _ = await self._sample(session, file_rec.id)
+            assert sorted(r.id for r in sub_rows) == ["s1", "s2", "s3"]
+            assert sorted(r.id for r in comm_rows) == ["c1", "c2"]
+
+    async def test_excluded_ids_are_never_sampled(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_rec = await _make_file(session, user.id)
+            await _seed_rows(session, file_rec.id, submissions=3, comments=2)
+
+            sub_rows, comm_rows, _, _ = await self._sample(
+                session,
+                file_rec.id,
+                exclude_submission_ids=["s1", "s3"],
+                exclude_comment_ids=["c1"],
+            )
+            assert [r.id for r in sub_rows] == ["s2"]
+            assert [r.id for r in comm_rows] == ["c2"]
+
+    async def test_excluded_ids_do_not_consume_sample_slots(self, session_factory) -> None:
+        """The exclusion narrows the pool BEFORE ``ceil(eligible * pct)``,
+        so a 50% sample of 4 undecided rows sends 2 of them -- not 2 of
+        the 6 rows that includes the decided ones.
+        """
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_rec = await _make_file(session, user.id)
+            await _seed_rows(session, file_rec.id, submissions=6)
+
+            sub_rows, _, _, _ = await data_service._sample_source_rows(
+                session,
+                source_file_id=file_rec.id,
+                min_words=0,
+                sub_tag_sql="",
+                sub_tag_bind={},
+                com_tag_sql="",
+                com_tag_bind={},
+                pct=50.0,
+                use_ai_posts=True,
+                use_ai_comments=False,
+                include_comments=False,
+                exclude_submission_ids=["s1", "s2"],
+            )
+            assert len(sub_rows) == 2
+            assert {r.id for r in sub_rows} <= {"s3", "s4", "s5", "s6"}
+
+    async def test_excluding_everything_yields_no_candidates(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_rec = await _make_file(session, user.id)
+            await _seed_rows(session, file_rec.id, submissions=2)
+
+            sub_rows, _, submissions_text, _ = await self._sample(
+                session, file_rec.id, exclude_submission_ids=["s1", "s2"]
+            )
+            assert sub_rows == []
+            assert submissions_text == ""
+
+
+class TestStartFilterPreviewJob:
+    async def test_rejects_a_malformed_schema(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            with pytest.raises(ValidationAppError):
+                await data_service.start_filter_preview_job(
+                    session, user.id, database="not-a-schema", api_key="sk", model="m",
+                    prompt="p", min_words=0, sample_percentage=100.0, filter_tags=None,
+                )
+
+    async def test_rejects_a_missing_api_key(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            await _make_file(session, user.id)
+            with pytest.raises(ValidationAppError):
+                await data_service.start_filter_preview_job(
+                    session, user.id, database="proj_src", api_key="", model="m",
+                    prompt="p", min_words=0, sample_percentage=100.0, filter_tags=None,
+                )
+
+    async def test_rejects_another_users_file(self, session_factory) -> None:
+        async with session_factory() as session:
+            owner = await _make_user(session, "owner@b.com")
+            await _make_file(session, owner.id)
+            intruder = await _make_user(session, "intruder@b.com")
+            with pytest.raises(NotFoundError):
+                await data_service.start_filter_preview_job(
+                    session, intruder.id, database="proj_src", api_key="sk", model="m",
+                    prompt="p", min_words=0, sample_percentage=100.0, filter_tags=None,
+                )
+
+    async def test_api_key_is_never_persisted_on_the_job_row(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            await _make_file(session, user.id)
+            job = await data_service.start_filter_preview_job(
+                session, user.id, database="proj_src", api_key="sk-secret", model="m",
+                prompt="p", min_words=0, sample_percentage=100.0, filter_tags=None,
+                decided_post_ids=["s1"],
+            )
+            assert "api_key" not in job.payload
+            assert "sk-secret" not in str(job.payload)
+            assert job.payload["decided_post_ids"] == ["s1"]
+
+
+class TestFilterPreviewJobHandler:
+    async def test_returns_ids_without_creating_anything(self, session_factory, monkeypatch) -> None:
+        monkeypatch.setattr(
+            "backend.scripts.filter_db.filter_posts_with_ai",
+            AsyncMock(return_value=(["s2"], "sys", "user", {"batches_processed": 1, "batches_total": 1})),
+        )
+        monkeypatch.setattr(
+            "backend.scripts.filter_db.filter_comments_with_ai",
+            AsyncMock(return_value=([], "", "", {"batches_processed": 1, "batches_total": 1})),
+        )
+
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_rec = await _make_file(session, user.id)
+            await _seed_rows(session, file_rec.id, submissions=3, comments=1)
+            files_before = len((await session.execute(select(File))).scalars().all())
+
+            job = await data_service.start_filter_preview_job(
+                session, user.id, database=file_rec.schemaname, api_key="sk", model="m",
+                prompt="keep the good ones", min_words=0, sample_percentage=100.0, filter_tags=None,
+            )
+            finished = await _wait_for_terminal_status(session, job.id, user.id)
+
+            assert finished.status == "succeeded", finished.error
+            assert finished.result["post_ids"] == ["s2"]
+            assert finished.result["comment_ids"] == []
+            assert finished.result["partial"] is False
+            assert "file" not in finished.result
+
+            files_after = len((await session.execute(select(File))).scalars().all())
+            assert files_after == files_before, "a preview must never create an artifact"
+
+    async def test_decided_rows_are_withheld_from_the_model(self, session_factory, monkeypatch) -> None:
+        posts_mock = AsyncMock(
+            return_value=([], "sys", "user", {"batches_processed": 1, "batches_total": 1})
+        )
+        monkeypatch.setattr("backend.scripts.filter_db.filter_posts_with_ai", posts_mock)
+        monkeypatch.setattr(
+            "backend.scripts.filter_db.filter_comments_with_ai",
+            AsyncMock(return_value=([], "", "", {"batches_processed": 1, "batches_total": 1})),
+        )
+
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_rec = await _make_file(session, user.id)
+            await _seed_rows(session, file_rec.id, submissions=3)
+
+            job = await data_service.start_filter_preview_job(
+                session, user.id, database=file_rec.schemaname, api_key="sk", model="m",
+                prompt="p", min_words=0, sample_percentage=100.0, filter_tags=None,
+                decided_post_ids=["s1", "s2"],
+            )
+            finished = await _wait_for_terminal_status(session, job.id, user.id)
+            assert finished.status == "succeeded", finished.error
+
+            sent_blob = posts_mock.await_args.args[1]
+            assert "[s3]" in sent_blob
+            assert "[s1]" not in sent_blob and "[s2]" not in sent_blob
+
+    async def test_surfaces_a_partial_runs_real_error(self, session_factory, monkeypatch) -> None:
+        """Regression: the per-type coverage dict's ``error`` used to be
+        dropped, so every partial run was blamed on a free model's batch
+        cap even when an API error stopped it.
+        """
+        monkeypatch.setattr(
+            "backend.scripts.filter_db.filter_posts_with_ai",
+            AsyncMock(
+                return_value=(
+                    ["s1"], "sys", "user",
+                    {"batches_processed": 1, "batches_total": 3, "error": "upstream 429"},
+                )
+            ),
+        )
+        monkeypatch.setattr(
+            "backend.scripts.filter_db.filter_comments_with_ai",
+            AsyncMock(return_value=([], "", "", {"batches_processed": 1, "batches_total": 1})),
+        )
+
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_rec = await _make_file(session, user.id)
+            await _seed_rows(session, file_rec.id, submissions=2, comments=1)
+
+            job = await data_service.start_filter_preview_job(
+                session, user.id, database=file_rec.schemaname, api_key="sk", model="m",
+                prompt="p", min_words=0, sample_percentage=100.0, filter_tags=None,
+            )
+            finished = await _wait_for_terminal_status(session, job.id, user.id)
+
+            assert finished.result["partial"] is True
+            assert finished.result["partial_error"] == "upstream 429"
+
+
+class TestCreateManualFilteredData:
+    async def _setup(self, session):
+        user = await _make_user(session)
+        file_rec = await _make_file(session, user.id)
+        await _seed_rows(session, file_rec.id, submissions=3, comments=2)
+        return user, file_rec
+
+    async def test_copies_exactly_the_chosen_rows(self, session_factory) -> None:
+        async with session_factory() as session:
+            user, source = await self._setup(session)
+
+            new_file, counts = await data_service.create_manual_filtered_data(
+                session, user.id, database=source.schemaname, name="hand picked",
+                description="chosen by hand", project_id=None,
+                post_ids=["s1", "s3"], comment_ids=["c2"],
+            )
+
+            assert counts["submissions"] == 2
+            assert counts["comments"] == 1
+            assert new_file.file_type == "filtered_data"
+            assert new_file.filename == "hand picked"
+            assert new_file.description == "chosen by hand"
+
+            subs = (
+                await session.execute(
+                    select(Submission).where(Submission.file_id == new_file.id).order_by(Submission.id)
+                )
+            ).scalars().all()
+            comms = (
+                await session.execute(select(Comment).where(Comment.file_id == new_file.id))
+            ).scalars().all()
+            assert [s.id for s in subs] == ["s1", "s3"]
+            assert [c.id for c in comms] == ["c2"]
+
+    async def test_records_an_edited_origin_with_no_llm_provenance(self, session_factory) -> None:
+        """An AI assist while editing is not the same claim as "a model
+        produced this" -- ``model``/``system_prompt`` must stay usable for
+        auditing which artifacts an LLM actually generated.
+        """
+        async with session_factory() as session:
+            user, source = await self._setup(session)
+
+            new_file, _ = await data_service.create_manual_filtered_data(
+                session, user.id, database=source.schemaname, name="hand picked",
+                description=None, project_id=None, post_ids=["s1"], comment_ids=[],
+            )
+
+            head = await version_repo.head_version(session, new_file.id)
+            assert head.version_no == 1
+            assert head.origin == "edited"
+            assert head.system_prompt is None
+            assert head.model is None
+            assert head.prompt_meta is None
+            assert head.sealed_at is not None
+
+    async def test_pins_lineage_to_the_source(self, session_factory) -> None:
+        async with session_factory() as session:
+            user, source = await self._setup(session)
+
+            new_file, _ = await data_service.create_manual_filtered_data(
+                session, user.id, database=source.schemaname, name="hand picked",
+                description=None, project_id=None, post_ids=["s1"], comment_ids=[],
+            )
+
+            edges = await version_repo.list_parent_edges(session, new_file.id)
+            assert [(e.parent_file_id, e.relation, e.role) for e in edges] == [
+                (source.id, "derived_from", "source_data")
+            ]
+
+    async def test_carries_memos_on_the_chosen_rows(self, session_factory) -> None:
+        from backend.app.repositories import memo_repo
+
+        async with session_factory() as session:
+            user, source = await self._setup(session)
+            for row_id, body in (("s1", "kept, and noted"), ("s2", "dropped, and noted")):
+                await memo_repo.upsert_memo(
+                    session, file_id=source.id, row_type="submission", row_id=row_id,
+                    body=body, author_user_id=user.id,
+                )
+            await session.commit()
+
+            new_file, counts = await data_service.create_manual_filtered_data(
+                session, user.id, database=source.schemaname, name="hand picked",
+                description=None, project_id=None, post_ids=["s1"], comment_ids=[],
+            )
+
+            assert counts["memos"] == 1
+            memos = await memo_repo.list_memos(session, new_file.id)
+            assert [(m.row_id, m.body) for m in memos] == [("s1", "kept, and noted")]
+
+    async def test_flags_comments_kept_without_their_parent_post(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            source = await _make_file(session, user.id)
+            session.add_all(
+                [
+                    Submission(file_id=source.id, id="s1", title="t", selftext="x", word_count=5),
+                    Comment(file_id=source.id, id="c1", body="b", link_id="s1", word_count=3),
+                    Comment(file_id=source.id, id="c2", body="b", link_id="s9", word_count=3),
+                ]
+            )
+            await session.commit()
+
+            _, counts = await data_service.create_manual_filtered_data(
+                session, user.id, database=source.schemaname, name="hand picked",
+                description=None, project_id=None, post_ids=["s1"], comment_ids=["c1", "c2"],
+            )
+            assert counts["orphaned_comments"] == 1
+
+    async def test_rejects_a_malformed_schema(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            with pytest.raises(ValidationAppError):
+                await data_service.create_manual_filtered_data(
+                    session, user.id, database="not-a-schema", name="x",
+                    description=None, project_id=None, post_ids=["s1"], comment_ids=[],
+                )
+
+    async def test_rejects_another_users_file(self, session_factory) -> None:
+        async with session_factory() as session:
+            owner = await _make_user(session, "owner@b.com")
+            source = await _make_file(session, owner.id)
+            intruder = await _make_user(session, "intruder@b.com")
+            with pytest.raises(NotFoundError):
+                await data_service.create_manual_filtered_data(
+                    session, intruder.id, database=source.schemaname, name="x",
+                    description=None, project_id=None, post_ids=["s1"], comment_ids=[],
+                )

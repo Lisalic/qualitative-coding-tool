@@ -218,6 +218,33 @@ class TestGetCodingArtifact:
         )
         assert resp.status_code == 404
 
+    async def test_version_no_reads_codebook_as_of_that_version(
+        self, client, route_backed_by_sqlite_jobs, make_token
+    ) -> None:
+        from backend.app.services import version_service
+
+        user = await _make_user(route_backed_by_sqlite_jobs)
+        coding_file = await _make_file(
+            route_backed_by_sqlite_jobs, user.id, schemaname="proj_asof", content="v1 code"
+        )
+        async with route_backed_by_sqlite_jobs() as session:
+            await version_service.commit_codebook_version(
+                session, file_id=coding_file.id, author_user_id=user.id, origin="edited",
+                codes=[{"code_uid": "u1", "family_uid": "f1", "family_name": "F", "name": "C", "body": "v2 code", "position": 0}],
+            )
+            await session.commit()
+
+        resp = client.get(
+            "/api/coding/proj_asof?version_no=1", headers=_auth_headers(make_token, sub=str(user.id))
+        )
+        assert resp.status_code == 200
+        assert [c["body"] for c in resp.json()["codes"]] == ["v1 code"]
+
+        resp_live = client.get(
+            "/api/coding/proj_asof", headers=_auth_headers(make_token, sub=str(user.id))
+        )
+        assert [c["body"] for c in resp_live.json()["codes"]] == ["v2 code"]
+
 
 class TestListCodingRows:
     def test_requires_auth(self, client) -> None:
@@ -253,6 +280,54 @@ class TestListCodingRows:
             {"code": "A", "code_uid": "A-uid", "quote": "e", "start_offset": 0, "end_offset": 1, "notes": None}
         ]
         assert by_item["t3_s2"]["codes"] == []
+
+    async def test_version_no_lists_code_evidence_as_of_that_version(
+        self, client, route_backed_by_sqlite_jobs, make_token
+    ) -> None:
+        from backend.app.repositories import coding_repo
+        from backend.app.services import version_service
+
+        user = await _make_user(route_backed_by_sqlite_jobs)
+        coding_file = await _make_file(
+            route_backed_by_sqlite_jobs, user.id, schemaname="proj_c"
+        )
+        await _add_submission(
+            route_backed_by_sqlite_jobs, coding_file.id, sub_id="s1", selftext="alpha beta"
+        )
+        await _add_coding_entry(
+            route_backed_by_sqlite_jobs, coding_file.id, post_id="s1", code="A", quote="alpha"
+        )
+
+        async with route_backed_by_sqlite_jobs() as session:
+            v2 = await version_service.commit_coding_version(
+                session, file_id=coding_file.id, author_user_id=user.id, origin="edited"
+            )
+            await coding_repo.replace_entries_for_items(
+                session,
+                coding_file.id,
+                [{
+                    "row_type": "submission",
+                    "post_id": "s1",
+                    "entries": [{
+                        "code": "B",
+                        "code_uid": "B-uid",
+                        "quote": "beta",
+                        "start_offset": 6,
+                        "end_offset": 10,
+                        "notes": None,
+                    }],
+                }],
+                version_no=v2.version_no,
+            )
+            await session.commit()
+
+        headers = _auth_headers(make_token, sub=str(user.id))
+        historical = client.get("/api/coding/proj_c/rows?version_no=1", headers=headers)
+        live = client.get("/api/coding/proj_c/rows", headers=headers)
+
+        assert historical.status_code == 200
+        assert [entry["code"] for entry in historical.json()["rows"][0]["codes"]] == ["A"]
+        assert [entry["code"] for entry in live.json()["rows"][0]["codes"]] == ["B"]
 
     async def test_only_uncoded_filter(self, client, route_backed_by_sqlite_jobs, make_token) -> None:
         user = await _make_user(route_backed_by_sqlite_jobs)
@@ -321,6 +396,41 @@ class TestGetCodingText:
         )
         assert resp.status_code == 200
         assert resp.json()["text"] == ""
+
+    async def test_version_no_renders_text_as_of_that_version(
+        self, client, route_backed_by_sqlite_jobs, make_token
+    ) -> None:
+        from backend.app.repositories import coding_repo
+        from backend.app.services import version_service
+
+        user = await _make_user(route_backed_by_sqlite_jobs)
+        coding_file = await _make_file(route_backed_by_sqlite_jobs, user.id, schemaname="proj_c")
+        await _add_coding_entry(route_backed_by_sqlite_jobs, coding_file.id, post_id="s1", code="A", quote="ev-a")
+
+        async with route_backed_by_sqlite_jobs() as session:
+            v2 = await version_service.commit_coding_version(
+                session, file_id=coding_file.id, author_user_id=user.id, origin="edited",
+            )
+            await coding_repo.replace_entries_for_items(
+                session, coding_file.id,
+                [{"row_type": "submission", "post_id": "s1", "entries": [
+                    {"code": "B", "code_uid": "B-uid", "quote": "ev-b", "start_offset": 0, "end_offset": 4, "notes": None},
+                ]}],
+                version_no=v2.version_no,
+            )
+            await session.commit()
+
+        resp_v1 = client.get(
+            "/api/coding/proj_c/text?version_no=1", headers=_auth_headers(make_token, sub=str(user.id))
+        )
+        assert "EVIDENCE: ev-a" in resp_v1.json()["text"]
+        assert "EVIDENCE: ev-b" not in resp_v1.json()["text"]
+
+        resp_live = client.get(
+            "/api/coding/proj_c/text", headers=_auth_headers(make_token, sub=str(user.id))
+        )
+        assert "EVIDENCE: ev-b" in resp_live.json()["text"]
+        assert "EVIDENCE: ev-a" not in resp_live.json()["text"]
 
 
 _ONE_CODE = [

@@ -78,27 +78,37 @@ export function useDataTableActions({
   const deleteSelected = useCallback(async () => {
     if (!currentDatabase || selectedRows.size === 0) return;
     const confirmed = await ToastService.confirm(
-      `Delete ${selectedRows.size} selected entries permanently?`,
+      `Delete ${selectedRows.size} selected entries? This closes them out of the live view -- the artifact's version history keeps a record, and they can be restored from an earlier version.`,
     );
     if (!confirmed) return;
+
+    // Grouped into at most one request per table, so the backend mints
+    // one version for the whole batch rather than one per row (see
+    // file_service.delete_rows's docstring).
+    const groups = { submission: [], comment: [] };
+    for (const key of Array.from(selectedRows)) {
+      const [type, ...rest] = String(key).split(":");
+      const rowId = rest.join(":");
+      if (type === "submission") groups.submission.push(rowId);
+      else groups.comment.push(rowId);
+    }
 
     try {
       setLoading(true);
       setError("");
 
-      for (const key of Array.from(selectedRows)) {
-        const [type, ...rest] = String(key).split(":");
-        const rowId = rest.join(":");
-        const table = type === "submission" ? "submissions" : "comments";
+      for (const [typeKey, rowIds] of Object.entries(groups)) {
+        if (!rowIds.length) continue;
+        const table = typeKey === "submission" ? "submissions" : "comments";
 
-        const form = new FormData();
-        form.append("schema", currentDatabase);
-        form.append("table", table);
-        form.append("row_id", rowId);
-
-        const response = await apiFetch("/api/delete-row/", {
+        const response = await apiFetch("/api/delete-rows/", {
           method: "POST",
-          body: form,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            schema_name: currentDatabase,
+            table,
+            row_ids: rowIds,
+          }),
         });
 
         if (!response.ok) {
