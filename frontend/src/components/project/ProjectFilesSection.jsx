@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../../api";
 import ToastService from "../feedback/ToastService";
 import FileRowActions from "./FileRowActions";
+import Panel from "../shell/Panel";
 
 const tabBtn =
   "border border-paper px-3.5 py-2 text-sm font-medium transition-colors hover:bg-paper hover:text-ink";
@@ -102,15 +103,42 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
     }
   };
 
-  const handleDeleteFile = async (schemaName) => {
+  // Artifacts derived from this one survive its deletion -- each owns a
+  // full copy of everything it needs (a coding file carries its own
+  // codebook snapshot and its own rows) -- but they permanently lose the
+  // recorded link back to it. Name them in the confirmation so that
+  // trade-off is a decision rather than a surprise. Best-effort: if the
+  // lineage lookup fails, confirm without the list rather than blocking
+  // a delete the user asked for.
+  const fetchDerivedNames = async (schemaName) => {
+    try {
+      const response = await apiFetch(
+        `/api/artifacts/${encodeURIComponent(schemaName)}/lineage`,
+      );
+      if (!response.ok) return [];
+      const data = await response.json();
+      return (data?.children || []).map(
+        (child) => child.filename || child.schema_name,
+      );
+    } catch {
+      return [];
+    }
+  };
+
+  const handleDeleteFile = async (file) => {
+    const label = file.display_name || file.schema_name;
+    const derived = await fetchDerivedNames(file.schema_name);
+    const derivedNote = derived.length
+      ? ` ${derived.length} artifact${derived.length === 1 ? "" : "s"} derived from it (${derived.join(", ")}) will be kept, but will lose the recorded link back to it.`
+      : "";
     const confirmed = await ToastService.confirm(
-      `Are you sure you want to delete "${schemaName}"? This action cannot be undone.`,
+      `Are you sure you want to delete "${label}"? This action cannot be undone.${derivedNote}`,
     );
     if (!confirmed) {
       return;
     }
     try {
-      const response = await apiFetch(`/api/delete-database/${schemaName}`, {
+      const response = await apiFetch(`/api/delete-database/${file.schema_name}`, {
         method: "DELETE",
       });
       if (!response.ok) throw new Error("Failed to delete file");
@@ -170,7 +198,7 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
   const renderFileRow = (f, onView, allowMergeCheckbox = false) => (
     <div
       key={f.id}
-      className="flex items-start gap-3 border border-paper/20 p-4"
+      className="flex items-start gap-3 border border-line-soft p-3"
     >
       {allowMergeCheckbox && (
         <input
@@ -223,8 +251,9 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
         <FileRowActions
           file={f}
           onView={onView}
+          onHistory={(file) => navigate(`/versions?ref=${encodeURIComponent(file.schema_name)}`)}
           onRename={startRenameFile}
-          onDelete={(file) => handleDeleteFile(file.schema_name)}
+          onDelete={handleDeleteFile}
         />
       )}
     </div>
@@ -232,32 +261,30 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
 
   return (
     <>
-      <div className="mb-6 border-2 border-paper p-5">
-        <h2 className="mb-4 text-lg font-semibold">Project Files</h2>
-        <div className="flex flex-wrap gap-3">
-          {["database", "filtered", "codebook", "coding", "summary"].map((tab) => (
-            <button
-              key={tab}
-              type="button"
-              className={`${tabBtn} ${activeTab === tab ? tabBtnSelected : ""}`}
-              onClick={() => setActiveTab(tab)}
-            >
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="border-2 border-paper p-6">
+      {/* The tab strip is the region header, not a second panel above it. */}
+      <Panel
+        title="Project files"
+        scroll={false}
+        actions={["database", "filtered", "codebook", "coding", "summary"].map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            className={`${tabBtn} ${activeTab === tab ? tabBtnSelected : ""}`}
+            onClick={() => setActiveTab(tab)}
+          >
+            {tab.charAt(0).toUpperCase() + tab.slice(1)}
+          </button>
+        ))}
+      >
         {activeTab === "database" && (
           <>
-            <div className="mb-4 flex items-center justify-between">
+            <div className="mb-3 flex items-center justify-between">
               <h2 className="text-lg font-semibold">Database Files</h2>
               <button type="button" className={tabBtn} onClick={() => navigate("/import")}>
                 Add Database
               </button>
             </div>
-            <div className="flex flex-col gap-3">
+            <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
               {dbFiles.map((f) =>
                 renderFileRow(
                   f,
@@ -271,7 +298,7 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
 
         {activeTab === "filtered" && (
           <>
-            <div className="mb-4 flex items-center justify-between">
+            <div className="mb-3 flex items-center justify-between">
               <h2 className="text-lg font-semibold">Filtered Files</h2>
               <button
                 type="button"
@@ -281,7 +308,7 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
                 Add Filtered
               </button>
             </div>
-            <div className="flex flex-col gap-3">
+            <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
               {filteredFiles.map((f) =>
                 renderFileRow(
                   f,
@@ -298,7 +325,7 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
 
         {activeTab === "codebook" && (
           <>
-            <div className="mb-4 flex items-center justify-between">
+            <div className="mb-3 flex items-center justify-between">
               <h2 className="text-lg font-semibold">Codebook Files</h2>
               <button
                 type="button"
@@ -320,7 +347,7 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
                 </button>
               ))}
             </div>
-            <div className="flex flex-col gap-3">
+            <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
               {shownCodebooks.map((f) =>
                 renderFileRow(f, () =>
                   f.file_type === "codebook_comparison"
@@ -336,7 +363,7 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
 
         {activeTab === "coding" && (
           <>
-            <div className="mb-4 flex items-center justify-between">
+            <div className="mb-3 flex items-center justify-between">
               <h2 className="text-lg font-semibold">Coding Files</h2>
               <button
                 type="button"
@@ -358,7 +385,7 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
                 </button>
               ))}
             </div>
-            <div className="flex flex-col gap-3">
+            <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
               {shownCodings.map((f) =>
                 renderFileRow(f, () =>
                   navigate(
@@ -375,7 +402,7 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
 
         {activeTab === "summary" && (
           <>
-            <div className="mb-4 flex items-center justify-between">
+            <div className="mb-3 flex items-center justify-between">
               <h2 className="text-lg font-semibold">Summary Files</h2>
               <button
                 type="button"
@@ -385,7 +412,7 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
                 Add Summary
               </button>
             </div>
-            <div className="flex flex-col gap-3">
+            <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
               {summaryFiles.map((f) =>
                 renderFileRow(f, () =>
                   navigate("/summaryview", {
@@ -426,7 +453,7 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
               {mergeSuccess && <div className="mt-2 text-success">{mergeSuccess}</div>}
             </div>
           )}
-      </div>
+      </Panel>
     </>
   );
 }

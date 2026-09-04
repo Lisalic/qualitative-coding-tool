@@ -8,6 +8,18 @@
 
   --font-sans: system-ui, -apple-system, sans-serif;
 
+  /* Border hierarchy. Derived from white opacity, never a literal gray --
+     see documentation/style-guide.md. `line` is the default region border,
+     `line-soft` separates rows inside a region, `line-strong` is reserved
+     for modals and other genuinely emphasized edges. */
+  --color-line: rgba(255, 255, 255, 0.28);
+  --color-line-soft: rgba(255, 255, 255, 0.14);
+  --color-line-strong: #ffffff;
+
+  /* Surfaces. Same rule: white-alpha, not gray. */
+  --color-surface: rgba(255, 255, 255, 0.02);
+  --color-surface-raised: rgba(255, 255, 255, 0.05);
+
   /* This app is deliberately square-cornered everywhere; zero out the
      default radius scale so no utility can accidentally introduce
      roundness. */
@@ -27,15 +39,27 @@
     line-height: 1.5;
   }
 
+  /* The shell in App.jsx is a fixed-height flex column that owns every
+     scroll region itself, so the document must never scroll. `dvh` rather
+     than `vh` because mobile browsers shrink the visual viewport as their
+     toolbars collapse, and 100vh overflows by exactly that much. */
+  html,
+  body {
+    overflow: hidden;
+  }
+
+  /* No min-width floor: the document can't scroll, so anything wider than
+     the viewport would be clipped with no way to reach it. The shell always
+     fits, and content too wide to shrink scrolls inside its own region
+     instead (see PageShell). */
   body {
     @apply bg-ink text-paper;
-    min-width: 320px;
-    min-height: 100vh;
+    height: 100dvh;
   }
 
   #root {
     width: 100%;
-    min-height: 100vh;
+    height: 100dvh;
   }
 
   a {

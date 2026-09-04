@@ -1,10 +1,9 @@
 import React, { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import { mintClientCodeUid } from "../../lib/codingUtils";
+import { btnSm, inputSm } from "../../lib/uiClasses";
 
-const btnSmall =
-  "border border-paper px-2.5 py-1 text-xs transition-colors hover:bg-paper hover:text-ink disabled:opacity-40";
-const inputClasses =
-  "min-w-0 border border-paper bg-white/5 px-2 py-1 text-sm text-paper focus:outline-none focus:ring-2 focus:ring-paper disabled:opacity-50";
+const btnSmall = btnSm;
+const inputClasses = `min-w-0 ${inputSm}`;
 const textareaClasses = `${inputClasses} min-h-[4.5rem] w-full resize-y`;
 
 const DETAIL_FIELDS = [
@@ -259,6 +258,7 @@ const CodeLegend = ({
     // payload carry `code_uid` -- the stable identity. The name row is
     // the click target so extra detail text doesn't toggle the filter.
     const isSelected = selectedCodeSet.has(code.name);
+    const interactive = !disabled && typeof onCodeToggle === "function";
     const details = showDetails ? codeDetailLines(code) : [];
     const nameRow = (
       <>
@@ -273,11 +273,13 @@ const CodeLegend = ({
       return (
         <div
           key={key}
-          onClick={() => onCodeToggle(code)}
-          className={`flex cursor-pointer items-center gap-1.5 px-2 py-1 text-sm transition-colors ${
+          onClick={interactive ? () => onCodeToggle(code) : undefined}
+          className={`flex items-center gap-1.5 px-2 py-1 text-sm transition-colors ${
+            interactive ? "cursor-pointer" : "cursor-default"
+          } ${
             isSelected
               ? "border-2 border-paper bg-white/10 font-semibold"
-              : "border border-paper/20 hover:bg-white/5"
+              : "border border-line-soft hover:bg-white/5"
           }`}
         >
           {nameRow}
@@ -290,12 +292,14 @@ const CodeLegend = ({
         className={
           isSelected
             ? "border-2 border-paper bg-white/10"
-            : "border border-paper/20"
+            : "border border-line-soft"
         }
       >
         <div
-          onClick={() => onCodeToggle(code)}
-          className="flex cursor-pointer items-center gap-1.5 px-2 py-1 text-sm transition-colors hover:bg-white/5"
+          onClick={interactive ? () => onCodeToggle(code) : undefined}
+          className={`flex items-center gap-1.5 px-2 py-1 text-sm transition-colors ${
+            interactive ? "cursor-pointer hover:bg-white/5" : "cursor-default"
+          }`}
         >
           {nameRow}
         </div>
@@ -315,9 +319,8 @@ const CodeLegend = ({
 
   if (isEditMode) {
     return (
-      <div className="w-full border border-paper p-3" ref={menuRootRef}>
-        <h4 className="mb-2.5 font-semibold">Codebook</h4>
-        <div className="sticky top-0 z-[3] mb-2.5 flex flex-wrap gap-2 border-b border-paper/20 bg-ink pb-2">
+      <div className="w-full" ref={menuRootRef}>
+        <div className="sticky top-0 z-[3] mb-2.5 flex flex-wrap gap-2 border-b border-line-soft bg-ink pb-2">
           <button
             type="button"
             onClick={() => setExpandedFamilies(buildExpandedState)}
@@ -337,7 +340,7 @@ const CodeLegend = ({
           <button
             type="button"
             onClick={addFamily}
-            className="ml-auto border-2 border-paper px-2.5 py-1 text-xs font-semibold transition-colors hover:bg-paper hover:text-ink disabled:opacity-40"
+            className={`ml-auto ${btnSmall}`}
             disabled={disabled}
           >
             + Add family
@@ -360,8 +363,8 @@ const CodeLegend = ({
               const isExpanded = Boolean(expandedFamilies[familyIndex]);
 
               return (
-                <div key={`edit-family-${familyIndex}`} className="overflow-hidden border border-paper/30">
-                  <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-b border-paper/20 p-2">
+                <div key={`edit-family-${familyIndex}`} className="overflow-hidden border border-line">
+                  <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-b border-line-soft p-2">
                     <div className="flex items-center gap-1.5">
                       <button
                         type="button"
@@ -456,7 +459,7 @@ const CodeLegend = ({
                               return (
                                 <div
                                   key={`edit-code-${familyIndex}-${codeIndex}`}
-                                  className="relative flex flex-col gap-1.5 bg-white/[0.03] py-1.5 pl-2 pr-1.5 before:absolute before:left-[-13px] before:top-4 before:w-2.5 before:border-t before:border-paper/20 before:content-['']"
+                                  className="relative flex flex-col gap-1.5 bg-white/[0.03] py-1.5 pl-2 pr-1.5 before:absolute before:left-[-13px] before:top-4 before:w-2.5 before:border-t before:border-line-soft before:content-['']"
                                 >
                                   <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2">
                                     <div
@@ -534,9 +537,7 @@ const CodeLegend = ({
   }
 
   return (
-    <div className="w-full border border-paper p-3">
-      <h4 className="mb-2.5 font-semibold">Codes</h4>
-
+    <div className="w-full">
       {hasTreeLegend ? (
         <div>
           <div className="mb-2 flex justify-between gap-2">
@@ -558,7 +559,7 @@ const CodeLegend = ({
 
           <div className="flex flex-col gap-2">
             {treeFamilies.map((family, index) => (
-              <div key={family.familyUid} className="border border-paper/20">
+              <div key={family.familyUid} className="border border-line-soft">
                 <div
                   onClick={() =>
                     setExpandedFamilies((prev) => ({
@@ -566,7 +567,7 @@ const CodeLegend = ({
                       [index]: !prev[index],
                     }))
                   }
-                  className="flex cursor-pointer items-center gap-2 border-b border-paper/20 px-2 py-1.5 transition-colors hover:bg-white/5"
+                  className="flex cursor-pointer items-center gap-2 border-b border-line-soft px-2 py-1.5 transition-colors hover:bg-white/5"
                 >
                   <span className="w-4 text-center">
                     {expandedFamilies[index] ? "▾" : "▸"}

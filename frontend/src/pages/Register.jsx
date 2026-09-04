@@ -8,7 +8,7 @@ const Register = () => {
   const page = useRegisterPage();
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-6 py-12">
+    <div className="flex h-full flex-col items-center justify-center overflow-y-auto gap-6 px-6 py-12">
       <PageHeading
         title="Qualitative Coding Tool"
         className="text-center text-2xl font-bold sm:text-3xl"

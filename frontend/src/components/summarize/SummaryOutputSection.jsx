@@ -4,7 +4,7 @@ export default function SummaryOutputSection({ summary, createdFile }) {
   if (summary === "" || !createdFile) return null;
 
   return (
-    <div className="mt-4">
+    <div>
       <ArtifactCreatedMessage
         name={createdFile.filename}
         viewPath="/summaryview"

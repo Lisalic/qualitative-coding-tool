@@ -1,7 +1,9 @@
 import ErrorDisplay from "../feedback/ErrorDisplay";
-import ArtifactSelector from "../primitives/ArtifactSelector";
+import ArtifactPicker from "../primitives/ArtifactPicker";
 import MarkdownDisplay from "../primitives/MarkdownDisplay";
-import ViewPageShell from "../shell/ViewPageShell";
+import PageShell from "../shell/PageShell";
+import Panel from "../shell/Panel";
+import PageEmptyState from "../primitives/PageEmptyState";
 import useViewComparisonPage from "./useViewComparisonPage";
 
 export default function ComparisonViewPageContainer({
@@ -11,6 +13,8 @@ export default function ComparisonViewPageContainer({
   contentUrl,
   contentField,
   emptyMessage,
+  placeholderMessage,
+  pickerPlaceholder,
 }) {
   const {
     available,
@@ -27,34 +31,40 @@ export default function ComparisonViewPageContainer({
   } = useViewComparisonPage({ fileType, preselectStateKey, contentUrl, contentField });
 
   return (
-    <ViewPageShell title={title}>
-      <ArtifactSelector
-        showProjectFilter={true}
-        projects={projectsList}
-        selectedProject={selectedProject}
-        onProjectChange={setSelectedProject}
-        items={available}
-        selectedId={selected}
-        onSelect={setSelected}
-        emptyMessage={emptyMessage}
-      />
-
+    <PageShell
+      title={selectedName || title}
+      subtitle={selectedName ? selectedDescription : undefined}
+      width="wide"
+      bodyClassName="flex flex-col gap-3"
+      actions={
+        <ArtifactPicker
+          showProjectFilter={true}
+          projects={projectsList}
+          selectedProject={selectedProject}
+          onProjectChange={setSelectedProject}
+          items={available}
+          selectedId={selected}
+          onSelect={setSelected}
+          emptyMessage={emptyMessage}
+          placeholder={pickerPlaceholder}
+        />
+      }
+    >
       {loading ? (
-        <div className="border border-paper/20 bg-white/5 px-4 py-3 text-sm text-paper/70">
+        <div className="border border-line bg-surface-raised px-3 py-2 text-sm text-paper/70">
           Loading...
         </div>
       ) : null}
       <ErrorDisplay message={error} type="error" variant="alert" />
 
       {content ? (
-        <div className="border-2 border-paper p-6">
-          <h2 className="mb-1 text-lg font-semibold">{selectedName || "Comparison"}</h2>
-          {selectedDescription ? (
-            <p className="mb-3 text-sm text-paper/70">{selectedDescription}</p>
-          ) : null}
-          <MarkdownDisplay content={content} className="text-paper" />
-        </div>
-      ) : null}
-    </ViewPageShell>
+        <Panel scroll={false}>
+          {/* A wide page still needs a readable measure for prose. */}
+          <MarkdownDisplay content={content} className="max-w-[75ch] text-paper" />
+        </Panel>
+      ) : loading || error ? null : (
+        <PageEmptyState message={placeholderMessage} />
+      )}
+    </PageShell>
   );
 }

@@ -22,7 +22,7 @@ const MODE_CONFIG = {
     },
     table: {
       isFilteredView: true,
-      emptyMessage: "Select a project file to view filtered data",
+      emptyMessage: "Select a database to view filtered data",
     },
   },
 };

@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { apiFetch } from "../../api";
 
-const tabBtn =
-  "border border-paper px-3.5 py-2 text-sm font-medium transition-colors hover:bg-paper hover:text-ink disabled:opacity-50";
-const inputClasses =
-  "border border-paper bg-white/5 px-3 py-2.5 text-paper placeholder:text-paper/40 focus:outline-none focus:ring-2 focus:ring-paper";
+import Panel from "../shell/Panel";
+import { btn, input } from "../../lib/uiClasses";
+
+const tabBtn = btn;
+const inputClasses = input;
 
 export default function ProjectHeaderSection({ project, onRefreshProject }) {
   const [editing, setEditing] = useState(false);
@@ -48,19 +49,21 @@ export default function ProjectHeaderSection({ project, onRefreshProject }) {
   };
 
   return (
-    <div className="mb-6 border-2 border-paper p-6">
+    <Panel
+      title="Details"
+      scroll={false}
+      actions={
+        !editing ? (
+          <button type="button" className={tabBtn} onClick={startEdit}>
+            Edit
+          </button>
+        ) : null
+      }
+    >
       {!editing ? (
         <>
-          <div className="mb-3 flex items-center gap-3">
-            <h1 className="text-2xl font-bold">{project.projectname}</h1>
-            <button type="button" className={`${tabBtn} text-xs`} onClick={startEdit}>
-              Edit
-            </button>
-          </div>
           {project.description && (
-            <p className="mb-3 text-base leading-relaxed text-paper/70">
-              {project.description}
-            </p>
+            <p className="mb-2 leading-relaxed text-paper/70">{project.description}</p>
           )}
           {project.created_at && (
             <div className="text-sm text-paper/50">
@@ -92,6 +95,6 @@ export default function ProjectHeaderSection({ project, onRefreshProject }) {
           />
         </form>
       )}
-    </div>
+    </Panel>
   );
 }

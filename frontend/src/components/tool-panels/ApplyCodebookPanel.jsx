@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
 import { postFormAndPoll } from "../../api";
 import FormShell from "../forms/FormShell";
 import DatabaseSourceFields from "../forms/DatabaseSourceFields";
@@ -9,6 +8,8 @@ import AiModelFormGroup from "../models/AiModelFormGroup";
 import ArtifactCreatedMessage from "../feedback/ArtifactCreatedMessage";
 import ProgressBar from "../feedback/ProgressBar";
 import ContentScopeFormGroup from "./ContentScopeFormGroup";
+import Panel from "../shell/Panel";
+import { input, select } from "../../lib/uiClasses";
 import { useToolPanelData } from "./useToolPanelData";
 import { useInitialProjectId } from "./useInitialProjectId";
 import {
@@ -18,11 +19,13 @@ import {
 } from "../../lib/apiContracts";
 
 const EXAMPLE_PROMPT = EXAMPLE_PROMPTS.apply;
-const inputClasses =
-  "border border-paper bg-white/5 px-3 py-2.5 text-paper placeholder:text-paper/40 focus:outline-none focus:ring-2 focus:ring-paper disabled:opacity-50";
+const inputClasses = input;
+const selectClasses = select;
 
-export default function ApplyCodebookPanel({ methodology, onMethodologyChange }) {
-  const navigate = useNavigate();
+export default function ApplyCodebookPanel({
+  methodology,
+  onMethodologyChange,
+}) {
   const initialProjectId = useInitialProjectId();
   const [database, setDatabase] = useState("");
   const [reportName, setReportName] = useState("");
@@ -57,9 +60,6 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
     });
   }, [codebooks]);
 
-  const handleViewCoding = () => {
-    navigate("/coding-view");
-  };
 
   const handleSubmit = async () => {
     const savedApiKey = localStorage.getItem("apiKey");
@@ -101,11 +101,13 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
         throw err;
       }
 
-      const { ok, data, error: postError } = await postFormAndPoll(
-        "/api/apply-codebook/",
-        requestData,
-        { onProgress: setProgress },
-      );
+      const {
+        ok,
+        data,
+        error: postError,
+      } = await postFormAndPoll("/api/apply-codebook/", requestData, {
+        onProgress: setProgress,
+      });
 
       if (!ok) {
         setError(postError || "Failed to apply codebook");
@@ -213,7 +215,11 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
     // scope that silently samples nothing from the missing table.
     if (!postsAvailable && commentsAvailable && contentScope !== "comments") {
       setContentScope("comments");
-    } else if (postsAvailable && !commentsAvailable && contentScope !== "posts") {
+    } else if (
+      postsAvailable &&
+      !commentsAvailable &&
+      contentScope !== "posts"
+    ) {
       setContentScope("posts");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -238,20 +244,9 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
   const displayError = error || panelDataError;
 
   return (
-    <div>
-      <h1 className="mb-2 text-center text-2xl font-bold">Apply Codebook</h1>
-
-      <div className="mb-6 flex justify-center">
-        <button
-          type="button"
-          onClick={handleViewCoding}
-          className="border border-paper px-4 py-2 text-sm transition-colors hover:bg-paper hover:text-ink"
-        >
-          View Coding Results
-        </button>
-      </div>
-
+    <div className="flex flex-col gap-3">
       <FormShell
+        columns
         onSubmit={handleSubmit}
         submitButton={{
           text: "Apply Codebook",
@@ -260,141 +255,159 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
         }}
         error={displayError}
       >
-        <DatabaseSourceFields
-          radioName="apply-database-type"
-          databaseType={databaseType}
-          onDatabaseTypeChange={handleDatabaseTypeChange}
-          database={database}
-          onDatabaseChange={handleDatabaseChange}
-          databaseOptions={databaseOptions}
-          databasePlaceholder="Select a database"
-          selectedProject={selectedProject}
-          onProjectChange={setSelectedProject}
-          projectOptions={projectOptions}
-          disabled={loading}
-        />
-
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="codebook" className="text-sm">
-            Select Codebook
-          </label>
-          <select
-            id="codebook"
-            value={codebook}
-            onChange={(e) => setCodebook(e.target.value)}
-            className={inputClasses}
+        <Panel
+          title="Source data & codebook"
+          className="flex-1"
+          scroll={false}
+          bodyClassName="flex flex-col gap-3"
+        >
+          <DatabaseSourceFields
+            radioName="apply-database-type"
+            databaseType={databaseType}
+            onDatabaseTypeChange={handleDatabaseTypeChange}
+            database={database}
+            onDatabaseChange={handleDatabaseChange}
+            databaseOptions={databaseOptions}
+            databasePlaceholder="Select a database"
+            selectedProject={selectedProject}
+            onProjectChange={setSelectedProject}
+            projectOptions={projectOptions}
             disabled={loading}
-          >
-            {codebooks.length === 0 ? (
-              <option value="" disabled>
-                No codebooks available
-              </option>
-            ) : (
-              codebooks.map((cb) => (
-                <option key={cb.id} value={cb.id.toString()}>
-                  {cb.name || cb.display_name || cb.id.toString()}
+          />
+
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="codebook" className="text-sm">
+              Select Codebook
+            </label>
+            <select
+              id="codebook"
+              value={codebook}
+              onChange={(e) => setCodebook(e.target.value)}
+              className={selectClasses}
+              disabled={loading}
+            >
+              {codebooks.length === 0 ? (
+                <option value="" disabled>
+                  No codebooks available
                 </option>
-              ))
-            )}
-          </select>
-        </div>
+              ) : (
+                codebooks.map((cb) => (
+                  <option key={cb.id} value={cb.id.toString()}>
+                    {cb.name || cb.display_name || cb.id.toString()}
+                  </option>
+                ))
+              )}
+            </select>
+          </div>
 
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="report_name" className="text-sm">
-            Report Name
-          </label>
-          <input
-            id="report_name"
-            type="text"
-            value={reportName}
-            onChange={(e) => setReportName(e.target.value)}
-            placeholder="Enter report name... "
-            className={inputClasses}
-            disabled={loading}
+          <ContentScopeFormGroup
+            contentScope={contentScope}
+            onContentScopeChange={setContentScope}
+            postsAvailable={postsAvailable}
+            commentsAvailable={commentsAvailable}
+            disabled={loading || !database}
+            radioName="apply-content-scope"
           />
-        </div>
 
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="description" className="text-sm">
-            Description (optional)
-          </label>
-          <textarea
-            id="description"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Optional description for the report"
+          <SliderField
+            id="samplePercentage"
+            label="Sample Size"
+            value={samplePercentage}
+            onChange={setSamplePercentage}
+            min={1}
+            max={100}
+            step={1}
+            disabled={loading || !database}
+            valueDisplay={database ? `${samplePercentage}%` : ""}
+            valueMinWidth="70px"
+            caption={
+              !database
+                ? "Select a database to see sampled record counts."
+                : `${Math.ceil((getSelectedRecordCount() * samplePercentage) / 100)} of ${getSelectedRecordCount()} records will be selected randomly.`
+            }
+          />
+        </Panel>
+
+        <Panel
+          title="Output & instructions"
+          className="flex-1"
+          scroll={false}
+          bodyClassName="flex flex-col gap-3"
+        >
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="report_name" className="text-sm">
+              Report Name
+            </label>
+            <input
+              id="report_name"
+              type="text"
+              value={reportName}
+              onChange={(e) => setReportName(e.target.value)}
+              placeholder="Enter report name... "
+              className={inputClasses}
+              disabled={loading}
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="description" className="text-sm">
+              Description (optional)
+            </label>
+            <textarea
+              id="description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Optional description for the report"
+              rows={2}
+              className={`${inputClasses} resize-y`}
+              disabled={loading}
+            />
+          </div>
+
+          <PromptTextareaWithActions
+            id="methodology"
+            label="Enter Prompt"
+            value={methodology}
+            onChange={onMethodologyChange}
+            placeholder="Enter your coding methodology or leave blank..."
             rows={2}
-            className={`${inputClasses} resize-y`}
+            promptType="apply"
+            exampleText={EXAMPLE_PROMPT}
             disabled={loading}
+            onSaveFeedback={handlePromptSaveFeedback}
           />
-        </div>
 
-        <PromptTextareaWithActions
-          id="methodology"
-          label="Enter Prompt"
-          value={methodology}
-          onChange={onMethodologyChange}
-          placeholder="Enter your coding methodology or leave blank..."
-          rows={2}
-          promptType="apply"
-          exampleText={EXAMPLE_PROMPT}
-          disabled={loading}
-          onSaveFeedback={handlePromptSaveFeedback}
-        />
-
-        <AiModelFormGroup
-          model={model}
-          onModelChange={setModel}
-          disabled={loading}
-          selectPlaceholder="dash"
-        />
-
-        <ContentScopeFormGroup
-          contentScope={contentScope}
-          onContentScopeChange={setContentScope}
-          postsAvailable={postsAvailable}
-          commentsAvailable={commentsAvailable}
-          disabled={loading || !database}
-          radioName="apply-content-scope"
-        />
-
-        <SliderField
-          id="samplePercentage"
-          label="Sample Size"
-          value={samplePercentage}
-          onChange={setSamplePercentage}
-          min={1}
-          max={100}
-          step={1}
-          disabled={loading || !database}
-          valueDisplay={database ? `${samplePercentage}%` : ""}
-          valueMinWidth="70px"
-          caption={
-            !database
-              ? "Select a database to see sampled record counts."
-              : `${Math.ceil((getSelectedRecordCount() * samplePercentage) / 100)} of ${getSelectedRecordCount()} records will be selected randomly.`
-          }
-        />
+          <AiModelFormGroup
+            model={model}
+            onModelChange={setModel}
+            disabled={loading}
+            selectPlaceholder="dash"
+          />
+        </Panel>
       </FormShell>
 
       {loading && progress && (
-        <ProgressBar current={progress.current} total={progress.total} label={progress.label} />
+        <ProgressBar
+          current={progress.current}
+          total={progress.total}
+          label={progress.label}
+        />
       )}
 
       {partialWarning && (
-        <div className="mt-4 border border-paper bg-white/5 px-4 py-3 text-center text-sm text-paper">
+        <div className="border border-paper bg-surface-raised px-3 py-2 text-center text-sm text-paper">
           {partialWarning}
         </div>
       )}
 
       {codingSummary && (
-        <div className="mt-4 border border-paper bg-white/5 px-4 py-3 text-center text-sm text-paper">
+        <div className="border border-paper bg-surface-raised px-3 py-2 text-center text-sm text-paper">
           {codingSummary}
         </div>
       )}
 
       {createdFile && (
-        <div className="mt-4">
+        <div>
           <ArtifactCreatedMessage
             name={createdFile.filename}
             viewPath="/coding-view"
@@ -405,7 +418,7 @@ export default function ApplyCodebookPanel({ methodology, onMethodologyChange })
 
       {saveMessage && (
         <div
-          className={`mt-4 border px-4 py-3 text-center text-sm ${
+          className={`border px-3 py-2 text-center text-sm ${
             saveMessageType === "success"
               ? "border-success bg-success/10 text-success"
               : "border-error bg-error/10 text-error"

@@ -2,13 +2,14 @@ import { useNavigate } from "react-router-dom";
 import ProjectsListSection from "../components/project/ProjectsListSection";
 import CreateProjectSection from "../components/project/CreateProjectSection";
 import useHomePage from "../components/project/useHomePage";
+import PageShell from "../components/shell/PageShell";
 
 export default function Home() {
   const page = useHomePage();
   const navigate = useNavigate();
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-4 py-10">
+    <PageShell title="Projects" width="wide" bodyClassName="flex flex-col gap-3">
       <ProjectsListSection
         projects={page.projects}
         loading={page.loading}
@@ -26,6 +27,6 @@ export default function Home() {
         onSubmit={page.handleCreateProject}
         onCancel={page.handleCancel}
       />
-    </div>
+    </PageShell>
   );
 }

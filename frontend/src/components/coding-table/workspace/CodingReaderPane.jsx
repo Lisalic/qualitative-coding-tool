@@ -1,11 +1,12 @@
 import { useState } from "react";
 import HighlightedContent from "../HighlightedContent";
 import PageEmptyState from "../../primitives/PageEmptyState";
+import Panel from "../../shell/Panel";
+import { btnSm } from "../../../lib/uiClasses";
 
-const btnSmall =
-  "border border-paper px-2.5 py-1 text-xs transition-colors hover:bg-paper hover:text-ink disabled:opacity-40";
+const btnSmall = btnSm;
 
-function AppliedCodeRow({ entry, getCodeColor, onRemove, onUpdateNotes }) {
+function AppliedCodeRow({ entry, getCodeColor, onRemove, onUpdateNotes, readOnly }) {
   const [notesDraft, setNotesDraft] = useState(entry.notes || "");
   const [editingNotes, setEditingNotes] = useState(false);
 
@@ -27,17 +28,21 @@ function AppliedCodeRow({ entry, getCodeColor, onRemove, onUpdateNotes }) {
             &ldquo;{entry.quote}&rdquo;
           </div>
         </div>
-        <button
-          type="button"
-          className="shrink-0 text-paper/50 hover:text-error"
-          onClick={onRemove}
-          aria-label={`Remove ${entry.code}`}
-          title="Remove code"
-        >
-          ×
-        </button>
+        {!readOnly && (
+          <button
+            type="button"
+            className="shrink-0 text-paper/50 hover:text-error"
+            onClick={onRemove}
+            aria-label={`Remove ${entry.code}`}
+            title="Remove code"
+          >
+            ×
+          </button>
+        )}
       </div>
-      {editingNotes ? (
+      {readOnly ? (
+        entry.notes ? <div className="text-xs text-paper/60">{entry.notes}</div> : null
+      ) : editingNotes ? (
         <input
           autoFocus
           type="text"
@@ -84,17 +89,23 @@ export default function CodingReaderPane({
   onUpdateNotes,
   onRecodeThisDocument,
   isAiProposed,
+  readOnly = false,
 }) {
   if (!activeRow) {
-    return <PageEmptyState message="Select a row from the list to read and code it." />;
+    return (
+      <Panel className="h-full">
+        <PageEmptyState message="Select a row from the list to read and code it." />
+      </Panel>
+    );
   }
 
   const codes = Array.isArray(activeRow.codes) ? activeRow.codes : [];
 
   return (
-    <div
+    <Panel
       key={activeRow.item_id}
-      className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto border border-paper p-4"
+      className="h-full"
+      bodyClassName="flex flex-col gap-3"
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
@@ -108,9 +119,11 @@ export default function CodingReaderPane({
           </div>
           {activeRow.title && <h3 className="mt-0.5 text-lg font-semibold">{activeRow.title}</h3>}
         </div>
-        <button type="button" className={`${btnSmall} shrink-0`} onClick={onRecodeThisDocument}>
-          Recode with AI
-        </button>
+        {!readOnly && (
+          <button type="button" className={`${btnSmall} shrink-0`} onClick={onRecodeThisDocument}>
+            Recode with AI
+          </button>
+        )}
       </div>
 
       <HighlightedContent
@@ -129,7 +142,9 @@ export default function CodingReaderPane({
         </div>
         {codes.length === 0 ? (
           <div className="text-sm text-paper/50">
-            Not coded yet. Select text above and pick a code to tag it.
+            {readOnly
+              ? "No codes were applied in this version."
+              : "Not coded yet. Select text above and pick a code to tag it."}
           </div>
         ) : (
           <div className="flex flex-col gap-1.5">
@@ -140,6 +155,7 @@ export default function CodingReaderPane({
                 getCodeColor={getCodeColor}
                 onRemove={() => onRemoveEntry(index)}
                 onUpdateNotes={(notes) => onUpdateNotes(index, notes)}
+                readOnly={readOnly}
               />
             ))}
           </div>
@@ -150,8 +166,8 @@ export default function CodingReaderPane({
           shift the position of the text the popup is already anchored
           to (see HighlightedContent's module comment for why that used
           to make the popup jump the instant it opened). */}
-      {pendingSelection && (
-        <div className="border border-paper bg-white/5 px-3 py-2 text-sm">
+      {!readOnly && pendingSelection && (
+        <div className="shrink-0 border border-paper bg-surface-raised px-3 py-2 text-sm">
           Text selected &mdash; pick a code from the popup or the codebook on the right to tag it.
           <button
             type="button"
@@ -162,6 +178,6 @@ export default function CodingReaderPane({
           </button>
         </div>
       )}
-    </div>
+    </Panel>
   );
 }

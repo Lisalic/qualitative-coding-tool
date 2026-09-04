@@ -3,6 +3,7 @@ import ProjectHeaderSection from "../components/project/ProjectHeaderSection";
 import ProjectFilesSection from "../components/project/ProjectFilesSection";
 import PageEmptyState from "../components/primitives/PageEmptyState";
 import useProjectPage from "../components/project/useProjectPage";
+import PageShell from "../components/shell/PageShell";
 
 export default function Project() {
   const { projectId } = useParams();
@@ -10,23 +11,27 @@ export default function Project() {
 
   if (page.loading) {
     return (
-      <div className="mx-auto w-full max-w-4xl px-4 py-10">
+      <PageShell title="Project" width="prose">
         <PageEmptyState message="Loading project..." />
-      </div>
+      </PageShell>
     );
   }
   if (!page.project) {
     return (
-      <div className="mx-auto w-full max-w-4xl px-4 py-10">
+      <PageShell title="Project" width="prose">
         <PageEmptyState message="Project not found" />
-      </div>
+      </PageShell>
     );
   }
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-4 py-10">
+    <PageShell
+      title={page.project.projectname || "Project"}
+      width="wide"
+      bodyClassName="flex flex-col gap-3"
+    >
       <ProjectHeaderSection project={page.project} onRefreshProject={page.refreshProject} />
       <ProjectFilesSection project={page.project} onRefreshProject={page.refreshProject} />
-    </div>
+    </PageShell>
   );
 }

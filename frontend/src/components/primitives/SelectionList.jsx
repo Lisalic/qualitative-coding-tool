@@ -1,10 +1,9 @@
 import { useMemo, useState } from "react";
+import { input, select } from "../../lib/uiClasses";
 
-const inputClasses =
-  "min-w-0 border border-paper bg-white/5 px-3 py-1.5 text-sm text-paper placeholder:text-paper/40 focus:outline-none focus:ring-2 focus:ring-paper";
+const inputClasses = `min-w-0 ${input}`;
 
-const projectSelectClasses =
-  "border border-paper bg-white/5 px-3 py-1.5 text-sm text-paper focus:outline-none focus:ring-2 focus:ring-paper sm:w-56 sm:flex-none";
+const projectSelectClasses = `${select} sm:w-56 sm:flex-none`;
 
 function itemLabel(item) {
   return String(item.display_name ?? item.name ?? item.id ?? "");
@@ -15,11 +14,14 @@ function projectLabel(project) {
 }
 
 /**
- * Document picker used by every "view" page (ArtifactSelector) and the
- * data browser (DatabaseSelectionSection). Renders as a scrollable,
- * alphabetized 2-column grid with an always-visible name-filter search box,
- * so this doesn't degrade once a user accumulates dozens of
- * codebooks/comparisons/summaries.
+ * Document picker body: an alphabetized, scrollable grid with an
+ * always-visible name filter, so this doesn't degrade once a user
+ * accumulates dozens of codebooks/comparisons/summaries.
+ *
+ * This renders no chrome of its own -- it lives inside ArtifactPicker's
+ * toolbar popover. It used to be the page-level `border-2 border-paper p-4`
+ * box every view page opened with, which cost ~200px above content that
+ * often wanted the full viewport.
  *
  * When showProjectFilter is set, the project scope selector sits in the
  * same toolbar row as the search box (project narrows scope, search finds
@@ -30,8 +32,8 @@ export default function SelectionList({
   items = [],
   selectedId,
   onSelect = () => {},
-  className = "mb-6 border-2 border-paper p-4",
-  listClassName = "mt-3 grid max-h-32 grid-cols-2 content-start gap-1 overflow-y-auto",
+  className = "",
+  listClassName = "mt-2 grid max-h-[50vh] grid-cols-1 content-start gap-1 overflow-y-auto sm:grid-cols-2",
   buttonClass = "w-full border border-paper px-3 py-1.5 text-left text-sm transition-colors hover:bg-paper hover:text-ink",
   selectedButtonClass = "bg-paper text-ink",
   emptyMessage = "No items available",
@@ -63,7 +65,7 @@ export default function SelectionList({
   if (!hasItems && !showProjectFilter) {
     return (
       <div className={className}>
-        <p className="text-paper">{emptyMessage}</p>
+        <p className="text-sm text-paper/70">{emptyMessage}</p>
       </div>
     );
   }
@@ -97,7 +99,7 @@ export default function SelectionList({
       {hasItems ? (
         <div className={listClassName}>
           {filtered.length === 0 ? (
-            <p className="col-span-2 px-1 py-2 text-sm text-paper/70">
+            <p className="px-1 py-2 text-sm text-paper/70 sm:col-span-2">
               No matches for &ldquo;{query}&rdquo;
             </p>
           ) : (
@@ -124,7 +126,7 @@ export default function SelectionList({
           )}
         </div>
       ) : (
-        <p className="mt-3 text-paper">{emptyMessage}</p>
+        <p className="mt-2 text-sm text-paper/70">{emptyMessage}</p>
       )}
     </div>
   );

@@ -1,5 +1,7 @@
 import CompareDualSelectPanel from "./CompareDualSelectPanel";
 import CompareModelPromptPanel from "./CompareModelPromptPanel";
+import PageShell from "../shell/PageShell";
+import { btnPrimary } from "../../lib/uiClasses";
 import CompareResultPanel from "./CompareResultPanel";
 import useComparePageData from "./useComparePageData";
 
@@ -44,7 +46,11 @@ const CONFIG_BY_MODE = {
   },
 };
 
-export default function ComparePageContainer({ mode = "codebook", initialA = "", showTitle = true }) {
+export default function ComparePageContainer({
+  mode = "codebook",
+  initialA = "",
+  showTitle = true,
+}) {
   const config = CONFIG_BY_MODE[mode] || CONFIG_BY_MODE.codebook;
   const {
     items,
@@ -77,13 +83,13 @@ export default function ComparePageContainer({ mode = "codebook", initialA = "",
   });
 
   return (
-    <div className="w-full">
-      {showTitle ? (
-        <h1 className="mb-6 text-center text-2xl font-bold">{config.title}</h1>
-      ) : null}
-
+    <PageShell
+      title={showTitle ? config.title : undefined}
+      width="wide"
+      bodyClassName="flex flex-col gap-3"
+    >
       <form onSubmit={submitCompare}>
-        <div className="flex flex-col gap-6 lg:flex-row">
+        <div className="flex flex-col gap-3 lg:flex-row">
           <CompareDualSelectPanel
             panelTitle={config.panelTitle}
             labelA={config.labelA}
@@ -110,19 +116,15 @@ export default function ComparePageContainer({ mode = "codebook", initialA = "",
           />
         </div>
 
-        <div className="mt-4 flex justify-center">
-          <button
-            className="border-2 border-paper px-7 py-2.5 text-base font-semibold transition-colors hover:bg-paper hover:text-ink disabled:opacity-50"
-            type="submit"
-            disabled={loading}
-          >
+        <div className="mt-3 flex justify-center">
+          <button className={btnPrimary} type="submit" disabled={loading}>
             {loading ? "Comparing..." : "Compare"}
           </button>
         </div>
       </form>
 
       {error && (
-        <div className="mt-4 border border-error bg-error/10 px-4 py-3 text-sm text-error">
+        <div className="border border-error bg-error/10 px-3 py-2 text-sm text-error">
           {error}
         </div>
       )}
@@ -133,6 +135,6 @@ export default function ComparePageContainer({ mode = "codebook", initialA = "",
         viewPath={config.viewPath}
         viewStateKey={config.viewStateKey}
       />
-    </div>
+    </PageShell>
   );
 }

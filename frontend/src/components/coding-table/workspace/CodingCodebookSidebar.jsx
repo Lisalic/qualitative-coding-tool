@@ -1,7 +1,8 @@
 import CodeLegend from "../CodeLegend";
+import Panel from "../../shell/Panel";
+import { btnSm } from "../../../lib/uiClasses";
 
-const btnSmall =
-  "border border-paper px-2.5 py-1 text-xs transition-colors hover:bg-paper hover:text-ink disabled:opacity-40";
+const btnSmall = btnSm;
 
 function truncate(text, max = 60) {
   const value = String(text || "");
@@ -55,31 +56,32 @@ export default function CodingCodebookSidebar({
     onToggleFilterCode(name);
   };
 
-  return (
-    <div className="flex h-full min-h-0 flex-col gap-2 overflow-y-auto border border-paper p-3">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold">
-          Codebook
-          {isDirty && <span className="ml-1.5 text-xs font-normal text-paper/50">(edited)</span>}
-        </h3>
-        {!isEditMode ? (
-          <button type="button" className={btnSmall} onClick={onBeginEdit}>
-            Edit
-          </button>
-        ) : (
-          <div className="flex gap-1.5">
-            <button type="button" className={btnSmall} onClick={onCancelEdit}>
-              Cancel
-            </button>
-            <button type="button" className={btnSmall} onClick={onFinishEdit}>
-              Done
-            </button>
-          </div>
-        )}
-      </div>
+  const title = (
+    <>
+      Codebook
+      {isDirty && <span className="ml-1.5 text-xs font-normal normal-case text-paper/50">(edited)</span>}
+    </>
+  );
 
+  const actions = !isEditMode ? (
+    <button type="button" className={btnSmall} onClick={onBeginEdit}>
+      Edit
+    </button>
+  ) : (
+    <>
+      <button type="button" className={btnSmall} onClick={onCancelEdit}>
+        Cancel
+      </button>
+      <button type="button" className={btnSmall} onClick={onFinishEdit}>
+        Done
+      </button>
+    </>
+  );
+
+  return (
+    <Panel title={title} actions={actions} className="h-full" bodyClassName="flex flex-col gap-2">
       {!isEditMode && pendingSelection && (
-        <div className="border border-paper bg-white/5 px-2.5 py-2 text-xs">
+        <div className="shrink-0 border border-paper bg-surface-raised px-2.5 py-2 text-xs">
           Tagging &ldquo;{truncate(pendingSelection.text)}&rdquo; &mdash; click a code below.
         </div>
       )}
@@ -93,6 +95,6 @@ export default function CodingCodebookSidebar({
         onCodeToggle={handleCodeToggle}
         getCodeColor={getCodeColor}
       />
-    </div>
+    </Panel>
   );
 }

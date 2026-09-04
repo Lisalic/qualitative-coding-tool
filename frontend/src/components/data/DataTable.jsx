@@ -2,23 +2,26 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { apiFetch } from "../../api";
 import EntryModal from "./EntryModal";
 import { useDataTableActions } from "./useDataTableActions";
+import { useRowMemos } from "./useRowMemos";
+import MemoIndicator from "./MemoIndicator";
+import Panel from "../shell/Panel";
+import { btn, btnDanger, input, select } from "../../lib/uiClasses";
 
+// The header row sticks to the top of the Panel's own scroll container, so a
+// long page of rows stays readable without a separate frozen-header widget.
 const thClasses =
-  "border-b-2 border-r border-paper px-3 py-2.5 text-left font-medium last:border-r-0";
+  "sticky top-0 z-[1] border-b-2 border-r border-paper bg-ink px-3 py-2 text-left font-medium last:border-r-0";
 const tdClasses =
-  "border-b border-r border-paper/20 px-3 py-2.5 last:border-r-0";
-const btnClasses =
-  "border border-paper px-3 py-1.5 text-sm transition-colors hover:bg-paper hover:text-ink disabled:opacity-40";
-const btnDangerClasses =
-  "border border-error bg-error/10 px-3 py-1.5 text-sm text-error transition-colors hover:bg-error hover:text-paper disabled:opacity-40";
+  "border-b border-r border-line-soft px-3 py-2 last:border-r-0";
+const btnClasses = btn;
+const btnDangerClasses = btnDanger;
+const inputClasses = input;
+const selectClasses = select;
 
 export default function DataTable({
   database = "",
-  title = "Database Contents",
   isFilteredView = false,
-  displayName = null,
   metadata = null,
-  description = null,
 }) {
   const [dbEntries, setDbEntries] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -102,6 +105,7 @@ export default function DataTable({
     setLoading,
     setError,
   });
+  const { getMemo, saveMemo } = useRowMemos(currentDatabase);
 
   // Clear selections only when switching databases. Page, page size, and search
   // changes intentionally do NOT clear selection, so it persists across them.
@@ -118,11 +122,6 @@ export default function DataTable({
     setShowModal(false);
     setSelectedEntry(null);
   };
-
-  const displayDbName =
-    currentDatabase && String(currentDatabase).trim()
-      ? displayName || String(currentDatabase).replace(/\.db$/i, "")
-      : title;
 
   const { filteredSubmissions, filteredComments } = useMemo(() => {
     if (!dbEntries) {
@@ -203,32 +202,21 @@ export default function DataTable({
   };
 
   return (
-    <div className="border border-paper p-8">
-      <div className="mb-6 flex flex-col items-center">
-        <h1 className="text-3xl font-bold">
-          {currentDatabase && String(currentDatabase).trim()
-            ? `Database: ${displayDbName}`
-            : title}
-        </h1>
-        {description ? (
-          <div className="mt-4 text-center text-paper/70">{description}</div>
-        ) : null}
-      </div>
-
+    <div className="flex flex-col gap-3">
       {error && (
-        <p className="mb-4 border border-error bg-error/10 px-4 py-3 text-sm text-error">
+        <p className="border border-error bg-error/10 px-3 py-2 text-sm text-error">
           {error}
         </p>
       )}
 
       {!dbEntries && !loading && !error && (
-        <p className="mb-4 border border-paper/20 bg-white/5 px-4 py-3 text-sm text-paper/70">
+        <p className="border border-line bg-surface-raised px-3 py-2 text-sm text-paper/70">
           Select a database to view its contents.
         </p>
       )}
 
       {loading && (
-        <p className="mb-4 border border-paper/20 bg-white/5 px-4 py-3 text-sm text-paper/70">
+        <p className="border border-line bg-surface-raised px-3 py-2 text-sm text-paper/70">
           Loading database contents...
         </p>
       )}
@@ -236,7 +224,7 @@ export default function DataTable({
       {dbEntries && (
         <>
           {metadata && (
-            <div className="mb-3 text-sm text-paper/70">
+            <div className="text-sm text-paper/70">
               {metadata.tables ? (
                 (() => {
                   const submissions =
@@ -291,7 +279,7 @@ export default function DataTable({
             </div>
           )}
 
-          <div className="mb-4 flex w-full items-center justify-between">
+          <div className="flex w-full flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <label htmlFor="entry-limit" className="text-sm text-paper/70">
                 Show entries:{" "}
@@ -303,7 +291,7 @@ export default function DataTable({
                   setLimit(Number(e.target.value));
                   setPage(0);
                 }}
-                className="border border-paper bg-white/5 px-2 py-1.5 text-sm text-paper focus:outline-none focus:ring-2 focus:ring-paper"
+                className={selectClasses}
               >
                 <option value={10}>10</option>
                 <option value={25}>25</option>
@@ -321,22 +309,20 @@ export default function DataTable({
                   setSearchTerm(e.target.value);
                   setPage(0);
                 }}
-                className="border border-paper bg-white/5 px-3 py-1.5 text-left text-sm text-paper placeholder:text-paper/40 focus:outline-none focus:ring-2 focus:ring-paper"
+                className={`${inputClasses} text-left`}
               />
             </div>
           </div>
 
           {dbEntries.message && (
-            <p className="mb-4 border border-paper/20 bg-white/5 px-4 py-3 text-sm text-paper/70">
+            <p className="border border-line bg-surface-raised px-3 py-2 text-sm text-paper/70">
               {dbEntries.message}
             </p>
           )}
 
           {filteredSubmissions.length > 0 && (
-            <div className="mb-8">
-              <h3 className="mb-3 text-lg font-medium">Sample Posts ({limit})</h3>
-              <div className="overflow-x-auto border border-paper">
-                <table className="w-full border-collapse">
+            <Panel title={`Sample Posts (${limit})`} padded={false} bodyClassName="overflow-auto">
+              <table className="w-full border-collapse">
                   <thead>
                     <tr>
                       <th className={thClasses} style={{ width: 48 }}>
@@ -389,20 +375,23 @@ export default function DataTable({
                             onClick={(e) => e.stopPropagation()}
                           />
                         </td>
-                        <td className={tdClasses}>{sub.id}</td>
+                        <td className={tdClasses}>
+                          {sub.id}
+                          <MemoIndicator memo={getMemo("submission", sub.id)} />
+                        </td>
                         {isFilteredView || currentDatabase === "filtered" ? (
                           <>
-                            <td className={`${tdClasses} max-w-[300px] truncate`}>
+                            <td className={`${tdClasses} max-w-[42ch] truncate`}>
                               {sub.title}
                             </td>
-                            <td className={`${tdClasses} max-w-[300px] truncate`}>
+                            <td className={`${tdClasses} max-w-[42ch] truncate`}>
                               {sub.selftext}
                             </td>
                           </>
                         ) : (
                           <>
                             <td className={tdClasses}>{sub.subreddit}</td>
-                            <td className={`${tdClasses} max-w-[300px] truncate`}>
+                            <td className={`${tdClasses} max-w-[42ch] truncate`}>
                               {sub.title}
                             </td>
                             <td className={tdClasses}>{sub.author}</td>
@@ -411,17 +400,14 @@ export default function DataTable({
                         )}
                       </tr>
                     ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+                </tbody>
+              </table>
+            </Panel>
           )}
 
           {filteredComments.length > 0 && (
-            <div className="mb-8">
-              <h3 className="mb-3 text-lg font-medium">Sample Comments ({limit})</h3>
-              <div className="overflow-x-auto border border-paper">
-                <table className="w-full border-collapse">
+            <Panel title={`Sample Comments (${limit})`} padded={false} bodyClassName="overflow-auto">
+              <table className="w-full border-collapse">
                   <thead>
                     <tr>
                       <th className={thClasses} style={{ width: 48 }}>
@@ -465,19 +451,21 @@ export default function DataTable({
                             onClick={(e) => e.stopPropagation()}
                           />
                         </td>
-                        <td className={tdClasses}>{comment.id}</td>
+                        <td className={tdClasses}>
+                          {comment.id}
+                          <MemoIndicator memo={getMemo("comment", comment.id)} />
+                        </td>
                         <td className={tdClasses}>{comment.subreddit}</td>
-                        <td className={`${tdClasses} max-w-[300px] truncate`}>
+                        <td className={`${tdClasses} max-w-[42ch] truncate`}>
                           {comment.body}
                         </td>
                         <td className={tdClasses}>{comment.author}</td>
                         <td className={tdClasses}>{comment.score}</td>
                       </tr>
                     ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+                </tbody>
+              </table>
+            </Panel>
           )}
 
           {dbEntries.submissions.length === 0 &&
@@ -569,6 +557,8 @@ export default function DataTable({
         onNext={goToNext}
         hasPrev={currentIndex > 0}
         hasNext={currentIndex >= 0 && currentIndex < currentList.length - 1}
+        memo={selectedEntry ? getMemo(selectedEntry.type, selectedEntry.id) : null}
+        onSaveMemo={saveMemo}
       />
     </div>
   );

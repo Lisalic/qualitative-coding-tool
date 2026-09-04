@@ -53,7 +53,7 @@ export default function CodingTextView({ schema, refreshKey }) {
 
   if (error) {
     return (
-      <div className="border border-error bg-error/10 px-4 py-3 text-sm text-error">{error}</div>
+      <div className="border border-error bg-error/10 px-3 py-2 text-sm text-error">{error}</div>
     );
   }
 
@@ -62,7 +62,7 @@ export default function CodingTextView({ schema, refreshKey }) {
   }
 
   return (
-    <pre className="max-h-[70vh] overflow-auto whitespace-pre-wrap break-words border border-paper/20 bg-white/5 p-4 font-mono text-sm text-paper">
+    <pre className="h-full min-h-0 overflow-auto whitespace-pre-wrap break-words border border-line bg-surface-raised p-3 font-mono text-sm text-paper">
       {text}
     </pre>
   );

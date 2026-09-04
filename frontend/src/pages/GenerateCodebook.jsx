@@ -1,13 +1,13 @@
 import { useState } from "react";
 import GenerateCodebookPanel from "../components/tool-panels/GenerateCodebookPanel";
-import ToolPage from "../components/shell/ToolPage";
+import PageShell from "../components/shell/PageShell";
 
 export default function GenerateCodebook() {
   const [prompt, setPrompt] = useState("");
 
   return (
-    <ToolPage>
+    <PageShell title="Generate Codebook" width="wide">
       <GenerateCodebookPanel prompt={prompt} onPromptChange={setPrompt} />
-    </ToolPage>
+    </PageShell>
   );
 }

@@ -1,9 +1,9 @@
 import CodingRecodeBar from "./CodingRecodeBar";
 
-const inputClasses =
-  "border border-paper bg-white/5 px-2.5 py-1.5 text-sm text-paper placeholder:text-paper/40 focus:outline-none focus:ring-2 focus:ring-paper disabled:opacity-50";
-const btnSmall =
-  "border border-paper px-2 py-1 text-xs transition-colors hover:bg-paper hover:text-ink disabled:opacity-40";
+import { input, btnSm } from "../../../lib/uiClasses";
+
+const inputClasses = input;
+const btnSmall = btnSm;
 
 const ONLY_OPTIONS = [
   { value: "all", label: "All rows" },
@@ -51,8 +51,8 @@ export default function CodingDocumentList({
 }) {
   const allMatchingSelected = matchingCount > 0 && selectedItemIds?.size >= matchingCount;
   return (
-    <div className="flex h-full min-h-0 flex-col border border-paper">
-      <div className="flex flex-col gap-2 border-b border-paper/30 p-3">
+    <div className="flex h-full min-h-0 flex-col border border-line bg-surface">
+      <div className="flex shrink-0 flex-col gap-2 border-b border-line p-2.5">
         <div className="flex items-center justify-between gap-2">
           <div className="text-xs text-paper/70">
             {totalCoded} of {totalRows} rows coded

@@ -37,14 +37,22 @@ const Register = React.lazy(() => import("./pages/Register"));
 function App() {
   return (
     <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-      <div className="flex min-h-screen w-full flex-col bg-ink text-paper">
+      {/* Fixed-height app shell: the document never scrolls (see index.css),
+          so every page owns its own scroll regions and a dense page can use
+          the full viewport height without guessing at it with calc(). The
+          `min-h-0` on <main> and the content column is load-bearing -- flex
+          children default to min-height:auto and refuse to shrink below
+          their content, which silently breaks every nested scroller.
+          Page padding lives in PageShell, not here, so a full-bleed page
+          can opt out of it entirely. */}
+      <div className="flex h-dvh w-full flex-col overflow-hidden bg-ink text-paper">
         <Navbar />
-        <main className="flex w-full flex-1 items-stretch">
+        <main className="flex min-h-0 w-full flex-1 items-stretch">
           <Sidebar />
-          <div className="min-w-0 flex-1 px-6 py-6">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             <Suspense
               fallback={
-                <div className="flex min-h-[40vh] items-center justify-center text-paper/70">
+                <div className="flex min-h-0 flex-1 items-center justify-center text-paper/70">
                   <span>Loading...</span>
                 </div>
               }

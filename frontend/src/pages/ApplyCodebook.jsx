@@ -1,16 +1,16 @@
 import { useState } from "react";
 import ApplyCodebookPanel from "../components/tool-panels/ApplyCodebookPanel";
-import ToolPage from "../components/shell/ToolPage";
+import PageShell from "../components/shell/PageShell";
 
 export default function ApplyCodebook() {
   const [methodology, setMethodology] = useState("");
 
   return (
-    <ToolPage>
+    <PageShell title="Apply Codebook" width="wide">
       <ApplyCodebookPanel
         methodology={methodology}
         onMethodologyChange={setMethodology}
       />
-    </ToolPage>
+    </PageShell>
   );
 }

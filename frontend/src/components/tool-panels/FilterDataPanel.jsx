@@ -1,4 +1,3 @@
-import { useNavigate } from "react-router-dom";
 import { useState, useEffect, useCallback } from "react";
 import { apiFetch, postFormAndPoll } from "../../api";
 import FormShell from "../forms/FormShell";
@@ -10,6 +9,8 @@ import AiModelFormGroup from "../models/AiModelFormGroup";
 import ArtifactCreatedMessage from "../feedback/ArtifactCreatedMessage";
 import ProgressBar from "../feedback/ProgressBar";
 import ContentScopeFormGroup from "./ContentScopeFormGroup";
+import Panel from "../shell/Panel";
+import { input } from "../../lib/uiClasses";
 import { useToolPanelData } from "./useToolPanelData";
 import { useInitialProjectId } from "./useInitialProjectId";
 import {
@@ -19,14 +20,12 @@ import {
 } from "../../lib/apiContracts";
 
 const EXAMPLE_PROMPT = EXAMPLE_PROMPTS.filter;
-const inputClasses =
-  "border border-paper bg-white/5 px-3 py-2.5 text-paper placeholder:text-paper/40 focus:outline-none focus:ring-2 focus:ring-paper disabled:opacity-50";
+const inputClasses = input;
 
 export default function FilterDataPanel({
   filterPrompt,
   onFilterPromptChange,
 }) {
-  const navigate = useNavigate();
   const initialProjectId = useInitialProjectId();
   const [message, setMessage] = useState("");
   const [createdFile, setCreatedFile] = useState(null);
@@ -120,7 +119,11 @@ export default function FilterDataPanel({
     // scope that silently samples nothing from the missing table.
     if (!postsAvailable && commentsAvailable && contentScope !== "comments") {
       setContentScope("comments");
-    } else if (postsAvailable && !commentsAvailable && contentScope !== "posts") {
+    } else if (
+      postsAvailable &&
+      !commentsAvailable &&
+      contentScope !== "posts"
+    ) {
       setContentScope("posts");
     }
   }, [postsAvailable, commentsAvailable, rangesLoading, contentScope]);
@@ -193,12 +196,17 @@ export default function FilterDataPanel({
       if (data?.partial) {
         const describe = (counts) =>
           Object.entries(counts || {})
-            .map(([kind, total]) => `${data.batches_processed?.[kind] ?? "?"}/${total} ${kind} batches`)
+            .map(
+              ([kind, total]) =>
+                `${data.batches_processed?.[kind] ?? "?"}/${total} ${kind} batches`,
+            )
             .join(", ");
         const reason = data.partial_error
           ? `Stopped early after an error: ${data.partial_error}`
           : "This is likely due to a free model's batch limit -- use a paid model or reduce the sample size for complete coverage.";
-        setPartialWarning(`Warning: only ${describe(data.batches_total)} were processed. ${reason}`);
+        setPartialWarning(
+          `Warning: only ${describe(data.batches_total)} were processed. ${reason}`,
+        );
       }
       onFilterPromptChange("");
       setFilterTags("");
@@ -209,9 +217,6 @@ export default function FilterDataPanel({
     }
   };
 
-  const handleViewFilteredData = () => {
-    navigate("/filtered-data");
-  };
 
   const handlePromptSaveFeedback = ({ type, message }) => {
     setSaveMessage(message);
@@ -233,19 +238,9 @@ export default function FilterDataPanel({
   }));
 
   return (
-    <div>
-      <h1 className="mb-2 text-center text-2xl font-bold">Apply Filter</h1>
-      <div className="mb-6 flex justify-center">
-        <button
-          type="button"
-          onClick={handleViewFilteredData}
-          className="border border-paper px-4 py-2 text-sm transition-colors hover:bg-paper hover:text-ink"
-        >
-          View Filtered Data
-        </button>
-      </div>
-
+    <div className="flex flex-col gap-3">
       <FormShell
+        columns
         onSubmit={handleSubmit}
         submitButton={{
           text: "Filter",
@@ -254,133 +249,156 @@ export default function FilterDataPanel({
         }}
         error={message || panelDataError || null}
       >
-        <DatabaseSourceFields
-          radioName="filter-database-type"
-          databaseType={databaseType}
-          onDatabaseTypeChange={handleDatabaseTypeChange}
-          database={database}
-          onDatabaseChange={setDatabase}
-          databaseOptions={databaseOptions}
-          databasePlaceholder="Select a database"
-          selectedProject={selectedProject}
-          onProjectChange={setSelectedProject}
-          projectOptions={projectOptions}
-          disabled={loading}
-        />
-
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="name" className="text-sm">
-            Filtered Database Name
-          </label>
-          <input
-            id="name"
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="my-filtered-db"
-            className={inputClasses}
+        {/* Left: what is being filtered. Right: what comes out and how. */}
+        <Panel
+          title="Source data"
+          className="flex-1"
+          scroll={false}
+          bodyClassName="flex flex-col gap-3"
+        >
+          <DatabaseSourceFields
+            radioName="filter-database-type"
+            databaseType={databaseType}
+            onDatabaseTypeChange={handleDatabaseTypeChange}
+            database={database}
+            onDatabaseChange={setDatabase}
+            databaseOptions={databaseOptions}
+            databasePlaceholder="Select a database"
+            selectedProject={selectedProject}
+            onProjectChange={setSelectedProject}
+            projectOptions={projectOptions}
             disabled={loading}
           />
-        </div>
 
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="description" className="text-sm">
-            Description (optional)
-          </label>
-          <textarea
-            id="description"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Optional description for the filtered database"
+          <ContentScopeFormGroup
+            contentScope={contentScope}
+            onContentScopeChange={setContentScope}
+            postsAvailable={postsAvailable}
+            commentsAvailable={commentsAvailable}
+            disabled={loading || !database}
+            radioName="filter-content-scope"
+          />
+
+          <SliderField
+            id="minWords"
+            label="Minimum Words"
+            value={minWords}
+            onChange={setMinWords}
+            min={0}
+            max={1000}
+            step={10}
+            disabled={loading}
+            valueDisplay={minWords}
+            valueMinWidth="60px"
+            caption={
+              rangesLoading ? "Loading word count ranges..." : minWordsCaption
+            }
+          />
+
+          <SliderField
+            id="samplePercentage"
+            label="Sample Size"
+            value={samplePercentage}
+            onChange={setSamplePercentage}
+            min={1}
+            max={100}
+            step={1}
+            disabled={loading || !database}
+            valueDisplay={database ? `${samplePercentage}%` : ""}
+            valueMinWidth="70px"
+            caption={
+              !database
+                ? "Select a database to see sampled record counts."
+                : `${Math.ceil(
+                    ((counts.submissions + counts.comments) *
+                      samplePercentage) /
+                      100,
+                  )} of ${counts.submissions + counts.comments} records will be selected randomly.`
+            }
+          />
+        </Panel>
+
+        <Panel
+          title="Output & instructions"
+          className="flex-1"
+          scroll={false}
+          bodyClassName="flex flex-col gap-3"
+        >
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="name" className="text-sm">
+              Filtered Database Name
+            </label>
+            <input
+              id="name"
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="my-filtered-db"
+              className={inputClasses}
+              disabled={loading}
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="description" className="text-sm">
+              Description (optional)
+            </label>
+            <textarea
+              id="description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Optional description for the filtered database"
+              rows={3}
+              className={`${inputClasses} resize-y`}
+              disabled={loading}
+            />
+          </div>
+
+          <PromptTextareaWithActions
+            id="filterPrompt"
+            label="Enter prompt"
+            value={filterPrompt}
+            onChange={onFilterPromptChange}
+            placeholder="Enter your filter prompt..."
             rows={3}
-            className={`${inputClasses} resize-y`}
+            promptType="filter"
+            exampleText={EXAMPLE_PROMPT}
             disabled={loading}
+            onSaveFeedback={handlePromptSaveFeedback}
           />
-        </div>
 
-        <PromptTextareaWithActions
-          id="filterPrompt"
-          label="Enter prompt"
-          value={filterPrompt}
-          onChange={onFilterPromptChange}
-          placeholder="Enter your filter prompt..."
-          rows={3}
-          promptType="filter"
-          exampleText={EXAMPLE_PROMPT}
-          disabled={loading}
-          onSaveFeedback={handlePromptSaveFeedback}
-        />
+          <div className="flex flex-col gap-1.5">
+            <AiLabel htmlFor="filterTags" text="Keywords (optional)" />
+            <textarea
+              id="filterTags"
+              value={filterTags}
+              onChange={(e) => setFilterTags(e.target.value)}
+              placeholder="Comma-separated keywords (optional)."
+              rows={3}
+              className={`${inputClasses} resize-y`}
+              disabled={loading}
+            />
+          </div>
 
-        <div className="flex flex-col gap-1.5">
-          <AiLabel htmlFor="filterTags" text="Keywords (optional)" />
-          <textarea
-            id="filterTags"
-            value={filterTags}
-            onChange={(e) => setFilterTags(e.target.value)}
-            placeholder="Comma-separated keywords (optional)."
-            rows={3}
-            className={`${inputClasses} resize-y`}
+          <AiModelFormGroup
+            model={model}
+            onModelChange={setModel}
             disabled={loading}
+            selectPlaceholder="filter"
           />
-        </div>
-
-        <AiModelFormGroup
-          model={model}
-          onModelChange={setModel}
-          disabled={loading}
-          selectPlaceholder="filter"
-        />
-
-        <ContentScopeFormGroup
-          contentScope={contentScope}
-          onContentScopeChange={setContentScope}
-          postsAvailable={postsAvailable}
-          commentsAvailable={commentsAvailable}
-          disabled={loading || !database}
-          radioName="filter-content-scope"
-        />
-
-        <SliderField
-          id="minWords"
-          label="Minimum Words"
-          value={minWords}
-          onChange={setMinWords}
-          min={0}
-          max={1000}
-          step={10}
-          disabled={loading}
-          valueDisplay={minWords}
-          valueMinWidth="60px"
-          caption={rangesLoading ? "Loading word count ranges..." : minWordsCaption}
-        />
-
-        <SliderField
-          id="samplePercentage"
-          label="Sample Size"
-          value={samplePercentage}
-          onChange={setSamplePercentage}
-          min={1}
-          max={100}
-          step={1}
-          disabled={loading || !database}
-          valueDisplay={database ? `${samplePercentage}%` : ""}
-          valueMinWidth="70px"
-          caption={
-            !database
-              ? "Select a database to see sampled record counts."
-              : `${Math.ceil(
-                  ((counts.submissions + counts.comments) * samplePercentage) / 100,
-                )} of ${counts.submissions + counts.comments} records will be selected randomly.`
-          }
-        />
+        </Panel>
       </FormShell>
 
       {loading && progress && (
-        <ProgressBar current={progress.current} total={progress.total} label={progress.label} />
+        <ProgressBar
+          current={progress.current}
+          total={progress.total}
+          label={progress.label}
+        />
       )}
 
       {createdFile && (
-        <div className="mt-4">
+        <div>
           <ArtifactCreatedMessage
             name={createdFile.filename}
             viewPath="/filtered-data"
@@ -390,22 +408,22 @@ export default function FilterDataPanel({
       )}
 
       {partialWarning && (
-        <div className="mt-4 border border-paper bg-white/5 px-4 py-3 text-center text-sm text-paper">
+        <div className="border border-paper bg-surface-raised px-3 py-2 text-center text-sm text-paper">
           {partialWarning}
         </div>
       )}
 
       {orphanedComments > 0 && (
-        <div className="mt-4 border border-paper bg-white/5 px-4 py-3 text-center text-sm text-paper">
-          {orphanedComments} comment{orphanedComments === 1 ? "" : "s"} kept without{" "}
-          {orphanedComments === 1 ? "its" : "their"} parent post -- posts and comments were
-          filtered independently.
+        <div className="border border-paper bg-surface-raised px-3 py-2 text-center text-sm text-paper">
+          {orphanedComments} comment{orphanedComments === 1 ? "" : "s"} kept
+          without {orphanedComments === 1 ? "its" : "their"} parent post --
+          posts and comments were filtered independently.
         </div>
       )}
 
       {saveMessage && (
         <div
-          className={`mt-4 border px-4 py-3 text-center text-sm ${
+          className={`border px-3 py-2 text-center text-sm ${
             saveMessageType === "success"
               ? "border-success bg-success/10 text-success"
               : "border-error bg-error/10 text-error"

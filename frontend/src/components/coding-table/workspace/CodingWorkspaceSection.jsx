@@ -8,16 +8,14 @@ import CodingCodebookSidebar from "./CodingCodebookSidebar";
 import ViewModeTabs from "../../primitives/ViewModeTabs";
 import PageEmptyState from "../../primitives/PageEmptyState";
 import PromptPanel from "../../primitives/PromptPanel";
+import PageShell from "../../shell/PageShell";
+import { btn, btnSm, btnActive, btnPrimary } from "../../../lib/uiClasses";
 import { hasPromptInfo } from "../../../lib/promptInfo";
-import VersionHistoryPanel from "../../versioning/VersionHistoryPanel";
-import useVersionHistory from "../../versioning/useVersionHistory";
 import { flattenCodebookCodes, getCodeColor } from "../../../lib/codingUtils";
 
-const tabInactive =
-  "border border-paper px-3 py-1.5 text-sm transition-colors hover:bg-paper hover:text-ink";
-const tabActive = "border border-paper bg-paper px-3 py-1.5 text-sm font-semibold text-ink";
-const promptBtnClasses =
-  "border border-paper px-2.5 py-1 text-xs transition-colors hover:bg-paper hover:text-ink";
+const tabInactive = btn;
+const tabActive = `${btn} ${btnActive}`;
+const promptBtnClasses = btnSm;
 
 /** One-line summary of everything staged in the current editing session
  * -- rows changed (broken out by how many came from an accepted AI
@@ -47,10 +45,18 @@ function sessionSummary(page) {
  * session (see useViewCodingPage's docstring); the bottom bar appears
  * the moment any of them is dirty, and Save Changes flushes the whole
  * session in a single request.
+ *
+ * Layout: this owns its whole route, rendering PageShell with
+ * scroll="fill" so the 3-pane grid gets the real remaining viewport height.
+ * It previously guessed at that height with `h-[calc(100vh-220px)]` while
+ * also setting `min-h-[960px]` -- the floor won on any laptop screen, so
+ * the workspace overflowed the very viewport it was sized to fit.
+ *
+ * `picker` is the artifact selector, rendered into the toolbar rather than
+ * as a box above the workspace.
  */
-export default function CodingWorkspaceSection({ page }) {
+export default function CodingWorkspaceSection({ page, picker = null }) {
   const [showPrompt, setShowPrompt] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
   const navigate = useNavigate();
 
   const promptInfo = {
@@ -66,73 +72,73 @@ export default function CodingWorkspaceSection({ page }) {
   // must be immediately taggable, not just after a Save.
   const availableCodes = flattenCodebookCodes(page.codebookDraft);
 
-  const history = useVersionHistory(page.selectedCodingSchema);
-  const handleDuplicateFrom = async (versionNo, displayName) => {
-    const result = await page.handleDuplicate(displayName, versionNo);
-    return result;
-  };
-
   if (!selectedCodedData) {
     return (
-      <section className="border-2 border-paper p-6">
-        <PageEmptyState message="Select a coded data file to view" />
-      </section>
+      <PageShell title="View Coding" actions={picker} width="wide">
+        <PageEmptyState message="Select a coding to view" />
+      </PageShell>
     );
   }
 
-  return (
-    <section className="flex flex-col gap-3 border-2 border-paper p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="truncate text-lg font-semibold">{page.selectedCodedDataName}</h2>
-          {page.selectedCodingDescription && (
-            <p className="truncate text-sm text-paper/60">{page.selectedCodingDescription}</p>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <ViewModeTabs
-            modes={[
-              { value: "reader", label: "Reader", activeClassName: tabActive, inactiveClassName: tabInactive },
-              { value: "text", label: "Text View", activeClassName: tabActive, inactiveClassName: tabInactive },
-            ]}
-            activeMode={viewMode}
-            onChange={page.setViewMode}
-            containerClassName="flex gap-1.5"
-          />
-          <button type="button" className={promptBtnClasses} onClick={() => setShowHistory((v) => !v)}>
-            {showHistory ? "Hide" : "Show"} History
-          </button>
-          <button
-            type="button"
-            className={promptBtnClasses}
-            onClick={() => navigate("/lineage", { state: { ref: page.selectedCodingSchema } })}
-          >
-            Lineage
-          </button>
-          {hasPromptInfo(promptInfo) && (
-            <button type="button" className={promptBtnClasses} onClick={() => setShowPrompt((v) => !v)}>
-              {showPrompt ? "Hide" : "Show"} Prompt
-            </button>
-          )}
-          <CodingDuplicateControl
-            defaultName={page.selectedCodedDataName}
-            onDuplicate={page.handleDuplicate}
-          />
-        </div>
-      </div>
+  const actions = (
+    <>
+      {picker}
+      <ViewModeTabs
+        modes={[
+          { value: "reader", label: "Reader", activeClassName: tabActive, inactiveClassName: tabInactive },
+          { value: "text", label: "Text View", activeClassName: tabActive, inactiveClassName: tabInactive },
+        ]}
+        activeMode={viewMode}
+        onChange={page.setViewMode}
+        containerClassName="flex gap-1.5"
+      />
+      <button
+        type="button"
+        className={promptBtnClasses}
+        onClick={() => navigate(`/versions?ref=${encodeURIComponent(page.selectedCodingSchema)}`)}
+      >
+        History
+      </button>
+      <button
+        type="button"
+        className={promptBtnClasses}
+        onClick={() => navigate("/lineage", { state: { ref: page.selectedCodingSchema } })}
+      >
+        Lineage
+      </button>
+      {hasPromptInfo(promptInfo) && (
+        <button type="button" className={promptBtnClasses} onClick={() => setShowPrompt((v) => !v)}>
+          {showPrompt ? "Hide" : "Show"} Prompt
+        </button>
+      )}
+      <CodingDuplicateControl
+        defaultName={page.selectedCodedDataName}
+        onDuplicate={page.handleDuplicate}
+      />
+    </>
+  );
 
-      {showPrompt && <PromptPanel {...promptInfo} />}
+  return (
+    <PageShell
+      title={page.selectedCodedDataName}
+      subtitle={page.selectedCodingDescription}
+      actions={actions}
+      width="full"
+      scroll="fill"
+      bodyClassName="gap-3"
+    >
+      {showPrompt && (
+        <div className="shrink-0">
+          <PromptPanel {...promptInfo} />
+        </div>
+      )}
 
       {viewMode === "text" ? (
-        <CodingTextView schema={page.selectedCodingSchema} refreshKey={page.refreshKey} />
+        <div className="min-h-0 flex-1">
+          <CodingTextView schema={page.selectedCodingSchema} refreshKey={page.refreshKey} />
+        </div>
       ) : (
-        <div
-          className={`grid h-[calc(100vh-220px)] min-h-[960px] grid-cols-1 gap-3 overflow-hidden lg:grid-rows-1 ${
-            showHistory
-              ? "lg:grid-cols-[280px_minmax(0,1fr)_280px_280px]"
-              : "lg:grid-cols-[280px_minmax(0,1fr)_280px]"
-          }`}
-        >
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden lg:grid-cols-[minmax(220px,280px)_minmax(0,1fr)_minmax(240px,300px)] lg:grid-rows-1">
           <CodingDocumentList
             rows={page.rows}
             activeItemId={page.activeItemId}
@@ -198,23 +204,18 @@ export default function CodingWorkspaceSection({ page }) {
             onFinishEdit={page.finishCodebookEdit}
             onCancelEdit={page.cancelCodebookEdit}
           />
-
-          {showHistory && (
-            <VersionHistoryPanel
-              history={history}
-              onClose={() => setShowHistory(false)}
-              onDuplicateFrom={handleDuplicateFrom}
-            />
-          )}
         </div>
       )}
 
+      {/* Pinned by flex rather than `fixed`: the panes above now end exactly
+          at the viewport edge, so an overlaying bar would permanently hide
+          their last row. */}
       {page.isSessionDirty && (
-        <div className="fixed inset-x-0 bottom-0 z-50 flex flex-wrap items-center justify-center gap-3 border-t-2 border-paper bg-ink px-4 py-3 shadow-[0_-2px_12px_rgba(0,0,0,0.3)]">
+        <div className="flex shrink-0 flex-wrap items-center justify-center gap-3 border-t-2 border-paper bg-ink px-4 py-2">
           <span className="text-sm">{sessionSummary(page)}</span>
           <button
             type="button"
-            className="border border-paper px-3 py-1.5 text-sm text-paper/70 transition-colors hover:bg-paper hover:text-ink"
+            className={`${btn} text-paper/70`}
             onClick={page.discardSession}
             disabled={page.sessionSaveState.status === "saving"}
           >
@@ -222,7 +223,7 @@ export default function CodingWorkspaceSection({ page }) {
           </button>
           <button
             type="button"
-            className="border-2 border-paper bg-paper px-4 py-1.5 text-sm font-semibold text-ink transition-colors hover:bg-ink hover:text-paper disabled:opacity-40"
+            className={`${btnPrimary} bg-paper text-ink hover:bg-ink hover:text-paper`}
             onClick={page.saveSession}
             disabled={page.sessionSaveState.status === "saving"}
           >
@@ -233,6 +234,6 @@ export default function CodingWorkspaceSection({ page }) {
           )}
         </div>
       )}
-    </section>
+    </PageShell>
   );
 }

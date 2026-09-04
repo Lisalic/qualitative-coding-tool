@@ -3,7 +3,11 @@ import AiLabel from "../forms/AiLabel";
 const EXAMPLE_PROMPT =
   "Please provide a comprehensive summary focusing on:\n- Key themes and patterns in the coded data\n- Most frequently applied codes and their significance\n- Relationships between different codes\n- Representative examples from the data\n- Overall insights and implications";
 
-export default function PromptEditorSection({ value, onChange, onLoadExample }) {
+export default function PromptEditorSection({
+  value,
+  onChange,
+  onLoadExample,
+}) {
   return (
     <div className="mb-3">
       <div className="mb-1 flex items-center justify-between">

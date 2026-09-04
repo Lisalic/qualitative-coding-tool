@@ -171,20 +171,6 @@ export default function useViewCodebookPage() {
     [selectedCodebook, codebookDraft, fetchCodebook, fetchAvailableCodebooks],
   );
 
-  const duplicateFrom = useCallback(
-    async (versionNo, displayName) => {
-      if (!selectedCodebook) return { ok: false, error: "No codebook selected." };
-      const result = await requestJson(`/api/codebook/${encodeURIComponent(selectedCodebook)}/duplicate`, {
-        method: "POST",
-        body: { display_name: displayName, from_version_no: versionNo || undefined },
-      });
-      if (!result.ok) return { ok: false, error: result.error };
-      await fetchAvailableCodebooks();
-      return { ok: true };
-    },
-    [selectedCodebook, fetchAvailableCodebooks],
-  );
-
   useEffect(() => {
     fetchProjects();
   }, [fetchProjects]);
@@ -231,6 +217,5 @@ export default function useViewCodebookPage() {
     saveEdit,
     refreshKey,
     refetchCodebook: () => selectedCodebook && fetchCodebook(selectedCodebook),
-    duplicateFrom,
   };
 }

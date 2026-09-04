@@ -22,10 +22,11 @@ function toSelectorItem(file) {
     display_name: file.display_name || file.schema_name || String(file.id),
     description: typeLabel(file.file_type),
     fileId: String(file.id),
+    file_type: file.file_type,
   };
 }
 
-/** Flatten (and dedupe) project.files into ArtifactSelector items.
+/** Flatten (and dedupe) project.files into ArtifactPicker items.
  * `selectedProject` narrows to one project; empty means all of them.
  */
 export function artifactsFromProjects(projects, selectedProject) {
@@ -53,7 +54,7 @@ export function artifactsFromProjects(projects, selectedProject) {
  * linkable/shareable and survives a refresh.
  *
  * Artifact picking reuses the same project-scoped, name-searchable
- * selector as the other View pages (`ArtifactSelector`), flattened
+ * selector as the other View pages (`ArtifactPicker`), flattened
  * across every file type since lineage is type-agnostic.
  */
 export default function useLineagePage() {

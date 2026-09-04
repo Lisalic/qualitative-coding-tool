@@ -9,6 +9,8 @@ export default function ViewCodingComparisons() {
       contentUrl={(id) => `/api/coding-comparison?coding_id=${encodeURIComponent(id)}`}
       contentField="coding_comparison"
       emptyMessage="No coding comparisons available"
+      placeholderMessage="Select a coding comparison to view"
+      pickerPlaceholder="Select coding comparison…"
     />
   );
 }

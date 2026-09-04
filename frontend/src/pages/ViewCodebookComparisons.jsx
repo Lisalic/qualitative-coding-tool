@@ -9,6 +9,8 @@ export default function ViewCodebookComparisons() {
       contentUrl={(id) => `/api/codebook?codebook_id=${encodeURIComponent(id)}`}
       contentField="codebook_comparison"
       emptyMessage="No codebook comparisons available"
+      placeholderMessage="Select a codebook comparison to view"
+      pickerPlaceholder="Select codebook comparison…"
     />
   );
 }
