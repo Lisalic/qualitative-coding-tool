@@ -236,7 +236,28 @@ async def _demote_if_eligible(session: AsyncSession, file_id: int, head_version_
 
 
 async def link_parents(session: AsyncSession, child_file_id: int, parents: Sequence[EdgeSpec]) -> None:
+    """Write one ``artifact_edges`` row per parent spec.
+
+    A parent that no longer exists is **skipped**, not written. Every
+    caller here is a long-running job that read its parents minutes
+    earlier (an LLM round trip ago), so a parent can be deleted inside
+    that window; writing the edge anyway put a ``parent_file_id`` with
+    no ``files`` row into the table, which Postgres rejects at COMMIT --
+    rolling back the whole finished artifact, LLM output included --
+    while SQLite (FKs off in tests) silently stored the dangling edge.
+    Lineage is metadata about content, so losing an edge must never
+    corrupt or discard the content itself; the artifact is written, one
+    edge lighter. Handlers that *copy rows out of* a parent (apply
+    codebook, filter) have a stricter requirement and check the parent
+    themselves before getting here -- see
+    ``file_repo.require_existing_file_ids``.
+    """
+    if not parents:
+        return
+    existing = await file_repo.existing_file_ids(session, {s.parent_file_id for s in parents})
     for spec in parents:
+        if spec.parent_file_id not in existing:
+            continue
         parent_head = await version_repo.head_version(session, spec.parent_file_id)
         await version_repo.add_edge(
             session,

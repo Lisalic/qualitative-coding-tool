@@ -23,19 +23,27 @@ async def _lookup_file(
     *,
     file_types: tuple[str, ...] | None = None,
 ) -> File | None:
+    """Resolve ``ref`` by schemaname, then filename, then id.
+
+    Every pass takes the LOWEST-id match rather than requiring a unique
+    one. ``files.filename`` is a user-chosen display name with no
+    uniqueness constraint (rename and duplicate both let two of a user's
+    files share one), so a ``scalar_one_or_none()`` here raised
+    ``MultipleResultsFound`` -- an unhandled 500 that locked the user out
+    of reading, renaming OR deleting *either* colliding file. Picking the
+    oldest match keeps a given ref resolving to the same file over time
+    (a newly created namesake never steals an existing ref) and, unlike
+    raising, always leaves both files reachable by schemaname and id.
+    """
     base = select(File).where(File.user_id == user_id)
     if file_types:
         base = base.where(File.file_type.in_(file_types))
 
-    result = await session.execute(base.where(File.schemaname == ref))
-    file_rec = result.scalar_one_or_none()
-    if file_rec is not None:
-        return file_rec
-
-    result = await session.execute(base.where(File.filename == ref))
-    file_rec = result.scalar_one_or_none()
-    if file_rec is not None:
-        return file_rec
+    for condition in (File.schemaname == ref, File.filename == ref):
+        result = await session.execute(base.where(condition).order_by(File.id).limit(1))
+        file_rec = result.scalars().first()
+        if file_rec is not None:
+            return file_rec
 
     try:
         file_id = int(ref)
@@ -103,6 +111,42 @@ async def list_files_with_tables(session: AsyncSession, user_id: int) -> list[Fi
         select(File).where(File.user_id == user_id).options(selectinload(File.tables))
     )
     return list(result.scalars().all())
+
+
+async def existing_file_ids(session: AsyncSession, file_ids: set[int]) -> set[int]:
+    """Of ``file_ids``, the subset that still has a ``files`` row.
+
+    Deliberately NOT ownership-scoped -- this answers "does the row the
+    FK points at exist", which is what a caller about to write a
+    ``file_id`` foreign key needs to know. Ownership is a separate
+    question, already settled upstream by whoever chose these ids; use
+    ``filter_owned_ids`` when the ids come from an untrusted source.
+    """
+    if not file_ids:
+        return set()
+    result = await session.execute(select(File.id).where(File.id.in_(file_ids)))
+    return set(result.scalars().all())
+
+
+async def require_existing_file_ids(session: AsyncSession, file_ids: set[int]) -> None:
+    """Raise ``NotFoundError`` if any of ``file_ids`` no longer exists.
+
+    For the case a background job hits when the artifact it is about to
+    read *content* out of was deleted during its (minutes-long) LLM call:
+    apply-codebook and filter both copy their source file's rows into the
+    artifact they are creating, at the very end of the run. A source that
+    vanished mid-run copies zero rows, which would otherwise ship a
+    finished-looking artifact whose coding entries reference rows it
+    doesn't have. Failing the job with a clear message is the only
+    honest outcome -- unlike a missing *lineage* parent, which
+    ``version_service.link_parents`` can safely skip.
+    """
+    missing = set(file_ids) - await existing_file_ids(session, set(file_ids))
+    if missing:
+        raise NotFoundError(
+            "Source file no longer exists (deleted while this job was running): "
+            + ", ".join(str(i) for i in sorted(missing))
+        )
 
 
 async def filter_owned_ids(session: AsyncSession, file_ids: set[int], user_id: int) -> set[int]:

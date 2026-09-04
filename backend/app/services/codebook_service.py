@@ -99,15 +99,16 @@ async def _lookup_codebook_file(
     base = select(File).where(File.user_id == user_id, File.file_type.in_(file_types))
 
     if codebook_id:
-        result = await session.execute(base.where(File.schemaname == codebook_id))
-        file_rec = result.scalar_one_or_none()
-        if file_rec is not None:
-            return file_rec
-
-        result = await session.execute(base.where(File.filename == codebook_id))
-        file_rec = result.scalar_one_or_none()
-        if file_rec is not None:
-            return file_rec
+        # Lowest-id match, not scalar_one_or_none: `filename` is a
+        # non-unique display name, and requiring uniqueness turned a
+        # name collision into an unhandled 500 -- see
+        # `repositories/file_repo.py::_lookup_file` for the full
+        # reasoning this mirrors.
+        for condition in (File.schemaname == codebook_id, File.filename == codebook_id):
+            result = await session.execute(base.where(condition).order_by(File.id).limit(1))
+            file_rec = result.scalars().first()
+            if file_rec is not None:
+                return file_rec
 
         try:
             fid = int(codebook_id)

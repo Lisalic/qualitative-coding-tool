@@ -165,11 +165,15 @@ async def get_summary(session: AsyncSession, user_id: int, summary_id: str | Non
     base = select(File).where(File.file_type == "summary", File.user_id == user_id)
 
     if summary_id:
-        result = await session.execute(base.where(File.schemaname == summary_id))
-        file_rec = result.scalar_one_or_none()
-        if file_rec is None:
-            result = await session.execute(base.where(File.filename == summary_id))
-            file_rec = result.scalar_one_or_none()
+        # Lowest-id match, not scalar_one_or_none -- see
+        # `repositories/file_repo.py::_lookup_file` for why a
+        # non-unique `filename` must not raise here.
+        file_rec = None
+        for condition in (File.schemaname == summary_id, File.filename == summary_id):
+            result = await session.execute(base.where(condition).order_by(File.id).limit(1))
+            file_rec = result.scalars().first()
+            if file_rec is not None:
+                break
         if file_rec is None:
             try:
                 fid = int(summary_id)

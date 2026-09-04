@@ -34,14 +34,34 @@ from unittest.mock import MagicMock  # noqa: E402
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
-from sqlalchemy import create_engine  # noqa: E402
+from sqlalchemy import create_engine, event  # noqa: E402
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
 from sqlalchemy.orm import Session, sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
 from backend.app.auth import create_access_token  # noqa: E402
-from backend.app.database import Base, get_async_db, get_db  # noqa: E402
+from backend.app.database import Base, User, get_async_db, get_db  # noqa: E402
 from backend.app.main import app as fastapi_app  # noqa: E402
+
+
+def _enable_sqlite_foreign_keys(sync_engine) -> None:
+    """Turn on ``PRAGMA foreign_keys`` for every connection this engine
+    opens.
+
+    SQLite ignores foreign keys unless asked, so without this the test
+    suite happily accepted writes Postgres rejects -- an
+    ``artifact_edges`` row pointing at a deleted ``files`` row, a
+    delete that skipped a dependent table -- and the whole class of
+    missing-reference bug was invisible until production. With it on,
+    the fixtures enforce referential integrity the way the real database
+    does.
+    """
+
+    @event.listens_for(sync_engine, "connect")
+    def _set_pragma(dbapi_connection, _record):  # noqa: ANN001
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
 
 @pytest.fixture()
@@ -68,6 +88,7 @@ def sqlite_engine():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+    _enable_sqlite_foreign_keys(engine)
     Base.metadata.create_all(engine)
     try:
         yield engine
@@ -106,12 +127,32 @@ async def async_sqlite_engine():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+    _enable_sqlite_foreign_keys(engine.sync_engine)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     try:
         yield engine
     finally:
         await engine.dispose()
+
+
+@pytest.fixture()
+async def default_user(async_sqlite_engine) -> int:
+    """Insert the ``User`` row that route tests authenticating as
+    ``sub="1"`` implicitly assume exists.
+
+    Needed since ``_enable_sqlite_foreign_keys`` made the fixtures
+    enforce foreign keys: ``files.user_id``/``projects.user_id`` point at
+    ``users.id``, so a request that writes a row for a token's subject
+    fails unless that subject is a real row -- exactly as it would
+    against Postgres.
+    """
+    SessionLocal = async_sessionmaker(async_sqlite_engine, expire_on_commit=False)
+    async with SessionLocal() as session:
+        user = User(email="default-route-test-user@example.com", password="hash")
+        session.add(user)
+        await session.commit()
+        return user.id
 
 
 @pytest.fixture()
