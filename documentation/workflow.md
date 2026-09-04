@@ -24,7 +24,7 @@ The app supports a qualitative analysis pipeline over social/text data:
 ### Frontend architecture (React)
 
 - Routing is centralized in `frontend/src/App.jsx`, with protected routes for tool workflows.
-- Shared tool-page layout (`frontend/src/components/shell/*`) keeps panels consistent across Import, Filter, Generate, Apply, and Compare screens.
+- Shared layout (`frontend/src/components/shell/PageShell.jsx` + `Panel.jsx`) keeps every screen consistent: one toolbar title, and for the form pages (Import, Filter, Generate, Apply, Compare, Summarize) two side-by-side panels — source on the left, output and instructions on the right — over a centered primary button.
 - Reusable panel data loading (`frontend/src/components/tool-panels/useToolPanelData.js`) fetches raw DBs, filtered DBs, projects, and optional codebooks in parallel.
 - Frontend request builders in `frontend/src/lib/apiContracts.js` mirror backend schema requirements and validate required fields before network calls.
 
@@ -161,9 +161,16 @@ Why implemented this way:
 
 ## 4) Filter Data
 
+There are **two ways** to produce a `filtered_data` artifact. Both create a
+structurally identical artifact (same lineage pin, same row copy, same counts) --
+they differ only in how the row set is chosen and in the `origin` recorded on v1.
+
+### 4a) One-shot AI filter (`/filter`)
+
 User-facing behavior:
 
 - Create filtered datasets using prompt/model criteria and optional tags/sampling.
+  The AI's selection *is* the result; there is no review step.
 
 Frontend implementation:
 
@@ -173,13 +180,82 @@ Frontend implementation:
 
 Backend implementation:
 
-- `POST /api/filter-data/`
+- `POST /api/filter-data/` -> `data_service.start_filter_data_job` -> job type `filter_data`
 - Uses filtering pipeline logic under `backend/scripts/filter_db.py` and tag expansion logic.
+- v1 is recorded with `origin="generated"` and full LLM provenance.
+
+### 4b) Filter editor (`/filter-editor`)
+
+User-facing behavior:
+
+- Read the source rows and mark each one **included**, **excluded**, or leave it
+  undecided; name the new database and assign it to a project; submit.
+- The AI filter is available *inside* the screen as an assistant: it proposes rows
+  from the undecided pool only, they arrive pre-checked and badged `(added by AI)`,
+  and it can be re-run as often as the user likes. Nothing is created until submit.
+- Reached from the **Filter** button in the data viewer's header, or from the sidebar.
+
+Frontend implementation:
+
+- Page: `frontend/src/pages/FilterEditor.jsx`
+- Components: `frontend/src/components/filter-editor/` (`FilterEditor.jsx`,
+  `FilterAiPanel.jsx`, `FilterEditorTable.jsx`, `useFilterEditorState.js`)
+- Selection logic (pure, unit-tested): `frontend/src/lib/filterEditorState.js`,
+  persisted to `localStorage` per source database so a refresh or a multi-minute
+  AI run doesn't lose the work.
+- Request builders: `buildFilterPreviewPayload` / `buildManualFilterPayload`.
+
+Backend implementation:
+
+- `POST /api/filter-preview/` -> job type `filter_preview`. Runs the same AI pass
+  as 4a (`data_service._run_ai_filter`, shared by both jobs) but **creates nothing**
+  -- it returns the row ids it would keep. Already-decided ids are sent along and
+  removed from the candidate pool before sampling (`_sample_source_rows`'s
+  `exclude_*` arguments), which is what makes repeated runs propose new rows.
+- `POST /api/filtered-data/manual` -> `data_service.create_manual_filtered_data`.
+  Synchronous (no LLM call), reusing `_materialize_filtered_schema` with
+  `origin="edited"` and no `system_prompt`/`prompt_meta`.
 
 Why implemented this way:
 
-- filtering is an explicit transformation stage that creates a new artifact (`filtered_data`) rather than mutating source data,
-- sampled + prompt-driven strategy supports iterative analysis workflows.
+- filtering is an explicit transformation stage that creates a new artifact
+  (`filtered_data`) rather than mutating source data,
+- sampled + prompt-driven strategy supports iterative analysis workflows,
+- an AI assist during editing is deliberately **not** recorded as LLM provenance:
+  `origin`/`model`/`system_prompt` must stay usable for auditing which artifacts a
+  model actually generated.
+
+## 4c) Row memos
+
+User-facing behavior:
+
+- Write a free-text analytic memo on any row, from the raw data viewer, the
+  filtered data viewer, or the filter editor -- all three open the same row modal.
+- A row that has a memo shows a `✎` marker in the table.
+- Memos follow their row into any artifact derived from it, so a note written while
+  filtering is still there when that row is opened in the resulting filtered
+  database (or later in the coding workspace).
+
+Frontend implementation:
+
+- `frontend/src/components/data/MemoEditor.jsx` (inside `EntryModal.jsx`),
+  `MemoIndicator.jsx`, and the shared `useRowMemos.js` hook (one fetch per database).
+
+Backend implementation:
+
+- `GET /api/memos/?schema=...` and `PUT /api/memos/` (`backend/app/api/memo_routes.py`)
+- `backend/app/services/memo_service.py`, `backend/app/repositories/memo_repo.py`,
+  `storage_models.py::RowMemo`, Alembic revision `c8f1b04e7a29`.
+
+Why implemented this way:
+
+- distinct from `CodingEntry.notes`, which annotates a single coded *quote* and only
+  exists once a codebook has been applied -- a memo attaches to the row itself and is
+  available from the moment data is imported,
+- scoped per artifact row (`file_id` + `row_type` + `row_id`) and copied forward at
+  every row-copy site, matching the self-contained-artifact model `coding` already uses,
+- deliberately not SCD-2 range-versioned: a memo is commentary *about* an artifact,
+  not artifact content, so it is not what a version diff describes.
 
 ## 5) Generate and View Codebook
 
@@ -328,6 +404,7 @@ Frontend routes (`frontend/src/App.jsx`):
 - `/data`
 - `/project/:projectId`
 - `/filter`
+- `/filter-editor`
 - `/filtered-data`
 - `/codebook-generate`
 - `/codebook-view`
@@ -342,7 +419,8 @@ Main backend endpoints by domain:
 
 - Files/data management: `/api/upload-zst/`, `/api/file-entries/`, `/api/comments/{submission_id}`, `/api/post-contents/`, `/api/delete-row/`, `/api/move-rows/`
 - Project/file metadata: `/api/projects/`, `/api/create-project/`, `/api/update-project/`, `/api/rename-file/`, `/api/my-files/`
-- Filtering: `/api/filter-data/`, `/api/word-count-ranges/`
+- Filtering: `/api/filter-data/`, `/api/filter-preview/`, `/api/filtered-data/manual`, `/api/word-count-ranges/`
+- Row memos: `/api/memos/` (GET, PUT)
 - Codebook: `/api/generate-codebook/`, `/api/codebook`, `/api/parse-codebook`, `/api/list-codebooks`, `/api/save-file-codebook/`, `/api/compare-codebooks/`
 - Coding and summarization: `/api/apply-codebook/`, `/api/coding/{ref}`, `/api/coding/{ref}/rows`, `/api/coding/{ref}/text`, `/api/coding/{ref}/codebook` (PUT), `/api/coding/{ref}/rows` (PUT), `/api/coding/{ref}` (PATCH), `/api/coding/{ref}/duplicate`, `/api/coding/{ref}/recode`, `/api/coding-comparison`, `/api/compare-codings/`, `/api/summarize-coding/`, `/api/save-comparison/`, `/api/save-summary/`, `/api/summary/{summary_id}`
 
