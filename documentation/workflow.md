@@ -259,35 +259,102 @@ Why implemented this way:
 
 ## 5) Generate and View Codebook
 
+There are **two ways** to produce a `codebook` artifact, mirroring the pair at
+stage 4. Both create a structurally identical artifact through the same
+`codebook_service._materialize_codebook` -- they differ only in how the codes are
+arrived at and in the `origin` recorded on v1.
+
+### 5a) One-shot AI generation (`/codebook-generate`)
+
 User-facing behavior:
 
-- Generate codebooks from selected datasets and inspect/edit them.
+- Generate a codebook from a selected dataset with a prompt, model and sample size.
+  The model's taxonomy *is* the result; there is no review step.
 
 Frontend implementation:
 
-- Generate page/panel: `frontend/src/pages/GenerateCodebook.jsx`, `frontend/src/components/tool-panels/GenerateCodebookPanel.jsx`
-- View page/hook/workspace: `frontend/src/pages/ViewCodebook.jsx`, `frontend/src/components/codebook/useViewCodebookPage.js`, `frontend/src/components/codebook/CodebookWorkspaceSection.jsx`
+- Page/panel: `frontend/src/pages/GenerateCodebook.jsx`, `frontend/src/components/tool-panels/GenerateCodebookPanel.jsx`
+- Request builder: `buildGenerateCodebookForm` in `frontend/src/lib/apiContracts.js`
 
 Backend implementation:
 
-- `POST /api/generate-codebook/`
-- `GET /api/codebook`
-- `GET /api/parse-codebook`
-- `GET /api/list-codebooks`
-- `POST /api/save-file-codebook/`
+- `POST /api/generate-codebook/` -> `codebook_service.start_generate_codebook_job` -> job type `generate_codebook`
+- Sampling via `_assemble_source_records`, generation via
+  `backend/scripts/codebook_generator.py`'s map-reduce, persistence via
+  `_materialize_codebook` -- all three shared with 5b.
+- v1 is recorded with `origin="generated"` and full LLM provenance.
+
+### 5b) Codebook editor (`/codebook-editor`)
+
+User-facing behavior:
+
+- Read the source corpus on the left and build the code list on the right, using the
+  same `CodeLegend` editor View Codebook uses. Name the codebook, assign a project,
+  submit.
+- The generator is available *inside* the screen as an assistant: it proposes codes
+  into a **review tray**, one card per code showing every field it produced, and each
+  is accepted or dismissed individually. Nothing enters the codebook without an
+  explicit accept, and nothing is created until submit.
+- Two modes. **New** creates a fresh codebook. **Refine** opens an existing one and
+  does another data-anchored pass over it, saving through the same
+  `PUT /api/codebook/{ref}` the View Codebook editor uses -- so a refinement is an
+  ordinary new version, and identity (`code_uid`/`family_uid`) is carried through so
+  a rename reads as a rename in the diff rather than a delete-plus-add.
+- The current draft is sent with every assistant run, so repeated runs propose codes
+  that are still missing instead of restating the codebook that already exists.
+  Dismissals are remembered for the same reason.
+
+Frontend implementation:
+
+- Page: `frontend/src/pages/CodebookEditor.jsx`
+- Components: `frontend/src/components/codebook-editor/` (`CodebookEditor.jsx`,
+  `CodebookAiPanel.jsx`, `CodebookProposalTray.jsx`, `CodebookSourceReader.jsx`,
+  `useCodebookEditorState.js`)
+- Draft/proposal logic (pure, unit-tested): `frontend/src/lib/codebookEditorState.js`,
+  persisted to `localStorage` per (source data, target codebook) pair so a refresh or
+  a multi-minute AI run doesn't lose the work.
+- Request builders: `buildCodebookPreviewPayload` / `buildManualCodebookPayload`.
+
+Backend implementation:
+
+- `POST /api/codebook-preview/` -> job type `codebook_preview`. Runs the same
+  generation pass as 5a but **creates nothing** -- no `File`, no `ArtifactVersion`,
+  no edge, and no commit at all. The draft is sent as `existing_codes` and rendered
+  into the prompt (`codebook_generator.build_system_prompt`), and proposals already
+  covered by it are dropped server-side on the way back
+  (`codebook_service._code_dedupe_key`, which must stay in step with
+  `codebookEditorState.codeKey`).
+- `POST /api/codebook/manual` -> `codebook_service.create_manual_codebook`.
+  Synchronous (no LLM call), reusing `_materialize_codebook` with `origin="edited"`
+  and no `model`/`system_prompt`/`prompt_meta`.
+
+### 5c) View Codebook
+
+- Page/hook/workspace: `frontend/src/pages/ViewCodebook.jsx`, `frontend/src/components/codebook/useViewCodebookPage.js`, `frontend/src/components/codebook/CodebookWorkspaceSection.jsx`
+- `GET /api/codebook`, `GET /api/list-codebooks`, `PUT /api/codebook/{ref}`,
+  `POST /api/codebook/{ref}/import`, `POST /api/codebook/{ref}/duplicate`
 
 Why implemented this way:
 
 - generation and viewing are separated so users can iterate between automated draft and manual refinement,
-- parse and save endpoints support both markdown and structured editing experiences.
+- the editor gives that iteration a home where the *data* is visible, which the
+  standalone viewer cannot do,
+- proposals go to a tray rather than straight into the draft (unlike the filter
+  editor, which merges row suggestions directly): a code carries a definition and
+  inclusion/exclusion criteria, so adopting one is a claim about how the whole corpus
+  will be read, not a single bit,
+- an AI assist during editing is deliberately **not** recorded as LLM provenance, for
+  the same auditing reason given at 4b.
 
 ## 6) Apply Codebook and View Coding
 
 User-facing behavior:
 
-- Apply a selected codebook to a selected database (optionally a sampled subset via the Sample Size slider); the AI codes every sampled post and comment, coded or not.
+- Apply a selected codebook to a selected database (optionally a sampled subset via the Sample Size slider), in one of **two modes**:
+  - **Code with AI** -- the classifier codes every sampled post and comment, and the finished coding artifact comes back for review.
+  - **Code by hand** -- the same artifact is created *uncoded* (`POST /api/coding/manual`): rows copied in, codebook snapshotted, zero coding entries. The researcher lands straight in the View Coding workspace and tags rows themselves, calling the AI in on whichever rows they choose. Both modes go through `coding_service._materialize_coding_artifact`, so the artifacts are structurally identical and differ only in provenance (`origin="edited"` with no model/prompt fields) and in whether anything is coded yet.
 - View Coding shows the resulting artifact: the codebook (editable), a paged table of every row the artifact owns — coded or uncoded — with per-row inline code/evidence/notes editing, and a read-only Text View rendering.
-- Select any subset of rows and re-run the AI classifier over just that subset with a chosen model (Recode); the result is staged as reviewable proposals in the same editing session as manual tags and codebook edits, not written until Save.
+- Select any subset of rows and re-run the AI classifier over just that subset with a chosen model (Recode); the result is staged as reviewable proposals in the same editing session as manual tags and codebook edits, not written until Save. **A row already coded by hand this session is never overwritten by a recode** -- it is skipped and reported as such, the same "the assistant may add, never overwrite" rule the filter editor enforces. The **Uncoded (N)** button selects exactly the rows nothing has coded yet, which is the selection a recode can help with without redoing reviewed work.
 - Manual tagging, codebook edits, and accepted recode proposals all accumulate in one editing session; Save Changes commits everything together as exactly one new version.
 - Duplicate forks the whole saved artifact (codebook snapshot, its own rows, its coding, lineage, project links) under a new name.
 
@@ -407,6 +474,7 @@ Frontend routes (`frontend/src/App.jsx`):
 - `/filter-editor`
 - `/filtered-data`
 - `/codebook-generate`
+- `/codebook-editor`
 - `/codebook-view`
 - `/codebook-apply`
 - `/coding-view`
@@ -421,6 +489,6 @@ Main backend endpoints by domain:
 - Project/file metadata: `/api/projects/`, `/api/create-project/`, `/api/update-project/`, `/api/rename-file/`, `/api/my-files/`
 - Filtering: `/api/filter-data/`, `/api/filter-preview/`, `/api/filtered-data/manual`, `/api/word-count-ranges/`
 - Row memos: `/api/memos/` (GET, PUT)
-- Codebook: `/api/generate-codebook/`, `/api/codebook`, `/api/parse-codebook`, `/api/list-codebooks`, `/api/save-file-codebook/`, `/api/compare-codebooks/`
-- Coding and summarization: `/api/apply-codebook/`, `/api/coding/{ref}`, `/api/coding/{ref}/rows`, `/api/coding/{ref}/text`, `/api/coding/{ref}/codebook` (PUT), `/api/coding/{ref}/rows` (PUT), `/api/coding/{ref}` (PATCH), `/api/coding/{ref}/duplicate`, `/api/coding/{ref}/recode`, `/api/coding-comparison`, `/api/compare-codings/`, `/api/summarize-coding/`, `/api/save-comparison/`, `/api/save-summary/`, `/api/summary/{summary_id}`
+- Codebook: `/api/generate-codebook/`, `/api/codebook-preview/`, `/api/codebook/manual`, `/api/codebook`, `/api/parse-codebook`, `/api/list-codebooks`, `/api/save-file-codebook/`, `/api/compare-codebooks/`
+- Coding and summarization: `/api/apply-codebook/`, `/api/coding/manual`, `/api/coding/{ref}`, `/api/coding/{ref}/rows`, `/api/coding/{ref}/text`, `/api/coding/{ref}/codebook` (PUT), `/api/coding/{ref}/rows` (PUT), `/api/coding/{ref}` (PATCH), `/api/coding/{ref}/duplicate`, `/api/coding/{ref}/recode`, `/api/coding-comparison`, `/api/compare-codings/`, `/api/summarize-coding/`, `/api/save-comparison/`, `/api/save-summary/`, `/api/summary/{summary_id}`
 
