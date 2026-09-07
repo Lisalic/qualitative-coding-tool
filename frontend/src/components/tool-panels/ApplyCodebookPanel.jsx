@@ -1,41 +1,65 @@
 import { useState, useEffect } from "react";
-import { postFormAndPoll } from "../../api";
+import { postFormAndPoll, requestJson } from "../../api";
 import FormShell from "../forms/FormShell";
 import DatabaseSourceFields from "../forms/DatabaseSourceFields";
 import SliderField from "../forms/SliderField";
 import PromptTextareaWithActions from "../forms/PromptTextareaWithActions";
 import AiModelFormGroup from "../models/AiModelFormGroup";
-import ArtifactCreatedMessage from "../feedback/ArtifactCreatedMessage";
 import ProgressBar from "../feedback/ProgressBar";
 import ContentScopeFormGroup from "./ContentScopeFormGroup";
 import Panel from "../shell/Panel";
-import { input, select } from "../../lib/uiClasses";
+import { btn, btnActive, input, select } from "../../lib/uiClasses";
 import { useToolPanelData } from "./useToolPanelData";
 import { useInitialProjectId } from "./useInitialProjectId";
 import {
   EXAMPLE_PROMPTS,
   MissingFieldsError,
   buildApplyCodebookForm,
+  buildManualCodingPayload,
 } from "../../lib/apiContracts";
 
 const EXAMPLE_PROMPT = EXAMPLE_PROMPTS.apply;
 const inputClasses = input;
 const selectClasses = select;
 
+/**
+ * Apply a codebook, either way round.
+ *
+ * "Code with AI" is the one-shot path: the classifier runs over every
+ * sampled row and the finished coding artifact comes back.
+ *
+ * "Code by hand" creates the same artifact minus the classification
+ * (`POST /api/coding/manual`) -- rows copied in, codebook snapshotted,
+ * nothing coded -- and drops the researcher into the ViewCoding
+ * workspace, where they tag rows themselves and can invoke the AI on
+ * whichever rows they choose. Both paths go through
+ * `coding_service._materialize_coding_artifact`, so what they produce is
+ * structurally identical and only its provenance differs.
+ *
+ * One panel with a mode switch rather than a second page: the two share
+ * every field that chooses WHICH rows and WHICH codebook, and differ only
+ * in whether a model is called.
+ *
+ * This is the setup step of the Apply Codebook editor: on success it
+ * hands the new artifact to `onCreated` and its host opens the coding
+ * workspace on it (see `components/coding-editor/CodingEditor.jsx`).
+ * Coding is iterative, so the finished artifact is a starting point, not
+ * a result -- ending at a success banner would leave the researcher one
+ * navigation short of the actual work.
+ */
 export default function ApplyCodebookPanel({
   methodology,
   onMethodologyChange,
+  onCreated,
 }) {
   const initialProjectId = useInitialProjectId();
+  const [mode, setMode] = useState("ai");
   const [database, setDatabase] = useState("");
   const [reportName, setReportName] = useState("");
   const [databaseType, setDatabaseType] = useState("unfiltered");
   const [codebook, setCodebook] = useState("");
   const [loading, setLoading] = useState(false);
-  const [createdFile, setCreatedFile] = useState(null);
   const [progress, setProgress] = useState(null);
-  const [partialWarning, setPartialWarning] = useState("");
-  const [codingSummary, setCodingSummary] = useState("");
   const [error, setError] = useState(null);
   const [description, setDescription] = useState("");
   const [selectedProject, setSelectedProject] = useState(initialProjectId);
@@ -61,7 +85,57 @@ export default function ApplyCodebookPanel({
   }, [codebooks]);
 
 
+  const handleManualSubmit = async () => {
+    if (codebooks.length === 0) {
+      setError("No codebooks available. Please create a codebook first.");
+      return;
+    }
+    try {
+      setLoading(true);
+      setError(null);
+      setProgress(null);
+
+      let payload;
+      try {
+        payload = buildManualCodingPayload({
+          database,
+          codebook,
+          reportName,
+          description,
+          projectId: selectedProject || null,
+          samplePercentage,
+          contentScope,
+        });
+      } catch (err) {
+        if (err instanceof MissingFieldsError) {
+          setError(err.message);
+          return;
+        }
+        throw err;
+      }
+
+      const { ok, data, error: postError } = await requestJson("/api/coding/manual", {
+        method: "POST",
+        body: payload,
+      });
+      if (!ok) {
+        setError(postError || "Failed to start the coding");
+        return;
+      }
+
+      onCreated(data?.file, {});
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSubmit = async () => {
+    if (mode === "manual") {
+      await handleManualSubmit();
+      return;
+    }
     const savedApiKey = localStorage.getItem("apiKey");
     if (!savedApiKey) {
       setError("Please set your API key in the navbar first.");
@@ -74,10 +148,7 @@ export default function ApplyCodebookPanel({
     try {
       setLoading(true);
       setError(null);
-      setCreatedFile(null);
       setProgress(null);
-      setPartialWarning("");
-      setCodingSummary("");
 
       let requestData;
       try {
@@ -113,25 +184,24 @@ export default function ApplyCodebookPanel({
         setError(postError || "Failed to apply codebook");
         return;
       }
-      setCreatedFile(data?.file || null);
+      const notices = {};
       if (data?.partial) {
         const reason = data.partial_error
           ? `Stopped early after an error: ${data.partial_error}`
           : "This is likely due to a free model's batch limit -- use a paid model or reduce the sample size for complete coverage.";
-        setPartialWarning(
-          `Warning: only ${data.batches_processed}/${data.batches_total} batches were coded. ${reason}`,
-        );
+        notices.partialWarning =
+          `Warning: only ${data.batches_processed}/${data.batches_total} batches were coded. ${reason}`;
       }
       const rejectedTotal =
         (data?.rejected_unknown_item || 0) +
         (data?.rejected_unknown_code || 0) +
         (data?.rejected_quote_not_found || 0);
       if (rejectedTotal > 0) {
-        setCodingSummary(
+        notices.codingSummary =
           `${data.accepted || 0} coding${data.accepted === 1 ? "" : "s"} saved. ` +
-            `${rejectedTotal} rejected as unverifiable (couldn't be matched back to the source text) and were not saved.`,
-        );
+          `${rejectedTotal} rejected as unverifiable (couldn't be matched back to the source text) and were not saved.`;
       }
+      if (data?.file) onCreated(data.file, notices);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -245,12 +315,41 @@ export default function ApplyCodebookPanel({
 
   return (
     <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm text-paper/60">How do you want to code?</span>
+        <div className="flex gap-2" role="group" aria-label="Coding mode">
+          <button
+            type="button"
+            className={`${btn} ${mode === "ai" ? btnActive : ""}`}
+            aria-pressed={mode === "ai"}
+            onClick={() => setMode("ai")}
+            disabled={loading}
+          >
+            Code with AI
+          </button>
+          <button
+            type="button"
+            className={`${btn} ${mode === "manual" ? btnActive : ""}`}
+            aria-pressed={mode === "manual"}
+            onClick={() => setMode("manual")}
+            disabled={loading}
+          >
+            Code by hand
+          </button>
+        </div>
+        <span className="text-xs text-paper/50">
+          {mode === "ai"
+            ? "The model codes every sampled row, then you review it."
+            : "Rows are copied in uncoded; you tag them in the workspace, with AI help when you want it."}
+        </span>
+      </div>
+
       <FormShell
         columns
         onSubmit={handleSubmit}
         submitButton={{
-          text: "Apply Codebook",
-          loadingText: "Applying...",
+          text: mode === "manual" ? "Start Coding by Hand" : "Apply Codebook",
+          loadingText: mode === "manual" ? "Starting..." : "Applying...",
           disabled: loading,
         }}
         error={displayError}
@@ -364,25 +463,34 @@ export default function ApplyCodebookPanel({
             />
           </div>
 
-          <PromptTextareaWithActions
-            id="methodology"
-            label="Enter Prompt"
-            value={methodology}
-            onChange={onMethodologyChange}
-            placeholder="Enter your coding methodology or leave blank..."
-            rows={2}
-            promptType="apply"
-            exampleText={EXAMPLE_PROMPT}
-            disabled={loading}
-            onSaveFeedback={handlePromptSaveFeedback}
-          />
+          {mode === "ai" ? (
+            <>
+              <PromptTextareaWithActions
+                id="methodology"
+                label="Enter Prompt"
+                value={methodology}
+                onChange={onMethodologyChange}
+                placeholder="Enter your coding methodology or leave blank..."
+                rows={2}
+                promptType="apply"
+                exampleText={EXAMPLE_PROMPT}
+                disabled={loading}
+                onSaveFeedback={handlePromptSaveFeedback}
+              />
 
-          <AiModelFormGroup
-            model={model}
-            onModelChange={setModel}
-            disabled={loading}
-            selectPlaceholder="dash"
-          />
+              <AiModelFormGroup
+                model={model}
+                onModelChange={setModel}
+                disabled={loading}
+                selectPlaceholder="dash"
+              />
+            </>
+          ) : (
+            <p className="text-sm text-paper/60">
+              No model runs now. You&apos;ll code rows yourself in the workspace, and can
+              ask the AI to code a selection at any point from there.
+            </p>
+          )}
         </Panel>
       </FormShell>
 
@@ -392,28 +500,6 @@ export default function ApplyCodebookPanel({
           total={progress.total}
           label={progress.label}
         />
-      )}
-
-      {partialWarning && (
-        <div className="border border-paper bg-surface-raised px-3 py-2 text-center text-sm text-paper">
-          {partialWarning}
-        </div>
-      )}
-
-      {codingSummary && (
-        <div className="border border-paper bg-surface-raised px-3 py-2 text-center text-sm text-paper">
-          {codingSummary}
-        </div>
-      )}
-
-      {createdFile && (
-        <div>
-          <ArtifactCreatedMessage
-            name={createdFile.filename}
-            viewPath="/coding-view"
-            viewState={{ selectedCodedData: createdFile.schema_name }}
-          />
-        </div>
       )}
 
       {saveMessage && (

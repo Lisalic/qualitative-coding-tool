@@ -8,7 +8,7 @@ export default function ViewCoding() {
   return (
     <CodingWorkspaceSection
       page={page}
-      picker={
+      leadingActions={
         <ArtifactPicker
           showProjectFilter={true}
           projects={page.projectsList || []}

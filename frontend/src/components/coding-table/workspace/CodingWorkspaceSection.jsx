@@ -52,10 +52,19 @@ function sessionSummary(page) {
  * also setting `min-h-[960px]` -- the floor won on any laptop screen, so
  * the workspace overflowed the very viewport it was sized to fit.
  *
- * `picker` is the artifact selector, rendered into the toolbar rather than
- * as a box above the workspace.
+ * `leadingActions` opens the toolbar: the artifact selector on View
+ * Coding, a back-to-setup button on Apply Codebook, which renders this
+ * same workspace on the artifact it just created. `emptyTitle`/
+ * `emptyMessage` cover the no-artifact-selected state, which only View
+ * Coding can actually reach (Apply Codebook renders its setup step
+ * instead of this component until an artifact exists).
  */
-export default function CodingWorkspaceSection({ page, picker = null }) {
+export default function CodingWorkspaceSection({
+  page,
+  leadingActions = null,
+  emptyTitle = "View Coding",
+  emptyMessage = "Select a coding to view",
+}) {
   const [showPrompt, setShowPrompt] = useState(false);
   const navigate = useNavigate();
 
@@ -74,15 +83,15 @@ export default function CodingWorkspaceSection({ page, picker = null }) {
 
   if (!selectedCodedData) {
     return (
-      <PageShell title="View Coding" actions={picker} width="wide">
-        <PageEmptyState message="Select a coding to view" />
+      <PageShell title={emptyTitle} actions={leadingActions} width="wide">
+        <PageEmptyState message={emptyMessage} />
       </PageShell>
     );
   }
 
   const actions = (
     <>
-      {picker}
+      {leadingActions}
       <ViewModeTabs
         modes={[
           { value: "reader", label: "Reader", activeClassName: tabActive, inactiveClassName: tabInactive },
@@ -160,6 +169,7 @@ export default function CodingWorkspaceSection({ page, picker = null }) {
             matchingCount={page.rowsTotal}
             disabled={page.rowsLoading}
             onSelectAll={page.selectAllMatching}
+            onSelectUncoded={page.selectUncodedMatching}
             selectAllLoading={page.selectAllLoading}
             recodeProps={{
               selectedCount: page.selectedItemIds.size,

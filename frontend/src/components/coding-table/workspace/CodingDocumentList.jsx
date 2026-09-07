@@ -46,10 +46,12 @@ export default function CodingDocumentList({
   matchingCount,
   disabled,
   onSelectAll,
+  onSelectUncoded,
   selectAllLoading,
   recodeProps,
 }) {
   const allMatchingSelected = matchingCount > 0 && selectedItemIds?.size >= matchingCount;
+  const uncodedCount = Math.max(0, (totalRows || 0) - (totalCoded || 0));
   return (
     <div className="flex h-full min-h-0 flex-col border border-line bg-surface">
       <div className="flex shrink-0 flex-col gap-2 border-b border-line p-2.5">
@@ -57,17 +59,28 @@ export default function CodingDocumentList({
           <div className="text-xs text-paper/70">
             {totalCoded} of {totalRows} rows coded
           </div>
-          <button
-            type="button"
-            className={btnSmall}
-            onClick={onSelectAll}
-            disabled={disabled || selectAllLoading || matchingCount === 0 || allMatchingSelected}
-            title={
-              matchingCount > 0 ? `Select all ${matchingCount} rows matching the current filter/search` : undefined
-            }
-          >
-            {selectAllLoading ? "Selecting..." : `Select all${matchingCount ? ` (${matchingCount})` : ""}`}
-          </button>
+          <div className="flex shrink-0 gap-1.5">
+            <button
+              type="button"
+              className={btnSmall}
+              onClick={onSelectUncoded}
+              disabled={disabled || selectAllLoading || uncodedCount === 0}
+              title="Select every row that has no codes yet -- the rows an AI recode can help with without overwriting your own work"
+            >
+              {`Uncoded${uncodedCount ? ` (${uncodedCount})` : ""}`}
+            </button>
+            <button
+              type="button"
+              className={btnSmall}
+              onClick={onSelectAll}
+              disabled={disabled || selectAllLoading || matchingCount === 0 || allMatchingSelected}
+              title={
+                matchingCount > 0 ? `Select all ${matchingCount} rows matching the current filter/search` : undefined
+              }
+            >
+              {selectAllLoading ? "Selecting..." : `Select all${matchingCount ? ` (${matchingCount})` : ""}`}
+            </button>
+          </div>
         </div>
         <input
           type="search"

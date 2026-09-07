@@ -39,12 +39,46 @@ const SEARCH_DEBOUNCE_MS = 400;
  *
  * `discardSession` throws both away and refetches from the server;
  * `saveSession` sends whichever of `codes`/`rows` actually changed.
+ *
+ * Two surfaces drive this one hook, which is why it takes a `pinned` mode:
+ *
+ * - **View Coding** passes nothing. The hook fetches the user's coding
+ *   files and the picker chooses among them.
+ * - **Apply Codebook** passes `pinned`, plus the artifact it just
+ *   created. There is nothing to pick -- the workspace opens on that one
+ *   file -- so the artifact-list and project fetches never run.
+ *
+ * `pinned` is its own flag rather than being inferred from `pinnedRef`
+ * being set, because Apply Codebook's setup step has no artifact yet: a
+ * null ref there means "not created yet", not "fall back to the picker",
+ * and inferring would fire two list fetches for a picker that screen
+ * never shows.
+ *
+ * Everything past that point (fetching the artifact and its rows, the
+ * editing session, recode, save) is identical, which is the whole reason
+ * the two pages can share a workspace instead of growing two of them.
  */
-export default function useViewCodingPage() {
+export default function useViewCodingPage({
+  pinned = false,
+  pinnedRef = null,
+  pinnedName = "",
+  pinnedDescription = "",
+} = {}) {
   const location = useLocation();
+  const isPinned = pinned;
   const [availableCodedData, setAvailableCodedData] = useState([]);
-  const [selectedCodedData, setSelectedCodedData] = useState(null);
-  const [selectedCodedDataName, setSelectedCodedDataName] = useState("");
+  const [pickedCodedData, setSelectedCodedData] = useState(null);
+  const [pickedCodedDataName, setSelectedCodedDataName] = useState("");
+  // Pinned mode reads straight through to the props rather than mirroring
+  // them into state via an effect: an effect lands a render late, so the
+  // first frame after Apply Codebook creates an artifact would render the
+  // "select a coding" empty state before correcting itself.
+  // A rename inside a pinned workspace has nowhere to write back to (the
+  // owner supplied the name as a prop), so it is held here until the
+  // pinned artifact itself changes.
+  const [renamedName, setRenamedName] = useState(null);
+  const selectedCodedData = isPinned ? pinnedRef : pickedCodedData;
+  const selectedCodedDataName = isPinned ? renamedName ?? pinnedName : pickedCodedDataName;
   const [refreshKey, setRefreshKey] = useState(0);
   const [projectsList, setProjectsList] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
@@ -273,9 +307,15 @@ export default function useViewCodingPage() {
     pendingRowEditsRef.current = pendingRowEdits;
   }, [pendingRowEdits]);
   const [aiProposedItemIds, setAiProposedItemIds] = useState(() => new Set());
+  // Rows the researcher tagged BY HAND this session. Written only by
+  // `stageRowEdit` (manual tag/untag/note), never by an accepted
+  // proposal, so it is exactly the set a recode must not overwrite --
+  // see `handleRecodeSelected`.
+  const humanEditedItemIds = useRef(new Set());
   const [sessionSaveState, setSessionSaveState] = useState({ status: "idle", message: "" });
 
   const stageRowEdit = useCallback((itemId, entries) => {
+    humanEditedItemIds.current.add(itemId);
     setRows((prev) => prev.map((row) => (row.item_id === itemId ? { ...row, codes: entries } : row)));
     setPendingRowEdits((prev) => {
       const next = new Map(prev);
@@ -332,6 +372,7 @@ export default function useViewCodingPage() {
     }
     setPendingRowEdits(new Map());
     setAiProposedItemIds(new Set());
+    humanEditedItemIds.current = new Set();
     setSessionSaveState({ status: "success", message: "Saved." });
     setRefreshKey((key) => key + 1);
     // Also resets codebookDraft/isCodebookDirty from the freshly saved
@@ -351,6 +392,7 @@ export default function useViewCodingPage() {
   const discardSession = useCallback(() => {
     setPendingRowEdits(new Map());
     setAiProposedItemIds(new Set());
+    humanEditedItemIds.current = new Set();
     setCodebookDraft(cloneCodebookTree(codebookTree));
     setIsCodebookDirty(false);
     setIsCodebookEditMode(false);
@@ -477,10 +519,11 @@ export default function useViewCodingPage() {
       });
       if (!result.ok) return { ok: false, error: result.error };
       setSelectedCodedDataName(trimmed);
-      fetchAvailableCodedData();
+      setRenamedName(trimmed);
+      if (!isPinned) fetchAvailableCodedData();
       return { ok: true };
     },
-    [fetchAvailableCodedData, getSelectedCodingSchema],
+    [fetchAvailableCodedData, getSelectedCodingSchema, isPinned],
   );
 
   const handleDuplicate = useCallback(
@@ -492,10 +535,10 @@ export default function useViewCodingPage() {
         body: { display_name: displayName, from_version_no: fromVersionNo || undefined },
       });
       if (!result.ok) return { ok: false, error: result.error };
-      await fetchAvailableCodedData();
+      if (!isPinned) await fetchAvailableCodedData();
       return { ok: true };
     },
-    [fetchAvailableCodedData, getSelectedCodingSchema],
+    [fetchAvailableCodedData, getSelectedCodingSchema, isPinned],
   );
 
   // ---------------------------------------------------------------------
@@ -516,31 +559,56 @@ export default function useViewCodingPage() {
 
   const [selectAllLoading, setSelectAllLoading] = useState(false);
 
-  // Selects every row matching the current only/code/search filters, not
-  // just the current page's 25 -- `rows` only ever holds one page, so
-  // this re-fetches with the full matching count as the limit (the same
+  // Selects every row matching the current code/search filters, not just
+  // the current page's 25 -- `rows` only ever holds one page, so this
+  // re-fetches with the full matching count as the limit (the same
   // GET /api/coding/{ref}/rows endpoint, reusing whatever filters are
   // already active) rather than being limited to what happens to be
   // loaded client-side.
-  const selectAllMatching = useCallback(async () => {
-    const schema = getSelectedCodingSchema();
-    if (!schema || rowsTotal === 0) return;
-    setSelectAllLoading(true);
-    const params = new URLSearchParams({ limit: String(rowsTotal), offset: "0", only: onlyFilter || "all" });
-    if (searchQuery) params.set("q", searchQuery);
-    if (activeFilterCode) params.set("code", activeFilterCode);
-    const result = await requestJson(`/api/coding/${encodeURIComponent(schema)}/rows?${params}`, {
-      method: "GET",
-    });
-    setSelectAllLoading(false);
-    if (!result.ok) return;
-    const matchedIds = (Array.isArray(result.data.rows) ? result.data.rows : []).map((row) => row.item_id);
-    setSelectedItemIds((prev) => {
-      const next = new Set(prev);
-      matchedIds.forEach((id) => next.add(id));
-      return next;
-    });
-  }, [getSelectedCodingSchema, rowsTotal, onlyFilter, searchQuery, activeFilterCode]);
+  //
+  // `only` is a parameter rather than always `onlyFilter` so the caller
+  // can ask for the uncoded rows specifically without first changing the
+  // list's filter and changing it back.
+  const selectMatching = useCallback(
+    async (only) => {
+      const schema = getSelectedCodingSchema();
+      if (!schema || rowsTotal === 0) return;
+      setSelectAllLoading(true);
+      const params = new URLSearchParams({ limit: String(rowsTotal), offset: "0", only });
+      if (searchQuery) params.set("q", searchQuery);
+      if (activeFilterCode) params.set("code", activeFilterCode);
+      const result = await requestJson(`/api/coding/${encodeURIComponent(schema)}/rows?${params}`, {
+        method: "GET",
+      });
+      setSelectAllLoading(false);
+      if (!result.ok) return;
+      const matchedIds = (Array.isArray(result.data.rows) ? result.data.rows : []).map(
+        (row) => row.item_id,
+      );
+      setSelectedItemIds((prev) => {
+        const next = new Set(prev);
+        matchedIds.forEach((id) => next.add(id));
+        return next;
+      });
+    },
+    [getSelectedCodingSchema, rowsTotal, searchQuery, activeFilterCode],
+  );
+
+  const selectAllMatching = useCallback(
+    () => selectMatching(onlyFilter || "all"),
+    [selectMatching, onlyFilter],
+  );
+
+  /**
+   * Select only the rows nothing has coded yet.
+   *
+   * The counterpart of the filter editor sending its decided ids so the
+   * AI never re-litigates them: it keeps a recode aimed at the rows still
+   * awaiting a decision, instead of asking the model to redo work the
+   * researcher has already reviewed (and, before the `humanEditedItemIds`
+   * guard in `handleRecodeSelected`, silently overwrite it).
+   */
+  const selectUncodedMatching = useCallback(() => selectMatching("uncoded"), [selectMatching]);
 
   const recodeThisDocument = useCallback(() => {
     if (!activeItemId) return;
@@ -601,10 +669,35 @@ export default function useViewCodingPage() {
 
     // A recode is a proposal, not a write (see coding_service's
     // _run_recode_items_job) -- stage each returned row into the same
-    // pending-edits map manual tags use, overwriting whatever was
-    // pending for that row (full-row replacement, same as the
-    // server-side semantics). Nothing is committed until Save Changes.
-    const proposals = Array.isArray(data.proposals) ? data.proposals : [];
+    // pending-edits map manual tags use (full-row replacement, matching
+    // the server-side semantics). Nothing is committed until Save
+    // Changes.
+    //
+    // A row the researcher already coded BY HAND this session is left
+    // alone, even when it was in the selection sent for recoding. The
+    // assistant may add, never overwrite -- the same rule
+    // `filterEditorState.applyAiResult` enforces by refusing to touch a
+    // row the user already ruled on. Without this, selecting "all
+    // matching" and recoding silently discarded the tags the researcher
+    // had just placed, with no way to get them back short of discarding
+    // the whole session.
+    const allProposals = Array.isArray(data.proposals) ? data.proposals : [];
+    const proposals = allProposals.filter(
+      (proposal) => !humanEditedItemIds.current.has(proposal.item_id),
+    );
+    const skipped = allProposals.length - proposals.length;
+    if (skipped > 0) {
+      setRecodeSummary((prev) =>
+        [
+          prev,
+          `${proposals.length} row${proposals.length === 1 ? "" : "s"} updated by AI. ` +
+            `${skipped} left as you coded ${skipped === 1 ? "it" : "them"} by hand.`,
+        ]
+          .filter(Boolean)
+          .join(" "),
+      );
+    }
+
     setPendingRowEdits((prev) => {
       const next = new Map(prev);
       proposals.forEach((proposal) => next.set(proposal.item_id, proposal.codes || []));
@@ -654,16 +747,21 @@ export default function useViewCodingPage() {
     return () => window.removeEventListener("beforeunload", handler);
   }, [isSessionDirty]);
 
+  // Both lists exist only to feed the picker, so a pinned workspace skips
+  // them -- Apply Codebook already knows which artifact it is showing.
   useEffect(() => {
+    if (isPinned) return;
     fetchProjects();
-  }, [fetchProjects]);
+  }, [isPinned, fetchProjects]);
 
   useEffect(() => {
+    if (isPinned) return;
     fetchAvailableCodedData();
-  }, [fetchAvailableCodedData]);
+  }, [isPinned, fetchAvailableCodedData]);
 
   // Reset all per-artifact state whenever the selected coding file changes.
   useEffect(() => {
+    setRenamedName(null);
     setCodebookTree([]);
     setSystemPrompt("");
     setInstructions("");
@@ -682,6 +780,7 @@ export default function useViewCodingPage() {
     setSelectedItemIds(new Set());
     setPendingRowEdits(new Map());
     setAiProposedItemIds(new Set());
+    humanEditedItemIds.current = new Set();
     setSessionSaveState({ status: "idle", message: "" });
     setIsCodebookEditMode(false);
     setCodebookDraft([]);
@@ -734,9 +833,9 @@ export default function useViewCodingPage() {
 
   const pageCount = Math.max(1, Math.ceil(rowsTotal / ROWS_PER_PAGE));
   const selectedCodingSchema = getSelectedCodingSchema();
-  const selectedCodingDescription = availableCodedData.find(
-    (codedData) => codedData.id === selectedCodedData,
-  )?.description;
+  const selectedCodingDescription = isPinned
+    ? pinnedDescription
+    : availableCodedData.find((codedData) => codedData.id === selectedCodedData)?.description;
 
   return {
     availableCodedData,
@@ -791,6 +890,7 @@ export default function useViewCodingPage() {
     toggleItemSelected,
     clearSelection,
     selectAllMatching,
+    selectUncodedMatching,
     selectAllLoading,
     recodeThisDocument,
     recodeModel,
