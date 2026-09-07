@@ -12,6 +12,7 @@ field-level validation (422 on bad input) and accurate OpenAPI docs.
 from __future__ import annotations
 
 import inspect
+import re
 from typing import Any, Literal, Optional, Type, TypeVar
 
 from fastapi import Form
@@ -38,6 +39,41 @@ def _content_scope_field() -> Any:
         default="both",
         description="Which content types to sample: 'both', 'posts', or 'comments'",
     )
+
+
+def _strip_db_suffix_value(value: Any) -> Any:
+    """Normalize a source-database identifier: trim, and drop a trailing
+    ``.db`` the frontend sometimes carries on a display name. Shared by
+    every request model with a ``database`` field so they cannot drift.
+    """
+    if not isinstance(value, str):
+        return value
+    value = value.strip()
+    if value.endswith(".db"):
+        value = value[:-3]
+    return value
+
+
+def _validate_codebook_ref_value(value: str) -> str:
+    """A codebook reference is either a numeric ``File`` id or a
+    ``proj_<hex>`` schema name -- both accepted, nothing else. Shared by
+    ApplyCodebookRequest and ManualCodingRequest, which resolve the same
+    kind of reference through ``file_repo.resolve_file_id``.
+    """
+    raw = value.strip()
+    if not raw:
+        raise ValueError("codebook must not be empty")
+    if raw.startswith("proj_"):
+        if not re.match(_SCHEMA_PATTERN, raw):
+            raise ValueError("codebook schema must match proj_<hex>")
+        return raw
+    try:
+        int(raw)
+    except ValueError as exc:
+        raise ValueError(
+            "codebook must be a numeric File id or a proj_<hex> schema name"
+        ) from exc
+    return raw
 
 
 def as_form(cls: Type[T]):
@@ -379,6 +415,95 @@ class GenerateCodebookResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Codebook editor (/codebook-editor) -- the human-in-the-loop counterpart to
+# GenerateCodebook above, mirroring the FilterPreview/ManualFilter pair.
+#
+# Both are JSON bodies rather than `as_form` multipart, because each carries
+# a nested list (the same reasoning as FilterPreviewRequest). The split is
+# deliberate: the preview request has no `name`/`project_id` because it
+# creates nothing, and the manual request has no `api_key`/`model` because it
+# calls no model.
+# ---------------------------------------------------------------------------
+
+
+class ExistingCodeRef(BaseModel):
+    """One code already in the researcher's draft, sent to the preview job
+    so the model is asked for what's *missing* rather than a fresh
+    taxonomy. Deliberately narrow -- family/name/definition is everything
+    the prompt needs; sending whole code rows would just inflate the
+    reserved prompt budget.
+    """
+
+    family_name: str = ""
+    name: str = Field(min_length=1)
+    definition: Optional[str] = None
+
+
+class CodebookPreviewRequest(_StrippingModel):
+    """Payload for ``POST /api/codebook-preview/`` -- ask the model for
+    codes to add to a draft. Creates nothing; see
+    ``codebook_service._run_codebook_preview_job``.
+    """
+
+    api_key: str = Field(min_length=1)
+    database: str = Field(pattern=_SCHEMA_PATTERN)
+    model: str = Field(min_length=1)
+    prompt: Optional[str] = None
+    sample_percentage: float = Field(default=100.0, ge=1.0, le=100.0)
+    content_scope: ContentScope = _content_scope_field()
+    # Legitimately empty on a first pass, so not required -- same reasoning
+    # as FilterPreviewRequest.decided_post_ids.
+    existing_codes: list[ExistingCodeRef] = Field(default_factory=list)
+
+    @field_validator("database", mode="before")
+    @classmethod
+    def _strip_db_suffix(cls, value: Any) -> Any:
+        return _strip_db_suffix_value(value)
+
+
+class ProposedCode(BaseModel):
+    """One code the preview job proposes. Carries no ``code_uid``: a
+    proposal has no identity until the researcher accepts it, at which
+    point the editor mints one (see ``lib/codebookEditorState.js``).
+    """
+
+    family_name: str = ""
+    name: str
+    definition: Optional[str] = None
+    inclusion: Optional[str] = None
+    exclusion: Optional[str] = None
+    keywords: Optional[str] = None
+    example: Optional[str] = None
+
+
+class CodebookPreviewResponse(BaseModel):
+    """Job result read back from ``GET /api/jobs/{id}``."""
+
+    proposals: list[ProposedCode] = []
+    partial: bool = False
+    partial_error: Optional[str] = None
+    batches_processed: Optional[dict[str, int]] = None
+    batches_total: Optional[dict[str, int]] = None
+
+
+class ManualCodebookRequest(_StrippingModel):
+    """Payload for ``POST /api/codebook/manual`` -- create a codebook from
+    the editor's hand-composed draft.
+    """
+
+    database: str = Field(pattern=_SCHEMA_PATTERN)
+    name: str = Field(min_length=1)
+    description: Optional[str] = None
+    project_id: Optional[int] = None
+    codes: list[CodebookCodeIn] = Field(min_length=1)
+
+    @field_validator("database", mode="before")
+    @classmethod
+    def _strip_db_suffix(cls, value: Any) -> Any:
+        return _strip_db_suffix_value(value)
+
+
+# ---------------------------------------------------------------------------
 # CompareCodebooks
 # ---------------------------------------------------------------------------
 
@@ -433,24 +558,7 @@ class ApplyCodebookRequest(_StrippingModel):
     @field_validator("codebook")
     @classmethod
     def _validate_codebook_ref(cls, value: str) -> str:
-        raw = value.strip()
-        if not raw:
-            raise ValueError("codebook must not be empty")
-        if raw.startswith("proj_"):
-            # structural check mirrors _SCHEMA_PATTERN
-            import re as _re
-
-            if not _re.match(_SCHEMA_PATTERN, raw):
-                raise ValueError("codebook schema must match proj_<hex>")
-            return raw
-        # otherwise it must parse as int (File id)
-        try:
-            int(raw)
-        except ValueError as exc:
-            raise ValueError(
-                "codebook must be a numeric File id or a proj_<hex> schema name"
-            ) from exc
-        return raw
+        return _validate_codebook_ref_value(value)
 
 
 class ApplyCodebookResponse(BaseModel):
@@ -652,6 +760,44 @@ class RecodeItemsRequest(_StrippingModel):
     item_ids: list[str] = Field(min_length=1)
     model: Optional[str] = None
     methodology: Optional[str] = None
+
+
+class ManualCodingRequest(_StrippingModel):
+    """Payload for ``POST /api/coding/manual`` -- start a coding artifact
+    by hand: copy the chosen rows in and snapshot the codebook, but code
+    nothing. The human-in-the-loop counterpart to ApplyCodebookRequest,
+    with no ``api_key``/``model``/``methodology`` because it calls no
+    model.
+
+    JSON rather than ``as_form`` because it can carry explicit row-id
+    lists (same reasoning as ManualFilterRequest).
+    """
+
+    database: str = Field(pattern=_SCHEMA_PATTERN)
+    codebook: str = Field(
+        min_length=1,
+        description="Either a numeric File id or a proj_<hex> schema name",
+    )
+    report_name: str = Field(min_length=1, description="Display name for the coding output")
+    description: Optional[str] = None
+    project_id: Optional[int] = None
+    sample_percentage: float = Field(default=100.0, ge=1.0, le=100.0)
+    content_scope: ContentScope = _content_scope_field()
+    # Explicit ids win when either list is non-empty; otherwise the rows
+    # are sampled by sample_percentage within content_scope. Both empty is
+    # the ordinary case (sample), so neither is required.
+    post_ids: list[str] = Field(default_factory=list)
+    comment_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("database", mode="before")
+    @classmethod
+    def _strip_db_suffix(cls, value: Any) -> Any:
+        return _strip_db_suffix_value(value)
+
+    @field_validator("codebook")
+    @classmethod
+    def _validate_codebook_ref(cls, value: str) -> str:
+        return _validate_codebook_ref_value(value)
 
 
 # ---------------------------------------------------------------------------

@@ -7,6 +7,9 @@ import {
   buildRecodeItemsPayload,
   buildFilterPreviewPayload,
   buildManualFilterPayload,
+  buildCodebookPreviewPayload,
+  buildManualCodebookPayload,
+  buildManualCodingPayload,
 } from "../apiContracts";
 
 function fdEntries(fd) {
@@ -441,5 +444,138 @@ describe("buildManualFilterPayload", () => {
 
   it("throws MissingFieldsError when the name is blank", () => {
     expect(() => buildManualFilterPayload({ ...base, name: "  " })).toThrow(MissingFieldsError);
+  });
+});
+
+describe("buildCodebookPreviewPayload", () => {
+  const base = { apiKey: "k", database: "proj_abc", model: "m" };
+
+  it("builds the minimal JSON body with an empty draft", () => {
+    expect(buildCodebookPreviewPayload(base)).toEqual({
+      api_key: "k",
+      database: "proj_abc",
+      model: "m",
+      sample_percentage: 100,
+      existing_codes: [],
+    });
+  });
+
+  it("carries no name or project -- a preview creates nothing", () => {
+    const payload = buildCodebookPreviewPayload({ ...base, existingCodes: [{ name: "a" }] });
+    expect(payload).not.toHaveProperty("name");
+    expect(payload).not.toHaveProperty("project_id");
+    expect(payload.existing_codes).toEqual([{ name: "a" }]);
+  });
+
+  it("clamps the sample percentage and strips a .db suffix", () => {
+    const payload = buildCodebookPreviewPayload({
+      ...base,
+      database: "proj_abc.db",
+      samplePercentage: 500,
+    });
+    expect(payload.database).toBe("proj_abc");
+    expect(payload.sample_percentage).toBe(100);
+  });
+
+  it("requires an api key, a database and a model", () => {
+    expect(() => buildCodebookPreviewPayload({ ...base, apiKey: "" })).toThrow(
+      MissingFieldsError,
+    );
+    expect(() => buildCodebookPreviewPayload({ ...base, model: "" })).toThrow(
+      MissingFieldsError,
+    );
+    expect(() => buildCodebookPreviewPayload({ ...base, database: "nope" })).toThrow(
+      MissingFieldsError,
+    );
+  });
+});
+
+describe("buildManualCodebookPayload", () => {
+  const codes = [{ name: "Bullying", family_name: "Harm", is_new: true, family_is_new: true }];
+  const base = { database: "proj_abc", name: "hand written", codes };
+
+  it("builds the minimal JSON body", () => {
+    expect(buildManualCodebookPayload(base)).toEqual({
+      database: "proj_abc",
+      name: "hand written",
+      codes,
+    });
+  });
+
+  it("carries no api key or model -- submitting involves no LLM call", () => {
+    const payload = buildManualCodebookPayload(base);
+    expect(payload).not.toHaveProperty("api_key");
+    expect(payload).not.toHaveProperty("model");
+  });
+
+  it("rejects an empty draft with an actionable message", () => {
+    expect(() => buildManualCodebookPayload({ ...base, codes: [] })).toThrow(
+      /codes \(add at least one\)/,
+    );
+  });
+
+  it("rejects a code that still has no name", () => {
+    expect(() =>
+      buildManualCodebookPayload({ ...base, codes: [...codes, { name: "  " }] }),
+    ).toThrow(/still need a name/);
+  });
+
+  it("includes an optional description and project", () => {
+    const payload = buildManualCodebookPayload({
+      ...base,
+      description: "notes",
+      projectId: "7",
+    });
+    expect(payload.description).toBe("notes");
+    expect(payload.project_id).toBe(7);
+  });
+});
+
+describe("buildManualCodingPayload", () => {
+  const base = { database: "proj_abc", codebook: "12", reportName: "by hand" };
+
+  it("builds the minimal JSON body", () => {
+    expect(buildManualCodingPayload(base)).toEqual({
+      database: "proj_abc",
+      codebook: "12",
+      report_name: "by hand",
+      sample_percentage: 100,
+      post_ids: [],
+      comment_ids: [],
+    });
+  });
+
+  it("carries no api key, model or methodology -- no model runs", () => {
+    const payload = buildManualCodingPayload(base);
+    expect(payload).not.toHaveProperty("api_key");
+    expect(payload).not.toHaveProperty("model");
+    expect(payload).not.toHaveProperty("methodology");
+  });
+
+  it("accepts a proj_ codebook reference as well as a numeric id", () => {
+    expect(buildManualCodingPayload({ ...base, codebook: "proj_def" }).codebook).toBe(
+      "proj_def",
+    );
+  });
+
+  it("rejects a codebook reference that is neither", () => {
+    expect(() => buildManualCodingPayload({ ...base, codebook: "cb-1" })).toThrow(
+      MissingFieldsError,
+    );
+  });
+
+  it("passes explicit row ids through", () => {
+    const payload = buildManualCodingPayload({ ...base, postIds: ["s1"], commentIds: ["c1"] });
+    expect(payload.post_ids).toEqual(["s1"]);
+    expect(payload.comment_ids).toEqual(["c1"]);
+  });
+
+  it("requires a source, a codebook and a name", () => {
+    expect(() => buildManualCodingPayload({ ...base, reportName: "" })).toThrow(
+      MissingFieldsError,
+    );
+    expect(() => buildManualCodingPayload({ ...base, database: "nope" })).toThrow(
+      MissingFieldsError,
+    );
   });
 });

@@ -71,6 +71,23 @@ function assertProjSchema(schema, field, flow) {
 }
 
 /**
+ * A codebook reference is either a numeric File id or a `proj_<id>`
+ * schema name -- both accepted, nothing else. Mirrors
+ * `schemas._validate_codebook_ref_value`, and shared by the AI and
+ * by-hand coding builders so the two cannot drift.
+ */
+function assertCodebookRef(codebook, flow) {
+  const raw = String(codebook ?? "").trim();
+  if (!raw.startsWith("proj_") && !/^\d+$/.test(raw)) {
+    throw new MissingFieldsError(
+      ["codebook (must be numeric File id or proj_<id> schema)"],
+      flow,
+    );
+  }
+  return raw;
+}
+
+/**
  * Build the multipart/form-data body for POST /api/filter-data/.
  * Mirrors `FilterDataRequest` in `backend/app/api/schemas.py`.
  */
@@ -183,15 +200,7 @@ export function buildApplyCodebookForm({
     "apply-codebook",
   );
 
-  const rawCodebook = String(codebook).trim();
-  const isProjRef = rawCodebook.startsWith("proj_");
-  const isNumericRef = /^\d+$/.test(rawCodebook);
-  if (!isProjRef && !isNumericRef) {
-    throw new MissingFieldsError(
-      ["codebook (must be numeric File id or proj_<id> schema)"],
-      "apply-codebook",
-    );
-  }
+  const rawCodebook = assertCodebookRef(codebook, "apply-codebook");
 
   const fd = new FormData();
   fd.append("api_key", apiKey);
@@ -316,6 +325,140 @@ export function buildManualFilterPayload({
     comment_ids,
   };
   if (!isBlank(description)) payload.description = description;
+  if (projectId !== undefined && projectId !== null && projectId !== "") {
+    payload.project_id = Number(projectId);
+  }
+  return payload;
+}
+
+
+/**
+ * Build the JSON body for POST /api/codebook-preview/.
+ * Mirrors `CodebookPreviewRequest` in `backend/app/api/schemas.py`.
+ *
+ * `existingCodes` is the researcher's live draft, sent so the model is
+ * asked for what's missing rather than a fresh taxonomy -- the codebook
+ * editor's counterpart to `decided_*_ids` narrowing the filter preview's
+ * candidate pool. Legitimately empty on a first pass, so unlike the other
+ * fields it is not `assertRequired`.
+ *
+ * No `name`/`projectId`: a preview creates nothing.
+ */
+export function buildCodebookPreviewPayload({
+  apiKey,
+  database,
+  model,
+  prompt,
+  samplePercentage,
+  contentScope,
+  existingCodes,
+}) {
+  assertRequired({ apiKey, database, model }, "codebook-preview");
+  const normalizedDatabase = assertProjSchema(
+    database,
+    "database",
+    "codebook-preview",
+  );
+
+  const payload = {
+    api_key: apiKey,
+    database: normalizedDatabase,
+    model,
+    sample_percentage: clampPct(samplePercentage),
+    existing_codes: existingCodes || [],
+  };
+
+  if (!isBlank(prompt)) payload.prompt = prompt;
+  if (!isBlank(contentScope)) payload.content_scope = contentScope;
+
+  return payload;
+}
+
+/**
+ * Build the JSON body for POST /api/codebook/manual.
+ * Mirrors `ManualCodebookRequest` in `backend/app/api/schemas.py`.
+ *
+ * No `apiKey` or `model`: submitting the editor's draft creates the
+ * codebook with no LLM call, whatever role the preview assistant played
+ * in assembling that draft. Same reasoning as `buildManualFilterPayload`.
+ */
+export function buildManualCodebookPayload({
+  database,
+  name,
+  description,
+  projectId,
+  codes,
+}) {
+  assertRequired({ database, name }, "manual-codebook");
+  const normalizedDatabase = assertProjSchema(
+    database,
+    "database",
+    "manual-codebook",
+  );
+
+  const codeList = Array.isArray(codes) ? codes : [];
+  if (codeList.length === 0) {
+    // The server rejects this too; failing here keeps the message
+    // actionable instead of surfacing a 422 field path.
+    throw new MissingFieldsError(["codes (add at least one)"], "manual-codebook");
+  }
+  const unnamed = codeList.filter((code) => isBlank(code?.name)).length;
+  if (unnamed > 0) {
+    throw new MissingFieldsError(
+      [`${unnamed} code(s) still need a name`],
+      "manual-codebook",
+    );
+  }
+
+  const payload = {
+    database: normalizedDatabase,
+    name: name.trim(),
+    codes: codeList,
+  };
+  if (!isBlank(description)) payload.description = description;
+  if (projectId !== undefined && projectId !== null && projectId !== "") {
+    payload.project_id = Number(projectId);
+  }
+  return payload;
+}
+
+/**
+ * Build the JSON body for POST /api/coding/manual.
+ * Mirrors `ManualCodingRequest` in `backend/app/api/schemas.py`.
+ *
+ * The by-hand counterpart to `buildApplyCodebookForm`: same source and
+ * codebook fields, no `apiKey`/`model`/`methodology`, because starting a
+ * coding artifact by hand calls no model. JSON rather than FormData since
+ * it can carry explicit row-id lists.
+ */
+export function buildManualCodingPayload({
+  database,
+  codebook,
+  reportName,
+  description,
+  projectId,
+  samplePercentage,
+  contentScope,
+  postIds,
+  commentIds,
+}) {
+  assertRequired({ database, codebook, reportName }, "manual-coding");
+  const normalizedDatabase = assertProjSchema(
+    database,
+    "database",
+    "manual-coding",
+  );
+
+  const payload = {
+    database: normalizedDatabase,
+    codebook: assertCodebookRef(codebook, "manual-coding"),
+    report_name: reportName.trim(),
+    sample_percentage: clampPct(samplePercentage),
+    post_ids: postIds || [],
+    comment_ids: commentIds || [],
+  };
+  if (!isBlank(description)) payload.description = description;
+  if (!isBlank(contentScope)) payload.content_scope = contentScope;
   if (projectId !== undefined && projectId !== null && projectId !== "") {
     payload.project_id = Number(projectId);
   }
