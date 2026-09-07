@@ -412,6 +412,121 @@ async def start_generate_codebook_job(
     )
 
 
+async def _assemble_source_records(
+    session: AsyncSession,
+    source_file_id: int,
+    sample_percentage: float,
+    content_scope: str,
+) -> str:
+    """Sample a data file's submissions/comments and flatten them into the
+    one-record-per-item text the codebook prompts consume, joined with
+    ``context_window.ITEM_SEPARATOR``.
+
+    Shared by the one-shot generate job and the editor's propose-codes
+    preview job, so both look at the source data in exactly the same way
+    -- the codebook counterpart of ``data_service._sample_source_rows``.
+    Raises ``ValidationAppError`` when the sample comes back empty, since
+    neither caller can do anything useful with no data.
+    """
+    include_posts = content_scope in ("both", "posts")
+    include_comments = content_scope in ("both", "comments")
+
+    subs = (
+        await raw_data_repo.sample_submissions(session, source_file_id, sample_percentage)
+        if include_posts
+        else []
+    )
+    comments = (
+        await raw_data_repo.sample_comments(session, source_file_id, sample_percentage)
+        if include_comments
+        else []
+    )
+    parent_context = await raw_data_repo.parent_post_context_for_comments(session, source_file_id, comments)
+
+    records: list[str] = []
+    for sub in subs:
+        records.append(f"[POST] Title: {sub.title or ''}\n{sub.selftext or ''}")
+    for comment in comments:
+        parent = parent_context.get(comment.link_id) if comment.link_id else None
+        parent_title = (parent or {}).get("title") or ""
+        prefix = f'[COMMENT] (replying to "{parent_title}") ' if parent_title else "[COMMENT] "
+        records.append(f"{prefix}{comment.body or ''}")
+    assembled = context_window.ITEM_SEPARATOR.join(records)
+
+    if not assembled.strip():
+        raise ValidationAppError(
+            "No records were sampled from the selected database. Increase sample size above 0%."
+        )
+    return assembled
+
+
+async def _materialize_codebook(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    source_file_id: int,
+    name: str,
+    description: str | None,
+    project_id: int | None,
+    code_rows: list[dict],
+    origin: str,
+    message: str | None = None,
+    job_id: int | None = None,
+    model: str | None = None,
+    system_prompt: str | None = None,
+    user_instructions: str | None = None,
+    prompt_meta: dict | None = None,
+) -> File:
+    """Create a new ``codebook`` File from ``code_rows`` and commit it as
+    that file's v1, linked back to the data it was built from.
+
+    The single write path for a brand-new codebook, shared by the one-shot
+    ``generate_codebook`` job and the editor's ``create_manual_codebook``
+    -- the codebook counterpart of
+    ``data_service._materialize_filtered_schema``, and for the same
+    reason: two entry points that produce the same artifact type must not
+    be able to drift into producing structurally different artifacts.
+    Only ``origin`` and the provenance fields differ between them.
+
+    Does not commit -- the caller owns the transaction boundary.
+    """
+    final_description = (description or "").strip() if description is not None else None
+    if final_description == "":
+        final_description = None
+
+    new_schema = f"proj_{secrets.token_hex(6)}"
+    file_rec = File(
+        user_id=user_id,
+        filename=name,
+        schemaname=new_schema,
+        file_type="codebook",
+        description=final_description,
+    )
+    session.add(file_rec)
+    await session.flush()
+
+    await version_service.commit_codebook_version(
+        session,
+        file_id=file_rec.id,
+        author_user_id=user_id,
+        origin=origin,
+        codes=code_rows,
+        message=message,
+        job_id=job_id,
+        model=model,
+        system_prompt=system_prompt,
+        user_instructions=user_instructions,
+        prompt_meta=prompt_meta,
+        parents=[EdgeSpec(parent_file_id=source_file_id, relation=RELATION_DERIVED_FROM, role=ROLE_SOURCE_DATA)],
+    )
+
+    if project_id is not None:
+        project = await project_repo.get_owned_project(session, project_id, user_id)
+        await async_link_file_to_project(session, file_rec.id, project.id)
+
+    return file_rec
+
+
 @register_handler("generate_codebook")
 async def _run_generate_codebook_job(job_id: int, payload: dict) -> dict:
     """Handler for ``job_type="generate_codebook"``.
@@ -420,14 +535,11 @@ async def _run_generate_codebook_job(job_id: int, payload: dict) -> dict:
     session), so it opens its own session via the module-level
     ``AsyncSessionLocal`` -- same pattern as
     ``data_service._run_filter_data_job``. Sampling goes through
-    ``repositories/raw_data_repo.py::sample_submissions``/``sample_comments``
-    against the fixed ``submissions``/``comments`` tables (replacing the old
-    raw-SQL ``ORDER BY RANDOM() LIMIT`` reads against a per-artifact
-    schema); ``codebook_generator.generate_codebook`` is a native
-    ``async def`` (Stage 9, backed by
-    ``external/openrouter_client.py::chat_completion``), so it's ``await``ed
-    directly -- no more ``asyncio.to_thread`` wrapper around a sync
-    OpenAI SDK call.
+    ``_assemble_source_records`` (``repositories/raw_data_repo.py`` under
+    the hood) and persistence through ``_materialize_codebook``, both
+    shared with the editor's preview/manual paths;
+    ``codebook_generator.generate_codebook_map_reduce`` is a native
+    ``async def``, so it's ``await``ed directly.
     """
     source_file_id = payload["source_file_id"]
     user_id = payload["user_id"]
@@ -439,75 +551,32 @@ async def _run_generate_codebook_job(job_id: int, payload: dict) -> dict:
     project_id = payload.get("project_id")
     sample_percentage = payload["sample_percentage"]
     content_scope = payload.get("content_scope") or "both"
-    include_posts = content_scope in ("both", "posts")
-    include_comments = content_scope in ("both", "comments")
 
     async with AsyncSessionLocal() as session:
-        subs = (
-            await raw_data_repo.sample_submissions(session, source_file_id, sample_percentage)
-            if include_posts
-            else []
+        assembled = await _assemble_source_records(
+            session, source_file_id, sample_percentage, content_scope
         )
-        comments = (
-            await raw_data_repo.sample_comments(session, source_file_id, sample_percentage)
-            if include_comments
-            else []
-        )
-        parent_context = await raw_data_repo.parent_post_context_for_comments(session, source_file_id, comments)
-
-        records: list[str] = []
-        for sub in subs:
-            records.append(f"[POST] Title: {sub.title or ''}\n{sub.selftext or ''}")
-        for comment in comments:
-            parent = parent_context.get(comment.link_id) if comment.link_id else None
-            parent_title = (parent or {}).get("title") or ""
-            prefix = f'[COMMENT] (replying to "{parent_title}") ' if parent_title else "[COMMENT] "
-            records.append(f"{prefix}{comment.body or ''}")
-        assembled = context_window.ITEM_SEPARATOR.join(records)
-
-        if not assembled.strip():
-            raise ValidationAppError(
-                "No records were sampled from the selected database. Increase sample size above 0%."
-            )
 
         codebook_text, system_prompt, rendered_prompt, coverage = await codebook_generator_module.generate_codebook_map_reduce(
             assembled, api_key, prompt, MODEL=model, progress=ProgressTracker(job_id)
         )
         codebook_text = str(codebook_text or "")
 
-        final_description = (description or "").strip() if description is not None else None
-        if final_description == "":
-            final_description = None
-
-        new_schema = f"proj_{secrets.token_hex(6)}"
-        file_rec = File(
-            user_id=user_id,
-            filename=name,
-            schemaname=new_schema,
-            file_type="codebook",
-            description=final_description,
-        )
-        session.add(file_rec)
-        await session.flush()
-
-        code_rows = parse_json_to_codes(codebook_text)
-        await version_service.commit_codebook_version(
+        file_rec = await _materialize_codebook(
             session,
-            file_id=file_rec.id,
-            author_user_id=user_id,
+            user_id=user_id,
+            source_file_id=source_file_id,
+            name=name,
+            description=description,
+            project_id=project_id,
+            code_rows=[dict(r) for r in parse_json_to_codes(codebook_text)],
             origin=ORIGIN_GENERATED,
-            codes=[dict(r) for r in code_rows],
             job_id=job_id,
             model=model,
             system_prompt=system_prompt,
             user_instructions=prompt or None,
             prompt_meta=version_service.prompt_meta(rendered_prompt, batches=coverage["batches_total"]),
-            parents=[EdgeSpec(parent_file_id=source_file_id, relation=RELATION_DERIVED_FROM, role=ROLE_SOURCE_DATA)],
         )
-
-        if project_id is not None:
-            project = await project_repo.get_owned_project(session, project_id, user_id)
-            await async_link_file_to_project(session, file_rec.id, project.id)
 
         await session.commit()
         file_id, schema_name, filename, saved_description = (
@@ -527,6 +596,189 @@ async def _run_generate_codebook_job(job_id: int, payload: dict) -> dict:
         },
         **context_window.coverage_result_fields(coverage),
     }
+
+
+# ---------------------------------------------------------------------------
+# codebook_preview: background job kickoff + handler (the /codebook-editor
+# "propose more codes" assistant). Creates nothing -- see the handler.
+# ---------------------------------------------------------------------------
+
+
+def _code_dedupe_key(family_name: str | None, name: str | None) -> str:
+    """Normalized ``(family, name)`` identity used to tell a proposed code
+    apart from one the researcher already has. Mirrors
+    ``lib/codebookEditorState.js::codeKey`` exactly -- the two must agree
+    or the server and the client would disagree about what counts as a
+    duplicate.
+    """
+    return f"{(family_name or '').strip().lower()}\x00{(name or '').strip().lower()}"
+
+
+def _render_existing_codes(existing_codes: list[dict]) -> str:
+    """Render the researcher's current draft as the compact ``family ::
+    name -- definition`` list the prompt shows under EXISTING CODES.
+    """
+    lines: list[str] = []
+    for code in existing_codes:
+        family = str(code.get("family_name") or "").strip()
+        name = str(code.get("name") or "").strip()
+        if not name:
+            continue
+        definition = str(code.get("definition") or "").strip()
+        line = f"- {family} :: {name}" if family else f"- {name}"
+        if definition:
+            line += f" -- {definition}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+async def start_codebook_preview_job(
+    session: AsyncSession,
+    user_id: int,
+    *,
+    database: str,
+    api_key: str,
+    model: str | None,
+    prompt: str,
+    sample_percentage: float,
+    content_scope: str = "both",
+    existing_codes: list[dict] | None = None,
+) -> Job:
+    """Validate and enqueue a ``codebook_preview`` background job.
+
+    Same guards as ``start_generate_codebook_job`` (valid schema, api_key
+    present, source owned by ``user_id``), and the same ``runtime_extra``
+    handling so the key is never written to the ``jobs`` table. Takes no
+    ``name``/``project_id`` because this job creates no artifact.
+    """
+    schema = require_valid_schema(database, field_name="database")
+    if not api_key:
+        raise ValidationAppError("api_key is required")
+
+    source_file_id = await file_repo.resolve_file_id(session, schema, user_id)
+
+    return await enqueue_job(
+        session,
+        user_id=user_id,
+        job_type="codebook_preview",
+        payload={
+            "source_file_id": source_file_id,
+            "user_id": user_id,
+            "model": model,
+            "prompt": (prompt or "").strip(),
+            "sample_percentage": sample_percentage,
+            "content_scope": content_scope,
+            "existing_codes": existing_codes or [],
+        },
+        runtime_extra={"api_key": api_key},
+    )
+
+
+@register_handler("codebook_preview")
+async def _run_codebook_preview_job(job_id: int, payload: dict) -> dict:
+    """Handler for ``job_type="codebook_preview"``.
+
+    Samples the source data and asks the model for codes that are NOT
+    already in ``existing_codes`` (the researcher's live draft), then
+    returns them as plain proposal dicts for the editor's review tray.
+
+    Deliberately creates no ``File``, no ``ArtifactVersion``, no
+    ``codebook_codes`` row and no ``artifact_edges`` row -- a proposal is
+    not an artifact, and nothing becomes one until the researcher accepts
+    it and submits. Nothing here is written to the database at all, which
+    is also why it needs no ``session.commit()``. Same contract as
+    ``data_service._run_filter_preview_job``.
+
+    Proposals already covered by ``existing_codes`` are dropped here as
+    well as client-side: the prompt asks the model not to restate an
+    existing code, but a prompt is not a guarantee, and a run started
+    before the researcher added a code should not be able to re-propose
+    it on return.
+    """
+    source_file_id = payload["source_file_id"]
+    model = payload.get("model") or codebook_generator_module.MODEL_1
+    prompt = payload.get("prompt", "")
+    api_key = payload["api_key"]
+    sample_percentage = payload["sample_percentage"]
+    content_scope = payload.get("content_scope") or "both"
+    existing_codes: list[dict] = payload.get("existing_codes") or []
+
+    async with AsyncSessionLocal() as session:
+        assembled = await _assemble_source_records(
+            session, source_file_id, sample_percentage, content_scope
+        )
+
+    codebook_text, _system_prompt, _rendered_prompt, coverage = await codebook_generator_module.generate_codebook_map_reduce(
+        assembled,
+        api_key,
+        prompt,
+        MODEL=model,
+        progress=ProgressTracker(job_id),
+        existing_codes=_render_existing_codes(existing_codes),
+    )
+
+    seen = {_code_dedupe_key(c.get("family_name"), c.get("name")) for c in existing_codes}
+    proposals: list[dict] = []
+    for row in parse_json_to_codes(str(codebook_text or "")):
+        key = _code_dedupe_key(row.get("family_name"), row.get("name"))
+        if not row.get("name") or key in seen:
+            continue
+        seen.add(key)
+        proposals.append(
+            {
+                "family_name": row.get("family_name") or "",
+                "name": row.get("name") or "",
+                "definition": row.get("definition"),
+                "inclusion": row.get("inclusion"),
+                "exclusion": row.get("exclusion"),
+                "keywords": row.get("keywords"),
+                "example": row.get("example"),
+            }
+        )
+
+    return {"proposals": proposals, **context_window.coverage_result_fields(coverage)}
+
+
+async def create_manual_codebook(
+    session: AsyncSession,
+    user_id: int,
+    *,
+    database: str,
+    name: str,
+    description: str | None,
+    project_id: int | None,
+    codes: list[dict],
+) -> File:
+    """Create a codebook the researcher composed by hand in the codebook
+    editor (with or without help from the preview assistant).
+
+    Shares ``_materialize_codebook`` with the one-shot generate job, so
+    the resulting artifact is structurally identical -- only its
+    provenance differs. ``origin=edited`` with null ``model``/
+    ``system_prompt``/``prompt_meta`` is deliberate and matches
+    ``data_service.create_manual_filtered_data``: an assist during
+    editing is not the same claim as "a model produced this", and the
+    version spine's provenance fields mean the stronger claim.
+    """
+    schema = require_valid_schema(database, field_name="database")
+    source_file_id = await file_repo.resolve_file_id(session, schema, user_id)
+
+    code_rows = _resolve_code_rows(codes)
+    file_rec = await _materialize_codebook(
+        session,
+        user_id=user_id,
+        source_file_id=source_file_id,
+        name=name,
+        description=description,
+        project_id=project_id,
+        code_rows=code_rows,
+        origin=ORIGIN_EDITED,
+        message=f"Composed by hand from {len(code_rows)} codes",
+    )
+
+    await session.commit()
+    await session.refresh(file_rec)
+    return file_rec
 
 
 # ---------------------------------------------------------------------------

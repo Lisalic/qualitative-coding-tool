@@ -780,3 +780,130 @@ class TestGetSummaryFile:
         assert resp.status_code == 200
         assert resp.json()["summary"]["content"] == "my content"
         assert resp.json()["summary"]["display_name"] == "mine"
+
+
+class TestCodebookPreviewGuards:
+    """``/api/codebook-preview/`` is the codebook editor's assistive AI
+    run: a JSON body (it carries the draft), and a job whose result is
+    proposed codes rather than an artifact.
+    """
+
+    def test_requires_auth(self, client) -> None:
+        resp = client.post(
+            "/api/codebook-preview/",
+            json={"api_key": "k", "database": "proj_a", "model": "m"},
+        )
+        assert resp.status_code == 401
+
+    def test_non_proj_database_returns_422(self, client, auth_cookies) -> None:
+        resp = client.post(
+            "/api/codebook-preview/",
+            json={"api_key": "k", "database": "not_proj", "model": "m"},
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 422
+
+    def test_missing_model_returns_422(self, client, auth_cookies) -> None:
+        resp = client.post(
+            "/api/codebook-preview/",
+            json={"api_key": "k", "database": "proj_a"},
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 422
+
+    def test_unowned_database_returns_404(self, client, override_async_db, auth_cookies) -> None:
+        resp = client.post(
+            "/api/codebook-preview/",
+            json={"api_key": "k", "database": "proj_missing", "model": "m"},
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 404
+
+    async def test_valid_kickoff_returns_202_with_job_id(
+        self, client, route_backed_by_sqlite_jobs, make_token
+    ) -> None:
+        file_rec = await _make_file(
+            route_backed_by_sqlite_jobs,
+            user_id=1,
+            submissions=[{"id": "s1", "title": "t", "selftext": "x", "word_count": 1}],
+        )
+        resp = client.post(
+            "/api/codebook-preview/",
+            json={
+                "api_key": "k",
+                "database": file_rec.schemaname,
+                "model": "m",
+                "existing_codes": [{"family_name": "F", "name": "Alpha"}],
+            },
+            cookies={"access_token": make_token(sub="1")},
+        )
+        assert resp.status_code == 202
+        body = resp.json()
+        assert body["status"] == "pending"
+        assert isinstance(body["job_id"], int)
+
+
+class TestManualCodebookRoute:
+    """``POST /api/codebook/manual`` -- the codebook editor's submit.
+    Synchronous, since composing the codebook involves no LLM call.
+    """
+
+    _CODE = {
+        "code_uid": "u1", "family_uid": "f1", "family_name": "Harm", "name": "Bullying",
+        "is_new": True, "family_is_new": True,
+    }
+
+    def test_requires_auth(self, client) -> None:
+        resp = client.post(
+            "/api/codebook/manual",
+            json={"database": "proj_a", "name": "n", "codes": [self._CODE]},
+        )
+        assert resp.status_code == 401
+
+    def test_empty_draft_returns_422(self, client, auth_cookies) -> None:
+        resp = client.post(
+            "/api/codebook/manual",
+            json={"database": "proj_a", "name": "n", "codes": []},
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 422
+
+    def test_missing_name_returns_422(self, client, auth_cookies) -> None:
+        resp = client.post(
+            "/api/codebook/manual",
+            json={"database": "proj_a", "codes": [self._CODE]},
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 422
+
+    def test_unowned_database_returns_404(self, client, override_async_db, auth_cookies) -> None:
+        resp = client.post(
+            "/api/codebook/manual",
+            json={"database": "proj_missing", "name": "n", "codes": [self._CODE]},
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 404
+
+    async def test_creates_the_codebook_and_returns_it(
+        self, client, route_backed_by_sqlite_jobs, make_token
+    ) -> None:
+        file_rec = await _make_file(
+            route_backed_by_sqlite_jobs,
+            user_id=1,
+            submissions=[{"id": "s1", "title": "t", "selftext": "x", "word_count": 1}],
+        )
+        resp = client.post(
+            "/api/codebook/manual",
+            json={
+                "database": file_rec.schemaname,
+                "name": "hand written",
+                "description": "written while reading",
+                "codes": [self._CODE],
+            },
+            cookies={"access_token": make_token(sub="1")},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["file"]["filename"] == "hand written"
+        assert body["file"]["schema_name"].startswith("proj_")
+        assert body["file"]["version_no"] == 1

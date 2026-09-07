@@ -827,3 +827,270 @@ class TestCompareCodebooksJobHandlerEndToEnd:
             assert finished.status == "failed"
             assert "larger-context model" in finished.error
             assert not get_client_mock.called
+
+
+# ---------------------------------------------------------------------------
+# codebook_preview + create_manual_codebook (the /codebook-editor pair)
+# ---------------------------------------------------------------------------
+
+
+def _proposal_json(*names: str) -> str:
+    return json.dumps(
+        {
+            "codes": [
+                {
+                    "family": "F",
+                    "name": name,
+                    "definition": "a def",
+                    "inclusion": "when",
+                    "exclusion": "not when",
+                    "keywords": "kw",
+                    "example": "ex",
+                }
+                for name in names
+            ]
+        }
+    )
+
+
+async def _seed_source(session, user) -> File:
+    file_rec = await _make_file(session, user.id)
+    session.add_all(
+        [
+            Submission(file_id=file_rec.id, id="s1", title="t1", selftext="x1", word_count=5),
+            Comment(file_id=file_rec.id, id="c1", body="b1", word_count=3),
+        ]
+    )
+    await session.commit()
+    return file_rec
+
+
+class TestCodebookPreviewJob:
+    async def test_returns_proposals_and_creates_nothing(self, session_factory, monkeypatch) -> None:
+        monkeypatch.setattr(
+            "backend.app.services.codebook_service.codebook_generator_module.generate_codebook",
+            AsyncMock(return_value=(_proposal_json("Bullying", "Exclusion"), "sys", "user")),
+        )
+
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_rec = await _seed_source(session, user)
+
+            files_before = len((await session.execute(select(File))).scalars().all())
+
+            job = await codebook_service.start_codebook_preview_job(
+                session,
+                user.id,
+                database=file_rec.schemaname,
+                api_key="sk-secret",
+                model=None,
+                prompt="be thorough",
+                sample_percentage=100.0,
+            )
+            finished = await _wait_for_terminal_status(session, job.id, user.id)
+            assert finished.status == "succeeded", finished.error
+
+            assert [p["name"] for p in finished.result["proposals"]] == ["Bullying", "Exclusion"]
+            assert finished.result["proposals"][0]["definition"] == "a def"
+
+            # A proposal is not an artifact: no File, and no version on any
+            # file, is created by a preview run.
+            session.expire_all()
+            files_after = (await session.execute(select(File))).scalars().all()
+            assert len(files_after) == files_before
+            for existing in files_after:
+                assert await version_repo.head_version(session, existing.id) is None
+
+    async def test_drops_a_proposal_the_draft_already_covers(self, session_factory, monkeypatch) -> None:
+        """The prompt asks the model not to restate an existing code, but a
+        prompt is not a guarantee -- and a run started before the researcher
+        added a code must not be able to re-propose it on return."""
+        monkeypatch.setattr(
+            "backend.app.services.codebook_service.codebook_generator_module.generate_codebook",
+            AsyncMock(return_value=(_proposal_json("Bullying", "Exclusion"), "sys", "user")),
+        )
+
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_rec = await _seed_source(session, user)
+
+            job = await codebook_service.start_codebook_preview_job(
+                session,
+                user.id,
+                database=file_rec.schemaname,
+                api_key="sk-secret",
+                model=None,
+                prompt="",
+                sample_percentage=100.0,
+                # Same code, differently cased and padded -- the dedupe key
+                # is normalized, and must agree with the client's.
+                existing_codes=[{"family_name": " f ", "name": "BULLYING"}],
+            )
+            finished = await _wait_for_terminal_status(session, job.id, user.id)
+            assert finished.status == "succeeded", finished.error
+            assert [p["name"] for p in finished.result["proposals"]] == ["Exclusion"]
+
+    async def test_sends_the_draft_to_the_model_as_existing_codes(
+        self, session_factory, monkeypatch
+    ) -> None:
+        generate_mock = AsyncMock(return_value=(_proposal_json("Exclusion"), "sys", "user"))
+        monkeypatch.setattr(
+            "backend.app.services.codebook_service.codebook_generator_module.generate_codebook",
+            generate_mock,
+        )
+
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_rec = await _seed_source(session, user)
+
+            job = await codebook_service.start_codebook_preview_job(
+                session,
+                user.id,
+                database=file_rec.schemaname,
+                api_key="sk-secret",
+                model=None,
+                prompt="",
+                sample_percentage=100.0,
+                existing_codes=[{"family_name": "F", "name": "Bullying", "definition": "a def"}],
+            )
+            finished = await _wait_for_terminal_status(session, job.id, user.id)
+            assert finished.status == "succeeded", finished.error
+
+            system_prompt = generate_mock.await_args.kwargs["existing_codes"]
+            assert "F :: Bullying -- a def" in system_prompt
+
+    async def test_api_key_is_required_and_never_persisted(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_rec = await _seed_source(session, user)
+
+            with pytest.raises(ValidationAppError):
+                await codebook_service.start_codebook_preview_job(
+                    session,
+                    user.id,
+                    database=file_rec.schemaname,
+                    api_key="",
+                    model=None,
+                    prompt="",
+                    sample_percentage=100.0,
+                )
+
+    async def test_source_must_be_owned_by_the_caller(self, session_factory) -> None:
+        async with session_factory() as session:
+            owner = await _make_user(session, "owner@x.com")
+            other = await _make_user(session, "other@x.com")
+            file_rec = await _seed_source(session, owner)
+
+            with pytest.raises(NotFoundError):
+                await codebook_service.start_codebook_preview_job(
+                    session,
+                    other.id,
+                    database=file_rec.schemaname,
+                    api_key="sk-secret",
+                    model=None,
+                    prompt="",
+                    sample_percentage=100.0,
+                )
+
+
+class TestCreateManualCodebook:
+    _CODES = [
+        {
+            "code_uid": "u1", "family_uid": "f1", "family_name": "Harm", "name": "Bullying",
+            "is_new": True, "family_is_new": True, "definition": "a def", "position": 0,
+        },
+        {
+            "code_uid": "u2", "family_uid": "f1", "family_name": "Harm", "name": "Exclusion",
+            "is_new": True, "definition": "another def", "position": 1,
+        },
+    ]
+
+    async def test_creates_a_codebook_with_edited_provenance(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            source = await _seed_source(session, user)
+
+            file_rec = await codebook_service.create_manual_codebook(
+                session,
+                user.id,
+                database=source.schemaname,
+                name="hand written",
+                description="notes",
+                project_id=None,
+                codes=list(self._CODES),
+            )
+
+            assert file_rec.file_type == "codebook"
+            assert file_rec.filename == "hand written"
+            assert file_rec.description == "notes"
+            assert file_rec.schemaname.startswith("proj_")
+
+            codes = await version_service.read_codes(session, file_rec.id)
+            assert [c.name for c in codes] == ["Bullying", "Exclusion"]
+            # Client-minted identity is used as-is rather than re-minted, so
+            # a later edit reads as an edit and not a delete-plus-add.
+            assert [c.code_uid for c in codes] == ["u1", "u2"]
+            assert {c.family_uid for c in codes} == {"f1"}
+
+    async def test_records_no_model_provenance(self, session_factory) -> None:
+        """An assist during editing is not the claim that a model produced
+        the artifact -- overstating it would make these fields useless for
+        auditing which artifacts an LLM actually generated."""
+        async with session_factory() as session:
+            user = await _make_user(session)
+            source = await _seed_source(session, user)
+
+            file_rec = await codebook_service.create_manual_codebook(
+                session, user.id, database=source.schemaname, name="hand written",
+                description=None, project_id=None, codes=list(self._CODES),
+            )
+
+            head = await version_repo.head_version(session, file_rec.id)
+            assert head.origin == "edited"
+            assert head.version_no == 1
+            assert head.model is None
+            assert head.system_prompt is None
+            assert head.user_instructions is None
+            assert head.prompt_meta is None
+            assert "Composed by hand from 2 codes" in head.message
+
+    async def test_links_lineage_back_to_the_source_data(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            source = await _seed_source(session, user)
+
+            file_rec = await codebook_service.create_manual_codebook(
+                session, user.id, database=source.schemaname, name="hand written",
+                description=None, project_id=None, codes=list(self._CODES),
+            )
+
+            edges = await version_repo.list_parent_edges(session, file_rec.id)
+            assert [e.parent_file_id for e in edges] == [source.id]
+            assert edges[0].relation == "derived_from"
+            assert edges[0].role == "source_data"
+
+    async def test_rejects_a_code_with_no_identity(self, session_factory) -> None:
+        """`_resolve_code_rows` refuses to silently mint an identity -- the
+        same guard the hand-edit save path relies on."""
+        async with session_factory() as session:
+            user = await _make_user(session)
+            source = await _seed_source(session, user)
+
+            with pytest.raises(ValidationAppError):
+                await codebook_service.create_manual_codebook(
+                    session, user.id, database=source.schemaname, name="x",
+                    description=None, project_id=None,
+                    codes=[{"family_name": "Harm", "name": "Bullying"}],
+                )
+
+    async def test_source_must_be_owned_by_the_caller(self, session_factory) -> None:
+        async with session_factory() as session:
+            owner = await _make_user(session, "owner@x.com")
+            other = await _make_user(session, "other@x.com")
+            source = await _seed_source(session, owner)
+
+            with pytest.raises(NotFoundError):
+                await codebook_service.create_manual_codebook(
+                    session, other.id, database=source.schemaname, name="x",
+                    description=None, project_id=None, codes=list(self._CODES),
+                )

@@ -3,10 +3,12 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.schemas import (
+    CodebookPreviewRequest,
     CompareCodebooksRequest,
     DuplicateCodebookRequest,
     GenerateCodebookRequest,
     ImportCodebookRequest,
+    ManualCodebookRequest,
     SaveCodebookRequest,
     as_form,
 )
@@ -127,6 +129,71 @@ async def save_project_codebook(
     return JSONResponse(
         {"message": "Codebook saved", "id": str(file_rec.id), "display_name": file_rec.filename}
     )
+
+
+@router.post("/codebook/manual")
+async def create_manual_codebook(
+    payload: ManualCodebookRequest,
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
+) -> JSONResponse:
+    """Create a codebook from the codebook editor's hand-composed draft.
+
+    Synchronous (no LLM call, so no job to poll) -- the same asymmetry the
+    filter pair has between ``POST /api/filter-preview/`` and
+    ``POST /api/filtered-data/manual``.
+    """
+    file_rec = await codebook_service.create_manual_codebook(
+        db,
+        user_id,
+        database=payload.database,
+        name=payload.name,
+        description=payload.description,
+        project_id=payload.project_id,
+        codes=[c.model_dump() for c in payload.codes],
+    )
+    head = await version_repo.head_version(db, file_rec.id)
+    return JSONResponse(
+        {
+            "message": "Codebook created",
+            "file": {
+                "id": str(file_rec.id),
+                "schema_name": file_rec.schemaname,
+                "filename": file_rec.filename,
+                "description": file_rec.description,
+                "version_no": head.version_no if head else None,
+            },
+        }
+    )
+
+
+@router.post("/codebook-preview/")
+async def codebook_preview(
+    payload: CodebookPreviewRequest,
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
+) -> JSONResponse:
+    """Kick off a background job that samples the source data and proposes
+    codes to ADD to the editor's current draft, and return immediately
+    with a job id to poll.
+
+    The assistant half of the codebook editor: it creates no artifact and
+    writes nothing -- the researcher reviews each proposal and only an
+    explicit submit persists anything (see
+    ``codebook_service._run_codebook_preview_job``).
+    """
+    job = await codebook_service.start_codebook_preview_job(
+        db,
+        user_id,
+        database=payload.database,
+        api_key=payload.api_key,
+        model=payload.model,
+        prompt=payload.prompt or "",
+        sample_percentage=payload.sample_percentage,
+        content_scope=payload.content_scope,
+        existing_codes=[c.model_dump() for c in payload.existing_codes],
+    )
+    return JSONResponse({"job_id": job.id, "status": job.status}, status_code=202)
 
 
 @router.post("/codebook/{ref}/import")

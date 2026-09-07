@@ -116,6 +116,32 @@ _GENERATE_SYSTEM_PROMPT = (
     "- Output one object per code."
 )
 
+# Appended to _GENERATE_SYSTEM_PROMPT when the caller already has a draft
+# codebook (the /codebook-editor "propose more codes" pass). The model is
+# shown what exists and asked for what is missing, so a second pass over
+# the same data adds to the researcher's draft instead of restating it.
+_EXISTING_CODES_RULES = (
+    "\n\nThe researcher has ALREADY written the codes listed under EXISTING CODES below.\n"
+    "- Propose only codes that are NOT already covered by an existing code.\n"
+    "- Never restate, rename, or lightly reword an existing code.\n"
+    "- If a theme in the data is already fully covered, say nothing about it.\n"
+    "- Reuse an existing family name when a new code belongs to that family.\n\n"
+    "EXISTING CODES:\n"
+)
+
+
+def build_system_prompt(existing_codes: str = "") -> str:
+    """The open-coding system prompt, optionally carrying the researcher's
+    current draft so the model proposes *additional* codes rather than a
+    fresh taxonomy. Empty ``existing_codes`` reproduces the original
+    prompt byte for byte, so the one-shot generate path is unchanged.
+    """
+    existing_codes = (existing_codes or "").strip()
+    if not existing_codes:
+        return _GENERATE_SYSTEM_PROMPT
+    return _GENERATE_SYSTEM_PROMPT + _EXISTING_CODES_RULES + existing_codes
+
+
 _CONSOLIDATE_SYSTEM_PROMPT = (
     "You are an expert qualitative researcher. You are given SEVERAL DRAFT CODEBOOKS as JSON, "
     "each independently generated from a different subset of the same larger dataset. Merge them "
@@ -165,8 +191,15 @@ def merge_codebook_json_drafts(drafts: list[str]) -> str:
     return json.dumps({"codes": codes})
 
 
-async def generate_codebook(posts_content: str, api_key: str, custom_prompt: str = "", MODEL: str = MODEL_1) -> tuple[str, str, str]:
-    system_prompt = _GENERATE_SYSTEM_PROMPT
+async def generate_codebook(
+    posts_content: str,
+    api_key: str,
+    custom_prompt: str = "",
+    MODEL: str = MODEL_1,
+    *,
+    existing_codes: str = "",
+) -> tuple[str, str, str]:
+    system_prompt = build_system_prompt(existing_codes)
     user_prompt = _build_generate_user_prompt(posts_content, custom_prompt)
 
     result = await _json_client(system_prompt, user_prompt, api_key, MODEL)
@@ -180,6 +213,7 @@ async def generate_codebook_map_reduce(
     MODEL: str = MODEL_1,
     *,
     progress: ProgressTracker | None = None,
+    existing_codes: str = "",
 ) -> tuple[str, str, str, dict]:
     """Generate a codebook from ``posts_content``, batching + reconciling
     across multiple LLM calls when it's too large for one.
@@ -203,7 +237,8 @@ async def generate_codebook_map_reduce(
     ``context_window.run_sequential_batches``) records that so the caller
     can surface a partial-result warning.
     """
-    reserved_chars = len(_GENERATE_SYSTEM_PROMPT) + len(_build_generate_user_prompt("", custom_prompt)) + 1000
+    system_prompt_for_batches = build_system_prompt(existing_codes)
+    reserved_chars = len(system_prompt_for_batches) + len(_build_generate_user_prompt("", custom_prompt)) + 1000
     max_content_chars = context_window.max_prompt_chars(
         MODEL,
         reserved_chars=reserved_chars,
@@ -214,7 +249,9 @@ async def generate_codebook_map_reduce(
     batches = context_window.batch_by_separator(posts_content, max_content_chars, separator=context_window.ITEM_SEPARATOR)
 
     if len(batches) == 1:
-        result, system_prompt, user_prompt = await generate_codebook(posts_content, api_key, custom_prompt, MODEL=MODEL)
+        result, system_prompt, user_prompt = await generate_codebook(
+            posts_content, api_key, custom_prompt, MODEL=MODEL, existing_codes=existing_codes
+        )
         return result, system_prompt, user_prompt, {"batches_processed": 1, "batches_total": 1, "error": None}
 
     # +1 for the reduce call below, so the bar reflects the full amount of
@@ -223,7 +260,9 @@ async def generate_codebook_map_reduce(
         await progress.add_total(len(batches) + 1)
 
     async def _run_one_draft(i: int, batch: str) -> str:
-        draft, _, _ = await generate_codebook(batch, api_key, custom_prompt, MODEL=MODEL)
+        draft, _, _ = await generate_codebook(
+            batch, api_key, custom_prompt, MODEL=MODEL, existing_codes=existing_codes
+        )
         return draft
 
     drafts, map_coverage = await context_window.run_sequential_batches(batches, _run_one_draft, progress=progress)
@@ -234,7 +273,7 @@ async def generate_codebook_map_reduce(
         # merged rather than losing them to a failed reduce call too.
         fallback_text = merge_codebook_json_drafts(drafts)
         fallback_prompt = _build_generate_user_prompt(posts_content, custom_prompt)
-        return fallback_text, _GENERATE_SYSTEM_PROMPT, fallback_prompt, map_coverage
+        return fallback_text, system_prompt_for_batches, fallback_prompt, map_coverage
 
     reduce_user_prompt = _build_consolidation_user_prompt(drafts, custom_prompt)
     try:
@@ -248,7 +287,7 @@ async def generate_codebook_map_reduce(
             "batches_total": map_coverage["batches_total"] + 1,
             "error": str(exc),
         }
-        return fallback_text, _GENERATE_SYSTEM_PROMPT, reduce_user_prompt, coverage
+        return fallback_text, system_prompt_for_batches, reduce_user_prompt, coverage
 
     if progress is not None:
         await progress.advance()
