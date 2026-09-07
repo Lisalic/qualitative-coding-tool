@@ -12,6 +12,7 @@ const AUTH_ITEMS = [
   ["Filter Data", "/filter"],
   ["Filter Editor", "/filter-editor"],
   ["Generate Codebook", "/codebook-generate"],
+  ["Codebook Editor", "/codebook-editor"],
   ["Apply Codebook", "/codebook-apply"],
   ["Compare Codebook", "/compare-codebook"],
   ["Compare Coding", "/compare-coding"],

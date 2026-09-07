@@ -11,6 +11,7 @@ const FilterEditor = React.lazy(() => import("./pages/FilterEditor"));
 const Data = React.lazy(() => import("./pages/Data"));
 const FilteredData = React.lazy(() => import("./pages/FilteredData"));
 const GenerateCodebook = React.lazy(() => import("./pages/GenerateCodebook"));
+const CodebookEditor = React.lazy(() => import("./pages/CodebookEditor"));
 const ViewCodebook = React.lazy(() => import("./pages/ViewCodebook"));
 const ApplyCodebook = React.lazy(() => import("./pages/ApplyCodebook"));
 const ViewCoding = React.lazy(() => import("./pages/ViewCoding"));
@@ -114,6 +115,14 @@ function App() {
                   element={
                     <ProtectedRoute>
                       <GenerateCodebook />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/codebook-editor"
+                  element={
+                    <ProtectedRoute>
+                      <CodebookEditor />
                     </ProtectedRoute>
                   }
                 />
