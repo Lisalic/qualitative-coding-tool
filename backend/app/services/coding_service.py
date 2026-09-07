@@ -667,6 +667,191 @@ def _assemble_posts_content(
     return context_window.ITEM_SEPARATOR.join(records).strip()
 
 
+async def _read_codebook_as_parent(session: AsyncSession, codebook_file_id: int) -> tuple[str, list]:
+    """Seal the codebook's head, then read its markdown + code rows.
+
+    Read-as-parent: sealing first is what lets the new coding artifact's
+    edge pin exactly which codebook revision was snapshotted -- the one
+    genuine cross-file content read in this codebase (see
+    ``version_service.py``'s module docstring). Shared by the AI apply
+    path and the hand-started path so both pin the same way.
+    """
+    await version_service.pin_parent(session, codebook_file_id)
+    codebook_text = await version_service.read_codebook_markdown(session, codebook_file_id)
+    codebook_codes = await version_service.read_codes(session, codebook_file_id)
+    if not codebook_text:
+        raise ValidationAppError("Cannot apply codebook: codebook not found or empty")
+    return codebook_text, codebook_codes
+
+
+async def _sample_rows_for_coding(
+    session: AsyncSession,
+    source_file_id: int,
+    sample_percentage: float,
+    content_scope: str,
+) -> tuple[list, list]:
+    """Choose which of a source file's rows a new coding artifact will own.
+
+    ``sample_percentage`` chooses *which* rows the artifact contains --
+    the artifact then copies exactly those in; no further sampling happens
+    downstream.
+    """
+    include_posts = content_scope in ("both", "posts")
+    include_comments = content_scope in ("both", "comments")
+    submissions = (
+        await raw_data_repo.sample_submissions(session, source_file_id, sample_percentage)
+        if include_posts
+        else []
+    )
+    comments = (
+        await raw_data_repo.sample_comments(session, source_file_id, sample_percentage)
+        if include_comments
+        else []
+    )
+    return submissions, comments
+
+
+async def _materialize_coding_artifact(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    source_file_id: int,
+    codebook_file_id: int,
+    codebook_codes: list,
+    display_name: str,
+    description: str | None,
+    project_id: int | None,
+    submission_ids: list[str],
+    comment_ids: list[str],
+    coding_entries: list[dict],
+    origin: str,
+    message: str | None = None,
+    job_id: int | None = None,
+    model: str | None = None,
+    system_prompt: str | None = None,
+    user_instructions: str | None = None,
+    prompt_meta: dict | None = None,
+) -> File:
+    """Build a self-contained ``coding`` artifact: its own copy of the
+    chosen rows (and their memos), its own codebook snapshot, and its
+    coding -- committed as that file's v1.
+
+    The single write path for a brand-new coding artifact, shared by the
+    one-shot ``apply_codebook`` job and the hand-started
+    ``create_manual_coding`` -- the coding counterpart of
+    ``data_service._materialize_filtered_schema``, and for the same
+    reason: two entry points producing the same artifact type must not be
+    able to drift into producing structurally different artifacts. Only
+    ``origin``, the provenance fields, and whether ``coding_entries`` is
+    empty differ between them.
+
+    ``coding_entries=[]`` is the hand-started case:
+    ``bulk_insert_coding_entries`` is a no-op on an empty list, leaving a
+    valid v1 with a full codebook snapshot, its own rows, and zero live
+    entries -- which ``list_coding_rows`` already renders as uncoded, and
+    which the ViewCoding workspace then codes row by row.
+
+    Does not commit -- the caller owns the transaction boundary.
+    """
+    final_description = (description or "").strip() if description is not None else None
+    if final_description == "":
+        final_description = None
+
+    new_schema = f"proj_{secrets.token_hex(6)}"
+    file_rec = File(
+        user_id=user_id,
+        filename=display_name,
+        schemaname=new_schema,
+        file_type="coding",
+        description=final_description,
+    )
+    # The source data file was read before the (minutes-long) LLM call and
+    # its rows are copied in below -- if it was deleted in that window the
+    # copy would silently produce zero rows, leaving a coding artifact
+    # whose entries point at rows it doesn't have. Fail instead. (A
+    # deleted *codebook* is not fatal the same way: its codes were already
+    # read into `codebook_codes` by the caller, so the snapshot is
+    # complete; only its lineage edge is lost, which
+    # `version_service.link_parents` drops on its own.)
+    await file_repo.require_existing_file_ids(session, {source_file_id})
+
+    session.add(file_rec)
+    await session.flush()
+
+    await raw_data_repo.copy_rows_by_id(
+        session,
+        source_file_id=source_file_id,
+        target_file_id=file_rec.id,
+        submission_ids=submission_ids,
+        comment_ids=comment_ids,
+    )
+    # Memos follow their rows, so a note written while filtering is still
+    # there when the same post is read in the coding workspace.
+    await memo_repo.copy_memos_by_id(
+        session,
+        source_file_id=source_file_id,
+        target_file_id=file_rec.id,
+        submission_ids=submission_ids,
+        comment_ids=comment_ids,
+    )
+
+    # The new coding artifact's OWN codebook snapshot -- codes copied
+    # verbatim (code_uid/family_uid preserved) from the applied codebook,
+    # so coding_entries.code_uid (written just below) resolves against it
+    # immediately.
+    snapshot_rows = [
+        {
+            "code_uid": c.code_uid, "family_uid": c.family_uid, "family_name": c.family_name,
+            "name": c.name, "body": c.body, "definition": c.definition, "inclusion": c.inclusion,
+            "exclusion": c.exclusion, "keywords": c.keywords, "example": c.example, "position": c.position,
+        }
+        for c in codebook_codes
+    ]
+    # ONE version, not two: a coding file's codebook snapshot and its
+    # coding_entries share the SAME artifact_versions.version_no (the
+    # SCD-2 ranges on coding_entries are keyed against it) -- calling
+    # commit_codebook_version then commit_coding_version separately would
+    # mint two different version numbers for what is really one atomic
+    # commit, leaving coding_entries.valid_from pointing at a version with
+    # zero codebook_codes rows. So the codebook commit carries job_id/
+    # model/prompts too, and its version_no is what entries are stamped
+    # with.
+    codebook_version = await version_service.commit_codebook_version(
+        session, file_id=file_rec.id, author_user_id=user_id, origin=origin, codes=snapshot_rows,
+        message=message, job_id=job_id, model=model, system_prompt=system_prompt,
+        user_instructions=user_instructions, prompt_meta=prompt_meta,
+    )
+    await coding_repo.bulk_insert_coding_entries(
+        session, file_rec.id, coding_entries, version_no=codebook_version.version_no
+    )
+
+    await version_service.link_parents(
+        session, file_rec.id,
+        [
+            EdgeSpec(parent_file_id=source_file_id, relation=RELATION_DERIVED_FROM, role=ROLE_SOURCE_DATA),
+            EdgeSpec(parent_file_id=codebook_file_id, relation=RELATION_DERIVED_FROM, role=ROLE_CODEBOOK),
+        ],
+    )
+
+    # Matches the original handler's behavior exactly: link the new coding
+    # file to the *source* file's projects, but only when the source is
+    # itself a raw_data file (not filtered_data) -- a pre-existing
+    # narrowing this stage doesn't change.
+    source_result = await session.execute(
+        select(File).where(File.id == source_file_id).options(selectinload(File.projects))
+    )
+    source_file = source_result.scalar_one_or_none()
+    if source_file is not None and source_file.file_type == "raw_data":
+        for project in source_file.projects:
+            await async_link_file_to_project(session, file_rec.id, project.id)
+
+    if project_id is not None:
+        project = await project_repo.get_owned_project(session, project_id, user_id)
+        await async_link_file_to_project(session, file_rec.id, project.id)
+
+    return file_rec
+
+
 @register_handler("apply_codebook")
 async def _run_apply_codebook_job(job_id: int, payload: dict) -> dict:
     """Handler for ``job_type="apply_codebook"``.
@@ -676,16 +861,10 @@ async def _run_apply_codebook_job(job_id: int, payload: dict) -> dict:
     ``AsyncSessionLocal`` -- same pattern as
     ``_run_summarize_coding_job``/``data_service._run_filter_data_job``.
 
-    Builds a self-contained coding artifact: the sampled submissions and
-    comments are copied into the new file's own ``submissions``/
-    ``comments`` rows (``raw_data_repo.copy_rows_by_id``), the codebook
-    text is copied into its own ``artifact_content`` as a snapshot, and
-    the parsed classification goes into ``coding_entries`` -- no row or
-    codebook text is ever borrowed back from a parent file at read time.
-    ``artifact_edges`` rows still record lineage back to the source data
-    file and the codebook file, for traceability, not for content lookup;
-    the codebook edge is pinned to the exact version applied (see
-    ``version_service.pin_parent``).
+    Reads and classifies here; persistence goes through the shared
+    ``_materialize_coding_artifact`` (see its docstring for the
+    self-containment and one-version rules), which the hand-started
+    ``create_manual_coding`` also uses.
     """
     user_id = payload["user_id"]
     source_file_id = payload["source_file_id"]
@@ -697,30 +876,13 @@ async def _run_apply_codebook_job(job_id: int, payload: dict) -> dict:
     project_id = payload.get("project_id")
     api_key = payload["api_key"]
     content_scope = payload.get("content_scope") or "both"
-    include_posts = content_scope in ("both", "posts")
-    include_comments = content_scope in ("both", "comments")
 
     async with AsyncSessionLocal() as session:
-        # Read-as-parent: seal the codebook's head before reading it, so
-        # this coding artifact's edge pins exactly which revision was
-        # applied -- the one genuine cross-file content read in this
-        # codebase (see version_service.py's module docstring).
-        await version_service.pin_parent(session, codebook_file_id)
-        codebook_text = await version_service.read_codebook_markdown(session, codebook_file_id)
-        codebook_codes = await version_service.read_codes(session, codebook_file_id)
-        if not codebook_text:
-            raise ValidationAppError("Cannot apply codebook: codebook not found or empty")
+        codebook_text, codebook_codes = await _read_codebook_as_parent(session, codebook_file_id)
         await session.commit()
 
-        submissions = (
-            await raw_data_repo.sample_submissions(session, source_file_id, sample_percentage)
-            if include_posts
-            else []
-        )
-        comments = (
-            await raw_data_repo.sample_comments(session, source_file_id, sample_percentage)
-            if include_comments
-            else []
+        submissions, comments = await _sample_rows_for_coding(
+            session, source_file_id, sample_percentage, content_scope
         )
         parent_context = await raw_data_repo.parent_post_context_for_comments(session, source_file_id, comments)
         assembled = _assemble_posts_content(submissions, comments, parent_context=parent_context)
@@ -739,98 +901,25 @@ async def _run_apply_codebook_job(job_id: int, payload: dict) -> dict:
     )
 
     async with AsyncSessionLocal() as session:
-        display_name = (report_name or "").strip() or "coding"
-        new_schema = f"proj_{secrets.token_hex(6)}"
-        file_rec = File(
+        file_rec = await _materialize_coding_artifact(
+            session,
             user_id=user_id,
-            filename=display_name,
-            schemaname=new_schema,
-            file_type="coding",
-        )
-        # The source data file was read before the (minutes-long) LLM
-        # call and its rows are copied in below -- if it was deleted in
-        # that window the copy would silently produce zero rows, leaving
-        # a coding artifact whose entries point at rows it doesn't have.
-        # Fail the job instead. (A deleted *codebook* is not fatal the
-        # same way: its codes were already read into `codebook_codes`
-        # above, so the snapshot is complete; only its lineage edge is
-        # lost, which `version_service.link_parents` drops on its own.)
-        await file_repo.require_existing_file_ids(session, {source_file_id})
-
-        session.add(file_rec)
-        await session.flush()
-
-        await raw_data_repo.copy_rows_by_id(
-            session,
             source_file_id=source_file_id,
-            target_file_id=file_rec.id,
+            codebook_file_id=codebook_file_id,
+            codebook_codes=codebook_codes,
+            display_name=(report_name or "").strip() or "coding",
+            description=None,
+            project_id=project_id,
             submission_ids=submission_ids,
             comment_ids=comment_ids,
-        )
-        # Memos follow their rows, so a note written while filtering is
-        # still there when the same post is read in the coding workspace.
-        await memo_repo.copy_memos_by_id(
-            session,
-            source_file_id=source_file_id,
-            target_file_id=file_rec.id,
-            submission_ids=submission_ids,
-            comment_ids=comment_ids,
-        )
-
-        # The new coding artifact's OWN codebook snapshot -- codes copied
-        # verbatim (code_uid/family_uid preserved) from the applied
-        # codebook, so coding_entries.code_uid (written just below)
-        # resolves against it immediately.
-        snapshot_rows = [
-            {
-                "code_uid": c.code_uid, "family_uid": c.family_uid, "family_name": c.family_name,
-                "name": c.name, "body": c.body, "definition": c.definition, "inclusion": c.inclusion,
-                "exclusion": c.exclusion, "keywords": c.keywords, "example": c.example, "position": c.position,
-            }
-            for c in codebook_codes
-        ]
-        # ONE version, not two: a coding file's codebook snapshot and its
-        # coding_entries share the SAME artifact_versions.version_no (the
-        # SCD-2 ranges on coding_entries are keyed against it) -- calling
-        # commit_codebook_version then commit_coding_version separately
-        # would mint two different version numbers for what is really one
-        # atomic "this is what apply-codebook produced" commit, leaving
-        # coding_entries.valid_from pointing at a version with zero
-        # codebook_codes rows. So the codebook commit carries job_id/model/
-        # prompts too, and its version_no is what entries are stamped with.
-        codebook_version = await version_service.commit_codebook_version(
-            session, file_id=file_rec.id, author_user_id=user_id, origin=ORIGIN_GENERATED, codes=snapshot_rows,
-            job_id=job_id, model=model, system_prompt=system_prompt,
+            coding_entries=coding_entries,
+            origin=ORIGIN_GENERATED,
+            job_id=job_id,
+            model=model,
+            system_prompt=system_prompt,
             user_instructions=methodology or None,
             prompt_meta=version_service.prompt_meta(rendered_prompt, batches=coverage["batches_total"]),
         )
-        await coding_repo.bulk_insert_coding_entries(
-            session, file_rec.id, coding_entries, version_no=codebook_version.version_no
-        )
-
-        await version_service.link_parents(
-            session, file_rec.id,
-            [
-                EdgeSpec(parent_file_id=source_file_id, relation=RELATION_DERIVED_FROM, role=ROLE_SOURCE_DATA),
-                EdgeSpec(parent_file_id=codebook_file_id, relation=RELATION_DERIVED_FROM, role=ROLE_CODEBOOK),
-            ],
-        )
-
-        # Matches the old handler's own behavior exactly: link the new
-        # coding file to the *source* file's projects, but only when the
-        # source is itself a raw_data file (not filtered_data) -- a
-        # pre-existing narrowing this stage doesn't change.
-        source_result = await session.execute(
-            select(File).where(File.id == source_file_id).options(selectinload(File.projects))
-        )
-        source_file = source_result.scalar_one_or_none()
-        if source_file is not None and source_file.file_type == "raw_data":
-            for project in source_file.projects:
-                await async_link_file_to_project(session, file_rec.id, project.id)
-
-        if project_id is not None:
-            project = await project_repo.get_owned_project(session, project_id, user_id)
-            await async_link_file_to_project(session, file_rec.id, project.id)
 
         await session.commit()
         file_id, schema_name, filename = file_rec.id, file_rec.schemaname, file_rec.filename
@@ -840,6 +929,85 @@ async def _run_apply_codebook_job(job_id: int, payload: dict) -> dict:
         **validation_counts,
         **context_window.coverage_result_fields(coverage),
     }
+
+
+async def create_manual_coding(
+    session: AsyncSession,
+    user_id: int,
+    *,
+    database: str,
+    codebook: str,
+    report_name: str,
+    description: str | None,
+    project_id: int | None,
+    content_scope: str = "both",
+    sample_percentage: float = 100.0,
+    post_ids: list[str] | None = None,
+    comment_ids: list[str] | None = None,
+) -> tuple[File, dict[str, int]]:
+    """Start a coding artifact by hand: copy the chosen rows in and
+    snapshot the codebook, but code nothing.
+
+    The human-in-the-loop entry point for the coding stage. It creates the
+    same artifact ``apply_codebook`` does -- via the same
+    ``_materialize_coding_artifact`` -- minus the classification, so the
+    researcher lands in the ViewCoding workspace with every row uncoded
+    and tags them themselves, with ``POST /api/coding/{ref}/recode`` as an
+    opt-in assistant on whichever rows they choose.
+
+    ``origin=edited`` with null ``model``/``system_prompt``/``prompt_meta``
+    is deliberate and matches ``data_service.create_manual_filtered_data``:
+    no model produced this artifact.
+
+    Row selection: explicit ``post_ids``/``comment_ids`` win when either is
+    non-empty (letting a caller hand through an exact row set); otherwise
+    the rows are sampled by ``sample_percentage`` within ``content_scope``,
+    exactly as the AI path samples them.
+    """
+    if not (report_name or "").strip():
+        raise ValidationAppError("report_name is required")
+
+    source_file_id = await file_repo.resolve_file_id(session, database, user_id)
+    codebook_file_id = await file_repo.resolve_file_id(
+        session, codebook, user_id, file_types=_CODEBOOK_FILE_TYPES
+    )
+
+    _codebook_text, codebook_codes = await _read_codebook_as_parent(session, codebook_file_id)
+
+    post_ids = list(post_ids or [])
+    comment_ids = list(comment_ids or [])
+    if not post_ids and not comment_ids:
+        submissions, comments = await _sample_rows_for_coding(
+            session, source_file_id, sample_percentage, content_scope
+        )
+        post_ids = [s.id for s in submissions]
+        comment_ids = [c.id for c in comments]
+
+    if not post_ids and not comment_ids:
+        raise ValidationAppError(
+            "No records were sampled from the selected database. Increase sample size above 0%."
+        )
+
+    total = len(post_ids) + len(comment_ids)
+    file_rec = await _materialize_coding_artifact(
+        session,
+        user_id=user_id,
+        source_file_id=source_file_id,
+        codebook_file_id=codebook_file_id,
+        codebook_codes=codebook_codes,
+        display_name=report_name.strip(),
+        description=description,
+        project_id=project_id,
+        submission_ids=post_ids,
+        comment_ids=comment_ids,
+        coding_entries=[],
+        origin=ORIGIN_EDITED,
+        message=f"Started by hand from {total} rows, uncoded",
+    )
+
+    await session.commit()
+    await session.refresh(file_rec)
+    return file_rec, {"submissions": len(post_ids), "comments": len(comment_ids)}
 
 
 # ---------------------------------------------------------------------------

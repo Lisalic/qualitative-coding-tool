@@ -1783,3 +1783,177 @@ class TestCompareCodingsJobHandlerEndToEnd:
         assert finished.status == "failed"
         assert "larger-context model" in finished.error
         assert not llm_mock.called
+
+
+# ---------------------------------------------------------------------------
+# create_manual_coding (the hand-started entry point for /codebook-apply)
+# ---------------------------------------------------------------------------
+
+
+class TestCreateManualCoding:
+    """A hand-started coding artifact is the SAME artifact
+    ``apply_codebook`` produces -- same rows, same codebook snapshot, same
+    lineage, through the same ``_materialize_coding_artifact`` -- minus
+    the classification. What differs is its provenance and the fact that
+    every row starts uncoded, ready for the ViewCoding workspace.
+    """
+
+    async def _seed(self, session, user_id, *, schema_suffix: str = ""):
+        source = await _make_file(
+            session, user_id, file_type="raw_data", schemaname=f"proj_rawman{schema_suffix}"
+        )
+        session.add_all(
+            [
+                Submission(file_id=source.id, id="s1", title="t1", selftext="body one", word_count=2),
+                Submission(file_id=source.id, id="s2", title="t2", selftext="body two", word_count=2),
+            ]
+        )
+        await session.commit()
+        codebook_file = await _make_file(
+            session, user_id, file_type="codebook", schemaname=f"proj_cbman{schema_suffix}"
+        )
+        await _seed_codebook_markdown(session, codebook_file.id, user_id, _CODEBOOK_WITH_ALPHA_BETA)
+        await session.commit()
+        return source, codebook_file
+
+    async def test_copies_rows_and_snapshot_but_codes_nothing(self, session, user_id) -> None:
+        source, codebook_file = await self._seed(session, user_id)
+
+        file_rec, counts = await coding_service.create_manual_coding(
+            session, user_id, database=source.schemaname, codebook=codebook_file.schemaname,
+            report_name="by hand", description="notes", project_id=None,
+        )
+
+        assert file_rec.file_type == "coding"
+        assert file_rec.filename == "by hand"
+        assert file_rec.description == "notes"
+        assert counts == {"submissions": 2, "comments": 0}
+
+        # Its own copy of the rows -- a coding artifact is self-contained.
+        rows = (
+            await session.execute(select(Submission).where(Submission.file_id == file_rec.id))
+        ).scalars().all()
+        assert sorted(row.id for row in rows) == ["s1", "s2"]
+
+        # The full codebook snapshot, so every code is available to tag with
+        # from the first click.
+        codes = await version_service.read_codes(session, file_rec.id)
+        assert [c.name for c in codes] == ["Alpha", "Beta"]
+
+        # And nothing coded: exactly what `list_coding_rows` renders as
+        # uncoded, which is the point of the hand-started path.
+        entries = (
+            await session.execute(select(CodingEntry).where(CodingEntry.file_id == file_rec.id))
+        ).scalars().all()
+        assert entries == []
+
+    async def test_is_a_valid_v1_with_edited_provenance(self, session, user_id) -> None:
+        source, codebook_file = await self._seed(session, user_id, schema_suffix="b")
+
+        file_rec, _ = await coding_service.create_manual_coding(
+            session, user_id, database=source.schemaname, codebook=codebook_file.schemaname,
+            report_name="by hand", description=None, project_id=None,
+        )
+
+        head = await version_repo.head_version(session, file_rec.id)
+        assert head.version_no == 1
+        assert head.origin == "edited"
+        # No model ran, so nothing may claim one did.
+        assert head.model is None
+        assert head.system_prompt is None
+        assert head.user_instructions is None
+        assert head.prompt_meta is None
+        assert "Started by hand from 2 rows" in head.message
+
+        # One version, not two: the snapshot's version is the one coding
+        # entries would be stamped against.
+        versions = (
+            await session.execute(
+                select(ArtifactVersion).where(ArtifactVersion.file_id == file_rec.id)
+            )
+        ).scalars().all()
+        assert len(versions) == 1
+        snapshot = (
+            await session.execute(select(CodebookCode).where(CodebookCode.version_id == versions[0].id))
+        ).scalars().all()
+        assert len(snapshot) == 2
+
+    async def test_links_both_parents_the_same_way_the_ai_path_does(self, session, user_id) -> None:
+        source, codebook_file = await self._seed(session, user_id, schema_suffix="c")
+
+        file_rec, _ = await coding_service.create_manual_coding(
+            session, user_id, database=source.schemaname, codebook=codebook_file.schemaname,
+            report_name="by hand", description=None, project_id=None,
+        )
+
+        edges = await version_repo.list_parent_edges(session, file_rec.id)
+        by_role = {edge.role: edge for edge in edges}
+        assert set(by_role) == {"source_data", "codebook"}
+        assert by_role["source_data"].parent_file_id == source.id
+        assert by_role["codebook"].parent_file_id == codebook_file.id
+        assert all(edge.relation == "derived_from" for edge in edges)
+        # The codebook edge pins the exact revision snapshotted, which
+        # requires that revision to have been sealed on the way in.
+        assert by_role["codebook"].parent_version_id is not None
+
+    async def test_explicit_row_ids_win_over_sampling(self, session, user_id) -> None:
+        source, codebook_file = await self._seed(session, user_id, schema_suffix="d")
+
+        file_rec, counts = await coding_service.create_manual_coding(
+            session, user_id, database=source.schemaname, codebook=codebook_file.schemaname,
+            report_name="by hand", description=None, project_id=None,
+            post_ids=["s2"], comment_ids=[],
+        )
+
+        assert counts == {"submissions": 1, "comments": 0}
+        rows = (
+            await session.execute(select(Submission).where(Submission.file_id == file_rec.id))
+        ).scalars().all()
+        assert [row.id for row in rows] == ["s2"]
+
+    async def test_empty_codebook_is_rejected(self, session, user_id) -> None:
+        source = await _make_file(session, user_id, file_type="raw_data", schemaname="proj_rawmane")
+        session.add(Submission(file_id=source.id, id="s1", title="t", selftext="b", word_count=1))
+        await session.commit()
+        empty_codebook = await _make_file(
+            session, user_id, file_type="codebook", schemaname="proj_cbmane"
+        )
+
+        with pytest.raises(ValidationAppError, match="codebook not found or empty"):
+            await coding_service.create_manual_coding(
+                session, user_id, database=source.schemaname, codebook=empty_codebook.schemaname,
+                report_name="by hand", description=None, project_id=None,
+            )
+
+    async def test_a_source_with_no_rows_is_rejected(self, session, user_id) -> None:
+        source = await _make_file(session, user_id, file_type="raw_data", schemaname="proj_rawmanf")
+        codebook_file = await _make_file(
+            session, user_id, file_type="codebook", schemaname="proj_cbmanf"
+        )
+        await _seed_codebook_markdown(session, codebook_file.id, user_id, _CODEBOOK_WITH_ALPHA_BETA)
+        await session.commit()
+
+        with pytest.raises(ValidationAppError, match="No records were sampled"):
+            await coding_service.create_manual_coding(
+                session, user_id, database=source.schemaname, codebook=codebook_file.schemaname,
+                report_name="by hand", description=None, project_id=None,
+            )
+
+    async def test_report_name_is_required(self, session, user_id) -> None:
+        source, codebook_file = await self._seed(session, user_id, schema_suffix="g")
+
+        with pytest.raises(ValidationAppError, match="report_name"):
+            await coding_service.create_manual_coding(
+                session, user_id, database=source.schemaname, codebook=codebook_file.schemaname,
+                report_name="   ", description=None, project_id=None,
+            )
+
+    async def test_both_parents_must_be_owned_by_the_caller(self, session, user_id) -> None:
+        source, codebook_file = await self._seed(session, user_id, schema_suffix="h")
+        other_id = await _make_user(session, "intruder@example.com")
+
+        with pytest.raises(NotFoundError):
+            await coding_service.create_manual_coding(
+                session, other_id, database=source.schemaname, codebook=codebook_file.schemaname,
+                report_name="by hand", description=None, project_id=None,
+            )

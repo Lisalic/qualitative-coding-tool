@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.api.schemas import (
     ApplyCodebookRequest,
     DuplicateCodingRequest,
+    ManualCodingRequest,
     RecodeItemsRequest,
     SaveCodingRevisionRequest,
     UpdateCodingMetadataRequest,
@@ -148,6 +149,39 @@ async def update_coding_metadata(
         db, user_id, ref, display_name=payload.display_name, description=payload.description
     )
     return JSONResponse({"message": "Updated", "file": await _file_info(db, file_rec)})
+
+
+@router.post("/coding/manual")
+async def create_manual_coding(
+    payload: ManualCodingRequest,
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
+) -> JSONResponse:
+    """Start a coding artifact by hand -- rows copied in and the codebook
+    snapshotted, but nothing coded -- so the researcher can tag rows
+    themselves in the ViewCoding workspace, using
+    ``POST /api/coding/{ref}/recode`` as an opt-in assistant.
+
+    Synchronous (no LLM call, so no job to poll) -- the same asymmetry the
+    filter pair has between ``POST /api/filter-preview/`` and
+    ``POST /api/filtered-data/manual``.
+    """
+    file_rec, counts = await coding_service.create_manual_coding(
+        db,
+        user_id,
+        database=payload.database,
+        codebook=payload.codebook,
+        report_name=payload.report_name,
+        description=payload.description,
+        project_id=payload.project_id,
+        content_scope=payload.content_scope,
+        sample_percentage=payload.sample_percentage,
+        post_ids=payload.post_ids,
+        comment_ids=payload.comment_ids,
+    )
+    return JSONResponse(
+        {"message": "Coding created", "file": await _file_info(db, file_rec), "counts": counts}
+    )
 
 
 @router.post("/coding/{ref}/duplicate")

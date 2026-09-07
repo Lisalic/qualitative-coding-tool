@@ -997,3 +997,91 @@ class TestSummarizeCodingGuard:
         body = resp.json()
         assert body["status"] == "pending"
         assert isinstance(body["job_id"], int)
+
+
+class TestManualCodingRoute:
+    """``POST /api/coding/manual`` -- start a coding artifact by hand.
+    Synchronous, since it calls no model; the researcher then codes rows
+    in the ViewCoding workspace.
+    """
+
+    def test_requires_auth(self, client) -> None:
+        resp = client.post(
+            "/api/coding/manual",
+            json={"database": "proj_a", "codebook": "1", "report_name": "n"},
+        )
+        assert resp.status_code == 401
+
+    def test_non_proj_database_returns_422(self, client, make_token) -> None:
+        resp = client.post(
+            "/api/coding/manual",
+            json={"database": "not_proj", "codebook": "1", "report_name": "n"},
+            headers=_auth_headers(make_token),
+        )
+        assert resp.status_code == 422
+
+    def test_bad_codebook_reference_returns_422(self, client, make_token) -> None:
+        resp = client.post(
+            "/api/coding/manual",
+            json={"database": "proj_a", "codebook": "cb-1", "report_name": "n"},
+            headers=_auth_headers(make_token),
+        )
+        assert resp.status_code == 422
+
+    def test_missing_report_name_returns_422(self, client, make_token) -> None:
+        resp = client.post(
+            "/api/coding/manual",
+            json={"database": "proj_a", "codebook": "1"},
+            headers=_auth_headers(make_token),
+        )
+        assert resp.status_code == 422
+
+    async def test_unowned_database_returns_404(
+        self, client, route_backed_by_sqlite_jobs, make_token
+    ) -> None:
+        SessionLocal = route_backed_by_sqlite_jobs
+        user = await _make_user(SessionLocal)
+        resp = client.post(
+            "/api/coding/manual",
+            json={"database": "proj_missing", "codebook": "1", "report_name": "n"},
+            headers=_auth_headers(make_token, sub=str(user.id)),
+        )
+        assert resp.status_code == 404
+
+    async def test_creates_an_uncoded_artifact_and_returns_it(
+        self, client, route_backed_by_sqlite_jobs, make_token
+    ) -> None:
+        SessionLocal = route_backed_by_sqlite_jobs
+        user = await _make_user(SessionLocal)
+        source = await _make_file(SessionLocal, user.id, file_type="raw_data")
+        await _add_submission(SessionLocal, source.id, sub_id="s1")
+        codebook = await _make_file(
+            SessionLocal, user.id, file_type="codebook", content="about alpha"
+        )
+
+        resp = client.post(
+            "/api/coding/manual",
+            json={
+                "database": source.schemaname,
+                "codebook": codebook.schemaname,
+                "report_name": "by hand",
+                "description": "coded manually",
+            },
+            headers=_auth_headers(make_token, sub=str(user.id)),
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["file"]["filename"] == "by hand"
+        assert body["file"]["schema_name"].startswith("proj_")
+        # No model ran, so the response must not advertise one.
+        assert body["file"]["systemprompt"] is None
+        assert body["counts"] == {"submissions": 1, "comments": 0}
+
+        # The workspace can open it immediately: rows present, none coded.
+        ref = body["file"]["schema_name"]
+        artifact = client.get(
+            f"/api/coding/{ref}", headers=_auth_headers(make_token, sub=str(user.id))
+        ).json()
+        assert artifact["total_rows"] == 1
+        assert artifact["total_coded"] == 0
+        assert [c["name"] for c in artifact["codes"]] == ["C"]
