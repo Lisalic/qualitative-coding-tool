@@ -124,6 +124,7 @@ class TestUpgradeFromEmpty:
             inspector = inspect(engine)
             tables = set(inspector.get_table_names())
             job_columns = {c["name"] for c in inspector.get_columns("jobs")}
+            coding_entries_columns = {c["name"] for c in inspector.get_columns("coding_entries")}
         finally:
             engine.dispose()
 
@@ -133,10 +134,13 @@ class TestUpgradeFromEmpty:
             "users", "projects", "files", "file_tables", "project_files",
             "artifact_edges", "prompts", "submissions", "comments",
             "artifact_versions", "coding_entries", "jobs",
+            "codebook_codes", "artifact_assists", "row_memos",
         ):
             assert expected in tables, f"{expected!r} missing after upgrade head from empty"
 
         assert {"accounting", "salvaged_output"} <= job_columns
+        # d1f4a8c2e6b9's two additions: per-quote coder attribution.
+        assert {"coder", "coder_model"} <= coding_entries_columns
 
 
 class TestDowngradeUpgradeRoundTrip:
@@ -207,10 +211,28 @@ class TestSchemaMatchesOrmMetadata:
         instance of "added an ORM column, forgot the Alembic revision",
         which is exactly how this project's migration chain fell out of
         sync with its schema in the first place.
+
+        Regression: this used to import `storage_models`/`jobs.models`
+        but not `versioning_models` -- so unless some OTHER test module
+        happened to have imported it first during the same pytest
+        collection (an accident of import order, not a guarantee),
+        `ArtifactVersion`/`ArtifactEdge`/`CodebookCode`/`ArtifactAssist`
+        were never registered on `Base.metadata` and this test silently
+        never compared `artifact_versions`/`artifact_edges`/
+        `codebook_codes`/`artifact_assists` against the migrated schema
+        at all -- a false "0 drift" for exactly the tables added by this
+        campaign's own migrations. Running this file in isolation
+        reproduced it: `Base.metadata.tables` came back without any of
+        those four tables.
         """
         from backend.app.database import Base
         from backend.app import storage_models  # noqa: F401
+        from backend.app import versioning_models  # noqa: F401
         from backend.app.jobs import models as jobs_models  # noqa: F401
+
+        assert "artifact_versions" in Base.metadata.tables
+        assert "artifact_assists" in Base.metadata.tables
+        assert "codebook_codes" in Base.metadata.tables
 
         command.upgrade(alembic_config, "head")
 
