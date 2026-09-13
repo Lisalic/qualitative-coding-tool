@@ -17,6 +17,9 @@ const Project = React.lazy(() => import("./pages/Project"));
 const CompareCodebook = React.lazy(
   () => import("./pages/CompareCodebook")
 );
+const IntegrateCodebook = React.lazy(
+  () => import("./pages/IntegrateCodebook")
+);
 const CompareCoding = React.lazy(() => import("./pages/CompareCoding"));
 const SummarizeCoding = React.lazy(
   () => import("./pages/SummarizeCoding")
@@ -129,6 +132,14 @@ function App() {
                   element={
                     <ProtectedRoute>
                       <CompareCodebook />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/integrate-codebook"
+                  element={
+                    <ProtectedRoute>
+                      <IntegrateCodebook />
                     </ProtectedRoute>
                   }
                 />

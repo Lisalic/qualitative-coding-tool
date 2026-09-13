@@ -10,9 +10,10 @@ const AUTH_ITEMS = [
   ["Home", "/"],
   ["Import Data", "/import"],
   ["Filter Data", "/filter"],
-  ["Codebook", "/codebook"],
-  ["Apply Codebook", "/codebook-apply"],
+  ["Create Codebook", "/codebook"],
   ["Compare Codebook", "/compare-codebook"],
+  ["Integrate Codebook", "/integrate-codebook"],
+  ["Apply Codebook", "/codebook-apply"],
   ["Compare Coding", "/compare-coding"],
   ["Summarize Coding", "/summarize-coding"],
 ];
@@ -21,10 +22,10 @@ const VIEW_ITEMS = [
   ["View Data", "/data"],
   ["View Filtered Data", "/filtered-data"],
   ["View Codebook", "/codebook-view"],
-  ["View Coding", "/coding-view"],
-  ["View Summary", "/summaryview"],
   ["View Codebook Comparisons", "/codebook-comparison-view"],
+  ["View Coding", "/coding-view"],
   ["View Coding Comparisons", "/coding-comparison-view"],
+  ["View Summary", "/summaryview"],
   ["View Lineage", "/lineage"],
   ["Version History", "/versions"],
 ];
@@ -79,9 +80,12 @@ export default function Sidebar() {
   const pipeline = isAuth ? AUTH_ITEMS : ANON_ITEMS;
   const views = isAuth ? VIEW_ITEMS : [];
 
-  // "/" would prefix-match every route, so it only ever matches exactly.
+  // Exact path, or a real sub-path of it. A bare `startsWith` lit up
+  // every item whose route is a string prefix of another's -- "/codebook"
+  // matched "/codebook-apply", "/filter" matched "/filtered-data" -- so
+  // two entries read as the current page at once.
   const isActive = (path) =>
-    path === "/" ? location.pathname === "/" : location.pathname.startsWith(path);
+    location.pathname === path || location.pathname.startsWith(`${path}/`);
 
   if (collapsed) return null;
 

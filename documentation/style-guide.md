@@ -72,19 +72,45 @@ gaining a second frame. Before this, a codebook row sat four borders deep.
 `PageShell width="wide"`, with the page's fields laid out as one or two
 `Panel`s and a centered primary button beneath. `FormShell`'s `columns`
 prop gives a two-`Panel` "source on the left, output on the right" split
-to any form that wants one — today that's Apply Codebook's setup step
-(`components/coding-editor/CodingSetupPanel.jsx`), the create step before
-its workspace opens.
+to any form that wants one.
 
-**The editor workspaces** (Filter, Codebook, Apply Codebook, and View
-Coding) are not form pages — they share a 3-pane shape instead: a compact
-row/document list on the left, one item's full content in the center, and
-either decisions/AI-assist (Filter) or the codebook/AI-assist (Codebook,
-Apply Codebook) on the right. `PageShell width="full" scroll="fill"` with
-a `grid ... lg:grid-cols-[minmax(220px,280px)_minmax(0,1fr)_minmax(...,...)]`
-body gives the 3 panes the full remaining viewport height. See
-`components/coding-table/workspace/CodingWorkspaceSection.jsx` for the
-reference implementation the other two editors were built to match.
+**The editors** (Filter, Codebook, Apply Codebook) are two steps, built on
+one shared layer, `components/editor-shell/`:
+
+1. **Setup** — `PageShell width="wide"` around an `EditorSetupStep`: a
+   `Panel` naming the source on the left, a `Panel` naming the output
+   (`EditorOutputFields` — name/description/project) on the right, and a
+   `Continue`/`Create` button gated on the required fields. Nothing is
+   created yet; this only collects what the workspace needs.
+2. **Workspace** — `EditorWorkspace` (or, for Apply Codebook's shared View
+   Coding workspace, `CodingWorkspaceSection` directly, which needs its own
+   `PageShell` for a Text View mode that isn't 3-pane at all, but shares the
+   same `EDITOR_GRID_CLASSES`). A compact row/document list on the left
+   (`EditorListPane`), one item's full content in the center, and a
+   non-scrolling right rail (`EditorRail`) holding whatever that stage
+   works with (decisions' AI assist for Filter, the codebook sidebar for
+   Apply Codebook) plus its AI-assist tool pinned at the rail's foot.
+   `EditorActionBar` is the pinned Clear/Discard-then-primary strip at the
+   bottom.
+
+   `EditorWorkspace`'s `emphasis` prop picks which column gets the grid's
+   flexible `1fr` share (`EDITOR_GRID_CLASSES` itself never changes).
+   Filter and Apply Codebook decide something per row *in the center
+   pane*, so the default, `emphasis="reader"`, keeps the center wide and
+   both side columns narrow. The codebook editor's center pane is
+   read-only reference text — the artifact actually being built (the
+   draft code tree) lives in the rail — so it passes `emphasis="builder"`
+   to swap which column is `1fr` instead: the draft codebook and its
+   proposal tray become the wide center pane, and the source reader plus
+   the AI generator move to the (now wider, `320-400px`) right rail.
+
+`EditorRail`'s `scroll={false}` is what a rail with its own `flex-1`
+`Panel` wants — that Panel gets a real bounded height and scrolls
+internally, rather than the rail scrolling as a whole around an
+unbounded child. `useEditorRows` (fetch + paging + default-active-row) and
+`useEditorShortcuts` (one `document` keydown subscription per shortcut
+map, resilient to state changing identity every render) back the
+row-list and j/k-navigation behavior all three editors share.
 
 ## Spacing
 

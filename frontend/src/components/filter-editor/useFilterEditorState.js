@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   applyAiResult,
+  buildAssistRunsForSubmit,
   counts,
   decidedIds,
   deserializeDraft,
   draftStorageKey,
   emptySelection,
+  excludedIds,
   includedIds,
-  isAiAdded,
+  isAiDecided,
   serializeDraft,
   stateOf,
-  toggleAll,
   toggleExclude,
   toggleInclude,
 } from "../../lib/filterEditorState";
@@ -104,25 +105,23 @@ export function useFilterEditorState(sourceDatabase) {
     (rowType, id) => commit((prev) => toggleExclude(prev, rowType, id)),
     [commit],
   );
-  const includeAll = useCallback(
-    (rowType, ids) => commit((prev) => toggleAll(prev, rowType, ids)),
-    [commit],
-  );
-
   /**
-   * Fold an AI preview run's ids in, returning how many rows it actually
-   * added so the panel can report "12 rows added by AI" -- the whole
-   * feedback signal for a run that may have taken minutes.
+   * Fold an AI preview run's ids in (both directions), returning how many
+   * rows it actually included/excluded so the panel can report
+   * "3 included, 2 excluded" -- the whole feedback signal for a run that
+   * may have taken minutes.
    */
   const acceptAiSuggestions = useCallback(
     (result) => {
-      let added = 0;
+      let includedCount = 0;
+      let excludedCount = 0;
       commit((prev) => {
         const outcome = applyAiResult(prev, result);
-        added = outcome.addedCount;
+        includedCount = outcome.includedCount;
+        excludedCount = outcome.excludedCount;
         return outcome.selection;
       });
-      return added;
+      return { includedCount, excludedCount };
     },
     [commit],
   );
@@ -130,13 +129,14 @@ export function useFilterEditorState(sourceDatabase) {
   return {
     selection,
     stateOf: (rowType, id) => stateOf(selection, rowType, id),
-    isAiAdded: (rowType, id) => isAiAdded(selection, rowType, id),
+    isAiDecided: (rowType, id) => isAiDecided(selection, rowType, id),
     counts: useMemo(() => counts(selection), [selection]),
     decided: useMemo(() => decidedIds(selection), [selection]),
     included: useMemo(() => includedIds(selection), [selection]),
+    excluded: useMemo(() => excludedIds(selection), [selection]),
+    assistRuns: useMemo(() => buildAssistRunsForSubmit(selection), [selection]),
     include,
     exclude,
-    includeAll,
     acceptAiSuggestions,
     clearDraft,
   };

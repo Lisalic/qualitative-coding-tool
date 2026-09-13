@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch, requestJson } from "../../api";
 import { keyFor } from "../../lib/filterEditorState";
+import { isProjectSchema } from "../../lib/schemaGuards";
 
 /**
  * Every memo on one database, fetched once and indexed by `"<type>:<id>"`.
@@ -19,10 +20,8 @@ export function useRowMemos(database) {
   const [memos, setMemos] = useState(() => new Map());
   const [error, setError] = useState("");
 
-  const isProjectSchema = /^proj_[A-Za-z0-9_]+$/.test(String(database || ""));
-
   const load = useCallback(async () => {
-    if (!database || !isProjectSchema) {
+    if (!database || !isProjectSchema(database)) {
       setMemos(new Map());
       return;
     }
@@ -44,7 +43,7 @@ export function useRowMemos(database) {
       setError(err?.message || "Failed to load memos");
       setMemos(new Map());
     }
-  }, [database, isProjectSchema]);
+  }, [database]);
 
   useEffect(() => {
     load();

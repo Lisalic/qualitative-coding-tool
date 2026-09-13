@@ -3,7 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../../api";
 import ArtifactCreatedMessage from "../feedback/ArtifactCreatedMessage";
 import Panel from "../shell/Panel";
+import Dropdown from "../primitives/Dropdown";
 import { btn, btnPrimary, input, select } from "../../lib/uiClasses";
+import { toProjectOptions } from "../../lib/projectOptions";
 
 function formatApiErrorPayload(parsed, fallback) {
   if (!parsed || typeof parsed !== "object") return fallback;
@@ -355,28 +357,23 @@ export default function FileUpload({ onUploadSuccess }) {
               <label htmlFor="project-select" className="text-sm">
                 Select Project
               </label>
-              <select
+              <Dropdown
                 id="project-select"
                 value={selectedProject}
-                onChange={(e) => setSelectedProject(e.target.value)}
+                options={toProjectOptions(projects)}
+                onChange={setSelectedProject}
+                placeholder="Select a project"
                 disabled={
                   loading ||
                   projectsLoading ||
                   !!projectsError ||
                   projects.length === 0
                 }
-                required
-                className={selectClasses}
-              >
-                <option value="" disabled>
-                  Select a project
-                </option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.projectname}
-                  </option>
-                ))}
-              </select>
+                triggerClassName={`w-full ${selectClasses}`}
+                listLabel="Project"
+                searchPlaceholder="Search projects…"
+                emptyMessage="No projects match that search."
+              />
             </div>
 
             <div className="flex flex-col gap-1.5">

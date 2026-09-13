@@ -1,5 +1,6 @@
 import React from "react";
 import Panel from "../shell/Panel";
+import Dropdown from "../primitives/Dropdown";
 import { select } from "../../lib/uiClasses";
 
 const selectClasses = `w-full ${select}`;
@@ -19,42 +20,28 @@ export default function CompareDualSelectPanel({
     <Panel title={panelTitle} className="flex-1" scroll={false}>
       <div className="mb-3">
         <label className="mb-1 block text-sm">{labelA}</label>
-        <select
-          className={selectClasses}
+        <Dropdown
           value={valueA}
-          onChange={(e) => onChangeA(e.target.value)}
-        >
-          {!valueA && (
-            <option value="" disabled>
-              {placeholderOption}
-            </option>
-          )}
-          {options.map((it) => (
-            <option key={it.value} value={it.value}>
-              {it.label}
-            </option>
-          ))}
-        </select>
+          options={options}
+          onChange={onChangeA}
+          placeholder={placeholderOption}
+          triggerClassName={selectClasses}
+          listLabel={panelTitle}
+          emptyMessage="Nothing matches that search."
+        />
       </div>
 
       <div className="mb-3">
         <label className="mb-1 block text-sm">{labelB}</label>
-        <select
-          className={selectClasses}
+        <Dropdown
           value={valueB}
-          onChange={(e) => onChangeB(e.target.value)}
-        >
-          {!valueB && (
-            <option value="" disabled>
-              {placeholderOption}
-            </option>
-          )}
-          {options.map((it) => (
-            <option key={it.value} value={it.value}>
-              {it.label}
-            </option>
-          ))}
-        </select>
+          options={options}
+          onChange={onChangeB}
+          placeholder={placeholderOption}
+          triggerClassName={selectClasses}
+          listLabel={panelTitle}
+          emptyMessage="Nothing matches that search."
+        />
       </div>
     </Panel>
   );

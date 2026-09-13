@@ -43,18 +43,19 @@ artifact — only the workspace's AI recode needs one.
 |---|---|---|---|---|
 | Database Type | — | `unfiltered` | `unfiltered` \| `filtered` | |
 | Select Database | yes | — | must resolve to `proj_<id>` | |
-| Select Project | no | — | | pre-selected via `state.projectId` when arriving from a project page's "Add" button |
+| Select Project | yes | — | must be a project the caller owns | pre-selected via `state.projectId` when arriving from a project page's "Add" button; every artifact belongs to a project |
 | Select Codebook | yes | first available | numeric File id **or** `proj_<hex>` schema | auto-defaults to the first codebook in the list |
 | Content to Sample | — | `both` | Posts + Comments \| Posts Only \| Comments Only | auto-narrows to whichever type actually has rows |
-| Sample Size | no | `100` | slider 1–100 | |
 | Report Name | yes | — | non-blank | |
 | Description | no | — | | |
 
 ## What happens on submit
 
 `requestJson` → `POST /api/coding/manual` →
-`coding_service.create_manual_coding`, synchronous (no LLM call). Samples
-(or takes explicit row ids), copies the chosen rows and their memos in,
+`coding_service.create_manual_coding`, synchronous (no LLM call). Copies
+every row in the chosen content scope (the request still carries
+`sample_percentage`, always `100` from this panel — there is no sampling
+control) and their memos in,
 snapshots the applied codebook's codes, records `derived_from` edges back
 to both the source data and the codebook, and commits v1 with
 `origin="edited"` and no `model`/`system_prompt`/`prompt_meta` — `_materialize_coding_artifact`

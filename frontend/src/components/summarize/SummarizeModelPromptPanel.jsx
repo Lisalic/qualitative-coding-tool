@@ -1,7 +1,9 @@
 import AiModelFormGroup from "../models/AiModelFormGroup";
 import PromptEditorSection from "./PromptEditorSection";
 import Panel from "../shell/Panel";
+import Dropdown from "../primitives/Dropdown";
 import { input, select } from "../../lib/uiClasses";
+import { toProjectOptions } from "../../lib/projectOptions";
 
 const selectClasses = `w-full ${select}`;
 const inputClasses = input;
@@ -37,23 +39,17 @@ export default function SummarizeModelPromptPanel({
         <label htmlFor="summarize-project" className="text-sm">
           Project
         </label>
-        <select
+        <Dropdown
           id="summarize-project"
           value={selectedProject}
-          onChange={(e) => onProjectChange(e.target.value)}
-          className={selectClasses}
-        >
-          {!selectedProject && (
-            <option value="" disabled>
-              Select a project
-            </option>
-          )}
-          {(projects || []).map((project) => (
-            <option key={project.id} value={String(project.id)}>
-              {project.projectname}
-            </option>
-          ))}
-        </select>
+          options={toProjectOptions(projects)}
+          onChange={onProjectChange}
+          placeholder="Select a project"
+          triggerClassName={selectClasses}
+          listLabel="Project"
+          searchPlaceholder="Search projects…"
+          emptyMessage="No projects match that search."
+        />
       </div>
 
       <AiModelFormGroup

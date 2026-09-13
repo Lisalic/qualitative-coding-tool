@@ -1,17 +1,18 @@
 import MemoEditor from "../data/MemoEditor";
 import Panel from "../shell/Panel";
-import PageEmptyState from "../primitives/PageEmptyState";
 
 /**
- * Center pane: the active row's full text. Read-only, unlike the filter
- * editor's reader -- nothing here is decided per row, the researcher is
- * reading for themes and building the code list on the right.
+ * Reference rail (top): the active row's full text. Read-only, unlike the
+ * filter editor's reader -- nothing here is decided per row, the
+ * researcher is reading for themes while building the code list in the
+ * center pane. `min-h-0 flex-1` (not `h-full`) because this sits above a
+ * sibling (the AI panel) in a non-scrolling `EditorRail`.
  */
 export default function CodebookReaderPane({ activeRow, memo, onSaveMemo }) {
   if (!activeRow) {
     return (
-      <Panel className="h-full">
-        <PageEmptyState message="Select a row from the list to read it." />
+      <Panel className="min-h-0 flex-1">
+        <p className="italic text-paper/60">Select a row from the list to read it.</p>
       </Panel>
     );
   }
@@ -21,7 +22,7 @@ export default function CodebookReaderPane({ activeRow, memo, onSaveMemo }) {
   const body = rowType === "submission" ? activeRow.selftext : activeRow.body;
 
   return (
-    <Panel key={`${rowType}:${id}`} className="h-full" bodyClassName="flex flex-col gap-3">
+    <Panel key={`${rowType}:${id}`} className="min-h-0 flex-1" bodyClassName="flex flex-col gap-3">
       <div className="min-w-0">
         <div className="text-xs uppercase tracking-wide text-paper/50">
           {rowType === "submission" ? "Post" : "Comment"} &middot; {id}

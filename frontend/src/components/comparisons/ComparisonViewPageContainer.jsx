@@ -59,8 +59,9 @@ export default function ComparisonViewPageContainer({
 
       {content ? (
         <Panel scroll={false}>
-          {/* A wide page still needs a readable measure for prose. */}
-          <MarkdownDisplay content={content} className="max-w-[75ch] text-paper" />
+          {/* MarkdownDisplay keeps the prose measure per block, so tables
+              can use the page's full width. */}
+          <MarkdownDisplay content={content} className="text-paper" />
         </Panel>
       ) : loading || error ? null : (
         <PageEmptyState message={placeholderMessage} />

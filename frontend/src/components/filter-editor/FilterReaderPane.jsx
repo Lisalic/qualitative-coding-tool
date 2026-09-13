@@ -1,7 +1,6 @@
 import MemoEditor from "../data/MemoEditor";
 import Panel from "../shell/Panel";
-import PageEmptyState from "../primitives/PageEmptyState";
-import { btn, btnActive } from "../../lib/uiClasses";
+import { badge, btn, btnActive } from "../../lib/uiClasses";
 
 /**
  * Center pane: the active row's full text, the one place it's shown in
@@ -10,11 +9,11 @@ import { btn, btnActive } from "../../lib/uiClasses";
  * reading the whole thing is exactly when a first impression might
  * change.
  */
-export default function FilterReaderPane({ activeRow, state, isAiAdded, onInclude, onExclude, memo, onSaveMemo }) {
+export default function FilterReaderPane({ activeRow, state, isAiDecided, onInclude, onExclude, memo, onSaveMemo }) {
   if (!activeRow) {
     return (
       <Panel className="h-full">
-        <PageEmptyState message="Select a row from the list to read it." />
+        <p className="italic text-paper/60">Select a row from the list to read it.</p>
       </Panel>
     );
   }
@@ -29,9 +28,9 @@ export default function FilterReaderPane({ activeRow, state, isAiAdded, onInclud
         <div className="min-w-0">
           <div className="text-xs uppercase tracking-wide text-paper/50">
             {rowType === "submission" ? "Post" : "Comment"} &middot; {id}
-            {isAiAdded && (
-              <span className="ml-2 border border-paper/40 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-paper/70">
-                AI added
+            {isAiDecided && (
+              <span className={`ml-2 ${badge}`}>
+                {state === "excluded" ? "AI excluded" : "AI included"}
               </span>
             )}
           </div>

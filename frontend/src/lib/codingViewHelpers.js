@@ -62,7 +62,13 @@ export const normalizeCodingRowEdits = (rows) => {
         };
       }
       const base = { code_uid: codeUid, quote, start_offset: startOffset, end_offset: endOffset };
-      normalizedCodes.push(notes ? { ...base, notes } : base);
+      if (notes) base.notes = notes;
+      // B1 per-quote attribution -- see storage_models.CodingEntry. Carried
+      // through unchanged; useViewCodingPage.js is what stamps `coder`/
+      // `assist_job_id` onto an entry (human edit vs. accepted AI recode).
+      if (entry?.coder) base.coder = entry.coder;
+      if (entry?.assist_job_id) base.assist_job_id = entry.assist_job_id;
+      normalizedCodes.push(base);
     }
 
     normalizedRows.push({ item_id: itemId, entries: normalizedCodes });

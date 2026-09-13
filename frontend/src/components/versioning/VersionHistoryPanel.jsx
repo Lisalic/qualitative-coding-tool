@@ -83,19 +83,89 @@ function StatChip({ value, label }) {
   );
 }
 
-function CodeCountRow({ entry }) {
-  const sign = entry.delta > 0 ? "+" : "";
-  const tone = entry.delta > 0 ? "text-success" : "text-error";
+function DeltaCell({ delta }) {
+  if (!delta) return <span className="text-paper/40">&mdash;</span>;
   return (
-    <div className="flex items-center justify-between gap-2 text-sm">
-      <span className="min-w-0 truncate">{entry.name}</span>
-      <span className="shrink-0 text-paper/50">
-        {entry.from_count} &rarr; {entry.to_count}{" "}
-        <span className={tone}>
-          ({sign}
-          {entry.delta})
-        </span>
-      </span>
+    <span className={delta > 0 ? "text-success" : "text-error"}>
+      {delta > 0 ? "+" : ""}
+      {delta}
+    </span>
+  );
+}
+
+/** How many times each code is applied in the older version vs the newer
+ * one. This used to be a bare "Name  12 -> 15 (+3)" line per code, where
+ * nothing on screen said which number was which version -- the arrow was
+ * the only clue, and the header row is the whole point of the change.
+ *
+ * The last row totals every code application in the artifact, which is
+ * where `from_total_entries`/`to_total_entries` now live (they were
+ * previously a stat chip labelled "Codes applied", stacked among chips
+ * that counted rows rather than applications).
+ */
+function CodeCountsTable({ coding, fromVersion, toVersion }) {
+  const entries = coding.code_counts;
+  if (!entries.length) return null;
+
+  const totalDelta = coding.to_total_entries - coding.from_total_entries;
+
+  return (
+    <div className="overflow-x-auto border border-line">
+      <table className="w-full border-collapse text-sm">
+        <thead>
+          <tr className="text-[11px] uppercase tracking-wide text-paper/50">
+            <th scope="col" className="border-b border-line px-3 py-2 text-left font-semibold">
+              Code
+            </th>
+            <th scope="col" className="border-b border-line px-3 py-2 text-right font-semibold">
+              Before{fromVersion != null ? ` (v${fromVersion})` : ""}
+            </th>
+            <th scope="col" className="border-b border-line px-3 py-2 text-right font-semibold">
+              After{toVersion != null ? ` (v${toVersion})` : ""}
+            </th>
+            <th scope="col" className="border-b border-line px-3 py-2 text-right font-semibold">
+              Change
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map((entry) => (
+            <tr key={entry.code_uid}>
+              <th
+                scope="row"
+                className="border-b border-line-soft px-3 py-1.5 text-left font-normal"
+              >
+                {entry.name}
+              </th>
+              <td className="border-b border-line-soft px-3 py-1.5 text-right tabular-nums text-paper/70">
+                {entry.from_count}
+              </td>
+              <td className="border-b border-line-soft px-3 py-1.5 text-right tabular-nums text-paper/70">
+                {entry.to_count}
+              </td>
+              <td className="border-b border-line-soft px-3 py-1.5 text-right tabular-nums">
+                <DeltaCell delta={entry.delta} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr className="font-semibold">
+            <th scope="row" className="border-t border-line px-3 py-2 text-left">
+              All codes
+            </th>
+            <td className="border-t border-line px-3 py-2 text-right tabular-nums">
+              {coding.from_total_entries}
+            </td>
+            <td className="border-t border-line px-3 py-2 text-right tabular-nums">
+              {coding.to_total_entries}
+            </td>
+            <td className="border-t border-line px-3 py-2 text-right tabular-nums">
+              <DeltaCell delta={totalDelta} />
+            </td>
+          </tr>
+        </tfoot>
+      </table>
     </div>
   );
 }
@@ -151,8 +221,7 @@ function CodingChangeList({ title, entries }) {
  * message there used to be the ONLY thing this panel could say, even
  * when e.g. six posts had just been recoded).
  */
-function CodingDiffSummary({ coding }) {
-  const entryDelta = coding.to_total_entries - coding.from_total_entries;
+function CodingDiffSummary({ coding, fromVersion, toVersion }) {
   const stats = [
     { value: coding.rows_recoded, label: "Rows recoded" },
     { value: coding.rows_newly_coded, label: "Newly coded" },
@@ -171,20 +240,16 @@ function CodingDiffSummary({ coding }) {
   return (
     <div className="flex flex-col gap-2">
       <span className="text-xs font-semibold uppercase tracking-wide text-paper/50">Coding</span>
-      <div className="flex flex-wrap gap-1.5">
-        {stats.map((s) => (
-          <StatChip key={s.label} value={s.value} label={s.label} />
-        ))}
-        <StatChip
-          value={`${coding.from_total_entries}→${coding.to_total_entries}`}
-          label={`Codes applied ${entryDelta > 0 ? "(+" + entryDelta + ")" : entryDelta < 0 ? "(" + entryDelta + ")" : ""}`}
-        />
-      </div>
-      {coding.code_counts.length > 0 && (
-        <div className="flex flex-col gap-1 border-t border-line-soft pt-1.5">
-          {coding.code_counts.map((entry) => (
-            <CodeCountRow key={entry.code_uid} entry={entry} />
+      {stats.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {stats.map((s) => (
+            <StatChip key={s.label} value={s.value} label={s.label} />
           ))}
+        </div>
+      )}
+      {coding.code_counts.length > 0 && (
+        <div className="border-t border-line-soft pt-1.5">
+          <CodeCountsTable coding={coding} fromVersion={fromVersion} toVersion={toVersion} />
         </div>
       )}
       {(coding.applied?.length > 0 || coding.removed?.length > 0) && (
@@ -504,7 +569,13 @@ export default function VersionHistoryPanel({ history, fileType, onDuplicateFrom
             </div>
 
             {diff.data && <DataDiffSummary data={diff.data} />}
-            {diff.coding && <CodingDiffSummary coding={diff.coding} />}
+            {diff.coding && (
+              <CodingDiffSummary
+                coding={diff.coding}
+                fromVersion={Math.min(...selected)}
+                toVersion={Math.max(...selected)}
+              />
+            )}
 
             {codebookHasChanges && (
               <div className="flex flex-col gap-2 border-t border-line-soft pt-2">

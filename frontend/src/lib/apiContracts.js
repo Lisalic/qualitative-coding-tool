@@ -12,12 +12,16 @@
  */
 
 export const EXAMPLE_PROMPTS = {
-  filter:
-    "Act as a qualitative research assistant tasked with cleaning raw data transcripts for analysis. For each input item, decide whether it should be kept or removed. Apply these rules: remove spam/automated posts, remove obvious duplicates, and remove non-topical noise. Keep authentic human discussion and on-topic content.",
+  filterInclude:
+    "Keep authentic human discussion that is on-topic for [subject]. Include posts and comments that reflect a genuine first-person account or opinion, even if brief.",
+  filterExclude:
+    "Remove spam and automated/bot posts, obvious duplicates, and non-topical noise unrelated to [subject].",
   generate:
     "You are a codebook generator. Read representative dataset excerpts and propose a concise codebook of [topic]. Keep entries concise and focused; do not add unrelated commentary.\nResearch Context: These are excerpts from [e.g., reddit stories about bullying]. Specific Focus: Please generate codes specifically related to [e.g., retrospective bullying experiences.]",
   apply:
     "You are a coding assistant. Given a codebook and an input item, decide which code(s) from the codebook apply and provide a one-sentence justification. Focus on selecting the single best code when applicable; do not invent new codes. Keep responses concise.",
+  integrate:
+    "Merge codes describing the same concept even if named differently, picking the clearer name and combining their definitions. Keep genuinely distinct codes separate, and carry through a code that appears in only one codebook rather than dropping it.",
 };
 
 export class MissingFieldsError extends Error {
@@ -72,6 +76,32 @@ function assertProjSchema(schema, field, flow) {
 }
 
 /**
+ * Same shape check as `assertProjSchema`, over a list -- the integrate
+ * editor's "which codebooks am I merging" field. Requires at least `min`
+ * distinct (post-`.db`-strip) refs, mirroring
+ * `schemas._validate_codebook_schema_list`'s dedupe-while-preserving-order
+ * and the service layer's "at least two distinct codebooks" guard.
+ */
+function assertProjSchemaList(list, field, flow, { min = 2 } = {}) {
+  const raw = Array.isArray(list) ? list : [];
+  const seen = new Set();
+  const normalized = [];
+  for (const entry of raw) {
+    const cleaned = assertProjSchema(entry, field, flow);
+    if (seen.has(cleaned)) continue;
+    seen.add(cleaned);
+    normalized.push(cleaned);
+  }
+  if (normalized.length < min) {
+    throw new MissingFieldsError(
+      [`${field} (select at least ${min})`],
+      flow,
+    );
+  }
+  return normalized;
+}
+
+/**
  * A codebook reference is either a numeric File id or a `proj_<id>`
  * schema name -- both accepted, nothing else. Mirrors
  * `schemas._validate_codebook_ref_value`, and shared by the AI and
@@ -95,13 +125,12 @@ function assertCodebookRef(codebook, flow) {
  * `itemIds` is a list rather than a flat form field.
  */
 export function buildRecodeItemsPayload({ apiKey, itemIds, model, methodology }) {
-  assertRequired({ apiKey }, "recode-items");
+  assertRequired({ apiKey, model }, "recode-items");
   if (!Array.isArray(itemIds) || itemIds.length === 0) {
     throw new MissingFieldsError(["itemIds"], "recode-items");
   }
 
-  const payload = { api_key: apiKey, item_ids: itemIds };
-  if (!isBlank(model)) payload.model = model;
+  const payload = { api_key: apiKey, item_ids: itemIds, model };
   if (!isBlank(methodology)) payload.methodology = methodology;
   return payload;
 }
@@ -110,24 +139,35 @@ export function buildRecodeItemsPayload({ apiKey, itemIds, model, methodology })
  * Build the JSON body for POST /api/filter-preview/.
  * Mirrors `FilterPreviewRequest` in `backend/app/api/schemas.py`.
  *
- * `decidedPostIds`/`decidedCommentIds` are the rows the user has already
- * included or excluded in the filter editor. They are sent so the server
- * can drop them from the candidate pool before sampling -- which is what
- * makes re-running the tool propose new rows rather than the same ones.
- * They are legitimately empty on a first run, so unlike the other
- * builders they are not `assertRequired`.
+ * `includedPostIds`/`includedCommentIds`/`excludedPostIds`/
+ * `excludedCommentIds` are the rows the user has already included or
+ * excluded in the filter editor. They are always sent so the server can
+ * drop them from the candidate pool before sampling -- which is what
+ * makes re-running the tool propose new rows rather than the same ones
+ * -- and, when `useExamples` is set ("Autofill with AI"), doubles as the
+ * "similar example" source the model imitates instead of following
+ * `includePrompt`/`excludePrompt`.
+ *
+ * When `useExamples` is false, at least one of `includePrompt`,
+ * `excludePrompt`, or `filterTags` is required (mirrors the server's
+ * `_has_criteria` guard) so a run with nothing to go on fails here with
+ * a clear message instead of a 422.
  */
 export function buildFilterPreviewPayload({
   apiKey,
   database,
   model,
-  prompt,
+  includePrompt,
+  excludePrompt,
+  useExamples,
   filterTags,
   minWords,
   samplePercentage,
   contentScope,
-  decidedPostIds,
-  decidedCommentIds,
+  includedPostIds,
+  includedCommentIds,
+  excludedPostIds,
+  excludedCommentIds,
 }) {
   assertRequired({ apiKey, database, model }, "filter-preview");
   const normalizedDatabase = assertProjSchema(
@@ -136,16 +176,34 @@ export function buildFilterPreviewPayload({
     "filter-preview",
   );
 
+  const hasDecisions =
+    (includedPostIds || []).length > 0 ||
+    (includedCommentIds || []).length > 0 ||
+    (excludedPostIds || []).length > 0 ||
+    (excludedCommentIds || []).length > 0;
+
+  if (useExamples) {
+    if (!hasDecisions) {
+      throw new MissingFieldsError(["at least one included or excluded row"], "filter-preview");
+    }
+  } else if (isBlank(includePrompt) && isBlank(excludePrompt) && isBlank(filterTags)) {
+    throw new MissingFieldsError(["include or exclude criteria"], "filter-preview");
+  }
+
   const payload = {
     api_key: apiKey,
     database: normalizedDatabase,
     model,
+    use_examples: !!useExamples,
     sample_percentage: clampPct(samplePercentage),
-    decided_post_ids: decidedPostIds || [],
-    decided_comment_ids: decidedCommentIds || [],
+    included_post_ids: includedPostIds || [],
+    included_comment_ids: includedCommentIds || [],
+    excluded_post_ids: excludedPostIds || [],
+    excluded_comment_ids: excludedCommentIds || [],
   };
 
-  if (!isBlank(prompt)) payload.prompt = prompt;
+  if (!isBlank(includePrompt)) payload.include_prompt = includePrompt;
+  if (!isBlank(excludePrompt)) payload.exclude_prompt = excludePrompt;
   if (!isBlank(filterTags)) payload.filter_tags = filterTags.trim();
   if (!isBlank(contentScope)) payload.content_scope = contentScope;
 
@@ -161,7 +219,9 @@ export function buildFilterPreviewPayload({
  *
  * No `apiKey` or `model`: submitting the editor's selection creates the
  * artifact with no LLM call, whatever role the AI preview tool played in
- * assembling that selection.
+ * assembling that selection. `assistRuns` (from
+ * `filterEditorState.buildAssistRunsForSubmit`) is the separate C2
+ * provenance channel that DOES record which preview run(s) contributed.
  */
 export function buildManualFilterPayload({
   database,
@@ -170,8 +230,9 @@ export function buildManualFilterPayload({
   projectId,
   postIds,
   commentIds,
+  assistRuns,
 }) {
-  assertRequired({ database, name }, "manual-filter");
+  assertRequired({ database, name, projectId }, "manual-filter");
   const normalizedDatabase = assertProjSchema(
     database,
     "database",
@@ -191,11 +252,10 @@ export function buildManualFilterPayload({
     name: name.trim(),
     post_ids,
     comment_ids,
+    assist_runs: assistRuns || [],
   };
   if (!isBlank(description)) payload.description = description;
-  if (projectId !== undefined && projectId !== null && projectId !== "") {
-    payload.project_id = Number(projectId);
-  }
+  payload.project_id = Number(projectId);
   return payload;
 }
 
@@ -249,6 +309,9 @@ export function buildCodebookPreviewPayload({
  * No `apiKey` or `model`: submitting the editor's draft creates the
  * codebook with no LLM call, whatever role the preview assistant played
  * in assembling that draft. Same reasoning as `buildManualFilterPayload`.
+ * `assistRuns` (from `codebookEditorState.buildAssistRunsForSubmit`) is
+ * the separate C2 provenance channel that DOES record which preview
+ * run(s) contributed.
  */
 export function buildManualCodebookPayload({
   database,
@@ -256,8 +319,9 @@ export function buildManualCodebookPayload({
   description,
   projectId,
   codes,
+  assistRuns,
 }) {
-  assertRequired({ database, name }, "manual-codebook");
+  assertRequired({ database, name, projectId }, "manual-codebook");
   const normalizedDatabase = assertProjSchema(
     database,
     "database",
@@ -282,11 +346,91 @@ export function buildManualCodebookPayload({
     database: normalizedDatabase,
     name: name.trim(),
     codes: codeList,
+    assist_runs: assistRuns || [],
   };
   if (!isBlank(description)) payload.description = description;
-  if (projectId !== undefined && projectId !== null && projectId !== "") {
-    payload.project_id = Number(projectId);
+  payload.project_id = Number(projectId);
+  return payload;
+}
+
+/**
+ * Build the JSON body for POST /api/integrate-codebook-preview/. Mirrors
+ * `IntegrateCodebookPreviewRequest` in `backend/app/api/schemas.py`.
+ *
+ * No `samplePercentage`/`contentScope`: unlike `buildCodebookPreviewPayload`,
+ * this asks the model to merge whole codebooks, not sample raw data, so
+ * neither field applies.
+ */
+export function buildIntegratePreviewPayload({
+  apiKey,
+  codebooks,
+  model,
+  prompt,
+  existingCodes,
+}) {
+  assertRequired({ apiKey, model }, "integrate-codebook-preview");
+  const normalizedCodebooks = assertProjSchemaList(
+    codebooks,
+    "codebooks",
+    "integrate-codebook-preview",
+  );
+
+  const payload = {
+    api_key: apiKey,
+    codebooks: normalizedCodebooks,
+    model,
+    existing_codes: existingCodes || [],
+  };
+  if (!isBlank(prompt)) payload.prompt = prompt;
+
+  return payload;
+}
+
+/**
+ * Build the JSON body for POST /api/codebook/integrate. Mirrors
+ * `IntegrateCodebookRequest` in `backend/app/api/schemas.py`.
+ *
+ * No `apiKey`/`model`: same reasoning as `buildManualCodebookPayload` --
+ * submitting the reviewed merge draft creates the codebook with no LLM
+ * call, whatever role the integrate assistant played in proposing it.
+ * `assistRuns` is the same C2 provenance channel, this time recorded
+ * under `ASSIST_STAGE_INTEGRATE` server-side.
+ */
+export function buildIntegrateCodebookPayload({
+  codebooks,
+  name,
+  description,
+  projectId,
+  codes,
+  assistRuns,
+}) {
+  assertRequired({ name, projectId }, "integrate-codebook");
+  const normalizedCodebooks = assertProjSchemaList(
+    codebooks,
+    "codebooks",
+    "integrate-codebook",
+  );
+
+  const codeList = Array.isArray(codes) ? codes : [];
+  if (codeList.length === 0) {
+    throw new MissingFieldsError(["codes (add at least one)"], "integrate-codebook");
   }
+  const unnamed = codeList.filter((code) => isBlank(code?.name)).length;
+  if (unnamed > 0) {
+    throw new MissingFieldsError(
+      [`${unnamed} code(s) still need a name`],
+      "integrate-codebook",
+    );
+  }
+
+  const payload = {
+    codebooks: normalizedCodebooks,
+    name: name.trim(),
+    codes: codeList,
+    assist_runs: assistRuns || [],
+  };
+  if (!isBlank(description)) payload.description = description;
+  payload.project_id = Number(projectId);
   return payload;
 }
 
@@ -309,7 +453,7 @@ export function buildManualCodingPayload({
   postIds,
   commentIds,
 }) {
-  assertRequired({ database, codebook, reportName }, "manual-coding");
+  assertRequired({ database, codebook, reportName, projectId }, "manual-coding");
   const normalizedDatabase = assertProjSchema(
     database,
     "database",
@@ -326,8 +470,6 @@ export function buildManualCodingPayload({
   };
   if (!isBlank(description)) payload.description = description;
   if (!isBlank(contentScope)) payload.content_scope = contentScope;
-  if (projectId !== undefined && projectId !== null && projectId !== "") {
-    payload.project_id = Number(projectId);
-  }
+  payload.project_id = Number(projectId);
   return payload;
 }

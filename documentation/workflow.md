@@ -14,17 +14,18 @@ The app supports a qualitative analysis pipeline over social/text data:
 2. import raw data,
 3. inspect and optionally filter data,
 4. generate and refine codebooks,
-5. apply codebooks to produce coding outputs,
-6. compare codebooks/codings,
-7. summarize coding outputs,
-8. view saved summaries.
+5. integrate two or more codebooks into one merged codebook,
+6. apply codebooks to produce coding outputs,
+7. compare codebooks/codings,
+8. summarize coding outputs,
+9. view saved summaries.
 
 ## High-level architecture
 
 ### Frontend architecture (React)
 
 - Routing is centralized in `frontend/src/App.jsx`, with protected routes for tool workflows.
-- Shared layout (`frontend/src/components/shell/PageShell.jsx` + `Panel.jsx`) keeps every screen consistent. Simple form pages (Import, Compare, Summarize) get one or two side-by-side panels over a centered primary button. The three editor workspaces (Filter, Codebook, Apply Codebook/View Coding) share a different shape: a 3-pane grid — a compact row/document list on the left, one item's full content in the center, and decisions or the codebook plus an AI-assist tool on the right — filling the remaining viewport height (`scroll="fill"`).
+- Shared layout (`frontend/src/components/shell/PageShell.jsx` + `Panel.jsx`) keeps every screen consistent. Simple form pages (Import, Compare, Summarize) get one or two side-by-side panels over a centered primary button. The three editors (Filter, Codebook, Apply Codebook) are two steps built on one shared layer, `frontend/src/components/editor-shell/`: a setup step (source on the left, output naming on the right, nothing created yet) then a workspace — a 3-pane grid, a compact row/document list on the left, one item's full content in the center, and a non-scrolling right rail (decisions, or the draft/applied codebook) with that stage's AI-assist tool pinned at its foot — filling the remaining viewport height (`scroll="fill"`). View Coding shares the same workspace component.
 - Reusable panel data loading (`frontend/src/components/tool-panels/useToolPanelData.js`) fetches raw DBs, filtered DBs, projects, and optional codebooks in parallel.
 - Frontend request builders in `frontend/src/lib/apiContracts.js` mirror backend schema requirements and validate required fields before network calls.
 
@@ -76,6 +77,8 @@ genCodebook --> viewCodebook[ViewCodebook]
 viewCodebook --> applyCodebook[ApplyCodebook]
 applyCodebook --> viewCoding[ViewCoding]
 viewCodebook --> compareCodebook[CompareCodebooks]
+viewCodebook --> integrateCodebook[IntegrateCodebooks]
+integrateCodebook --> viewCodebook
 viewCoding --> compareCoding[CompareCodings]
 viewCoding --> summarizeCoding[SummarizeCoding]
 summarizeCoding --> viewSummary[ViewSummary]
@@ -161,21 +164,26 @@ Why implemented this way:
 
 ## 4) Filter Data
 
-Filtering has one entry point: the filter editor at `/filter`, a 3-pane
-workspace for producing a `filtered_data` artifact by hand, with the AI
-available inside it as an assistant rather than as a separate one-shot tool
-(the `/filter` one-shot page and its `/api/filter-data/` endpoint were
-retired once this editor covered everything they did).
+Filtering has one entry point: the filter editor at `/filter`, two steps
+(setup, then a 3-pane workspace) for producing a `filtered_data` artifact by
+hand, with the AI available inside the workspace as an assistant rather than
+as a separate one-shot tool (the `/filter` one-shot page and its
+`/api/filter-data/` endpoint were retired once this editor covered
+everything they did).
 
 User-facing behavior:
 
-- Left pane: every source row on the current page, each showing a decision
-  mark (kept/skipped/undecided), with quick Keep/Skip buttons and a status
-  filter (All/Undecided/Kept/Skipped) scoped to the loaded page.
-- Center pane: the selected row's full text, Keep/Skip for it, and its memo
-  editor.
-- Right pane: the AI assist tool, plus the fields (name, description,
-  project) that will name the artifact.
+- Setup step: pick the source database on the left, name the output
+  (name/description/project) on the right, then **Continue** into the
+  workspace -- nothing is created yet.
+- Workspace left pane: every source row on the current page, each showing a
+  decision mark (kept/skipped/undecided), with quick Keep/Skip buttons and a
+  status filter (All/Undecided/Kept/Skipped) scoped to the loaded page;
+  `j`/`k` step through it.
+- Workspace center pane: the selected row's full text, Keep/Skip for it, and
+  its memo editor.
+- Workspace right rail: the AI assist tool (the output fields from setup are
+  already settled, so this rail holds nothing else).
 - The AI filter proposes rows from the undecided pool only; accepted
   suggestions are badged `(added by AI)` and it can be re-run as often as
   the user likes without re-litigating rows already decided. Nothing is
@@ -187,9 +195,14 @@ Frontend implementation:
 
 - Page: `frontend/src/pages/Filter.jsx`
 - Components: `frontend/src/components/filter-editor/` (`FilterEditor.jsx`
-  composes `FilterRowList.jsx`, `FilterReaderPane.jsx`,
-  `FilterDecisionsRail.jsx`, and the AI panel `FilterAiPanel.jsx`, itself
-  built on the shared `frontend/src/components/forms/AiAssistPanel.jsx`)
+  renders `EditorSetupStep`/`EditorOutputFields` for the setup step, then
+  `EditorWorkspace` composing `FilterRowList.jsx` (built on the shared
+  `EditorListPane`), `FilterReaderPane.jsx`, and `FilterDecisionsRail.jsx`
+  (built on the shared `EditorRail`), which holds the AI panel
+  `FilterAiPanel.jsx`, itself built on the shared
+  `frontend/src/components/forms/AiAssistPanel.jsx`) --
+  `frontend/src/components/editor-shell/` is shared with the codebook and
+  coding editors, along with `useEditorRows`/`useEditorShortcuts`.
 - Selection logic (pure, unit-tested): `frontend/src/lib/filterEditorState.js`,
   persisted to `localStorage` per source database so a refresh or a multi-minute
   AI run doesn't lose the work.
@@ -205,7 +218,9 @@ Backend implementation:
 - `POST /api/filtered-data/manual` -> `data_service.create_manual_filtered_data`.
   Synchronous (no LLM call), the editor's only path to
   `_materialize_filtered_schema`, always with `origin="edited"` and no
-  `system_prompt`/`prompt_meta`.
+  `system_prompt`/`prompt_meta`. Carries an optional `assist_runs` array
+  (see "AI-assist provenance" below) recording which `filter_preview`
+  run(s) contributed and how many of their suggestions were kept.
 
 Why implemented this way:
 
@@ -213,9 +228,10 @@ Why implemented this way:
   (`filtered_data`) rather than mutating source data,
 - review-before-commit (mark, then submit) is a strictly more capable
   replacement for a one-shot AI pass with no undo,
-- an AI assist during editing is deliberately **not** recorded as LLM provenance:
-  `origin`/`model`/`system_prompt` must stay usable for auditing which artifacts a
-  model actually generated.
+- an AI assist during editing is deliberately **not** recorded as LLM provenance
+  on the version itself: `origin`/`model`/`system_prompt` must stay usable for
+  auditing which artifacts a model actually generated -- it is recorded in the
+  separate `artifact_assists` channel instead (see "AI-assist provenance").
 
 ## 4c) Row memos
 
@@ -254,26 +270,35 @@ Why implemented this way:
 ## 5) Generate and View Codebook
 
 Codebook generation has one entry point: the codebook editor at `/codebook`,
-a 3-pane workspace for writing a codebook by hand with the data in view (the
-`/codebook-generate` one-shot page and its `/api/generate-codebook/`
-endpoint were retired once this editor covered everything they did).
+two steps (setup, then a 3-pane workspace) for writing a codebook by hand
+with the data in view (the `/codebook-generate` one-shot page and its
+`/api/generate-codebook/` endpoint were retired once this editor covered
+everything they did).
 
 User-facing behavior:
 
-- Left pane: the source corpus, one card per post/comment. Center pane: the
-  selected row's full text and its memo. Right pane: the draft codebook
-  (`CodeLegend`, always in edit mode here), a proposal tray, and the AI
-  assist tool.
-- The generator is available *inside* the screen as an assistant: it proposes codes
+- Setup step: choose **New** or **Refine existing** (a pill toggle). New
+  asks for the source database on the left and names the output on the
+  right (name, description, and the owning project -- required, as it is
+  for every artifact). Refine asks only for the codebook: its source
+  database comes from that codebook's own lineage and is shown read-only
+  with a **Use another database** button, and there is no output panel at
+  all, since a refinement saves as a new version of the codebook picked on
+  the left. **Continue** opens the workspace; nothing is created yet, and
+  Refine's current codes are loaded into the draft the first time (never
+  overwriting an unsaved draft already restored from a prior visit).
+- Workspace left pane: the source corpus, one card per post/comment;
+  `j`/`k` step through it. Unlike Filter and Apply Codebook, nothing here
+  is decided per row -- the artifact being built is the code tree, so the
+  workspace runs the shared 3-pane frame with `emphasis="builder"`: the
+  **center pane** is the wide one, holding the draft codebook (`CodeLegend`,
+  always in edit mode here) with any AI proposal tray above it. The right
+  rail holds the reference material instead -- the selected row's full text
+  and its memo, plus the AI assist tool pinned at the foot.
+- The generator is available *inside* the workspace as an assistant: it proposes codes
   into the **review tray**, one card per code showing every field it produced, and each
   is accepted or dismissed individually. Nothing enters the codebook without an
-  explicit accept, and nothing is created until submit.
-- Two modes, chosen from the top toolbar. **New** creates a fresh codebook.
-  **Refine** opens an existing one and does another data-anchored pass over
-  it, saving through the same `PUT /api/codebook/{ref}` the View Codebook
-  editor uses -- so a refinement is an ordinary new version, and identity
-  (`code_uid`/`family_uid`) is carried through so a rename reads as a rename
-  in the diff rather than a delete-plus-add.
+  explicit accept, and nothing is saved until submit.
 - The current draft is sent with every assistant run, so repeated runs propose codes
   that are still missing instead of restating the codebook that already exists.
   Dismissals are remembered for the same reason.
@@ -282,8 +307,10 @@ Frontend implementation:
 
 - Page: `frontend/src/pages/Codebook.jsx`
 - Components: `frontend/src/components/codebook-editor/` (`CodebookEditor.jsx`
-  composes `CodebookSourceReader.jsx`, `CodebookReaderPane.jsx`, and
-  `CodebookCodesRail.jsx`, which in turn holds `CodeLegend`,
+  renders `EditorSetupStep`/`EditorOutputFields` for the setup step, then
+  `EditorWorkspace` composing `CodebookSourceReader.jsx` (built on the shared
+  `EditorListPane`), `CodebookReaderPane.jsx`, and `CodebookCodesRail.jsx`
+  (built on the shared `EditorRail`), which in turn holds `CodeLegend`,
   `CodebookProposalTray.jsx`, and the AI panel `CodebookAiPanel.jsx` -- built,
   like the filter editor's, on the shared
   `frontend/src/components/forms/AiAssistPanel.jsx`)
@@ -304,6 +331,8 @@ Backend implementation:
 - `POST /api/codebook/manual` -> `codebook_service.create_manual_codebook`.
   Synchronous (no LLM call), the editor's only path to `_materialize_codebook`,
   always with `origin="edited"` and no `model`/`system_prompt`/`prompt_meta`.
+  Carries an optional `assist_runs` array (see "AI-assist provenance" below);
+  `PUT /api/codebook/{ref}` (Refine mode) accepts the same field.
 
 ### 5c) View Codebook
 
@@ -320,28 +349,35 @@ Why implemented this way:
   editor, which merges row suggestions directly): a code carries a definition and
   inclusion/exclusion criteria, so adopting one is a claim about how the whole corpus
   will be read, not a single bit,
-- an AI assist during editing is deliberately **not** recorded as LLM provenance, for
-  the same auditing reason given at 4b.
+- an AI assist during editing is deliberately **not** recorded as LLM provenance on
+  the version itself, for the same auditing reason given in the filter stage above --
+  recorded in the separate `artifact_assists` channel instead (see "AI-assist
+  provenance").
 
 ## 6) Apply Codebook and View Coding
 
 User-facing behavior:
 
-- Apply Codebook has one entry point (`/codebook-apply`): the setup step
-  creates a `coding` artifact *uncoded* (`POST /api/coding/manual` -- rows
-  copied in, codebook snapshotted, zero coding entries) and immediately
-  opens the same View Coding workspace on it. The one-shot "Code with AI"
-  mode that used to sample-and-classify the whole artifact up front (via
-  `/api/apply-codebook/`) was retired -- coding a selection and reviewing
-  it before it's saved is a strict improvement over a one-shot pass with
-  no review step, and the workspace's AI recode covers the same ground.
+- Apply Codebook has one entry point (`/codebook-apply`): a setup step
+  (source data, codebook, sample on the left; output naming on the right,
+  built on the same `EditorSetupStep`/`EditorOutputFields` the filter and
+  codebook editors use) creates a `coding` artifact *uncoded*
+  (`POST /api/coding/manual` -- rows copied in, codebook snapshotted, zero
+  coding entries) and immediately opens the same View Coding workspace on
+  it. The one-shot "Code with AI" mode that used to sample-and-classify the
+  whole artifact up front (via `/api/apply-codebook/`) was retired -- coding
+  a selection and reviewing it before it's saved is a strict improvement
+  over a one-shot pass with no review step, and the workspace's AI recode
+  covers the same ground.
 - The workspace is a 3-pane reader (`CodingWorkspaceSection.jsx`): a
   document list on the left, the active document's full text and applied
-  codes in the center, and the codebook on the right. Selecting text and
-  clicking a code -- in the popup at the selection, in the sidebar, or via
-  the `1`-`9` keyboard shortcut (Nth code, name-sorted) -- tags it; `j`/`k`
-  step through the document list.
-- Select any subset of rows (or use **Select all**/**Uncoded (N)**) and re-run the AI classifier over just that subset with a chosen model (Recode); the result is staged as reviewable proposals in the same editing session as manual tags and codebook edits, not written until Save. **A row already coded by hand this session is never overwritten by a recode** -- it is skipped and reported as such, the same "the assistant may add, never overwrite" rule the filter editor enforces.
+  codes in the center, and a right rail holding the codebook plus the AI
+  recode tool pinned at its foot. Selecting text and clicking a code -- in
+  the popup at the selection or in the sidebar -- tags it; the popup also
+  takes `1`-`9` for its Nth *currently visible* code (i.e. after its own
+  search filter), with the ordinal shown next to each option so the
+  mapping is never a guess; `j`/`k` step through the document list.
+- Select any subset of rows (or use **Select all**/**Uncoded (N)**) and open the **Recode with AI** disclosure at the foot of the right rail to re-run the AI classifier over just that subset with a chosen model; the result is staged as reviewable proposals in the same editing session as manual tags and codebook edits, not written until Save. **A row already coded by hand this session is never overwritten by a recode** -- it is skipped and reported as such, the same "the assistant may add, never overwrite" rule the filter editor enforces.
 - Manual tagging, codebook edits, and accepted recode proposals all accumulate in one editing session; Save Changes commits everything together as exactly one new version.
 - Duplicate forks the whole saved artifact (codebook snapshot, its own rows, its coding, lineage, project links) under a new name.
 
@@ -349,10 +385,12 @@ Frontend implementation:
 
 - Apply page/setup: `frontend/src/pages/ApplyCodebook.jsx` ->
   `frontend/src/components/coding-editor/CodingEditor.jsx`, which renders
-  the setup step (`CodingSetupPanel.jsx`) and then this same workspace on
+  the setup step (`CodingSetupPanel.jsx`, built on the shared
+  `frontend/src/components/editor-shell/`) and then this same workspace on
   the artifact it just created
-- Coding workspace: `frontend/src/pages/ViewCoding.jsx`, `frontend/src/components/coding-table/workspace/useViewCodingPage.js`, `frontend/src/components/coding-table/workspace/CodingWorkspaceSection.jsx`
-- Document list, reader pane (owns the 1-9 shortcut), codebook sidebar, and AI-recode bar: `frontend/src/components/coding-table/workspace/CodingDocumentList.jsx`, `CodingReaderPane.jsx`, `CodingCodebookSidebar.jsx`, `CodingRecodeBar.jsx`
+- Coding workspace: `frontend/src/pages/ViewCoding.jsx`, `frontend/src/components/coding-table/workspace/useViewCodingPage.js`, `frontend/src/components/coding-table/workspace/CodingWorkspaceSection.jsx` (shares `EDITOR_GRID_CLASSES`/`EditorRail`/`EditorActionBar` with the filter and codebook editors' workspaces)
+- Document list, reader pane, codebook sidebar, and the AI-recode disclosure (rendered in the right rail, below the codebook sidebar, built on the shared `frontend/src/components/forms/AiAssistPanel.jsx`'s chrome): `frontend/src/components/coding-table/workspace/CodingDocumentList.jsx`, `CodingReaderPane.jsx`, `CodingCodebookSidebar.jsx`, `CodingRecodeBar.jsx`
+- The `1`-`9` code shortcut lives in `frontend/src/components/coding-table/HighlightedContent.jsx` (built on the shared `useEditorShortcuts`), since it needs the same filtered/visible code list the selection popup renders
 - Read-only rendered text tab: `frontend/src/components/coding-table/workspace/CodingTextView.jsx`
 - Fork-the-whole-artifact control: `frontend/src/components/coding-table/workspace/CodingDuplicateControl.jsx`
 - Request builders: `buildManualCodingPayload`/`buildRecodeItemsPayload` in `frontend/src/lib/apiContracts.js`
@@ -363,9 +401,9 @@ Backend implementation:
 - `GET /api/coding/{ref}` — codebook snapshot + parsed tree + row/coded counts + code frequency
 - `GET /api/coding/{ref}/rows` — one page of the artifact's own rows (`limit`/`offset`/`only=all|coded|uncoded`/`code`/`q`), each with its codes
 - `GET /api/coding/{ref}/text` — read-only canonical text, rendered fresh from `coding_entries`
-- `PUT /api/coding/{ref}/revision` — save the whole editing session (an updated codebook snapshot, updated row coding, or both) as at most one new version
+- `PUT /api/coding/{ref}/revision` — save the whole editing session (an updated codebook snapshot, updated row coding, or both) as at most one new version. Each row entry may carry `coder`/`assist_job_id` (B1 per-quote attribution -- see "AI-assist provenance" below); an optional `assist_runs` array records this save's recode contribution.
 - `PATCH /api/coding/{ref}` — rename / re-describe
-- `POST /api/coding/{ref}/duplicate` — fork the whole artifact
+- `POST /api/coding/{ref}/duplicate` — fork the whole artifact, carrying every row's `coder`/`coder_model` forward unchanged
 - `POST /api/coding/{ref}/recode` — kick off a background job that reclassifies a chosen subset of rows with a chosen model and returns the classification as proposals (nothing is written until the caller saves them via `PUT .../revision`)
 - `GET /api/coding-comparison` — a `coding_comparison` artifact's markdown (a blob-storage artifact type; content lives on `artifact_versions.content`, read via `version_service.read_blob`)
 
@@ -397,6 +435,30 @@ Why implemented this way:
 
 - single configurable compare UI avoids duplicate page logic,
 - saved comparison artifacts can be revisited and linked to projects like other outputs.
+
+## 7b) Integrate Codebook
+
+User-facing behavior:
+
+- Select two or more existing codebooks, ask an AI assistant to propose merged codes (each showing which source code(s) it came from), review every proposal by hand (accept/dismiss/edit, or add a source code by hand that the assistant missed), then save a new, ordinary `codebook` artifact.
+
+Frontend implementation:
+
+- Page: `frontend/src/pages/IntegrateCodebook.jsx`
+- Editor: `frontend/src/components/integrate-codebook/IntegrateCodebookEditor.jsx`, built on the same `EditorSetupStep`/`EditorWorkspace` shell as Filter/Codebook/Apply Codebook, with `IntegrateSourcePicker.jsx` (a searchable card grid plus a removable chip strip, not a bare checkbox list) picking sources in the setup step; the workspace has `IntegrateSourcePane.jsx` (read-only source codes, grouped by codebook, with a per-code "Add" that live-guards against duplicates rather than tracking a persistent "merged" flag — see "Why implemented this way" below) on the left, `IntegrateBuilderPane.jsx` (the merged draft, edited via the same `CodeLegend` every codebook tool uses) in the center, and `IntegrateRail.jsx`/`IntegrateAiPanel.jsx` on the right.
+- State: extends `frontend/src/lib/codebookEditorState.js` (the same tray→draft state machine Create Codebook uses) rather than a second module — `copySourceCode`/`integrateDraftStorageKey` are the additions specific to a merge.
+
+Backend implementation:
+
+- `POST /api/integrate-codebook-preview/` — AI-assist job (`job_type="integrate_codebook_preview"`), creates nothing; reads every source codebook, asks the LLM to merge them in one call (no batching — a merge is inherently over every source at once), and server-verifies each proposal's claimed sources against the codebooks actually read.
+- `POST /api/codebook/integrate` — synchronous submit; materializes the reviewed draft as a `codebook` with N `merged_from`/`merge_input` `artifact_edges` (one per source, in selection order).
+
+Why implemented this way:
+
+- **Set equality, not containment, for assist provenance.** A submit's `assist_runs` claims a `job_id`; that job's `source_file_ids` must equal (as a set) the codebooks actually being integrated, not merely contain them — containment would let a submit claim a run that covered a different, larger set of source codebooks, which is exactly the false-provenance claim `services/assist_service.py` exists to refuse. Sets rather than ordered lists because merge inputs are unordered by construction, unlike Compare's load-bearing `side_a`/`side_b`.
+- **Fresh identity on every accepted or copied code, never a source's own.** The merged codebook is a new artifact; a code folded in from one or more sources cannot honestly carry one source's `code_uid`, and `codebook_codes` rows never cross files. Per-code merge provenance stays fully recoverable without new storage: an accepted code's `code_uid` lands in that run's `artifact_assists.accepted_refs`, whose `job_id` points at the `integrate_codebook_preview` job whose `result.proposals[].sources` names the real source codes.
+- **A real `codebook`, not a new file type.** The output shows up in every existing codebook picker for free — it can be Applied, Compared, or Refined immediately, with no conversion step.
+- **No persistent "already merged" marker on a source code.** An earlier version tracked one (set on accept/add, never cleared) so the left pane could badge a source as covered — but nothing cleared it when the resulting draft code was later renamed, merged further, or deleted, which is exactly the editing this tool exists to support; the badge would then keep calling a source "covered" that no longer was. Removed in favor of a live duplicate check performed fresh on every "Add" click (`copySourceCode` against the current draft's `codeKey`s) and a footer that shows the draft's actual size rather than a per-source count.
 
 ## 8) Summarize Coding and View Summary
 
@@ -443,6 +505,42 @@ Why implemented this way:
 - `artifact_versions` gives every artifact a full revision history (see "Artifact versioning" above / `documentation/architecture.md`), so lineage and revision are tracked as two separate, explicit concerns rather than one table conflating them.
 - This supports reproducible analysis chains across import -> filter -> codebook -> coding -> summary, and lets the UI walk the DAG via `GET /api/artifacts/{ref}/lineage` (`frontend/src/pages/Lineage.jsx`).
 
+### AI-assist provenance
+
+The editor rewrite made a human the recorded author of every artifact
+(`origin="edited"`, no `model`/`system_prompt` on the version) even when an AI
+assist meaningfully shaped it, which erased the record of where the AI helped.
+Two sibling channels, deliberately separate from `ArtifactVersion`'s own
+fields, close that gap:
+
+- **Per-quote coder attribution (B1).** `coding_entries` (`storage_models.py`)
+  carries `coder` (`"human"`/`"ai"`) and `coder_model` per coded quote. A row's
+  AI/Human/Both label is never stored -- it's rolled up from its live entries
+  (`backend/app/core/coder_rollup.py` server-side, `frontend/src/lib/codingUtils.js::rollUpCoder`
+  client-side, so a locally staged edit reads correctly before the next fetch).
+  Surfaced as a small badge in `CodingDocumentList.jsx`/`CodingReaderPane.jsx`,
+  and as a `CODER:` line in the rendered Text View.
+- **Per-version assist runs (C2).** `artifact_assists` (`versioning_models.py`)
+  records one row per assistant run that contributed to a version: which
+  `filter_preview`/`codebook_preview`/`recode_items` job, how many proposals it
+  made, how many the researcher accepted versus dismissed, and which refs were
+  accepted. `backend/app/services/assist_service.py` is the write path (called
+  from `create_manual_filtered_data`/`create_manual_codebook`/
+  `save_project_codebook`/`save_coding_revision`) and the read path
+  (`GET /api/artifacts/{ref}/assists`). The client never gets to assert a run's
+  model or prompts -- `assist_service` re-derives both from the referenced
+  job's own `payload`/`result`, rejecting a `job_id` that doesn't check out
+  (wrong owner, wrong job type, wrong artifact, not yet succeeded).
+- Client-side, each editor already tracked this bookkeeping locally and threw
+  it away at submit (`filterEditorState.js`'s `aiAdded`,
+  `codebookEditorState.js`'s `aiAccepted`/`dismissed`,
+  `useViewCodingPage.js`'s recode staging); `buildAssistRunsForSubmit` in the
+  first two, and an equivalent computation inline in the coding hook, now
+  reduce that bookkeeping into the `assist_runs` payload at save time.
+- Prerequisite for TROUT-AI disclosure (T14/T15) and inter-coder reliability
+  work -- see `documentation/research/qualitative-coding-landscape-and-expansion.md`'s
+  GAP-4/avenues B1/C2.
+
 ## Why the overall workflow is implemented this way
 
 - **Pipeline clarity:** each transformation produces a new artifact, avoiding destructive overwrites.
@@ -466,6 +564,7 @@ Frontend routes (`frontend/src/App.jsx`):
 - `/codebook-apply`
 - `/coding-view`
 - `/compare-codebook`
+- `/integrate-codebook`
 - `/compare-coding`
 - `/summarize-coding`
 - `/summaryview`
@@ -476,6 +575,6 @@ Main backend endpoints by domain:
 - Project/file metadata: `/api/projects/`, `/api/create-project/`, `/api/update-project/`, `/api/rename-file/`, `/api/my-files/`
 - Filtering: `/api/filter-preview/`, `/api/filtered-data/manual`, `/api/word-count-ranges/`
 - Row memos: `/api/memos/` (GET, PUT)
-- Codebook: `/api/codebook-preview/`, `/api/codebook/manual`, `/api/codebook`, `/api/codebook/{ref}` (PUT), `/api/list-codebooks`, `/api/compare-codebooks/`
+- Codebook: `/api/codebook-preview/`, `/api/codebook/manual`, `/api/codebook`, `/api/codebook/{ref}` (PUT), `/api/list-codebooks`, `/api/compare-codebooks/`, `/api/integrate-codebook-preview/`, `/api/codebook/integrate`
 - Coding and summarization: `/api/coding/manual`, `/api/coding/{ref}`, `/api/coding/{ref}/rows`, `/api/coding/{ref}/text`, `/api/coding/{ref}/revision` (PUT), `/api/coding/{ref}` (PATCH), `/api/coding/{ref}/duplicate`, `/api/coding/{ref}/recode`, `/api/coding-comparison`, `/api/compare-codings/`, `/api/summarize-coding/`, `/api/save-comparison/`, `/api/save-summary/`, `/api/summary/{summary_id}`
 

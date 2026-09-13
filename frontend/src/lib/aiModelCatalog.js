@@ -79,3 +79,32 @@ export function formatPaidModelPricingLine(model) {
   }
   return `Paid model: ${inStr} / ${outStr} per 1M tokens (input / output).`;
 }
+
+/** Compact "1.2M" / "262K" rendering of a catalog entry's context window. */
+function formatContextLength(n) {
+  if (typeof n !== "number" || !Number.isFinite(n) || n <= 0) return null;
+  if (n >= 1_000_000) return `${Math.round(n / 100_000) / 10}M`;
+  if (n >= 1_000) return `${Math.round(n / 1_000)}K`;
+  return String(n);
+}
+
+/**
+ * One-line secondary label for a model inside the picker's option list:
+ * pricing tier first, then the context window, then the raw OpenRouter
+ * slug (which is what a user searching for a specific model usually
+ * knows). Kept short -- it sits under the display name in a dropdown row.
+ */
+export function formatAiModelOptionMeta(model) {
+  const parts = [];
+  if (model?.paid === true) {
+    const inStr = formatUsdPerMillion(model?.pricing?.inputUsdPerMillion);
+    const outStr = formatUsdPerMillion(model?.pricing?.outputUsdPerMillion);
+    parts.push(inStr && outStr ? `Paid · ${inStr}/${outStr} per 1M` : "Paid");
+  } else {
+    parts.push("Free");
+  }
+  const ctx = formatContextLength(model?.context_length);
+  if (ctx) parts.push(`${ctx} context`);
+  if (model?.value) parts.push(model.value);
+  return parts.join(" · ");
+}

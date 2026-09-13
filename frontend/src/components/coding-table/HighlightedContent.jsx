@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
+import { useEditorShortcuts } from "../editor-shell/useEditorShortcuts";
 
 const SELECTION_CHANGE_DEBOUNCE_MS = 50;
 
@@ -513,6 +514,28 @@ const HighlightedContent = ({
     (code.name || "").toLowerCase().includes(popoverFilter.trim().toLowerCase()),
   );
 
+  // 1-9 applies the Nth VISIBLE code (i.e. after the search box's own
+  // filter) to the pending selection -- indexing `availableCodes`
+  // instead used to apply the Nth code of the whole codebook, silently
+  // disagreeing with the popup the user is looking at the moment they
+  // typed a search term. Rebuilt on every keystroke since the visible
+  // list changes with it; `useEditorShortcuts` only tears down its
+  // `document` listener when `enabled` itself changes, not on every
+  // recomputation of the map.
+  const digitShortcuts = useMemo(() => {
+    if (!pendingSelection?.text || !onApplyCode) return {};
+    const map = {};
+    filteredPopoverCodes.slice(0, 9).forEach((code, index) => {
+      map[String(index + 1)] = () => {
+        onApplyCode(code.code_uid);
+        onSelectionChange?.(null);
+      };
+    });
+    return map;
+  }, [pendingSelection, onApplyCode, filteredPopoverCodes, onSelectionChange]);
+
+  useEditorShortcuts(digitShortcuts, { enabled: Boolean(pendingSelection?.text) });
+
   return (
     <>
       <div
@@ -612,20 +635,20 @@ const HighlightedContent = ({
               value={popoverFilter}
               onChange={(e) => setPopoverFilter(e.target.value)}
               placeholder="Search codes..."
-              // Marks this input for CodingReaderPane's 1-9 shortcut: it
+              // Marks this input for the 1-9 digit shortcut above: it
               // autofocuses the instant a selection is made, so without
               // this the shortcut's own hint text would be a lie -- the
               // digit would land in this filter box instead of applying
               // a code. A bare digit is not a realistic code-name search
               // anyway, so letting the shortcut win here costs nothing.
-              data-code-search-input="true"
-              className="mb-1.5 border border-paper bg-white/5 px-2 py-1 text-xs text-paper placeholder:text-paper/40 focus:outline-none focus:ring-1 focus:ring-paper"
+              data-shortcut-input="true"
+              className="mb-1.5 border border-paper bg-surface-raised px-2 py-1 text-xs text-paper placeholder:text-paper/40 focus:outline-none focus:ring-1 focus:ring-paper"
             />
             <div className="flex flex-col gap-1 overflow-y-auto">
               {filteredPopoverCodes.length === 0 ? (
                 <div className="px-1 py-1 text-xs text-paper/50">No matching codes</div>
               ) : (
-                filteredPopoverCodes.map((code) => (
+                filteredPopoverCodes.map((code, index) => (
                   <button
                     key={code.code_uid}
                     type="button"
@@ -634,6 +657,9 @@ const HighlightedContent = ({
                     onClick={handleApplyCodeClick(code.code_uid)}
                     title={code.name}
                   >
+                    {index < 9 && (
+                      <span className="w-3 shrink-0 text-paper/40">{index + 1}</span>
+                    )}
                     <span
                       className="h-2.5 w-2.5 shrink-0"
                       style={{ backgroundColor: getCodeColor(code.code_uid) }}

@@ -10,7 +10,7 @@ Sidebar → Compare Coding (pipeline group), or `/compare-coding` → `pages/Com
 
 Shares one implementation with [Compare Codebooks](compare-codebooks.md) — see that page and [architecture.md](../architecture.md) for the shared plumbing (`ComparePageContainer`'s `CONFIG_BY_MODE`).
 
-This is also the page `MarkdownView`'s Compare button opens when rendered for a coding artifact (it opens [Compare Codebooks](compare-codebooks.md) instead when rendered for a codebook — see `ArtifactMarkdownSection`'s `comparePath`/`compareStateKey` config).
+This is also the page the coding workspace's Compare button opens; the codebook workspace's equivalent opens [Compare Codebooks](compare-codebooks.md) instead.
 
 ## Prerequisites
 

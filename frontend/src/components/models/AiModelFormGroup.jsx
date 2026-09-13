@@ -1,20 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   filterAiModelsByPaid,
+  formatAiModelOptionMeta,
   formatPaidModelPricingLine,
   getAiModelByValue,
   useAiModels,
 } from "../../lib/aiModelCatalog";
 import AiLabel from "../forms/AiLabel";
+import Dropdown from "../primitives/Dropdown";
+import { select } from "../../lib/uiClasses";
 
 const SEGMENTS = [
   { mode: "all", label: "All" },
   { mode: "free", label: "Free" },
   { mode: "paid", label: "Paid" },
 ];
-
-const DEFAULT_SELECT_CLASSES =
-  "border border-paper bg-white/5 px-3 py-2.5 text-paper focus:outline-none focus:ring-2 focus:ring-paper disabled:opacity-50";
 
 /**
  * @param {object} props
@@ -27,7 +27,7 @@ const DEFAULT_SELECT_CLASSES =
  * @param {string} [props.className] — root wrapper; default "flex flex-col gap-1.5"
  * @param {string} [props.labelClassName]
  * @param {import('react').CSSProperties} [props.labelStyle]
- * @param {string} [props.selectClassName]
+ * @param {string} [props.selectClassName] — box classes for the picker's trigger
  */
 export default function AiModelFormGroup({
   model,
@@ -39,7 +39,7 @@ export default function AiModelFormGroup({
   className = "flex flex-col gap-1.5",
   labelClassName,
   labelStyle,
-  selectClassName = DEFAULT_SELECT_CLASSES,
+  selectClassName = select,
 }) {
   const [priceFilter, setPriceFilter] = useState("all");
   const { models, loading: modelsLoading, error: modelsError } = useAiModels();
@@ -56,45 +56,6 @@ export default function AiModelFormGroup({
   }, [model, filteredModels, modelsLoading, onModelChange]);
 
   const isDisabled = disabled || modelsLoading;
-
-  let selectChildren;
-  if (modelsLoading) {
-    selectChildren = (
-      <option value="" disabled>
-        Loading models…
-      </option>
-    );
-  } else if (selectPlaceholder === "filter") {
-    selectChildren = (
-      <>
-        {!model && (
-          <option value="" disabled>
-            Select an AI model
-          </option>
-        )}
-        {filteredModels.map((opt) => (
-          <option key={opt.value} value={opt.value}>
-            {opt.label}
-          </option>
-        ))}
-      </>
-    );
-  } else {
-    selectChildren = (
-      <>
-        {!model && (
-          <option value="" disabled>
-            Select a model
-          </option>
-        )}
-        {filteredModels.map((opt) => (
-          <option key={opt.value} value={opt.value}>
-            {opt.label}
-          </option>
-        ))}
-      </>
-    );
-  }
 
   return (
     <div className={className || undefined}>
@@ -128,15 +89,20 @@ export default function AiModelFormGroup({
           ))}
         </div>
       </div>
-      <select
+      <Dropdown
         id={id}
         value={model}
-        onChange={(e) => onModelChange(e.target.value)}
-        className={selectClassName}
+        options={filteredModels}
+        onChange={onModelChange}
         disabled={isDisabled}
-      >
-        {selectChildren}
-      </select>
+        loadingLabel={modelsLoading ? "Loading models…" : undefined}
+        placeholder={selectPlaceholder === "filter" ? "Select an AI model" : "Select a model"}
+        triggerClassName={`w-full ${selectClassName}`}
+        searchPlaceholder="Search models…"
+        emptyMessage="No models match that search."
+        listLabel="AI models"
+        renderOptionMeta={formatAiModelOptionMeta}
+      />
       {modelsError ? (
         <p className="mt-1.5 text-sm leading-snug text-error">{modelsError}</p>
       ) : selectedModel?.paid ? (

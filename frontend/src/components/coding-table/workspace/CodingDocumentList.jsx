@@ -1,9 +1,7 @@
-import CodingRecodeBar from "./CodingRecodeBar";
-
-import { input, btnSm } from "../../../lib/uiClasses";
-
-const inputClasses = input;
-const btnSmall = btnSm;
+import EditorListPane from "../../editor-shell/EditorListPane";
+import Dropdown from "../../primitives/Dropdown";
+import { select, btnSm } from "../../../lib/uiClasses";
+import { rollUpCoder } from "../../../lib/codingUtils";
 
 const ONLY_OPTIONS = [
   { value: "all", label: "All rows" },
@@ -48,128 +46,127 @@ export default function CodingDocumentList({
   onSelectAll,
   onSelectUncoded,
   selectAllLoading,
-  recodeProps,
+  loading,
 }) {
   const allMatchingSelected = matchingCount > 0 && selectedItemIds?.size >= matchingCount;
   const uncodedCount = Math.max(0, (totalRows || 0) - (totalCoded || 0));
+
   return (
-    <div className="flex h-full min-h-0 flex-col border border-line bg-surface">
-      <div className="flex shrink-0 flex-col gap-2 border-b border-line p-2.5">
-        <div className="flex items-center justify-between gap-2">
-          <div className="text-xs text-paper/70">
-            {totalCoded} of {totalRows} rows coded
+    <EditorListPane
+      loading={loading}
+      isEmpty={rows.length === 0}
+      footer={
+        <>
+          <button type="button" className={btnSm} onClick={onPrevPage} disabled={disabled || page <= 0}>
+            Prev
+          </button>
+          <span className="text-xs text-paper/60">
+            {pageCount === 0 ? 0 : page + 1} / {pageCount}
+          </span>
+          <button
+            type="button"
+            className={btnSm}
+            onClick={onNextPage}
+            disabled={disabled || page >= pageCount - 1}
+          >
+            Next
+          </button>
+        </>
+      }
+      header={
+        <>
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-xs text-paper/70">
+              {totalCoded} of {totalRows} rows coded
+            </div>
+            <div className="flex shrink-0 gap-1.5">
+              <button
+                type="button"
+                className={btnSm}
+                onClick={onSelectUncoded}
+                disabled={disabled || selectAllLoading || uncodedCount === 0}
+                title="Select every row that has no codes yet -- the rows an AI recode can help with without overwriting your own work"
+              >
+                {`Uncoded${uncodedCount ? ` (${uncodedCount})` : ""}`}
+              </button>
+              <button
+                type="button"
+                className={btnSm}
+                onClick={onSelectAll}
+                disabled={disabled || selectAllLoading || matchingCount === 0 || allMatchingSelected}
+                title={
+                  matchingCount > 0 ? `Select all ${matchingCount} rows matching the current filter/search` : undefined
+                }
+              >
+                {selectAllLoading ? "Selecting..." : `Select all${matchingCount ? ` (${matchingCount})` : ""}`}
+              </button>
+            </div>
           </div>
-          <div className="flex shrink-0 gap-1.5">
-            <button
-              type="button"
-              className={btnSmall}
-              onClick={onSelectUncoded}
-              disabled={disabled || selectAllLoading || uncodedCount === 0}
-              title="Select every row that has no codes yet -- the rows an AI recode can help with without overwriting your own work"
+          <input
+            type="search"
+            value={searchInput}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder="Search..."
+            className={select}
+            disabled={disabled}
+          />
+          <Dropdown
+            value={onlyFilter}
+            options={ONLY_OPTIONS}
+            onChange={onOnlyChange}
+            disabled={disabled}
+            triggerClassName={`w-full ${select}`}
+            listLabel="Filter rows by coded status"
+          />
+          {activeFilterCode && (
+            <div className="flex items-center justify-between gap-2 border border-line bg-surface-raised px-2 py-1 text-xs">
+              <span className="truncate">
+                Code: <strong>{activeFilterCode}</strong>
+              </span>
+              <button type="button" className="shrink-0 text-paper/60 hover:text-paper" onClick={onClearFilterCode}>
+                ×
+              </button>
+            </div>
+          )}
+        </>
+      }
+    >
+      <ul>
+        {rows.map((row) => {
+          const codeCount = Array.isArray(row.codes) ? row.codes.length : 0;
+          const isActive = row.item_id === activeItemId;
+          // Only surfaced when AI was actually involved -- a purely
+          // hand-coded row stays as plain as it always was, matching
+          // FilterRowList's "· AI" asymmetry (see rollUpCoder).
+          const coderMark = rollUpCoder(row.codes);
+          return (
+            <li
+              key={row.item_id}
+              className={`flex cursor-pointer items-start gap-2 border-b border-line-soft px-3 py-2.5 transition-colors ${
+                isActive ? "bg-paper text-ink" : "hover:bg-white/5"
+              }`}
+              onClick={() => onSelectItem(row.item_id)}
             >
-              {`Uncoded${uncodedCount ? ` (${uncodedCount})` : ""}`}
-            </button>
-            <button
-              type="button"
-              className={btnSmall}
-              onClick={onSelectAll}
-              disabled={disabled || selectAllLoading || matchingCount === 0 || allMatchingSelected}
-              title={
-                matchingCount > 0 ? `Select all ${matchingCount} rows matching the current filter/search` : undefined
-              }
-            >
-              {selectAllLoading ? "Selecting..." : `Select all${matchingCount ? ` (${matchingCount})` : ""}`}
-            </button>
-          </div>
-        </div>
-        <input
-          type="search"
-          value={searchInput}
-          onChange={(e) => onSearchChange(e.target.value)}
-          placeholder="Search..."
-          className={inputClasses}
-          disabled={disabled}
-        />
-        <select
-          value={onlyFilter}
-          onChange={(e) => onOnlyChange(e.target.value)}
-          className={inputClasses}
-          disabled={disabled}
-          aria-label="Filter rows by coded status"
-        >
-          {ONLY_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-        {activeFilterCode && (
-          <div className="flex items-center justify-between gap-2 border border-paper/40 bg-white/5 px-2 py-1 text-xs">
-            <span className="truncate">
-              Code: <strong>{activeFilterCode}</strong>
-            </span>
-            <button type="button" className="shrink-0 text-paper/60 hover:text-paper" onClick={onClearFilterCode}>
-              ×
-            </button>
-          </div>
-        )}
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {rows.length === 0 ? (
-          <div className="p-3 text-sm text-paper/60">No rows match.</div>
-        ) : (
-          <ul>
-            {rows.map((row) => {
-              const codeCount = Array.isArray(row.codes) ? row.codes.length : 0;
-              const isActive = row.item_id === activeItemId;
-              return (
-                <li
-                  key={row.item_id}
-                  className={`flex cursor-pointer items-start gap-2 border-b border-paper/10 px-3 py-2.5 transition-colors ${
-                    isActive ? "bg-paper text-ink" : "hover:bg-white/5"
-                  }`}
-                  onClick={() => onSelectItem(row.item_id)}
-                >
-                  <input
-                    type="checkbox"
-                    className="mt-1 shrink-0"
-                    checked={selectedItemIds.has(row.item_id)}
-                    onClick={(e) => e.stopPropagation()}
-                    onChange={() => onToggleItemSelected(row.item_id)}
-                    aria-label={`Select ${row.item_id} for recode`}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium">{rowPreview(row)}</div>
-                    <div className={`mt-0.5 text-xs ${isActive ? "text-ink/60" : "text-paper/50"}`}>
-                      {codeCount > 0 ? `${codeCount} code${codeCount === 1 ? "" : "s"}` : "Not coded"}
-                    </div>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </div>
-
-      <div className="flex items-center justify-between gap-2 border-t border-paper/30 p-2">
-        <button type="button" className={btnSmall} onClick={onPrevPage} disabled={disabled || page <= 0}>
-          Prev
-        </button>
-        <span className="text-xs text-paper/60">
-          {pageCount === 0 ? 0 : page + 1} / {pageCount}
-        </span>
-        <button
-          type="button"
-          className={btnSmall}
-          onClick={onNextPage}
-          disabled={disabled || page >= pageCount - 1}
-        >
-          Next
-        </button>
-      </div>
-
-      <CodingRecodeBar {...recodeProps} />
-    </div>
+              <input
+                type="checkbox"
+                className="mt-1 shrink-0"
+                checked={selectedItemIds.has(row.item_id)}
+                onClick={(e) => e.stopPropagation()}
+                onChange={() => onToggleItemSelected(row.item_id)}
+                aria-label={`Select ${row.item_id} for recode`}
+              />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium">{rowPreview(row)}</div>
+                <div className={`mt-0.5 text-xs ${isActive ? "text-ink/60" : "text-paper/50"}`}>
+                  {codeCount > 0 ? `${codeCount} code${codeCount === 1 ? "" : "s"}` : "Not coded"}
+                  {(coderMark === "ai" || coderMark === "both") &&
+                    ` · ${coderMark === "both" ? "AI + Human" : "AI"}`}
+                </div>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </EditorListPane>
   );
 }

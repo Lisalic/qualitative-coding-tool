@@ -102,4 +102,22 @@ describe("normalizeCodingRowEdits", () => {
       error: "Row 1 is missing an item id.",
     });
   });
+
+  it("carries coder/assist_job_id through when present (B1 attribution)", () => {
+    const rows = [{
+      itemId: "t3_1",
+      codes: [{ code_uid: "c", quote: "e", start_offset: 0, end_offset: 1, coder: "ai", assist_job_id: 7 }],
+    }];
+    const result = normalizeCodingRowEdits(rows);
+    expect(result.rows[0].entries[0]).toEqual({
+      code_uid: "c", quote: "e", start_offset: 0, end_offset: 1, coder: "ai", assist_job_id: 7,
+    });
+  });
+
+  it("omits coder/assist_job_id when absent, matching the server default", () => {
+    const rows = [{ itemId: "t3_1", codes: [{ code_uid: "c", quote: "e", start_offset: 0, end_offset: 1 }] }];
+    const result = normalizeCodingRowEdits(rows);
+    expect(result.rows[0].entries[0]).not.toHaveProperty("coder");
+    expect(result.rows[0].entries[0]).not.toHaveProperty("assist_job_id");
+  });
 });

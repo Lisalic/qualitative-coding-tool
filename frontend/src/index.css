@@ -70,14 +70,15 @@
     @apply text-paper/70;
   }
 
-  /* react-markdown output (MarkdownDisplay, MarkdownView, CodebookTree) is
-     rendered from LLM text that occasionally comes back wrapped in a
-     ``` fenced code block -- browsers render <pre> with white-space: pre
-     and no wrapping by default, which otherwise lets a single long line
-     spill straight through its container's border instead of wrapping or
-     scrolling. Force it to wrap and stay inside its box everywhere a
-     comparison/codebook/summary/coding artifact gets rendered as
-     markdown, regardless of which view page hosts it. */
+  /* Backstop for the plain-text `<pre>` blocks scattered across the app
+     (prompt panels, the coding text view, raw job results): browsers render
+     <pre> with white-space: pre and no wrapping, which lets a single long
+     line spill straight through its container's border. Force it to wrap
+     and stay inside its box.
+
+     MarkdownDisplay's own fenced code blocks deliberately opt back out of
+     this with `[white-space:pre]`, since a code block should scroll rather
+     than reflow. */
   pre {
     overflow-x: auto;
     white-space: pre-wrap;

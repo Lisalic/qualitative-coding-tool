@@ -3,11 +3,12 @@ import {
   acceptAll,
   acceptProposal,
   addProposals,
+  buildAssistRunsForSubmit,
+  copySourceCode,
   counts,
   deserializeDraft,
   dismissAll,
   dismissProposal,
-  draftStorageKey,
   emptyState,
   existingCodeRefs,
   isAiAccepted,
@@ -16,25 +17,20 @@ import {
   setDraft,
 } from "../../lib/codebookEditorState";
 
-function readDraft(sourceDatabase, targetCodebook) {
-  if (!sourceDatabase) return emptyState();
+function readDraft(storageKey) {
+  if (!storageKey) return emptyState();
   try {
-    return deserializeDraft(
-      window.localStorage.getItem(draftStorageKey(sourceDatabase, targetCodebook)),
-    );
+    return deserializeDraft(window.localStorage.getItem(storageKey));
   } catch {
     // Private mode / disabled storage: work in memory instead of failing.
     return emptyState();
   }
 }
 
-function writeDraft(sourceDatabase, targetCodebook, state) {
-  if (!sourceDatabase) return;
+function writeDraft(storageKey, state) {
+  if (!storageKey) return;
   try {
-    window.localStorage.setItem(
-      draftStorageKey(sourceDatabase, targetCodebook),
-      serializeDraft(state),
-    );
+    window.localStorage.setItem(storageKey, serializeDraft(state));
   } catch {
     // Quota or disabled storage -- the draft just isn't durable.
   }
@@ -42,7 +38,16 @@ function writeDraft(sourceDatabase, targetCodebook, state) {
 
 /**
  * Stateful wrapper over `lib/codebookEditorState.js`, persisting the draft
- * to `localStorage` under the (source data, target codebook) pair.
+ * to `localStorage` under one caller-supplied `storageKey`.
+ *
+ * Parameterized on the key itself, not on `(sourceDatabase,
+ * targetCodebook)`, because a second caller (the integrate editor) keys
+ * its draft on a different, unordered thing -- a SET of source codebooks
+ * (`lib/codebookEditorState.js::integrateDraftStorageKey`) -- and the
+ * hook's own job (read/write/clear/hydrate-on-change) doesn't care what
+ * the key means, only that it changed. Create Codebook (the only other
+ * caller) passes `draftStorageKey(sourceDatabase, targetCodebook)`
+ * itself; this hook no longer builds that key internally.
  *
  * Persisted rather than held in memory for the same reason the filter
  * editor's draft is: writing a codebook is a long session spent reading
@@ -60,20 +65,19 @@ function writeDraft(sourceDatabase, targetCodebook, state) {
  * hydration never writes at all. (See `useFilterEditorState`, which
  * learned this the same way.)
  */
-export function useCodebookEditorState(sourceDatabase, targetCodebook = "") {
-  const [state, setState] = useState(() => readDraft(sourceDatabase, targetCodebook));
+export function useCodebookEditorState(storageKey) {
+  const [state, setState] = useState(() => readDraft(storageKey));
   const stateRef = useRef(state);
   stateRef.current = state;
-  // `useState`'s initializer only runs on mount, so a later change of
-  // source or target still needs an explicit re-hydration.
-  const hydratedFor = useRef(draftStorageKey(sourceDatabase, targetCodebook));
+  // `useState`'s initializer only runs on mount, so a later change of key
+  // still needs an explicit re-hydration.
+  const hydratedFor = useRef(storageKey);
 
   useEffect(() => {
-    const key = draftStorageKey(sourceDatabase, targetCodebook);
-    if (hydratedFor.current === key) return;
-    hydratedFor.current = key;
-    setState(readDraft(sourceDatabase, targetCodebook));
-  }, [sourceDatabase, targetCodebook]);
+    if (hydratedFor.current === storageKey) return;
+    hydratedFor.current = storageKey;
+    setState(readDraft(storageKey));
+  }, [storageKey]);
 
   /** Apply a pure transform, then persist the result. */
   const commit = useCallback(
@@ -81,23 +85,23 @@ export function useCodebookEditorState(sourceDatabase, targetCodebook = "") {
       const next = transform(stateRef.current);
       stateRef.current = next;
       setState(next);
-      writeDraft(sourceDatabase, targetCodebook, next);
+      writeDraft(storageKey, next);
       return next;
     },
-    [sourceDatabase, targetCodebook],
+    [storageKey],
   );
 
   const clearDraft = useCallback(() => {
     const next = emptyState();
     stateRef.current = next;
     setState(next);
-    if (!sourceDatabase) return;
+    if (!storageKey) return;
     try {
-      window.localStorage.removeItem(draftStorageKey(sourceDatabase, targetCodebook));
+      window.localStorage.removeItem(storageKey);
     } catch {
       // Nothing to clean up if storage is unavailable.
     }
-  }, [sourceDatabase, targetCodebook]);
+  }, [storageKey]);
 
   const updateDraft = useCallback((tree) => commit((prev) => setDraft(prev, tree)), [commit]);
 
@@ -122,11 +126,11 @@ export function useCodebookEditorState(sourceDatabase, targetCodebook = "") {
    * signal for a run that may have taken minutes.
    */
   const receiveProposals = useCallback(
-    (proposals) => {
+    (proposals, jobId) => {
       let added = 0;
       let skipped = 0;
       commit((prev) => {
-        const outcome = addProposals(prev, proposals);
+        const outcome = addProposals(prev, proposals, jobId);
         added = outcome.addedCount;
         skipped = outcome.skippedCount;
         return outcome.state;
@@ -140,6 +144,10 @@ export function useCodebookEditorState(sourceDatabase, targetCodebook = "") {
   const acceptEvery = useCallback(() => commit((prev) => acceptAll(prev)), [commit]);
   const dismiss = useCallback((key) => commit((prev) => dismissProposal(prev, key)), [commit]);
   const dismissEvery = useCallback(() => commit((prev) => dismissAll(prev)), [commit]);
+  /** The integrate editor's "rescue" path -- copy a source code the AI
+   * tray never proposed a merge for straight into the draft. See
+   * `lib/codebookEditorState.js::copySourceCode`. */
+  const copyCode = useCallback((sourceCode) => commit((prev) => copySourceCode(prev, sourceCode)), [commit]);
 
   return {
     draft: state.draft,
@@ -147,6 +155,7 @@ export function useCodebookEditorState(sourceDatabase, targetCodebook = "") {
     counts: useMemo(() => counts(state), [state]),
     existingCodes: useMemo(() => existingCodeRefs(state), [state]),
     isAiAccepted: (codeUid) => isAiAccepted(state, codeUid),
+    assistRuns: useMemo(() => buildAssistRunsForSubmit(state), [state]),
     updateDraft,
     seedDraft,
     receiveProposals,
@@ -154,6 +163,7 @@ export function useCodebookEditorState(sourceDatabase, targetCodebook = "") {
     acceptEvery,
     dismiss,
     dismissEvery,
+    copyCode,
     clearDraft,
   };
 }

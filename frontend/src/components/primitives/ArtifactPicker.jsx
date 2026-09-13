@@ -1,18 +1,30 @@
-import { useEffect, useRef, useState } from "react";
-import SelectionList from "./SelectionList";
-import { btn } from "../../lib/uiClasses";
+import { useMemo } from "react";
+import Dropdown from "./Dropdown";
+import { btn, inputSm } from "../../lib/uiClasses";
+import { projectLabel } from "../../lib/projectOptions";
+
+/** Display name for a file row. The three hooks that feed this picker each
+ * shape their items differently, so the coalescing chain is the seam. */
+function itemLabel(item) {
+  return String(item.display_name ?? item.name ?? item.id ?? "");
+}
 
 /**
- * Compact artifact picker for a PageShell toolbar.
+ * Compact file picker for a PageShell toolbar.
  *
- * Every view page used to open with a `border-2` box wrapping a `max-h-32`
- * two-column grid -- a picker with its own scrollbar, sitting above content
- * that often needed the whole viewport. Collapsing it into the toolbar
- * recovers that space; the list itself is unchanged, just relocated into a
- * popover where it can afford to be taller than 128px.
+ * This is now a thin adapter over `Dropdown` — it supplies the trigger's
+ * toolbar-button look, maps file rows onto `{value,label,meta}`, and hands
+ * the project filter to `Dropdown`'s `header` slot. It used to be a second,
+ * parallel dropdown implementation (its own `absolute` popover, its own
+ * search box, its own dismissal, and no keyboard navigation at all), which
+ * meant "the dropdown" looked and behaved differently depending on which
+ * page you were on.
  *
- * SelectionList still owns the filtering and alphabetical sort; this only
- * supplies the trigger, the popover chrome, and dismissal.
+ * Ids are compared as strings throughout, because the pages disagree about
+ * the type: `ViewCodebook` passes a numeric file id while the others pass a
+ * schema-name string. The old split — `String()` in the trigger, strict `===`
+ * in the list — meant a numeric id showed the right trigger label but never
+ * highlighted its row. `onSelect` still receives the id in its original type.
  */
 export default function ArtifactPicker({
   items = [],
@@ -26,67 +38,60 @@ export default function ArtifactPicker({
   placeholder = "Select…",
   searchPlaceholder = "Search by name…",
 }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef(null);
+  const options = useMemo(
+    () =>
+      [...items]
+        .sort((a, b) => itemLabel(a).localeCompare(itemLabel(b), undefined, { sensitivity: "base" }))
+        .map((item) => ({
+          value: String(item.id),
+          label: itemLabel(item),
+          meta: item.description,
+        })),
+    [items],
+  );
 
-  useEffect(() => {
-    if (!open) return undefined;
+  const projectOptions = useMemo(
+    () => [
+      { value: "", label: "All Projects" },
+      ...projects.map((project) => ({ value: String(project.id), label: projectLabel(project) })),
+    ],
+    [projects],
+  );
 
-    const handlePointerDown = (event) => {
-      if (rootRef.current && !rootRef.current.contains(event.target)) setOpen(false);
-    };
-    const handleKeyDown = (event) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [open]);
-
-  const selected = items.find((item) => String(item.id) === String(selectedId));
-  const selectedLabel = selected
-    ? String(selected.display_name ?? selected.name ?? selected.id)
-    : placeholder;
+  const header = showProjectFilter ? (
+    <Dropdown
+      value={selectedProject ? String(selectedProject) : ""}
+      options={projectOptions}
+      onChange={(v) => onProjectChange?.(v)}
+      placeholder="All Projects"
+      triggerClassName={`w-full ${inputSm}`}
+      listLabel="Filter by project"
+      searchPlaceholder="Search projects…"
+      emptyMessage="No projects match that search."
+    />
+  ) : null;
 
   return (
-    <div className="relative" ref={rootRef}>
-      <button
-        type="button"
-        className={`${btn} flex max-w-[18rem] items-center gap-2`}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <span className="truncate">{selectedLabel}</span>
-        <span aria-hidden="true" className="shrink-0 text-paper/60">
-          &#9662;
-        </span>
-      </button>
-
-      {open ? (
-        <div className="absolute right-0 top-full z-40 mt-1 w-[min(32rem,calc(100vw-2rem))] border border-paper bg-ink p-2">
-          <SelectionList
-            items={items}
-            selectedId={selectedId}
-            onSelect={(id) => {
-              onSelect?.(id);
-              setOpen(false);
-            }}
-            className=""
-            listClassName="mt-2 grid max-h-[50vh] grid-cols-1 content-start gap-1 overflow-y-auto sm:grid-cols-2"
-            emptyMessage={emptyMessage}
-            searchPlaceholder={searchPlaceholder}
-            showProjectFilter={showProjectFilter}
-            projects={projects}
-            selectedProject={selectedProject}
-            onProjectChange={onProjectChange}
-          />
-        </div>
-      ) : null}
-    </div>
+    <Dropdown
+      value={selectedId == null ? "" : String(selectedId)}
+      options={options}
+      onChange={(v) => {
+        // Hand back the id in the type the page gave us, not the string the
+        // option list carries.
+        const item = items.find((candidate) => String(candidate.id) === v);
+        onSelect?.(item ? item.id : v);
+      }}
+      placeholder={placeholder}
+      triggerClassName={`${btn} max-w-[18rem]`}
+      searchPlaceholder={searchPlaceholder}
+      emptyMessage={options.length === 0 ? emptyMessage : "No files match that search."}
+      listLabel="Files"
+      renderOptionMeta={(opt) => opt.meta || null}
+      header={header}
+      // The list is always searchable here even when short: these pages are
+      // reached with a file already in mind, and the box is where you type
+      // its name.
+      searchable
+    />
   );
 }

@@ -22,6 +22,40 @@
  * Kept here rather than inside the React hook because `frontend/src/lib/**`
  * is the layer the Vitest suite covers (see CLAUDE.md);
  * `useCodebookEditorState` is a thin stateful wrapper over these.
+ *
+ * `assistRuns`/`acceptedKeyToUid` are the C2 AI-assist provenance channel
+ * (closes GAP-4): `addProposals` records which keys a run genuinely added
+ * to the tray, `acceptProposal` remembers which `code_uid` an accepted
+ * key became, and `buildAssistRunsForSubmit` reduces both into
+ * `{job_id, proposed_count, accepted_count, dismissed_count,
+ * accepted_refs}` at submit time -- a key never accepted (still in the
+ * tray, or explicitly dismissed) counts as dismissed. The server
+ * re-derives model/prompts from the job itself
+ * (`services/assist_service.py`) rather than trusting this.
+ *
+ * `copySourceCode` extends this same state machine for the
+ * integrate-codebook editor (a third caller, alongside Create Codebook's
+ * new/refine modes) rather than forking a second module: the
+ * tray-to-draft flow, identity minting, dismissal memory and assist-run
+ * bookkeeping are identical, and only what a proposal carries (which
+ * source codes it merged) and what a researcher can do outside the tray
+ * (copy a source code by hand) differ. A merge proposal's `sources` is
+ * display provenance ONLY, shown on the tray card while a merge is
+ * pending review -- it never reaches the draft tree (`cloneCodebookTree`
+ * would silently drop it as an unknown field anyway) and never reaches
+ * the server; the server's own merge-provenance record is
+ * `artifact_assists.accepted_refs` pointing at the
+ * `integrate_codebook_preview` job that produced it.
+ *
+ * There used to be a persistent "this source is covered" flag, set once
+ * on accept/copy and never cleared. It was removed: once a code is in
+ * the draft, the researcher is expected to rename it, merge it further,
+ * or delete it outright, and a flag that only ever turns on can't track
+ * any of that -- it would keep calling a source "covered" after the code
+ * it produced was deleted, which is actively misleading for exactly the
+ * editing work this tool exists to support. `copySourceCode` below does
+ * a live, un-stored duplicate check instead (see its docstring), which
+ * can't go stale because there is nothing to go stale.
  */
 
 import { cloneCodebookTree, mintClientCodeUid } from "./codingUtils";
@@ -51,7 +85,10 @@ export function codeKey(familyName, name) {
 
 /** The zero state: an empty codebook, nothing proposed. */
 export function emptyState() {
-  return { draft: [], proposals: [], dismissed: new Set(), aiAccepted: new Set() };
+  return {
+    draft: [], proposals: [], dismissed: new Set(), aiAccepted: new Set(),
+    assistRuns: [], acceptedKeyToUid: {},
+  };
 }
 
 function withState(state, mutate) {
@@ -60,6 +97,8 @@ function withState(state, mutate) {
     proposals: state.proposals.map((proposal) => ({ ...proposal })),
     dismissed: new Set(state.dismissed),
     aiAccepted: new Set(state.aiAccepted),
+    assistRuns: (state.assistRuns || []).map((run) => ({ ...run, proposedKeys: [...run.proposedKeys] })),
+    acceptedKeyToUid: { ...(state.acceptedKeyToUid || {}) },
   };
   mutate(next);
   return next;
@@ -110,6 +149,8 @@ export function seedDraftFromTree(state, tree) {
     next.proposals = [];
     next.dismissed = new Set();
     next.aiAccepted = new Set();
+    next.assistRuns = [];
+    next.acceptedKeyToUid = {};
   });
 }
 
@@ -125,9 +166,10 @@ export function seedDraftFromTree(state, tree) {
  * Returns `{ state, addedCount, skippedCount }` so the panel can report
  * what actually arrived rather than the raw size of the model's answer.
  */
-export function addProposals(state, incoming = []) {
+export function addProposals(state, incoming = [], jobId = undefined) {
   let addedCount = 0;
   let skippedCount = 0;
+  const addedKeys = [];
   const next = withState(state, (draftState) => {
     const seen = draftKeys(draftState.draft);
     for (const proposal of draftState.proposals) seen.add(proposal.key);
@@ -143,6 +185,7 @@ export function addProposals(state, incoming = []) {
       }
       seen.add(key);
       addedCount += 1;
+      addedKeys.push(key);
       draftState.proposals.push({
         key,
         family_name: familyName,
@@ -152,7 +195,16 @@ export function addProposals(state, incoming = []) {
         exclusion: raw?.exclusion ?? null,
         keywords: raw?.keywords ?? null,
         example: raw?.example ?? null,
+        // Merge provenance -- only the integrate editor's proposals carry
+        // these (Create Codebook's `ProposedCode` has neither), and both
+        // default harmlessly for that case: an empty array/null render as
+        // nothing in `CodebookProposalTray`.
+        sources: Array.isArray(raw?.sources) ? raw.sources : [],
+        rationale: raw?.rationale ?? null,
       });
+    }
+    if (jobId && addedKeys.length > 0) {
+      draftState.assistRuns.push({ jobId, proposedKeys: addedKeys });
     }
   });
   return { state: next, addedCount, skippedCount };
@@ -198,6 +250,7 @@ export function acceptProposal(state, key) {
     }
     const codeUid = mintClientCodeUid();
     next.aiAccepted.add(codeUid);
+    next.acceptedKeyToUid[key] = codeUid;
     family.codes.push({
       code_uid: codeUid,
       is_new: true,
@@ -248,6 +301,65 @@ export function isAiAccepted(state, codeUid) {
   return Boolean(codeUid) && state.aiAccepted.has(codeUid);
 }
 
+/**
+ * Copy one source code into the draft by hand, bypassing the AI tray
+ * entirely -- the rescue path for a code the assistant dropped, merged
+ * into something the researcher disagrees with, or never got the chance
+ * to consider. `sourceCode` is `{family_name, name, definition,
+ * inclusion, exclusion, keywords, example}` -- the left pane's own row
+ * shape.
+ *
+ * Mints a fresh identity exactly like `acceptProposal` (never the
+ * source's own `code_uid`/`family_uid` -- see this module's docstring
+ * and `codebook_service.create_integrated_codebook`), and reuses an
+ * existing same-named family the same way. Deliberately does NOT touch
+ * `aiAccepted`/`acceptedKeyToUid` -- copying is a human act, and an AI
+ * badge on it would be a lie.
+ *
+ * Guards against adding an exact duplicate of something already in the
+ * draft (by `codeKey`), checked fresh against the CURRENT draft on every
+ * call rather than a stored flag -- a stored "already added" marker is
+ * exactly the thing this module used to keep as `coveredSources` and
+ * removed: it can't track a code that was since renamed, merged further,
+ * or deleted, so it drifts from the truth the moment the researcher
+ * starts editing. A live check can't drift, because there's nothing to
+ * remember between calls. Returns `state` unchanged (same reference) on
+ * a no-op, so a caller can tell whether anything actually happened.
+ */
+export function copySourceCode(state, sourceCode) {
+  const key = codeKey(sourceCode.family_name, sourceCode.name);
+  if (draftKeys(state.draft).has(key)) return state;
+
+  return withState(state, (next) => {
+    const familyName = sourceCode.family_name || "Untitled family";
+    let family = next.draft.find(
+      (entry) => String(entry?.family_name ?? "").trim().toLowerCase() === familyName.toLowerCase(),
+    );
+    if (!family) {
+      family = {
+        family_uid: mintClientCodeUid(),
+        family_name: familyName,
+        family_is_new: true,
+        codes: [],
+      };
+      next.draft.push(family);
+    }
+    family.codes.push({
+      code_uid: mintClientCodeUid(),
+      is_new: true,
+      family_uid: family.family_uid,
+      family_name: family.family_name,
+      name: sourceCode.name,
+      body: "",
+      definition: sourceCode.definition ?? null,
+      inclusion: sourceCode.inclusion ?? null,
+      exclusion: sourceCode.exclusion ?? null,
+      keywords: sourceCode.keywords ?? null,
+      example: sourceCode.example ?? null,
+    });
+  });
+}
+
 export function counts(state) {
   const uids = draftCodeUids(state.draft);
   let aiAccepted = 0;
@@ -258,6 +370,30 @@ export function counts(state) {
     dismissed: state.dismissed.size,
     aiAccepted,
   };
+}
+
+/**
+ * Reduce `assistRuns`/`acceptedKeyToUid` into the submit payload's
+ * `assist_runs` -- one `{job_id, proposed_count, accepted_count,
+ * dismissed_count, accepted_refs}` per run. A proposed key with no
+ * recorded `code_uid` (still in the tray, or dismissed) counts as
+ * dismissed, evaluated at submit time rather than when the run happened.
+ */
+export function buildAssistRunsForSubmit(state) {
+  return (state.assistRuns || []).map((run) => {
+    const acceptedRefs = [];
+    for (const key of run.proposedKeys) {
+      const uid = state.acceptedKeyToUid?.[key];
+      if (uid) acceptedRefs.push(uid);
+    }
+    return {
+      job_id: run.jobId,
+      proposed_count: run.proposedKeys.length,
+      accepted_count: acceptedRefs.length,
+      dismissed_count: run.proposedKeys.length - acceptedRefs.length,
+      accepted_refs: acceptedRefs,
+    };
+  });
 }
 
 /** The codes to send as `existing_codes` on a preview run -- what the
@@ -291,6 +427,24 @@ export function draftStorageKey(sourceDatabase, targetCodebook = "") {
   return `${DRAFT_STORAGE_PREFIX}${sourceDatabase}:${targetCodebook || "new"}`;
 }
 
+/** Prefix for the integrate editor's own drafts, kept distinct from
+ * `DRAFT_STORAGE_PREFIX` (Create Codebook's) so the two tools' localStorage
+ * entries never collide even if a schema/ref string happened to coincide. */
+export const INTEGRATE_DRAFT_STORAGE_PREFIX = "integrateCodebookDraft:";
+
+/**
+ * One draft per SET of source codebooks being integrated -- sorted and
+ * deduped, unlike `draftStorageKey`'s ordered (source, target) pair,
+ * because the integrate editor's selection genuinely is a set: checking
+ * codebook A then B must resume the exact same in-progress draft as
+ * checking B then A, or switching the click order would silently orphan
+ * unsaved work.
+ */
+export function integrateDraftStorageKey(codebookRefs) {
+  const sorted = [...new Set((codebookRefs || []).map(String))].sort();
+  return `${INTEGRATE_DRAFT_STORAGE_PREFIX}${sorted.join("|")}`;
+}
+
 /** Sets aren't JSON-serializable; localStorage round-trips through arrays. */
 export function serializeDraft(state) {
   return JSON.stringify({
@@ -298,6 +452,8 @@ export function serializeDraft(state) {
     proposals: state.proposals,
     dismissed: [...state.dismissed],
     aiAccepted: [...state.aiAccepted],
+    assistRuns: state.assistRuns || [],
+    acceptedKeyToUid: state.acceptedKeyToUid || {},
   });
 }
 
@@ -338,6 +494,14 @@ export function deserializeDraft(raw) {
     // entry offering something the researcher has already ruled on.
     if (inDraft.has(key) || dismissed.has(key) || seen.has(key)) continue;
     seen.add(key);
+    const rawSources = Array.isArray(entry?.sources) ? entry.sources : [];
+    const sources = rawSources.filter(
+      (source) =>
+        source &&
+        typeof source.codebook === "string" &&
+        typeof source.name === "string" &&
+        source.name.trim(),
+    );
     proposals.push({
       key,
       family_name: familyName,
@@ -347,6 +511,8 @@ export function deserializeDraft(raw) {
       exclusion: entry?.exclusion ?? null,
       keywords: entry?.keywords ?? null,
       example: entry?.example ?? null,
+      sources,
+      rationale: typeof entry?.rationale === "string" ? entry.rationale : null,
     });
   }
   // A badge on a code that isn't in the draft any more would render as a
@@ -358,5 +524,17 @@ export function deserializeDraft(raw) {
       (uid) => typeof uid === "string" && uids.has(uid),
     ),
   );
-  return { draft, proposals, dismissed, aiAccepted };
+  const assistRuns = (Array.isArray(parsed.assistRuns) ? parsed.assistRuns : []).filter(
+    (run) => run && typeof run.jobId !== "undefined" && Array.isArray(run.proposedKeys),
+  );
+  // Same dangling-reference guard as `aiAccepted` -- a code_uid this
+  // mapping points at that isn't in the draft any more is noise.
+  const acceptedKeyToUid = {};
+  const rawMap = parsed.acceptedKeyToUid;
+  if (rawMap && typeof rawMap === "object") {
+    for (const [key, uid] of Object.entries(rawMap)) {
+      if (typeof uid === "string" && uids.has(uid)) acceptedKeyToUid[key] = uid;
+    }
+  }
+  return { draft, proposals, dismissed, aiAccepted, assistRuns, acceptedKeyToUid };
 }

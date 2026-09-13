@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { apiFetch, postJsonAndPoll, requestJson } from "../../../api";
 import { buildRecodeItemsPayload, MissingFieldsError } from "../../../lib/apiContracts";
-import { cloneCodebookTree, flattenTreeToCodes, groupCodesByFamily } from "../../../lib/codingUtils";
+import { cloneCodebookTree, flattenTreeToCodes, groupCodesByFamily, rollUpCoder } from "../../../lib/codingUtils";
 import { normalizeCodingRowEdits } from "../../../lib/codingViewHelpers";
 
 const ROWS_PER_PAGE = 25;
@@ -27,9 +27,11 @@ const SEARCH_DEBOUNCE_MS = 400;
  * - `pendingRowEdits` (`Map<item_id, entries[]>`): a row's full desired
  *   codes, touched by manual tag/untag/note edits AND by an accepted AI
  *   recode proposal (see `handleRecodeSelected`) -- both replace a row's
- *   codes wholesale, so they share one staging map. `aiProposedItemIds`
- *   tracks which of those came from AI, purely for the "N by AI" badge
- *   in the UI; it does not affect what gets saved.
+ *   codes wholesale, so they share one staging map. Each entry carries
+ *   its own `coder`/`assist_job_id` (B1 attribution -- see
+ *   `storage_models.CodingEntry`); `aiProposedPendingCount`
+ *   (`rollUpCoder` over the pending entries) is purely the "N by AI"
+ *   badge in the UI and does not affect what gets saved.
  * - `codebookDraft`: the codebook tree, edited in place by
  *   `CodeLegend`/`CodingCodebookSidebar` regardless of whether the
  *   sidebar's Edit/Done toggle is currently showing the editor -- the
@@ -306,7 +308,16 @@ export default function useViewCodingPage({
   useEffect(() => {
     pendingRowEditsRef.current = pendingRowEdits;
   }, [pendingRowEdits]);
-  const [aiProposedItemIds, setAiProposedItemIds] = useState(() => new Set());
+  // C2 assist provenance for this session's recode runs, one entry per
+  // `POST /api/coding/{ref}/recode` call: `{jobId, proposedItemIds}`,
+  // where `proposedItemIds` is EVERY item the model returned a proposal
+  // for, even one skipped for being already hand-edited (see
+  // `handleRecodeSelected`) -- a skipped item is exactly "proposed but
+  // not accepted", i.e. dismissed. `buildRecodeAssistRuns` (below) turns
+  // this into the `assist_runs` the save sends, evaluated against the
+  // FINAL staged state rather than at proposal time, so a row accepted
+  // now and hand-edited later correctly counts as dismissed too.
+  const [recodeRuns, setRecodeRuns] = useState([]);
   // Rows the researcher tagged BY HAND this session. Written only by
   // `stageRowEdit` (manual tag/untag/note), never by an accepted
   // proposal, so it is exactly the set a recode must not overwrite --
@@ -326,17 +337,46 @@ export default function useViewCodingPage({
   }, []);
 
   const isSessionDirty = pendingRowEdits.size > 0 || isCodebookDirty;
-  // Pending rows that came from an accepted AI recode proposal, not a
-  // manual edit -- purely for the "N by AI" bit of the bottom bar's
-  // summary (see CodingWorkspaceSection.jsx's sessionSummary); it does
-  // not affect what gets saved.
+  // Pending rows an AI recode contributed to, in their FINAL staged form
+  // -- derived from the row's own entries (rollUpCoder), not a
+  // session-long "was ever proposed" flag, so a row later hand-edited on
+  // top of an accepted proposal correctly stops counting as AI-only.
+  // Purely for the "N by AI" bit of the bottom bar's summary (see
+  // CodingWorkspaceSection.jsx's sessionSummary); it does not affect
+  // what gets saved.
   const aiProposedPendingCount = useMemo(() => {
     let count = 0;
-    pendingRowEdits.forEach((_, itemId) => {
-      if (aiProposedItemIds.has(itemId)) count += 1;
+    pendingRowEdits.forEach((entries) => {
+      const mark = rollUpCoder(entries);
+      if (mark === "ai" || mark === "both") count += 1;
     });
     return count;
-  }, [pendingRowEdits, aiProposedItemIds]);
+  }, [pendingRowEdits]);
+
+  /** Reduce `recodeRuns` against the CURRENT `pendingRowEdits`/`rows`
+   * into `assist_runs` for the save -- an item counts as accepted only
+   * if its final entries are non-empty and EVERY one is still
+   * `coder: "ai"` from THIS run's job, unmodified since. */
+  const buildRecodeAssistRuns = useCallback(() => {
+    if (recodeRuns.length === 0) return [];
+    const finalEntriesFor = (itemId) => {
+      if (pendingRowEdits.has(itemId)) return pendingRowEdits.get(itemId) || [];
+      return rows.find((r) => r.item_id === itemId)?.codes || [];
+    };
+    return recodeRuns.map((run) => {
+      const acceptedRefs = run.proposedItemIds.filter((itemId) => {
+        const entries = finalEntriesFor(itemId);
+        return entries.length > 0 && entries.every((e) => e.coder === "ai" && e.assist_job_id === run.jobId);
+      });
+      return {
+        job_id: run.jobId,
+        proposed_count: run.proposedItemIds.length,
+        accepted_count: acceptedRefs.length,
+        dismissed_count: run.proposedItemIds.length - acceptedRefs.length,
+        accepted_refs: acceptedRefs,
+      };
+    });
+  }, [recodeRuns, pendingRowEdits, rows]);
 
   const saveSession = useCallback(async () => {
     const schema = getSelectedCodingSchema();
@@ -356,10 +396,8 @@ export default function useViewCodingPage({
     const body = {};
     if (isCodebookDirty) body.codes = flattenTreeToCodes(codebookDraft);
     if (normalizedRows) body.rows = normalizedRows;
-    // Recode's model is provenance for the version, not something the
-    // save itself needs to succeed -- only attach it when this save
-    // actually includes an accepted AI proposal.
-    if (aiProposedItemIds.size > 0 && recodeModel) body.model = recodeModel;
+    const assistRuns = buildRecodeAssistRuns();
+    if (assistRuns.length > 0) body.assist_runs = assistRuns;
 
     setSessionSaveState({ status: "saving", message: "Saving..." });
     const result = await requestJson(`/api/coding/${encodeURIComponent(schema)}/revision`, {
@@ -371,7 +409,7 @@ export default function useViewCodingPage({
       return;
     }
     setPendingRowEdits(new Map());
-    setAiProposedItemIds(new Set());
+    setRecodeRuns([]);
     humanEditedItemIds.current = new Set();
     setSessionSaveState({ status: "success", message: "Saved." });
     setRefreshKey((key) => key + 1);
@@ -379,19 +417,18 @@ export default function useViewCodingPage({
     // tree -- see fetchCodingArtifact.
     fetchCodingArtifact(schema);
   }, [
-    aiProposedItemIds,
+    buildRecodeAssistRuns,
     codebookDraft,
     fetchCodingArtifact,
     getSelectedCodingSchema,
     isCodebookDirty,
     isSessionDirty,
     pendingRowEdits,
-    recodeModel,
   ]);
 
   const discardSession = useCallback(() => {
     setPendingRowEdits(new Map());
-    setAiProposedItemIds(new Set());
+    setRecodeRuns([]);
     humanEditedItemIds.current = new Set();
     setCodebookDraft(cloneCodebookTree(codebookTree));
     setIsCodebookDirty(false);
@@ -445,6 +482,10 @@ export default function useViewCodingPage({
           start_offset: pendingSelection.start,
           end_offset: pendingSelection.end,
           notes: null,
+          // B1 attribution -- a quote picked by hand here is never an AI
+          // recode proposal. Existing entries in the spread above (human
+          // or AI) keep whatever coder they already had.
+          coder: "human",
         },
       ];
       stageRowEdit(activeRow.item_id, entries);
@@ -681,6 +722,7 @@ export default function useViewCodingPage({
     // matching" and recoding silently discarded the tags the researcher
     // had just placed, with no way to get them back short of discarding
     // the whole session.
+    const jobId = result.jobId;
     const allProposals = Array.isArray(data.proposals) ? data.proposals : [];
     const proposals = allProposals.filter(
       (proposal) => !humanEditedItemIds.current.has(proposal.item_id),
@@ -698,22 +740,35 @@ export default function useViewCodingPage({
       );
     }
 
+    // B1 attribution: every entry a recode proposal carries is stamped
+    // `coder: "ai"` plus this run's `job_id` -- what
+    // `assist_service.resolve_ai_coder_model` validates on save, and what
+    // `buildRecodeAssistRuns` (above) reads back to compute accepted/
+    // dismissed counts.
+    const taggedCodesByItem = new Map(
+      proposals.map((proposal) => [
+        proposal.item_id,
+        (proposal.codes || []).map((entry) => ({ ...entry, coder: "ai", assist_job_id: jobId })),
+      ]),
+    );
+
     setPendingRowEdits((prev) => {
       const next = new Map(prev);
-      proposals.forEach((proposal) => next.set(proposal.item_id, proposal.codes || []));
+      taggedCodesByItem.forEach((codes, itemId) => next.set(itemId, codes));
       return next;
     });
     setRows((prev) =>
-      prev.map((row) => {
-        const proposal = proposals.find((p) => p.item_id === row.item_id);
-        return proposal ? { ...row, codes: proposal.codes || [] } : row;
-      }),
+      prev.map((row) =>
+        taggedCodesByItem.has(row.item_id) ? { ...row, codes: taggedCodesByItem.get(row.item_id) } : row,
+      ),
     );
-    setAiProposedItemIds((prev) => {
-      const next = new Set(prev);
-      proposals.forEach((proposal) => next.add(proposal.item_id));
-      return next;
-    });
+    // Every item the model proposed for, INCLUDING one skipped above for
+    // already being hand-edited -- a skip is "proposed but not accepted",
+    // which `buildRecodeAssistRuns` needs to count it as dismissed rather
+    // than silently dropping it from the provenance record.
+    if (jobId && allProposals.length > 0) {
+      setRecodeRuns((prev) => [...prev, { jobId, proposedItemIds: allProposals.map((p) => p.item_id) }]);
+    }
 
     clearSelection();
   }, [
@@ -779,7 +834,7 @@ export default function useViewCodingPage({
     setPendingSelection(null);
     setSelectedItemIds(new Set());
     setPendingRowEdits(new Map());
-    setAiProposedItemIds(new Set());
+    setRecodeRuns([]);
     humanEditedItemIds.current = new Set();
     setSessionSaveState({ status: "idle", message: "" });
     setIsCodebookEditMode(false);
@@ -878,7 +933,6 @@ export default function useViewCodingPage({
     applyCodeToSelection,
     removeCodeEntry,
     updateEntryNotes,
-    aiProposedItemIds,
     aiProposedPendingCount,
     pendingRowEditCount: pendingRowEdits.size,
     isCodebookDirty,

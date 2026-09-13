@@ -307,7 +307,7 @@ describe("postJsonAndPoll", () => {
       { intervalMs: 1 },
     );
 
-    expect(result).toEqual({ ok: true, status: 200, data: { recoded_item_count: 3 }, error: null });
+    expect(result).toEqual({ ok: true, status: 200, data: { recoded_item_count: 3 }, jobId: 9, error: null });
     const [, opts] = fetchMock.mock.calls[0];
     expect(opts.headers["Content-Type"]).toBe("application/json");
     expect(JSON.parse(opts.body)).toEqual({ item_ids: ["t3_1"], api_key: "k" });
@@ -338,7 +338,7 @@ describe("postFormAndPoll", () => {
 
     const result = await postFormAndPoll("/api/x", new FormData(), { intervalMs: 1, onStatusChange });
 
-    expect(result).toEqual({ ok: true, status: 200, data: { summary: "done" }, error: null });
+    expect(result).toEqual({ ok: true, status: 200, data: { summary: "done" }, jobId: 42, error: null });
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock.mock.calls[1][0]).toBe(`${BASE_URL}/api/jobs/42`);
     expect(onStatusChange.mock.calls.map((c) => c[0])).toEqual(["running", "succeeded"]);

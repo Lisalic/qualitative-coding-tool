@@ -2,7 +2,9 @@ import React from "react";
 import AiModelFormGroup from "../models/AiModelFormGroup";
 import AiLabel from "../forms/AiLabel";
 import Panel from "../shell/Panel";
+import Dropdown from "../primitives/Dropdown";
 import { btnSm, input, select, textarea } from "../../lib/uiClasses";
+import { toProjectOptions } from "../../lib/projectOptions";
 
 const inputClasses = input;
 
@@ -38,23 +40,17 @@ export default function CompareModelPromptPanel({
         <label htmlFor="compare-project" className="text-sm">
           Project
         </label>
-        <select
+        <Dropdown
           id="compare-project"
           value={selectedProject}
-          onChange={(e) => onProjectChange(e.target.value)}
-          className={select}
-        >
-          {!selectedProject && (
-            <option value="" disabled>
-              Select a project
-            </option>
-          )}
-          {(projects || []).map((project) => (
-            <option key={project.id} value={String(project.id)}>
-              {project.projectname}
-            </option>
-          ))}
-        </select>
+          options={toProjectOptions(projects)}
+          onChange={onProjectChange}
+          placeholder="Select a project"
+          triggerClassName={`w-full ${select}`}
+          listLabel="Project"
+          searchPlaceholder="Search projects…"
+          emptyMessage="No projects match that search."
+        />
       </div>
 
       <AiModelFormGroup

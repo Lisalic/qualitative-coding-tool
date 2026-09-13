@@ -1,4 +1,5 @@
 import Panel from "../shell/Panel";
+import Dropdown from "../primitives/Dropdown";
 import { select } from "../../lib/uiClasses";
 
 const selectClasses = `w-full ${select}`;
@@ -12,22 +13,16 @@ export default function SummarizeCodingPanel({
     <Panel title="Select coding" className="flex-1" scroll={false}>
       <div>
         <label className="mb-1 block text-sm">Coding</label>
-        <select
-          className={selectClasses}
+        <Dropdown
           value={selectedCoding}
-          onChange={(event) => onCodingChange(event.target.value)}
-        >
-          {!selectedCoding && (
-            <option value="" disabled>
-              Select a coding
-            </option>
-          )}
-          {codings.map((coding) => (
-            <option key={coding.value} value={coding.value}>
-              {coding.label}
-            </option>
-          ))}
-        </select>
+          options={codings}
+          onChange={onCodingChange}
+          placeholder="Select a coding"
+          triggerClassName={selectClasses}
+          listLabel="Coding"
+          searchPlaceholder="Search codings…"
+          emptyMessage="No codings match that search."
+        />
       </div>
     </Panel>
   );

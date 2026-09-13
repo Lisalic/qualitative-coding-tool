@@ -28,8 +28,6 @@ export default function CodebookProposalTray({
   onDismissAll,
   disabled,
 }) {
-  if (!proposals.length) return null;
-
   return (
     <Panel
       title={`Proposed codes (${proposals.length})`}

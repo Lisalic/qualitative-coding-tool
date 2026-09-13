@@ -10,7 +10,9 @@ Everything the pipeline produces is a `File` row (`backend/app/database.py`) —
 
 Content, and the prompts used to produce it, live one level down on the artifact's **version** rows (`artifact_versions` in `backend/app/versioning_models.py`) rather than on the `File` row itself — every save is a new commit, not an overwrite. See [architecture.md#storage](architecture.md#storage) and `backend/app/services/version_service.py`'s docstring for the full versioning model.
 
-Each pipeline stage (import → filter → generate codebook → apply codebook → compare → summarize) reads from one or more parent artifacts and **writes a new artifact** rather than mutating the source. Parent/child relationships are recorded as typed, ordered, version-pinned `artifact_edges` (`backend/app/versioning_models.py`), so the UI can trace an analysis chain back to its raw data — including exactly which revision of a parent was used. See the dependency graph in [workflow.md#end-to-end-workflow](workflow.md#end-to-end-workflow).
+Each pipeline stage (import → filter → generate codebook → apply codebook → compare → summarize → integrate) reads from one or more parent artifacts and **writes a new artifact** rather than mutating the source. Parent/child relationships are recorded as typed, ordered, version-pinned `artifact_edges` (`backend/app/versioning_models.py`), so the UI can trace an analysis chain back to its raw data — including exactly which revision of a parent was used. See the dependency graph in [workflow.md#end-to-end-workflow](workflow.md#end-to-end-workflow).
+
+`RELATION_MERGED_FROM`/`ROLE_MERGE_INPUT` (variadic — one edge per parent, `position` recording selection order) has two producers: merging raw data files (`backend/app/services/file_service.py`) and [Integrate Codebook](tools/integrate-codebook.md), which merges two or more `codebook` artifacts into one new `codebook` rather than a distinct file type.
 
 ## `schemaname`: an opaque identifier, not a Postgres schema
 

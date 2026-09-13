@@ -1,21 +1,19 @@
 import { useState, useEffect } from "react";
 import { requestJson } from "../../api";
-import FormShell from "../forms/FormShell";
+import EditorSetupStep from "../editor-shell/EditorSetupStep";
+import EditorOutputFields from "../editor-shell/EditorOutputFields";
 import DatabaseSourceFields from "../forms/DatabaseSourceFields";
-import SliderField from "../forms/SliderField";
 import ContentScopeFormGroup from "../tool-panels/ContentScopeFormGroup";
-import Panel from "../shell/Panel";
-import { input, select } from "../../lib/uiClasses";
+import Dropdown from "../primitives/Dropdown";
+import { select } from "../../lib/uiClasses";
 import { useToolPanelData } from "../tool-panels/useToolPanelData";
 import { useInitialProjectId } from "../tool-panels/useInitialProjectId";
 import { MissingFieldsError, buildManualCodingPayload } from "../../lib/apiContracts";
 
-const inputClasses = input;
-const selectClasses = select;
-
 /**
- * Start a coding artifact: pick the source data, the codebook, and how
- * much of it to sample.
+ * Start a coding artifact: pick the source data, the codebook, and
+ * which content types to bring in. Every row in that scope is copied
+ * in -- there is no sampling step.
  *
  * Creates the artifact uncoded (`POST /api/coding/manual`) -- rows
  * copied in, codebook snapshotted, nothing tagged -- and drops the
@@ -35,13 +33,13 @@ export default function CodingSetupPanel({ onCreated }) {
   const [error, setError] = useState(null);
   const [description, setDescription] = useState("");
   const [selectedProject, setSelectedProject] = useState(initialProjectId);
-  const [samplePercentage, setSamplePercentage] = useState(100);
   const [contentScope, setContentScope] = useState("both");
   const {
     databases,
     filteredDatabases,
     projects,
     codebooks,
+    loading: panelDataLoading,
     error: panelDataError,
   } = useToolPanelData({ includeCodebooks: true });
 
@@ -69,8 +67,7 @@ export default function CodingSetupPanel({ onCreated }) {
           codebook,
           reportName,
           description,
-          projectId: selectedProject || null,
-          samplePercentage,
+          projectId: selectedProject,
           contentScope,
         });
       } catch (err) {
@@ -98,58 +95,18 @@ export default function CodingSetupPanel({ onCreated }) {
     }
   };
 
-  const getAvailableDatabases = () => {
-    if (databaseType === "filtered") {
-      return filteredDatabases.map((item) => ({
-        name: item.value,
-        display_name: item.label,
-        metadata: item.meta,
-      }));
-    }
-    return databases.map((item) => ({
-      name: item.value,
-      display_name: item.label,
-      metadata: item.meta,
-    }));
-  };
+  // `useToolPanelData` already returns `{value,label,meta}` -- the shape
+  // Dropdown wants -- so these are passed through rather than remapped.
+  const databaseOptions = databaseType === "filtered" ? filteredDatabases : databases;
 
-  const getDisplayName = (item) => {
-    if (!item) return "";
-    if (typeof item === "object") return item.display_name || item.name || "";
-    return item.replace(".db", "");
-  };
-
-  const getSelectedRecordCount = () => {
-    const selected = getAvailableDatabases().find((item) => {
-      const value = typeof item === "string" ? item : item.name;
-      return value === database;
-    });
-    const tables = selected?.metadata?.tables || [];
-    if (!Array.isArray(tables) || tables.length === 0) return 0;
-
-    const hasRelevantTables = tables.some(
-      (t) => t?.table_name === "submissions" || t?.table_name === "comments",
-    );
-
-    return tables.reduce((sum, t) => {
-      const tableName = t?.table_name;
-      if (
-        hasRelevantTables &&
-        tableName !== "submissions" &&
-        tableName !== "comments"
-      ) {
-        return sum;
-      }
-      return sum + (Number(t?.row_count) || 0);
-    }, 0);
-  };
+  const codebookOptions = codebooks.map((cb) => ({
+    value: cb.id.toString(),
+    label: cb.name || cb.display_name || cb.id.toString(),
+  }));
 
   const getTableRowCount = (tableName) => {
-    const selected = getAvailableDatabases().find((item) => {
-      const value = typeof item === "string" ? item : item.name;
-      return value === database;
-    });
-    const tables = selected?.metadata?.tables || [];
+    const selected = databaseOptions.find((item) => item.value === database);
+    const tables = selected?.meta?.tables || [];
     const table = tables.find((t) => t?.table_name === tableName);
     return Number(table?.row_count) || 0;
   };
@@ -184,142 +141,85 @@ export default function CodingSetupPanel({ onCreated }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [postsAvailable, commentsAvailable]);
 
-  const databaseOptions = getAvailableDatabases().map((item) => ({
-    value: typeof item === "string" ? item : item.name,
-    label: getDisplayName(item),
-  }));
-
-  const projectOptions = (projects || []).map((p) => ({
-    value: String(p.id),
-    label: p.projectname || p.display_name || p.name || String(p.id),
-  }));
-
   const displayError = error || panelDataError;
+  const canSubmit =
+    !loading &&
+    Boolean(database) &&
+    Boolean(codebook) &&
+    Boolean(reportName.trim()) &&
+    Boolean(selectedProject);
 
   return (
-    <FormShell
-      columns
+    <EditorSetupStep
+      sourceTitle="Source data & codebook"
+      sourceFields={
+        <>
+          <DatabaseSourceFields
+            radioName="apply-database-type"
+            databaseType={databaseType}
+            onDatabaseTypeChange={handleDatabaseTypeChange}
+            database={database}
+            onDatabaseChange={handleDatabaseChange}
+            databaseOptions={databaseOptions}
+            databasePlaceholder={panelDataLoading ? "Loading..." : "Select a database"}
+            disabled={loading}
+          />
+
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="codebook" className="text-sm">
+              Select Codebook
+            </label>
+            <Dropdown
+              id="codebook"
+              value={codebook}
+              options={codebookOptions}
+              onChange={setCodebook}
+              placeholder="Select a codebook"
+              disabled={loading}
+              triggerClassName={`w-full ${select}`}
+              listLabel="Codebook"
+              searchPlaceholder="Search codebooks…"
+              emptyMessage={
+                codebooks.length === 0
+                  ? "No codebooks available."
+                  : "No codebooks match that search."
+              }
+            />
+          </div>
+
+          <ContentScopeFormGroup
+            contentScope={contentScope}
+            onContentScopeChange={setContentScope}
+            postsAvailable={postsAvailable}
+            commentsAvailable={commentsAvailable}
+            disabled={loading || !database}
+            radioName="apply-content-scope"
+          />
+        </>
+      }
+      outputFields={
+        <>
+          <EditorOutputFields
+            idPrefix="codingSetup"
+            name={reportName}
+            onNameChange={setReportName}
+            namePlaceholder="Enter report name..."
+            nameLabel="Report Name"
+            description={description}
+            onDescriptionChange={setDescription}
+            selectedProject={selectedProject}
+            onProjectChange={setSelectedProject}
+            projectOptions={projects}
+            disabled={loading}
+          />
+        </>
+      }
       onSubmit={handleSubmit}
-      submitButton={{
-        text: "Create coding",
-        loadingText: "Creating...",
-        disabled: loading,
-      }}
+      submitLabel="Create coding"
+      submitLoadingLabel="Creating..."
+      submitDisabled={!canSubmit}
+      submitLoading={loading}
       error={displayError}
-    >
-      <Panel
-        title="Source data & codebook"
-        className="flex-1"
-        scroll={false}
-        bodyClassName="flex flex-col gap-3"
-      >
-        <DatabaseSourceFields
-          radioName="apply-database-type"
-          databaseType={databaseType}
-          onDatabaseTypeChange={handleDatabaseTypeChange}
-          database={database}
-          onDatabaseChange={handleDatabaseChange}
-          databaseOptions={databaseOptions}
-          databasePlaceholder="Select a database"
-          selectedProject={selectedProject}
-          onProjectChange={setSelectedProject}
-          projectOptions={projectOptions}
-          disabled={loading}
-        />
-
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="codebook" className="text-sm">
-            Select Codebook
-          </label>
-          <select
-            id="codebook"
-            value={codebook}
-            onChange={(e) => setCodebook(e.target.value)}
-            className={selectClasses}
-            disabled={loading}
-          >
-            {codebooks.length === 0 ? (
-              <option value="" disabled>
-                No codebooks available
-              </option>
-            ) : (
-              codebooks.map((cb) => (
-                <option key={cb.id} value={cb.id.toString()}>
-                  {cb.name || cb.display_name || cb.id.toString()}
-                </option>
-              ))
-            )}
-          </select>
-        </div>
-
-        <ContentScopeFormGroup
-          contentScope={contentScope}
-          onContentScopeChange={setContentScope}
-          postsAvailable={postsAvailable}
-          commentsAvailable={commentsAvailable}
-          disabled={loading || !database}
-          radioName="apply-content-scope"
-        />
-
-        <SliderField
-          id="samplePercentage"
-          label="Sample Size"
-          value={samplePercentage}
-          onChange={setSamplePercentage}
-          min={1}
-          max={100}
-          step={1}
-          disabled={loading || !database}
-          valueDisplay={database ? `${samplePercentage}%` : ""}
-          valueMinWidth="70px"
-          caption={
-            !database
-              ? "Select a database to see sampled record counts."
-              : `${Math.ceil((getSelectedRecordCount() * samplePercentage) / 100)} of ${getSelectedRecordCount()} records will be selected randomly.`
-          }
-        />
-      </Panel>
-
-      <Panel
-        title="Output"
-        className="flex-1"
-        scroll={false}
-        bodyClassName="flex flex-col gap-3"
-      >
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="report_name" className="text-sm">
-            Report Name
-          </label>
-          <input
-            id="report_name"
-            type="text"
-            value={reportName}
-            onChange={(e) => setReportName(e.target.value)}
-            placeholder="Enter report name..."
-            className={inputClasses}
-            disabled={loading}
-          />
-        </div>
-
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="description" className="text-sm">
-            Description (optional)
-          </label>
-          <textarea
-            id="description"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Optional description for the report"
-            rows={2}
-            className={`${inputClasses} resize-y`}
-            disabled={loading}
-          />
-        </div>
-
-        <p className="text-sm text-paper/60">
-          Rows come in uncoded &mdash; tag by hand, or select rows and run the AI.
-        </p>
-      </Panel>
-    </FormShell>
+    />
   );
 }

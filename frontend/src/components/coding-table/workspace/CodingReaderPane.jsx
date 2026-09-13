@@ -1,10 +1,8 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import HighlightedContent from "../HighlightedContent";
-import PageEmptyState from "../../primitives/PageEmptyState";
 import Panel from "../../shell/Panel";
-import { btnSm } from "../../../lib/uiClasses";
-
-const btnSmall = btnSm;
+import { badge, btnSm } from "../../../lib/uiClasses";
+import { rollUpCoder } from "../../../lib/codingUtils";
 
 function AppliedCodeRow({ entry, getCodeColor, onRemove, onUpdateNotes, readOnly }) {
   const [notesDraft, setNotesDraft] = useState(entry.notes || "");
@@ -16,14 +14,21 @@ function AppliedCodeRow({ entry, getCodeColor, onRemove, onUpdateNotes, readOnly
   };
 
   return (
-    <div className="flex flex-col gap-1 border border-paper/20 bg-white/[0.03] px-2.5 py-2">
+    <div className="flex flex-col gap-1 border border-line bg-surface-raised px-2.5 py-2">
       <div className="flex items-start gap-2">
         <span
           className="mt-0.5 h-2.5 w-2.5 shrink-0"
           style={{ backgroundColor: getCodeColor(entry.code_uid) }}
         />
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold">{entry.code}</div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm font-semibold">{entry.code}</span>
+            {entry.coder === "ai" && (
+              <span className={badge} title={entry.coder_model ? `Coded by ${entry.coder_model}` : "Coded by AI"}>
+                AI
+              </span>
+            )}
+          </div>
           <div className="truncate text-xs italic text-paper/60" title={entry.quote}>
             &ldquo;{entry.quote}&rdquo;
           </div>
@@ -57,7 +62,7 @@ function AppliedCodeRow({ entry, getCodeColor, onRemove, onUpdateNotes, readOnly
             }
           }}
           placeholder="Add a note..."
-          className="border border-paper bg-white/5 px-2 py-1 text-xs text-paper placeholder:text-paper/40 focus:outline-none focus:ring-1 focus:ring-paper"
+          className="border border-paper bg-surface-raised px-2 py-1 text-xs text-paper placeholder:text-paper/40 focus:outline-none focus:ring-1 focus:ring-paper"
         />
       ) : (
         <button
@@ -77,6 +82,10 @@ function AppliedCodeRow({ entry, getCodeColor, onRemove, onUpdateNotes, readOnly
  * evidence highlighting) plus the list of codes applied to it. This is
  * the one thing on screen that shows full post/comment text -- unlike
  * the old table, which stacked every visible row's full text at once.
+ *
+ * The 1-9 code shortcut lives in `HighlightedContent` now, not here --
+ * it needs the same filtered, visible code list the selection popup
+ * renders, and this pane doesn't have access to that filter state.
  */
 export default function CodingReaderPane({
   activeRow,
@@ -88,45 +97,23 @@ export default function CodingReaderPane({
   onRemoveEntry,
   onUpdateNotes,
   onRecodeThisDocument,
-  isAiProposed,
   readOnly = false,
 }) {
-  // 1-9 applies the Nth codebook code (availableCodes is name-sorted) to
-  // whatever text is currently selected -- the keyboard equivalent of
-  // clicking a code in the selection popup or the sidebar. Only live
-  // with a pending selection, so a stray digit typed elsewhere on the
-  // page (a memo, a search box) is never mistaken for a code shortcut --
-  // reinforced by skipping the shortcut whenever focus is in a form
-  // field, with one deliberate exception: the selection popup's own
-  // "Search codes..." input autofocuses the instant a selection is
-  // made, so exempting only THAT input is what makes the shortcut work
-  // at the moment a user would actually reach for it (see
-  // HighlightedContent.jsx's `data-code-search-input` marker).
-  useEffect(() => {
-    if (readOnly || !pendingSelection?.text) return undefined;
-    const onKeyDown = (e) => {
-      const tag = e.target?.tagName;
-      const isCodeSearchInput = e.target?.dataset?.codeSearchInput === "true";
-      if (!isCodeSearchInput && (tag === "INPUT" || tag === "TEXTAREA" || e.target?.isContentEditable)) return;
-      if (e.key < "1" || e.key > "9") return;
-      const code = availableCodes[Number(e.key) - 1];
-      if (!code) return;
-      e.preventDefault();
-      onApplyCode(code.code_uid);
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [readOnly, pendingSelection, availableCodes, onApplyCode]);
-
   if (!activeRow) {
     return (
       <Panel className="h-full">
-        <PageEmptyState message="Select a row from the list to read and code it." />
+        <p className="italic text-paper/60">Select a row from the list to read and code it.</p>
       </Panel>
     );
   }
 
   const codes = Array.isArray(activeRow.codes) ? activeRow.codes : [];
+  // Derived from the row's OWN entries, not a session-long "was ever
+  // proposed" flag -- so a row hand-edited after an AI recode correctly
+  // reads BOTH rather than staying stuck at AI. See lib/codingUtils.js's
+  // rollUpCoder and core/coder_rollup.py (the server-side mirror, used
+  // for the persisted `coder` this reads).
+  const coderMark = rollUpCoder(codes);
 
   return (
     <Panel
@@ -138,16 +125,16 @@ export default function CodingReaderPane({
         <div className="min-w-0">
           <div className="text-xs uppercase tracking-wide text-paper/50">
             {activeRow.row_type === "comment" ? "Comment" : "Post"} &middot; {activeRow.item_id}
-            {isAiProposed && (
-              <span className="ml-2 border border-paper/40 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-paper/70">
-                AI proposal
+            {(coderMark === "ai" || coderMark === "both") && (
+              <span className={`ml-2 ${badge}`}>
+                {coderMark === "both" ? "AI + Human" : "AI"}
               </span>
             )}
           </div>
           {activeRow.title && <h3 className="mt-0.5 text-lg font-semibold">{activeRow.title}</h3>}
         </div>
         {!readOnly && (
-          <button type="button" className={`${btnSmall} shrink-0`} onClick={onRecodeThisDocument}>
+          <button type="button" className={`${btnSm} shrink-0`} onClick={onRecodeThisDocument}>
             Recode with AI
           </button>
         )}

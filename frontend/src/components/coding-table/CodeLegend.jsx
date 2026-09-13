@@ -1,13 +1,13 @@
-import React, { useEffect, useMemo, useState, useRef, useCallback } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { mintClientCodeUid } from "../../lib/codingUtils";
-import { btnSm, inputSm } from "../../lib/uiClasses";
+import { badge, btnSm, inputSm } from "../../lib/uiClasses";
 
 const btnSmall = btnSm;
 const inputClasses = `min-w-0 ${inputSm}`;
-const textareaClasses = `${inputClasses} min-h-[4.5rem] w-full resize-y`;
+const textareaClasses = `${inputClasses} min-h-[2.75rem] w-full resize-y`;
 
 const DETAIL_FIELDS = [
-  ["definition", "Definition"],
+  ["definition", "Definition", true],
   ["inclusion", "Inclusion"],
   ["exclusion", "Exclusion"],
   ["keywords", "Keywords"],
@@ -45,10 +45,14 @@ const CodeLegend = ({
   onDraftTreeChange,
   disabled = false,
   showDetails = false,
+  // C2 provenance: was this draft code accepted from an AI proposal this
+  // session? Optional -- only the codebook editor's draft has a proposal
+  // tray to check against (see codebookEditorState.isAiAccepted); every
+  // other CodeLegend caller (the read-only legend, the coding sidebar)
+  // has no such concept and just gets the default "never".
+  isAiAccepted = () => false,
 }) => {
   const [expandedFamilies, setExpandedFamilies] = useState({});
-  const [openMenuFamilyIndex, setOpenMenuFamilyIndex] = useState(null);
-  const menuRootRef = useRef(null);
 
   const selectedCodeSet = useMemo(
     () => new Set(selectedFilterCodes || []),
@@ -123,32 +127,6 @@ const CodeLegend = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEditMode, codebookTree]);
 
-  useEffect(() => {
-    if (!isEditMode) {
-      setOpenMenuFamilyIndex(null);
-      return;
-    }
-
-    const onPointerDown = (event) => {
-      if (!menuRootRef.current?.contains(event.target)) {
-        setOpenMenuFamilyIndex(null);
-      }
-    };
-
-    const onKeyDown = (event) => {
-      if (event.key === "Escape") {
-        setOpenMenuFamilyIndex(null);
-      }
-    };
-
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [isEditMode]);
-
   const updateDraftTree = useCallback(
     (updater) => {
       if (typeof onDraftTreeChange !== "function") return;
@@ -204,7 +182,8 @@ const CodeLegend = ({
   }, [updateDraftTree]);
 
   const removeFamily = useCallback(
-    (familyIndex) => {
+    (familyIndex, hasCodes) => {
+      if (hasCodes && !window.confirm("Remove this family and all its codes?")) return;
       updateDraftTree((tree) => tree.filter((_, i) => i !== familyIndex));
     },
     [updateDraftTree],
@@ -319,7 +298,7 @@ const CodeLegend = ({
 
   if (isEditMode) {
     return (
-      <div className="w-full" ref={menuRootRef}>
+      <div className="@container w-full">
         <div className="sticky top-0 z-[3] mb-2.5 flex flex-wrap gap-2 border-b border-line-soft bg-ink pb-2">
           <button
             type="button"
@@ -352,14 +331,13 @@ const CodeLegend = ({
             No code families yet. Use &quot;Add family&quot; to start.
           </div>
         ) : (
-          <div className="flex flex-col gap-2.5">
+          <div className="flex flex-col gap-2">
             {editFamilies.map((family, familyIndex) => {
               const famName =
                 typeof family?.family_name === "string"
                   ? family.family_name
                   : "";
               const codes = Array.isArray(family?.codes) ? family.codes : [];
-              const isMenuOpen = openMenuFamilyIndex === familyIndex;
               const isExpanded = Boolean(expandedFamilies[familyIndex]);
 
               return (
@@ -392,66 +370,40 @@ const CodeLegend = ({
                       disabled={disabled}
                     />
 
-                    <div className="relative">
+                    <div className="flex shrink-0 items-center gap-1.5">
                       <button
                         type="button"
-                        className="min-w-[30px] border border-paper px-2 py-0.5 text-base leading-none transition-colors hover:bg-paper hover:text-ink disabled:opacity-40"
-                        onClick={() =>
-                          setOpenMenuFamilyIndex((prev) =>
-                            prev === familyIndex ? null : familyIndex,
-                          )
-                        }
+                        className={btnSmall}
+                        onClick={() => addCode(familyIndex)}
                         disabled={disabled}
-                        aria-haspopup="menu"
-                        aria-expanded={isMenuOpen}
-                        aria-label="Family actions"
                       >
-                        ⋯
+                        + Code
                       </button>
-                      {isMenuOpen && (
-                        <div
-                          className="absolute right-0 top-[calc(100%+6px)] z-[5] min-w-[150px] border border-paper bg-ink p-1 shadow-lg"
-                          role="menu"
-                        >
-                          <button
-                            type="button"
-                            className="block w-full px-2 py-1.5 text-left text-sm transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
-                            onClick={() => {
-                              addCode(familyIndex);
-                              setOpenMenuFamilyIndex(null);
-                            }}
-                            disabled={disabled}
-                          >
-                            + Add code
-                          </button>
-                          <button
-                            type="button"
-                            className="block w-full px-2 py-1.5 text-left text-sm text-error transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
-                            onClick={() => {
-                              removeFamily(familyIndex);
-                              setOpenMenuFamilyIndex(null);
-                            }}
-                            disabled={disabled}
-                          >
-                            Remove family
-                          </button>
-                        </div>
-                      )}
+                      <button
+                        type="button"
+                        className="min-w-[28px] border border-paper px-1.5 py-0.5 text-sm leading-none transition-colors hover:bg-paper hover:text-ink disabled:opacity-40"
+                        onClick={() => removeFamily(familyIndex, codes.length > 0)}
+                        disabled={disabled}
+                        aria-label="Remove family"
+                        title="Remove family"
+                      >
+                        ×
+                      </button>
                     </div>
                   </div>
 
                   {isExpanded && (
-                    <div className="flex flex-col gap-2.5 p-2.5 pl-3">
+                    <div className="flex flex-col gap-1.5 p-1.5 pl-3">
                       {codes.length === 0 ? (
                         <span className="text-sm text-paper/70">
                           No codes in this family yet.
                         </span>
                       ) : (
-                        <div className="flex flex-col gap-2">
+                        <div className="flex flex-col gap-1">
                           <div className="pl-[18px] text-xs font-semibold uppercase tracking-wide text-paper/50">
                             Codes
                           </div>
-                          <div className="relative flex flex-col gap-1.5 pl-[18px] before:absolute before:bottom-0.5 before:left-[5px] before:top-0.5 before:w-px before:bg-paper/20 before:content-['']">
+                          <div className="relative flex flex-col gap-1 pl-[18px] before:absolute before:bottom-0.5 before:left-[5px] before:top-0.5 before:w-px before:bg-paper/20 before:content-['']">
                             {codes.map((codeEntry, codeIndex) => {
                               const cname =
                                 typeof codeEntry?.name === "string" ? codeEntry.name : "";
@@ -459,7 +411,7 @@ const CodeLegend = ({
                               return (
                                 <div
                                   key={`edit-code-${familyIndex}-${codeIndex}`}
-                                  className="relative flex flex-col gap-1.5 bg-white/[0.03] py-1.5 pl-2 pr-1.5 before:absolute before:left-[-13px] before:top-4 before:w-2.5 before:border-t before:border-line-soft before:content-['']"
+                                  className="relative flex flex-col gap-1 bg-white/[0.03] py-1 pl-2 pr-1.5 before:absolute before:left-[-13px] before:top-3 before:w-2.5 before:border-t before:border-line-soft before:content-['']"
                                 >
                                   <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2">
                                     <div
@@ -468,21 +420,28 @@ const CodeLegend = ({
                                         backgroundColor: getCodeColor(colorKey),
                                       }}
                                     />
-                                    <input
-                                      type="text"
-                                      className={inputClasses}
-                                      value={cname}
-                                      onChange={(e) =>
-                                        handleCodeFieldChange(
-                                          familyIndex,
-                                          codeIndex,
-                                          "name",
-                                          e.target.value,
-                                        )
-                                      }
-                                      placeholder="Code name"
-                                      disabled={disabled}
-                                    />
+                                    <div className="flex min-w-0 items-center gap-1.5">
+                                      <input
+                                        type="text"
+                                        className={`${inputClasses} min-w-0 flex-1`}
+                                        value={cname}
+                                        onChange={(e) =>
+                                          handleCodeFieldChange(
+                                            familyIndex,
+                                            codeIndex,
+                                            "name",
+                                            e.target.value,
+                                          )
+                                        }
+                                        placeholder="Code name"
+                                        disabled={disabled}
+                                      />
+                                      {isAiAccepted(codeEntry?.code_uid) && (
+                                        <span className={`shrink-0 ${badge}`} title="Accepted from an AI proposal this session">
+                                          AI
+                                        </span>
+                                      )}
+                                    </div>
                                     <button
                                       type="button"
                                       className="min-w-[28px] border border-paper px-1.5 py-0.5 text-sm leading-none transition-colors hover:bg-paper hover:text-ink disabled:opacity-40"
@@ -496,9 +455,12 @@ const CodeLegend = ({
                                       ×
                                     </button>
                                   </div>
-                                  <div className="flex flex-col gap-1.5 pl-5">
-                                    {DETAIL_FIELDS.map(([field, label]) => (
-                                      <label key={field} className="flex flex-col gap-0.5">
+                                  <div className="grid grid-cols-1 gap-x-2 gap-y-1 pl-5 @md:grid-cols-2 @4xl:grid-cols-3">
+                                    {DETAIL_FIELDS.map(([field, label, wide]) => (
+                                      <label
+                                        key={field}
+                                        className={`flex flex-col gap-0 ${wide ? "@md:col-span-2 @4xl:col-span-3" : ""}`}
+                                      >
                                         <span className="text-xs font-semibold uppercase tracking-wide text-paper/50">
                                           {label}
                                         </span>

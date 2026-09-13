@@ -1,4 +1,5 @@
 import { btnPrimary } from "../../lib/uiClasses";
+import ErrorDisplay from "../feedback/ErrorDisplay";
 
 /**
  * Form plumbing shared by the tool panels (filter, generate codebook, apply
@@ -8,6 +9,13 @@ import { btnPrimary } from "../../lib/uiClasses";
  * the compare and summarize pages. These forms used to be a single narrow
  * stack inside a max-w-3xl shell, which left most of a wide page empty and
  * pushed the submit button below the fold.
+ *
+ * `submitButton.disabled` and `submitButton.loading` are separate on
+ * purpose: `disabled` is whatever a caller wants to gate clicking on
+ * (required fields, an in-flight request, ...), while `loading` alone
+ * decides the label -- otherwise a required-fields gate reads the button
+ * as "in progress" the instant something is missing, before the user has
+ * clicked anything.
  */
 export default function FormShell({
   children,
@@ -38,19 +46,13 @@ export default function FormShell({
               disabled={submitButton.disabled}
               className={btnPrimary}
             >
-              {submitButton.disabled
-                ? submitButton.loadingText
-                : submitButton.text}
+              {submitButton.loading ? submitButton.loadingText : submitButton.text}
             </button>
           </div>
         )}
       </form>
 
-      {error && (
-        <p className="border border-error bg-error/10 px-3 py-2 text-sm text-error">
-          {error}
-        </p>
-      )}
+      <ErrorDisplay message={error} variant="alert" />
 
       {result && (
         <div className="border border-success bg-success/10 p-3">

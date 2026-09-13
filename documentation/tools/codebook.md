@@ -1,4 +1,4 @@
-# Codebook
+# Create Codebook
 
 ## Purpose
 
@@ -7,7 +7,7 @@ a fresh codebook, or another data-anchored pass over an existing one.
 
 ## Where to find it
 
-Sidebar → Codebook, the project page's **Add Codebook** button, or
+Sidebar → Create Codebook, the project page's **Add Codebook** button, or
 `/codebook` → `pages/Codebook.jsx` → `components/codebook-editor/CodebookEditor.jsx`.
 
 ## Layout
@@ -34,7 +34,12 @@ Chosen from the top toolbar:
   [View Codebook](view-codebook.md) editor uses. A refinement is an
   ordinary new version, not a special kind of write, and identity
   (`code_uid`/`family_uid`) carries through so a rename reads as a rename
-  in the version diff rather than a delete-plus-add.
+  in the version diff rather than a delete-plus-add. Refine asks only for
+  the codebook: the source database is read off that codebook's own
+  lineage (`GET /api/artifacts/{ref}/lineage`, first `raw_data`/
+  `filtered_data` parent) and shown read-only, with a **Use another
+  database** button that falls back to the picker when the second pass
+  should run against different data.
 
 ## Prerequisites
 

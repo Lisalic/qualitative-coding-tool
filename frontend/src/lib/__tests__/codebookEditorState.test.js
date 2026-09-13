@@ -3,7 +3,9 @@ import {
   acceptAll,
   acceptProposal,
   addProposals,
+  buildAssistRunsForSubmit,
   codeKey,
+  copySourceCode,
   counts,
   deserializeDraft,
   dismissAll,
@@ -12,6 +14,7 @@ import {
   draftStorageKey,
   emptyState,
   existingCodeRefs,
+  integrateDraftStorageKey,
   isAiAccepted,
   seedDraftFromTree,
   serializeDraft,
@@ -19,6 +22,17 @@ import {
 } from "../codebookEditorState";
 
 const proposal = (name, familyName = "Harm", extra = {}) => ({
+  name,
+  family_name: familyName,
+  definition: `${name} definition`,
+  ...extra,
+});
+
+/** A merge proposal (integrate editor), carrying source provenance. */
+const mergeProposal = (name, sources, extra = {}) =>
+  proposal(name, "Harm", { sources, rationale: sources.length > 1 ? "merged" : "", ...extra });
+
+const sourceCode = (name, familyName = "Harm", extra = {}) => ({
   name,
   family_name: familyName,
   definition: `${name} definition`,
@@ -185,6 +199,162 @@ describe("AI provenance", () => {
   });
 });
 
+describe("addProposals -- merge provenance", () => {
+  it("carries sources and rationale onto the tray entry", () => {
+    const sources = [{ codebook: "proj_a", family_name: "Harm", name: "Bullying" }];
+    const { state } = addProposals(emptyState(), [mergeProposal("Merged", sources)]);
+    expect(state.proposals[0].sources).toEqual(sources);
+    expect(state.proposals[0].rationale).toBe("");
+  });
+
+  it("defaults sources to an empty array and rationale to null when absent", () => {
+    const { state } = addProposals(emptyState(), [proposal("Exclusion")]);
+    expect(state.proposals[0].sources).toEqual([]);
+    expect(state.proposals[0].rationale).toBeNull();
+  });
+
+  it("ignores a non-array sources value", () => {
+    const { state } = addProposals(emptyState(), [proposal("Exclusion", "Harm", { sources: "not-an-array" })]);
+    expect(state.proposals[0].sources).toEqual([]);
+  });
+});
+
+describe("acceptProposal -- accepting a merge does not write sources onto the draft", () => {
+  it("does not write sources onto the accepted draft node", () => {
+    const sources = [{ codebook: "proj_a", family_name: "Harm", name: "Bullying" }];
+    const first = addProposals(emptyState(), [mergeProposal("Merged", sources)]);
+    const state = acceptProposal(first.state, first.state.proposals[0].key);
+    expect(state.draft[0].codes[0].sources).toBeUndefined();
+  });
+});
+
+describe("copySourceCode", () => {
+  it("mints a fresh code_uid distinct from the source's own identity", () => {
+    const state = copySourceCode(emptyState(), sourceCode("Bullying"));
+    const code = state.draft[0].codes[0];
+    expect(code.code_uid).toMatch(/^[0-9a-f]{32}$/);
+    expect(code.is_new).toBe(true);
+    expect(code.name).toBe("Bullying");
+  });
+
+  it("reuses an existing same-named family's uid", () => {
+    const seeded = seedDraftFromTree(emptyState(), existingTree);
+    const state = copySourceCode(seeded, sourceCode("Exclusion", "Harm"));
+    expect(state.draft).toHaveLength(1);
+    expect(state.draft[0].family_uid).toBe("fam-1");
+  });
+
+  it("does not add the copied code to aiAccepted", () => {
+    const state = copySourceCode(emptyState(), sourceCode("Bullying"));
+    const code = state.draft[0].codes[0];
+    expect(isAiAccepted(state, code.code_uid)).toBe(false);
+  });
+
+  it("does not add a duplicate when the same (family, name) is already in the draft", () => {
+    const first = copySourceCode(emptyState(), sourceCode("Bullying", "Harm"));
+    const second = copySourceCode(first, sourceCode("Bullying", "Harm"));
+    expect(second).toBe(first);
+    expect(second.draft[0].codes).toHaveLength(1);
+  });
+
+  it("the duplicate check is case/whitespace-insensitive, like codeKey", () => {
+    const first = copySourceCode(emptyState(), sourceCode("Bullying", "Harm"));
+    const second = copySourceCode(first, sourceCode("  bullying  ", " HARM "));
+    expect(second.draft[0].codes).toHaveLength(1);
+  });
+
+  it("a code with the same name but a different family is not a duplicate", () => {
+    const first = copySourceCode(emptyState(), sourceCode("Worry", "Harm"));
+    const second = copySourceCode(first, sourceCode("Worry", "Coping"));
+    expect(second.draft).toHaveLength(2);
+  });
+
+  it("re-adding after the copied code was deleted from the draft is allowed", () => {
+    // The whole point of dropping the persistent "covered" flag: once a
+    // code leaves the draft, re-adding its source must work again rather
+    // than being silently blocked by stale bookkeeping.
+    const added = copySourceCode(emptyState(), sourceCode("Bullying", "Harm"));
+    const deleted = setDraft(added, []);
+    const readded = copySourceCode(deleted, sourceCode("Bullying", "Harm"));
+    expect(readded.draft[0].codes).toHaveLength(1);
+  });
+});
+
+describe("integrateDraftStorageKey", () => {
+  it("is order-independent over the same set of codebooks", () => {
+    expect(integrateDraftStorageKey(["proj_b", "proj_a"])).toBe(
+      integrateDraftStorageKey(["proj_a", "proj_b"]),
+    );
+  });
+
+  it("dedupes repeated refs", () => {
+    expect(integrateDraftStorageKey(["proj_a", "proj_a", "proj_b"])).toBe(
+      integrateDraftStorageKey(["proj_a", "proj_b"]),
+    );
+  });
+
+  it("differs for a different set of codebooks", () => {
+    expect(integrateDraftStorageKey(["proj_a", "proj_b"])).not.toBe(
+      integrateDraftStorageKey(["proj_a", "proj_c"]),
+    );
+  });
+});
+
+describe("assistRuns / buildAssistRunsForSubmit", () => {
+  it("records nothing when addProposals is called with no jobId", () => {
+    const { state } = addProposals(emptyState(), [proposal("Exclusion")]);
+    expect(buildAssistRunsForSubmit(state)).toEqual([]);
+  });
+
+  it("records a run and counts an accepted proposal by its minted code_uid", () => {
+    const { state } = addProposals(emptyState(), [proposal("Exclusion")], 7);
+    const key = state.proposals[0].key;
+    const accepted = acceptProposal(state, key);
+    const uid = accepted.draft[0].codes[0].code_uid;
+
+    const runs = buildAssistRunsForSubmit(accepted);
+    expect(runs).toEqual([
+      { job_id: 7, proposed_count: 1, accepted_count: 1, dismissed_count: 0, accepted_refs: [uid] },
+    ]);
+  });
+
+  it("a proposal left in the tray at submit time counts as dismissed", () => {
+    const { state } = addProposals(emptyState(), [proposal("Exclusion"), proposal("Denial")], 7);
+    const [run] = buildAssistRunsForSubmit(state);
+    expect(run.proposed_count).toBe(2);
+    expect(run.accepted_count).toBe(0);
+    expect(run.dismissed_count).toBe(2);
+  });
+
+  it("an explicitly dismissed proposal counts as dismissed", () => {
+    const { state } = addProposals(emptyState(), [proposal("Exclusion")], 7);
+    const dismissed = dismissProposal(state, state.proposals[0].key);
+    const [run] = buildAssistRunsForSubmit(dismissed);
+    expect(run.accepted_count).toBe(0);
+    expect(run.dismissed_count).toBe(1);
+  });
+
+  it("skipped (duplicate) proposals never enter a run", () => {
+    const first = addProposals(emptyState(), [proposal("Exclusion")], 1);
+    const second = addProposals(first.state, [proposal("Exclusion")], 2);
+    expect(second.skippedCount).toBe(1);
+    expect(buildAssistRunsForSubmit(second.state)).toHaveLength(1);
+  });
+
+  it("survives a serialize/deserialize round-trip", () => {
+    const { state } = addProposals(emptyState(), [proposal("Exclusion")], 7);
+    const accepted = acceptProposal(state, state.proposals[0].key);
+    const restored = deserializeDraft(serializeDraft(accepted));
+    expect(buildAssistRunsForSubmit(restored)).toEqual(buildAssistRunsForSubmit(accepted));
+  });
+
+  it("seedDraftFromTree clears assist provenance along with proposals", () => {
+    const { state } = addProposals(emptyState(), [proposal("Exclusion")], 7);
+    const seeded = seedDraftFromTree(state, existingTree);
+    expect(buildAssistRunsForSubmit(seeded)).toEqual([]);
+  });
+});
+
 describe("dismissAll", () => {
   it("empties the tray and remembers every key", () => {
     const first = addProposals(emptyState(), [proposal("Exclusion"), proposal("Denial")]);
@@ -285,5 +455,35 @@ describe("serializeDraft / deserializeDraft", () => {
       aiAccepted: ["code-1", "gone-uid"],
     });
     expect([...deserializeDraft(raw).aiAccepted]).toEqual(["code-1"]);
+  });
+
+  it("round-trips an open proposal's sources and rationale", () => {
+    const sources = [{ codebook: "proj_a", family_name: "Harm", name: "Bullying" }];
+    const { state } = addProposals(emptyState(), [mergeProposal("Merged", sources)]);
+
+    const restored = deserializeDraft(serializeDraft(state));
+    expect(restored.proposals[0].sources).toEqual(sources);
+    expect(restored.proposals[0].rationale).toBe(state.proposals[0].rationale);
+  });
+
+  it("drops a malformed sources entry on a restored proposal", () => {
+    const raw = JSON.stringify({
+      draft: [],
+      proposals: [
+        {
+          name: "Merged",
+          family_name: "Harm",
+          sources: [
+            { codebook: "proj_a", name: "Bullying" },
+            { codebook: 123, name: "Bad" },
+            { codebook: "proj_b" },
+          ],
+        },
+      ],
+      dismissed: [],
+    });
+    expect(deserializeDraft(raw).proposals[0].sources).toEqual([
+      { codebook: "proj_a", name: "Bullying" },
+    ]);
   });
 });

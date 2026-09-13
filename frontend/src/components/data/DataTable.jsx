@@ -5,7 +5,9 @@ import { useDataTableActions } from "./useDataTableActions";
 import { useRowMemos } from "./useRowMemos";
 import MemoIndicator from "./MemoIndicator";
 import Panel from "../shell/Panel";
+import Dropdown from "../primitives/Dropdown";
 import { btn, btnDanger, input, select } from "../../lib/uiClasses";
+import { PAGE_SIZE_OPTIONS } from "../../lib/pageSizes";
 
 // The header row sticks to the top of the Panel's own scroll container, so a
 // long page of rows stays readable without a separate frozen-header widget.
@@ -106,6 +108,15 @@ export default function DataTable({
     setError,
   });
   const { getMemo, saveMemo } = useRowMemos(currentDatabase);
+
+  const targetDbOptions = useMemo(
+    () =>
+      projects.map((p) => ({
+        value: p.schema_name,
+        label: p.display_name || p.schema_name,
+      })),
+    [projects],
+  );
 
   // Clear selections only when switching databases. Page, page size, and search
   // changes intentionally do NOT clear selection, so it persists across them.
@@ -281,24 +292,19 @@ export default function DataTable({
 
           <div className="flex w-full flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <label htmlFor="entry-limit" className="text-sm text-paper/70">
-                Show entries:{" "}
-              </label>
-              <select
+              {/* The option labels read "25 / page", so a separate
+                  "Show entries:" label would just say it twice. */}
+              <Dropdown
                 id="entry-limit"
                 value={limit}
-                onChange={(e) => {
-                  setLimit(Number(e.target.value));
+                options={PAGE_SIZE_OPTIONS}
+                onChange={(next) => {
+                  setLimit(next);
                   setPage(0);
                 }}
-                className={selectClasses}
-              >
-                <option value={10}>10</option>
-                <option value={25}>25</option>
-                <option value={50}>50</option>
-                <option value={100}>100</option>
-                <option value={200}>200</option>
-              </select>
+                triggerClassName={`w-auto ${selectClasses}`}
+                listLabel="Entries per page"
+              />
             </div>
             <div className="flex">
               <input
@@ -515,22 +521,16 @@ export default function DataTable({
           </div>
           <div className="mt-2 flex items-center justify-center gap-2">
             <label className="text-sm">Move selected to:</label>
-            <select
+            <Dropdown
               value={targetDb}
-              onChange={(e) => setTargetDb(e.target.value)}
-              className="min-w-[280px] max-w-[320px] border border-paper bg-white/5 px-2 py-1.5 text-sm text-paper focus:outline-none focus:ring-2 focus:ring-paper"
-            >
-              {!targetDb && (
-                <option value="" disabled>
-                  Select a database
-                </option>
-              )}
-              {projects.map((p) => (
-                <option key={p.schema_name} value={p.schema_name}>
-                  {p.display_name || p.schema_name}
-                </option>
-              ))}
-            </select>
+              options={targetDbOptions}
+              onChange={setTargetDb}
+              placeholder="Select a database"
+              triggerClassName={`min-w-[280px] max-w-[320px] ${selectClasses}`}
+              listLabel="Destination database"
+              searchPlaceholder="Search databases…"
+              emptyMessage="No databases match that search."
+            />
             <button
               type="button"
               onClick={moveSelected}

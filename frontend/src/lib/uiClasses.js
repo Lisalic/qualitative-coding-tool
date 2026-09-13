@@ -49,3 +49,8 @@ export const panelHeader = "text-sm font-semibold uppercase tracking-wide";
 
 /** Small muted caption: timestamps, counts, helper text. */
 export const meta = "text-xs text-paper/50";
+
+/** Small bordered rectangle mark -- an AI/Human/Both coder mark, or any
+ * other short inline provenance/status tag. Square corners per the style
+ * guide; white-alpha only, no new palette color. */
+export const badge = "border border-line px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-paper/70";

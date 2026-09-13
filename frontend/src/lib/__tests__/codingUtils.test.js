@@ -5,6 +5,7 @@ import {
   flattenTreeToCodes,
   flattenCodebookCodes,
   getCodeColor,
+  rollUpCoder,
 } from "../codingUtils";
 
 describe("groupCodesByFamily", () => {
@@ -185,5 +186,32 @@ describe("getCodeColor", () => {
       expect(lightness).toBeGreaterThanOrEqual(55);
       expect(lightness).toBeLessThan(75);
     }
+  });
+});
+
+describe("rollUpCoder", () => {
+  it("returns null for an uncoded row", () => {
+    expect(rollUpCoder([])).toBeNull();
+    expect(rollUpCoder(undefined)).toBeNull();
+  });
+
+  it("returns human for entries with no coder field", () => {
+    expect(rollUpCoder([{ code: "A" }])).toBe("human");
+  });
+
+  it("returns human when every entry is coder: human", () => {
+    expect(rollUpCoder([{ coder: "human" }, { coder: "human" }])).toBe("human");
+  });
+
+  it("returns ai when every entry is coder: ai", () => {
+    expect(rollUpCoder([{ coder: "ai" }, { coder: "ai" }])).toBe("ai");
+  });
+
+  it("returns both when the row mixes human and ai entries", () => {
+    expect(rollUpCoder([{ coder: "ai" }, { coder: "human" }])).toBe("both");
+  });
+
+  it("a missing coder field counts as human when mixed with an ai entry", () => {
+    expect(rollUpCoder([{ coder: "ai" }, {}])).toBe("both");
   });
 });

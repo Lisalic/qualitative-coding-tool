@@ -185,3 +185,29 @@ export const getCodeColor = (codeUid) => {
   const lightness = 55 + (Math.abs(hash) % 20); // Vary lightness between 55-75%
   return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
 };
+
+/**
+ * Reduce a row's coded entries to one AI/Human/Both label -- the client
+ * mirror of `backend/app/core/coder_rollup.py::roll_up`. Computed
+ * client-side (never trusted from a server-fetched `row.coder` field)
+ * so the badge stays correct for a row with LOCALLY staged, unsaved
+ * edits too (see `useViewCodingPage.js`'s `pendingRowEdits`) -- a row
+ * the researcher just hand-edited or accepted a recode for hasn't been
+ * re-fetched yet, but its `codes` array already reflects the edit.
+ *
+ * Returns `null` for an uncoded row, `"ai"` / `"human"` / `"both"`
+ * otherwise -- see `CodingDocumentList.jsx`/`CodingReaderPane.jsx` for
+ * where this becomes a visible mark.
+ */
+export const rollUpCoder = (codes) => {
+  let seenHuman = false;
+  let seenAi = false;
+  for (const entry of Array.isArray(codes) ? codes : []) {
+    if (entry?.coder === "ai") seenAi = true;
+    else seenHuman = true; // "human", missing, or anything else defaults to human server-side
+    if (seenHuman && seenAi) return "both";
+  }
+  if (seenAi) return "ai";
+  if (seenHuman) return "human";
+  return null;
+};

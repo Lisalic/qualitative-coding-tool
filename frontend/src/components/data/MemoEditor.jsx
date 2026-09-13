@@ -1,7 +1,5 @@
 import { useEffect, useState } from "react";
-
-const btn =
-  "border border-paper px-3 py-1.5 text-sm transition-colors hover:bg-paper hover:text-ink disabled:opacity-40";
+import { btn, textarea } from "../../lib/uiClasses";
 
 /**
  * The memo on one row: a free-text analytic note the researcher writes
@@ -58,7 +56,7 @@ export default function MemoEditor({ memo, onSave, compact = false }) {
         onChange={(e) => setDraft(e.target.value)}
         placeholder="What did you notice about this row?"
         rows={4}
-        className="w-full resize-y border border-paper bg-white/5 px-3 py-2.5 text-paper placeholder:text-paper/40 focus:outline-none focus:ring-2 focus:ring-paper disabled:opacity-50"
+        className={textarea}
         disabled={saving}
       />
       <div className="mt-2 flex items-center gap-2">

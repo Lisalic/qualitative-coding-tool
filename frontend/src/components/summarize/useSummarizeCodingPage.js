@@ -58,6 +58,7 @@ export default function useSummarizeCodingPage() {
     if (!selectedCoding) return setError("Select a coding to summarize");
     if (!name.trim()) return setError("Enter a name for the summary");
     if (!selectedProject) return setError("Select a project");
+    if (!model) return setError("Select an AI model");
     const apiKey = localStorage.getItem("apiKey");
     if (!apiKey) return setError("Set your API key in the navbar first");
 
@@ -65,7 +66,7 @@ export default function useSummarizeCodingPage() {
     form.append("coding", selectedCoding);
     form.append("api_key", apiKey);
     form.append("name", name.trim());
-    if (model) form.append("model", model);
+    form.append("model", model);
     if (additionalPrompt.trim()) form.append("prompt", additionalPrompt.trim());
     form.append("project_id", selectedProject);
 

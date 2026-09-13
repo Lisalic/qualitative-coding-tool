@@ -30,7 +30,7 @@ export default function CodebookAiPanel({ database, existingCodes, onProposals, 
       throw err;
     }
 
-    const { ok, data, error: runError } = await postJsonAndPoll(
+    const { ok, data, jobId, error: runError } = await postJsonAndPoll(
       "/api/codebook-preview/",
       payload,
       { onProgress: setProgress },
@@ -38,7 +38,7 @@ export default function CodebookAiPanel({ database, existingCodes, onProposals, 
     if (!ok) return { error: runError || "AI codebook assistant failed" };
 
     const proposed = data?.proposals || [];
-    const { added, skipped } = onProposals(proposed);
+    const { added, skipped } = onProposals(proposed, jobId);
     const parts = [
       `AI proposed ${proposed.length} code${proposed.length === 1 ? "" : "s"}; ` +
         `${added} new for review${skipped > 0 ? `, ${skipped} already covered` : ""}.`,

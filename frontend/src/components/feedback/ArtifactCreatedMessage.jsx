@@ -19,7 +19,7 @@ export default function ArtifactCreatedMessage({ name, viewPath, viewState, neut
       role="status"
       className={`px-4 py-3 text-center text-sm font-medium ${
         neutral
-          ? "border border-paper/40 bg-white/5 text-paper"
+          ? "border border-line bg-surface-raised text-paper"
           : "border border-success bg-success/10 text-success"
       }`}
     >

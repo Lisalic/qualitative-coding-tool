@@ -16,7 +16,7 @@ At least one coding artifact (from [Apply Codebook](apply-codebook.md), or a sav
 
 | Control | Notes |
 |---|---|
-| Project scope bar + coding picker | `ArtifactSelector` over `GET /api/my-files/?file_type=coding` |
+| Project scope bar + coding picker | `ArtifactPicker` over `GET /api/my-files/?file_type=coding` |
 | View mode tabs | "Text View" or "Table View" |
 | Table rows | per post: Post ID, and repeatable Code / Evidence / Notes triples; code entry is a union of codes already in the data and codes in the codebook tree |
 | Codebook tree (editable) | renaming a code here propagates the rename into every row that uses it |

@@ -54,7 +54,7 @@ cd frontend && npm run dev
 3. Create a project from the home page — see [Projects](tools/projects.md).
 4. Import a `.zst` dataset into that project — see [Import Data](tools/import-data.md).
 5. Optionally filter the raw data down to a subset — see [Filter](tools/filter.md).
-6. Write a codebook from the raw or filtered data — see [Codebook](tools/codebook.md).
+6. Write a codebook from the raw or filtered data — see [Create Codebook](tools/codebook.md).
 7. Apply the codebook to produce coded output — see [Apply Codebook](tools/apply-codebook.md).
 8. Compare codebooks/codings or summarize the coding output, as needed.
 
