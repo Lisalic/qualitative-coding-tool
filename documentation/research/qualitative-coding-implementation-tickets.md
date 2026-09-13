@@ -1,8 +1,12 @@
 # Qualitative Coding Implementation Tickets
 
-**Prepared:** 2026-09-11  
-**Input audit:** `qualitative-coding-roadmap-audit.md`  
-**Use:** canonical backlog for a multi-agent implementation campaign
+**Prepared:** 2026-09-11 · **Status revised:** 2026-09-12
+**Input audit:** `qualitative-coding-roadmap-audit.md`
+**Use:** retained backlog for future campaigns; every ticket must be checked against the current code before dispatch
+
+Ticket state is intentionally not maintained in this file. Use `qualitative-coding-ticket-status.md` as the sole operational ledger and a run-specific `campaign/YYYYMMDD-short-name/next-wave.md` as the short-term dispatch plan. Labels such as “COMPLETED” below describe the retained contract; the ledger decides whether work may be dispatched.
+
+The first campaign completed `QC-001`, `QC-002`, `QC-005`, `QC-006`, and `QC-007`. Do not redispatch them. `QC-002` below records the owner-approved hybrid comparison contract that superseded the pilot's original computed-cross-artifact design.
 
 ## Global definition of done
 
@@ -29,13 +33,13 @@ Every ticket must satisfy all of these in addition to its own acceptance checks:
 - **Acceptance:** unauthorized or cross-owner refs fail; CSV opens with correct quoting/newlines; JSON validates against documented examples; historical export matches historical reads; empty artifacts export headers/metadata rather than erroring; focused route/service/UI tests pass.
 - **Visual reference:** place an `Export` action in the `PageShell` toolbar of existing view pages, using the existing dropdown and button primitives; screenshot the menu and successful download state.
 
-### QC-002 — Computed cross-artifact comparison
+### QC-002 — Version-history comparison and restored LLM cross-artifact comparison — COMPLETED
 
-- **Desired result:** replace free-form LLM comparison as the default with deterministic codebook and coding comparisons: only-in-A/B, stable-identity matches, renamed/redefined/moved codes, per-code counts, applied/removed evidence, and a clear “unrelated histories” case. LLM semantic matching may be an explicit optional assist, never the source of computed facts.
-- **Affected area:** `backend/app/core/codebook_diff.py`, `core/coding_diff.py`, comparison services/routes, comparison React components, old comparison docs/tests.
-- **Dependencies:** none; reuse the existing same-artifact diff logic.
-- **Acceptance:** fixture comparisons pin every result category; swapping A/B reverses directional fields; no model/API key is required for computed comparison; unrelated codebooks match only by documented rules; current comparison files remain readable or receive a documented migration path.
-- **Visual reference:** reuse `CompareDualSelectPanel` and render a split results table in the existing comparison page; screenshot identical, divergent, and empty comparisons.
+- **Delivered contract:** deterministic codebook comparison is a same-artifact version-history tool, matching the established coding version-history comparison UI. Deterministic coding version comparison remains there. LLM-powered codebook and coding comparisons are restored as the cross-artifact workflows.
+- **Persistence and viewing:** LLM comparison results are stored as files and remain viewable through their comparison views; previously stored comparison artifacts retain a readable path.
+- **Export:** project export includes the stored comparison artifacts and their identifying metadata.
+- **Methodological boundary:** deterministic history views report structural facts; LLM cross-artifact comparisons are explicitly labeled interpretive outputs and never presented as reliability statistics.
+- **Verification contract:** tests cover both comparison types, file persistence and authorization, existing-file viewing, codebook/coding version-history UI parity, and project-export inclusion.
 
 ### QC-003 — Extend an existing artifact's row set
 
@@ -363,14 +367,14 @@ Every ticket must satisfy all of these in addition to its own acceptance checks:
 - **Acceptance:** existing Reddit flows and historical artifacts remain compatible; TXT/CSV round-trip through coding/export; stable text-unit IDs and offsets survive derivation; mapping preview rejects ambiguous rows; a migration/backfill plan is proven on a disposable PostgreSQL database.
 - **Visual reference:** import mapper reusing the two-step form/editor language; screenshot TXT, clean CSV mapping, and invalid mapping.
 
-## Pilot wave
+## Completed pilot record
 
-The first autonomous wave is deliberately five tickets:
+The first autonomous wave covered:
 
 1. `QC-001` CSV/JSON export
-2. `QC-002` computed comparison
+2. `QC-002` comparison architecture, later superseded by the completed hybrid contract above
 3. `QC-005` usage/cost accounting
 4. `QC-006` partial-job semantics
 5. `QC-007` coverage dashboard
 
-Assign one worker per ticket only after an integration lead establishes non-overlapping file ownership. If `QC-005` and `QC-006` overlap in the job/client contract, sequence them or give both to one worker. Promote beyond the pilot only if at least four of five tickets meet acceptance without regressions and the integration reviewer can explain every residual failure.
+These tickets are historical completed work, not the next dispatch queue. Future campaigns follow `agent-worktree-orchestration-process.md`, take operational state from `qualitative-coding-ticket-status.md`, and must remove completed, overlapping, or redundant work before creating worker sessions.

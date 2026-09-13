@@ -418,24 +418,23 @@ Why implemented this way:
 
 User-facing behavior:
 
-- Compare two codebooks or two coding outputs with a deterministic, no-LLM structural/classification diff.
+- Ask an LLM to compare two codebooks or two coding outputs — similarities/differences, conflicting or inconsistent codes, merge/reconciliation suggestions, an overall recommendation — and save the narrative result as a `codebook_comparison`/`coding_comparison` artifact.
+- For a deterministic, no-LLM structural/classification diff between two *versions of the same artifact's own history* instead (not the LLM narrative comparison of two arbitrary artifacts here), open that artifact's Version History page (`GET /api/artifacts/{ref}/diff`, `frontend/src/components/versioning/VersionHistoryPanel.jsx`) — see "Lineage and traceability" below.
 
 Frontend implementation:
 
 - Pages: `frontend/src/pages/CompareCodebook.jsx`, `frontend/src/pages/CompareCoding.jsx`
-- Shared compare container and data hook: `frontend/src/components/compare/ComparePageContainer.jsx`, `frontend/src/components/compare/useComparePageData.js`
+- Shared compare container and data hook: `frontend/src/components/compare/ComparePageContainer.jsx`, `frontend/src/components/compare/useComparePageData.js`, `CompareDualSelectPanel.jsx`, `CompareModelPromptPanel.jsx`, `CompareResultPanel.jsx`
 
 Backend implementation:
 
-- `GET /api/comparison/codebooks`
-- `GET /api/comparison/codings`
+- `POST /api/compare-codebooks/` — job type `compare_codebooks`
+- `POST /api/compare-codings/` — job type `compare_codings`
 
 Why implemented this way:
 
 - single configurable compare UI avoids duplicate page logic,
-- computed synchronously from each artifact's own stored codes/entries, so no API key, no background job, and no comparison artifact to manage — swapping A/B is a tested reversibility invariant.
-
-**Retired:** an earlier, LLM-generated one-shot comparison (`POST /api/compare-codebooks/`, `POST /api/compare-codings/`, plus `POST /api/save-comparison/` to persist the result as a `codebook_comparison`/`coding_comparison` artifact) has been removed. `save-comparison`/`save-summary` still exist as a generic "save this content as a comparison/summary artifact" endpoint, but nothing in this flow calls it any more; any comparison artifact created by the old flow before this change remains readable via View Codebook/View Coding.
+- saved comparison artifacts can be revisited and linked to projects like other outputs.
 
 ## 7b) Integrate Codebook
 
@@ -505,6 +504,7 @@ Why implemented this way:
 - `artifact_edges` (in `backend/app/versioning_models.py`) captures typed, ordered, version-pinned parent-child artifact relationships, replacing the old untyped `file_dependencies` table.
 - `artifact_versions` gives every artifact a full revision history (see "Artifact versioning" above / `documentation/architecture.md`), so lineage and revision are tracked as two separate, explicit concerns rather than one table conflating them.
 - This supports reproducible analysis chains across import -> filter -> codebook -> coding -> summary, and lets the UI walk the DAG via `GET /api/artifacts/{ref}/lineage` (`frontend/src/pages/Lineage.jsx`).
+- Every artifact also has a Version History page (`/versions?ref=...`, `frontend/src/components/versioning/VersionHistoryPanel.jsx`) that lists its own `artifact_versions` and diffs any two of them via `GET /api/artifacts/{ref}/diff` (`backend/app/api/version_routes.py`): a structural codebook diff (added/removed/renamed/redefined/moved/reordered codes, always computed) plus a type-specific content diff — a coding artifact's own `coding_entries` (rows recoded, per-code count deltas, applied/removed evidence), or a raw/filtered data artifact's own submissions/comments (rows added/removed). This is the deterministic, no-LLM counterpart to [Compare Codebook and Compare Coding](#7-compare-codebook-and-compare-coding) above — scoped to one artifact's own history rather than two arbitrary artifacts.
 
 ### AI-assist provenance
 
@@ -576,8 +576,8 @@ Main backend endpoints by domain:
 - Project/file metadata: `/api/projects/`, `/api/create-project/`, `/api/update-project/`, `/api/rename-file/`, `/api/my-files/`
 - Filtering: `/api/filter-preview/`, `/api/filtered-data/manual`, `/api/word-count-ranges/`
 - Row memos: `/api/memos/` (GET, PUT)
-- Codebook: `/api/codebook-preview/`, `/api/codebook/manual`, `/api/codebook`, `/api/codebook/{ref}` (PUT), `/api/list-codebooks`, `/api/integrate-codebook-preview/`, `/api/codebook/integrate`
-- Coding and summarization: `/api/coding/manual`, `/api/coding/{ref}`, `/api/coding/{ref}/rows`, `/api/coding/{ref}/text`, `/api/coding/{ref}/revision` (PUT), `/api/coding/{ref}` (PATCH), `/api/coding/{ref}/duplicate`, `/api/coding/{ref}/recode`, `/api/coding-comparison`, `/api/summarize-coding/`, `/api/save-comparison/`, `/api/save-summary/`, `/api/summary/{summary_id}`
-- Comparisons (deterministic, no LLM): `/api/comparison/codebooks`, `/api/comparison/codings`
+- Codebook: `/api/codebook-preview/`, `/api/codebook/manual`, `/api/codebook`, `/api/codebook/{ref}` (PUT), `/api/list-codebooks`, `/api/compare-codebooks/`, `/api/integrate-codebook-preview/`, `/api/codebook/integrate`
+- Coding and summarization: `/api/coding/manual`, `/api/coding/{ref}`, `/api/coding/{ref}/rows`, `/api/coding/{ref}/text`, `/api/coding/{ref}/revision` (PUT), `/api/coding/{ref}` (PATCH), `/api/coding/{ref}/duplicate`, `/api/coding/{ref}/recode`, `/api/coding-comparison`, `/api/compare-codings/`, `/api/summarize-coding/`, `/api/save-comparison/`, `/api/save-summary/`, `/api/summary/{summary_id}`
+- Versioning (deterministic, no LLM): `/api/artifacts/{ref}/versions`, `/api/artifacts/{ref}/diff`, `/api/artifacts/{ref}/lineage`, `/api/artifacts/{ref}/assists`
 - Export: `/api/export/{file_id}/codebook`, `/api/export/{file_id}/coding`, `/api/export/{file_id}/summary`, `/api/export/{file_id}/memos`, `/api/export/projects/{project_id}/bundle`
 

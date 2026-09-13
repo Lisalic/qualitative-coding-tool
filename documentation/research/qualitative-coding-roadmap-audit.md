@@ -1,42 +1,43 @@
 # Qualitative Coding Roadmap Audit
 
-**Audited:** 2026-09-11  
-**Source:** `qualitative-coding-landscape-and-expansion.md`  
-**Code snapshot:** the current working tree on 2026-09-11, including uncommitted changes  
+**Audited:** 2026-09-11 · **Status revised:** 2026-09-12
+**Source:** `qualitative-coding-landscape-and-expansion.md`
+**Code snapshot:** the 2026-09-11 audit, the completed pilot campaign, and the owner's declared comparison-restoration state on 2026-09-12
 **Purpose:** turn the research document's expansion avenues into a smaller, dependency-aware engineering campaign.
 
 ## Executive decision
 
-The source contains **83 numbered avenues**, not 90. Two are already marked and verified as shipped (`B1`, `C2`), leaving 81 open suggestions. The suggestions should not become 81 independent coding tasks: several describe the same underlying capability, several are market choices rather than software work, and several would add complexity before the product's basic export, measurement, and durability gaps are closed.
+The source contains **83 numbered avenues**, not 90. They should not become independent coding tasks: several describe the same underlying capability, several are market choices rather than software work, and several would add complexity before prerequisite capabilities exist.
 
-This audit converts the source into **42 canonical implementation tickets**:
+The original audit converted the source into **42 canonical implementation tickets**. The first campaign completed `QC-001`, `QC-002`, `QC-005`, `QC-006`, and `QC-007`; 37 tickets remain candidates for future work and must be rechecked against the current code before dispatch. `QC-002`'s original computed-cross-artifact contract was subsequently superseded by the implemented hybrid comparison design:
 
-- **9 P0 tickets:** unblock safe use and establish a five-ticket pilot wave.
-- **15 P1 tickets:** make work reportable, measurable, durable, and privacy-aware.
-- **15 P2 tickets:** add methodological depth, interoperability, and collaboration.
-- **3 P3 tickets:** large expansion bets that should wait for evidence from the earlier waves.
-- **2 verified done items:** retain as historical context, never redispatch.
-- **12 deferred source avenues:** reconsider only when their stated trigger is met.
-- **4 rejected or owner-decision source avenues:** do not send to coding agents.
+- deterministic codebook comparison belongs in version history and uses the established version-history comparison UI;
+- deterministic coding version comparison remains in version history;
+- LLM-powered comparison remains the cross-artifact workflow for both codebooks and codings;
+- LLM comparison results are stored and viewable as files; and
+- project export includes those comparison artifacts.
 
-The canonical tickets live in `qualitative-coding-implementation-tickets.md`. The orchestration instructions live in `gemini-antigravity-campaign-prompt.md`.
+The retained backlog lives in `qualitative-coding-implementation-tickets.md`. Operational ticket state lives only in `qualitative-coding-ticket-status.md`. The reusable orchestration instructions live in `agent-worktree-orchestration-process.md`; `documentation/research/campaign/` stores per-run dispatch plans, reports, intermediate results, and verification evidence.
 
 ## Product rule used in the audit
 
-Prioritize the product's defensible core: **human-authored, auditable, statistically honest AI-assisted qualitative coding**. Do not optimize for the largest feature count. Prefer computed and exportable results over more free-form LLM prose, reuse the existing version spine and three-pane editor patterns, and add no dependency where the standard library or an installed dependency is enough.
+Prioritize the product's defensible core: **human-authored, auditable, statistically honest AI-assisted qualitative coding**. Do not optimize for the largest feature count. Use deterministic comparison for facts grounded in a shared artifact's version history; use clearly labeled LLM output for interpretive comparison between separate artifacts. Keep both exportable and reviewable, reuse the existing version spine and three-pane editor patterns, and add no dependency where the standard library or an installed dependency is enough.
 
 ## Verified baseline
 
-The current code supports the source document's major claims:
+The campaign evidence and owner-declared comparison restoration support these current-state claims:
 
 - The one-shot AI filter/codebook/apply routes are gone; the editors use preview-and-review flows.
 - `CodingEntry.coder`/`coder_model` and `ArtifactAssist` exist, with service and test coverage.
 - Evidence offsets, versioned artifact history, structural same-artifact diffs, row memos, retrieval filters, and code frequency counts exist.
-- There are no export routes, reliability metrics, saturation reports, team membership model, generic document model, PII workflow, or configurable non-OpenRouter endpoint.
+- Deterministic CSV/JSON exports, analysis-ready long/wide coding layouts, code summaries, and a deterministic project bundle exist. The project bundle includes stored comparison artifacts under the restored comparison contract.
+- Deterministic codebook and coding comparisons are version-history tools. Cross-artifact codebook and coding comparison is LLM-powered, stored as files, and viewable through the restored comparison views.
+- A corpus coverage dashboard exists. Reliability metrics, saturation reports, team membership, generic document ingest, a PII workflow, and a configurable non-OpenRouter endpoint remain open.
+- Job accounting distinguishes unknown values from zero, and partial/cancellation behavior has explicit tested semantics.
 - Jobs persist status but their secret is process-local; startup deliberately fails orphaned jobs rather than resuming them.
 - The live OpenRouter catalog now updates through `ai_models.set_catalog()`. The old GAP-9 wording is stale. The remaining reproducibility gap is the absence of a per-run catalog snapshot and complete generation parameters.
 
-Because the working tree was already heavily modified during this audit, an orchestrator must treat all pre-existing changes as user-owned. It must never reset, stash, rewrite, or include them in a worker commit without explicit authorization.
+Future campaigns follow `agent-worktree-orchestration-process.md` and dispatch only tickets marked `Prepared` in `qualitative-coding-ticket-status.md`. The `main` and `overhaul/human-in-the-loop-interface` worktrees are read-only; all implementation and integration happens in isolated campaign worktrees.
 
 ## Priority definitions
 
@@ -96,7 +97,7 @@ Every source ID appears exactly once below. “Merged” means the idea is accep
 | C7 | Merge with narrower claim | `QC-031`; export the evidence chain and document its schema, but do not claim formal ATI compatibility without testing against a published machine-readable specification |
 | C8 | Merge | `QC-032` scoped read-only review and peer debriefing |
 | C9 | Merge | `QC-010` versioned AI execution manifest |
-| C10 | Accept, P0 | `QC-005` usage, call-count, duration, and cost accounting |
+| C10 | Done | `QC-005` usage, call-count, duration, and cost accounting completed in the first campaign |
 
 ### Theme D — Interoperability and ingest
 
@@ -104,7 +105,7 @@ Every source ID appears exactly once below. “Merged” means the idea is accep
 |---|---|---|
 | D1 | Accept, P1 | `QC-018` `.qdc` import/export |
 | D2 | Merge | `QC-031` `.qdpx` and portable research bundle |
-| D3 | Accept with staged scope, P0 | `QC-001` CSV and JSON first; add XLSX only if real consumers require it or an existing dependency already supports it |
+| D3 | Done | `QC-001` deterministic CSV/JSON and analysis-ready exports plus project bundle; XLSX remains deferred until a real consumer requires it |
 | D4 | Accept, P3 | `QC-042` generic text-unit ingest |
 | D5 | Defer | Build 4CAT/Communalytic adapters only after the generic text-unit model exists and a real export sample is available |
 | D6 | Defer | Arctic Shift acquisition adds network, policy, and provenance surface before core import/export is complete |
@@ -117,7 +118,7 @@ Every source ID appears exactly once below. “Merged” means the idea is accep
 
 | Source | Decision | Canonical ticket or reason |
 |---|---|---|
-| E1 | Merge | `QC-007` corpus coverage dashboard |
+| E1 | Done | `QC-007` corpus coverage dashboard completed in the first campaign |
 | E2 | Accept, P2 | `QC-035` code co-occurrence analysis |
 | E3 | Merge | `QC-026` framework matrix and crosstabs |
 | E4 | Accept with reduced scope, P2 | `QC-036` transparent time buckets and filters. No change-point algorithm until users ask for it and its assumptions can be shown |
@@ -125,8 +126,8 @@ Every source ID appears exactly once below. “Merged” means the idea is accep
 | E6 | Accept, P0 | `QC-008` quote bank and evidence shortlist |
 | E7 | Accept, P1 | `QC-019` full-text search over source, evidence, and memos |
 | E8 | Defer | Embeddings add infrastructure, cost, and a second retrieval model before basic full-text search is proven insufficient |
-| E9 | Merge | `QC-007`; density is one view of corpus coverage, not its own subsystem |
-| E10 | Accept, P0 | `QC-002` computed cross-artifact comparison |
+| E9 | Done through E1 | `QC-007`; density remains part of corpus coverage rather than its own subsystem |
+| E10 | Superseded and implemented | `QC-002` now separates deterministic same-artifact version comparison from stored, viewable, exportable LLM cross-artifact comparison |
 
 ### Theme F — Collaboration
 
@@ -175,8 +176,8 @@ Every source ID appears exactly once below. “Merged” means the idea is accep
 | I2 | Merge | `QC-022`; resumption without idempotent batch checkpoints is not acceptable |
 | I3 | Accept with tight limits, P1 | `QC-040` exact-request deduplication. No semantic cache and no cross-user cache |
 | I4 | Merge | `QC-010`; live catalog rebinding is already fixed, so only snapshots/parameters remain |
-| I5 | Accept, P0 | `QC-006` explicit partial-job failure semantics |
-| I6 | Merge | `QC-005` preflight call, cost, and time estimates |
+| I5 | Done | `QC-006` explicit partial-job failure semantics completed in the first campaign |
+| I6 | Done through C10 | `QC-005` preflight call, cost, and time estimates completed in the first campaign |
 | I7 | Merge conditionally | `QC-022`; streaming is scheduled only after durable checkpoints prove partial results can be resumed safely |
 
 ## Contradictions resolved
@@ -190,12 +191,11 @@ Every source ID appears exactly once below. “Merged” means the idea is accep
 
 ## Recommended sequence
 
-Run no more than 4–6 workers at once, and never assign overlapping files to concurrent workers.
+Do not redispatch the completed pilot tickets: `QC-001`, `QC-002`, `QC-005`, `QC-006`, or `QC-007`. Before each new campaign, inspect the current code and remove any newly completed or redundant assignments from the retained ticket backlog.
 
-1. **Pilot:** `QC-001`, `QC-002`, `QC-005`, `QC-006`, `QC-007`.
-2. **Core reporting and rigor:** `QC-003`, `QC-004`, `QC-010`–`QC-017`, `QC-019`–`QC-023`.
-3. **Interop and methodology:** `QC-018`, `QC-024`–`QC-031`, `QC-035`–`QC-040`.
-4. **Collaboration:** `QC-032`–`QC-034` only after the authorization design is reviewed as one coherent change.
-5. **Large bets:** `QC-041` and `QC-042` only with explicit product-owner approval and validation plans.
+1. **Core reporting and rigor:** `QC-003`, `QC-004`, `QC-010`–`QC-017`, `QC-019`–`QC-023`.
+2. **Interop and methodology:** `QC-018`, `QC-024`–`QC-031`, `QC-035`–`QC-040`.
+3. **Collaboration:** `QC-032`–`QC-034` only after the authorization design is reviewed as one coherent change.
+4. **Large bets:** `QC-041` and `QC-042` only with explicit product-owner approval and validation plans.
 
-Do not start a later wave merely because workers are idle. A wave advances only after its integration reviewer passes backend tests, frontend tests, lint, build, migration checks where applicable, and browser verification for visible changes.
+Follow `agent-worktree-orchestration-process.md`: dispatch only two to four distinct Flash implementation worktrees per wave, prohibit overlapping or redundant feature assignments, and require Opus report review and two-state planning before Sonnet integration. A wave advances only after independent review and observed backend, frontend, migration, build, lint-baseline, and browser gates as applicable.

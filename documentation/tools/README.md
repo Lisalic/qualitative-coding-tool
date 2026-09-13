@@ -13,9 +13,9 @@ One page per tool in the app. Each page covers, in order: purpose, where to find
 | [View Codebook](view-codebook.md) | `/codebook-view` | viewer/editor |
 | [Apply Codebook](apply-codebook.md) | `/codebook-apply` | editor |
 | [View Coding](view-coding.md) | `/coding-view` | viewer/editor |
-| [Compare Codebooks](compare-codebooks.md) | `/compare-codebook` | viewer (computed) |
+| [Compare Codebooks](compare-codebooks.md) | `/compare-codebook` | pipeline (AI) |
 | [Integrate Codebook](integrate-codebook.md) | `/integrate-codebook` | editor |
-| [Compare Codings](compare-codings.md) | `/compare-coding` | viewer (computed) |
+| [Compare Codings](compare-codings.md) | `/compare-coding` | pipeline (AI) |
 | [Summarize Coding](summarize-coding.md) | `/summarize-coding` | pipeline (AI) |
 | [View Summary](view-summary.md) | `/summaryview` | viewer |
 | [Prompt Manager](prompt-manager.md) | modal (no route) | admin |

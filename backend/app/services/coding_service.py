@@ -47,7 +47,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.app.core.evidence_match import find_quote
-from backend.app.core.exceptions import NotFoundError, ValidationAppError
+from backend.app.core.exceptions import ContextBudgetError, NotFoundError, ValidationAppError
 from backend.app.core.item_types import COMMENT, SUBMISSION, qualify_item_id, split_item_id
 from backend.app.database import (
     AsyncSessionLocal,
@@ -69,8 +69,11 @@ from backend.app.versioning_models import (
     ORIGIN_FORKED,
     ORIGIN_GENERATED,
     ORIGIN_IMPORTED,
+    RELATION_COMPARED,
     RELATION_DERIVED_FROM,
     ROLE_CODEBOOK,
+    ROLE_SIDE_A,
+    ROLE_SIDE_B,
     ROLE_SOURCE_DATA,
 )
 from backend.scripts.codebook_apply import classify_posts
@@ -1074,6 +1077,194 @@ async def _run_recode_items_job(job_id: int, payload: dict) -> dict:
         "prompt_meta": version_service.prompt_meta(rendered_prompt, batches=coverage.get("batches_total")),
         **validation_counts,
         **context_window.coverage_result_fields(coverage),
+    }
+
+
+# ---------------------------------------------------------------------------
+# start_compare_codings_job: kickoff + handler
+# ---------------------------------------------------------------------------
+
+
+async def start_compare_codings_job(
+    session: AsyncSession,
+    user_id: int,
+    *,
+    coding_a: str,
+    coding_b: str,
+    api_key: str,
+    model: str,
+    prompt: str,
+    name: str,
+    description: str | None = None,
+    project_id: int | None = None,
+) -> Job:
+    """Validate and enqueue a ``compare_codings`` background job.
+
+    Both schemas must resolve, via ``repositories/file_repo.py``, to a
+    coding file owned by ``user_id``.
+    """
+    schema_a = (coding_a or "").strip()
+    schema_b = (coding_b or "").strip()
+    if not schema_a.startswith("proj_") or not schema_b.startswith("proj_"):
+        raise ValidationAppError("schema names must be proj_<id>")
+    if not api_key:
+        raise ValidationAppError("api_key is required")
+    if not name or not name.strip():
+        raise ValidationAppError("name is required")
+
+    file_id_a = await file_repo.resolve_file_id(session, schema_a, user_id, file_types=_CODING_FILE_TYPES)
+    file_id_b = await file_repo.resolve_file_id(session, schema_b, user_id, file_types=_CODING_FILE_TYPES)
+
+    return await enqueue_job(
+        session,
+        user_id=user_id,
+        job_type="compare_codings",
+        payload={
+            "user_id": user_id,
+            "file_id_a": file_id_a,
+            "file_id_b": file_id_b,
+            "model": model,
+            "prompt": prompt or "",
+            "name": name,
+            "description": description,
+            "project_id": project_id,
+        },
+        runtime_extra={"api_key": api_key},
+    )
+
+
+@register_handler("compare_codings")
+async def _run_compare_codings_job(job_id: int, payload: dict) -> dict:
+    """Handler for ``job_type="compare_codings"``.
+
+    Persists the comparison as a ``File`` (``file_type="coding_comparison"``).
+    ``artifact_edges`` rows link the new file to BOTH source codings,
+    ordered ``side_a``/``side_b``.
+    """
+    from backend.scripts import summarize_coding as summarize_coding_module
+    from backend.scripts.codebook_generator import get_client as codebook_get_client
+
+    user_id = payload["user_id"]
+    file_id_a = payload["file_id_a"]
+    file_id_b = payload["file_id_b"]
+    model = payload.get("model")
+    prompt = payload.get("prompt", "")
+    api_key = payload["api_key"]
+    name = payload.get("name")
+    description = payload.get("description")
+    project_id = payload.get("project_id")
+
+    async with AsyncSessionLocal() as session:
+        await version_service.pin_parent(session, file_id_a)
+        await version_service.pin_parent(session, file_id_b)
+        file_a = await session.get(File, file_id_a)
+        file_b = await session.get(File, file_id_b)
+        text_a = await _read_coding_content(session, file_id_a)
+        text_b = await _read_coding_content(session, file_id_b)
+        await session.commit()
+
+    if not text_a and not text_b:
+        raise ValidationAppError("No content found in either coding")
+
+    name_a = (file_a.filename if file_a else None) or "Coding A"
+    name_b = (file_b.filename if file_b else None) or "Coding B"
+
+    system_prompt = (
+        "You are an expert qualitative researcher. Compare the two provided coded datasets.\n"
+        "Provide a clear, structured comparison including:\n"
+        "- Major overlaps and divergences in coding decisions\n"
+        "- Instances where codes appear inconsistent or misapplied\n"
+        "- Suggestions for reconciliation or re-labeling\n"
+        "- An overall recommendation and confidence level.\n"
+        f"Refer to the coded datasets by their names, \"{name_a}\" and \"{name_b}\", "
+        "not as \"Coding A\"/\"Coding B\".\n"
+        "Return the full comparison in a markdown format."
+    )
+    chosen_model = model
+
+    def _compare_user_prompt(body_a: str, body_b: str, *, aggregated: bool) -> str:
+        note = (
+            " Each coding is shown as per-code counts with sampled evidence, not the full coded text."
+            if aggregated
+            else ""
+        )
+        return (
+            f'Coding "{name_a}": {body_a} Coding "{name_b}": {body_b} '
+            f"Please compare them in detail.{note} Additional instructions: {prompt}"
+        )
+
+    def _fits(candidate: str) -> bool:
+        return context_window.prompt_fits(
+            chosen_model,
+            prompt_chars=len(system_prompt) + len(candidate),
+            output_reserve_tokens=context_window.BOUNDED_OUTPUT_TOKENS,
+        )
+
+    user_prompt = _compare_user_prompt(text_a, text_b, aggregated=False)
+    if not _fits(user_prompt):
+        # The raw codings overflow the window (no batching -- a comparison
+        # is inherently over the whole corpus). Compact each side to
+        # per-code counts + sampled evidence, the same SQL aggregation
+        # summarize uses: far smaller, and a GROUP BY COUNT(*) beats an LLM
+        # eyeballing frequency from two walls of text. A side with no
+        # structured coding_entries rows (a coding_comparison, which has
+        # none) falls back to its raw text.
+        async with AsyncSessionLocal() as session:
+            summaries_a = await coding_repo.code_summary_with_samples(session, file_id_a)
+            summaries_b = await coding_repo.code_summary_with_samples(session, file_id_b)
+
+        agg_a = summarize_coding_module.build_aggregated_coding_data(summaries_a) if summaries_a else text_a
+        agg_b = summarize_coding_module.build_aggregated_coding_data(summaries_b) if summaries_b else text_b
+        user_prompt = _compare_user_prompt(agg_a, agg_b, aggregated=True)
+
+        if not _fits(user_prompt):
+            raise ContextBudgetError(
+                f"These two codings are too large to compare with {chosen_model}, even after "
+                "summarizing each to per-code counts. Choose a larger-context model."
+            )
+
+    comparison = await codebook_get_client(system_prompt, user_prompt, api_key, chosen_model)
+
+    final_description = (description or "").strip() if description is not None else None
+    if final_description == "":
+        final_description = None
+
+    async with AsyncSessionLocal() as session:
+        new_schema = f"cmp_{secrets.token_hex(6)}"
+        file_rec = File(
+            user_id=user_id,
+            filename=name,
+            schemaname=new_schema,
+            file_type="coding_comparison",
+            description=final_description,
+        )
+        session.add(file_rec)
+        await session.flush()
+
+        await version_service.commit_blob_version(
+            session,
+            file_id=file_rec.id,
+            author_user_id=user_id,
+            origin=ORIGIN_GENERATED,
+            content=comparison,
+            job_id=job_id,
+            model=chosen_model,
+            parents=[
+                EdgeSpec(parent_file_id=file_id_a, relation=RELATION_COMPARED, role=ROLE_SIDE_A, position=0),
+                EdgeSpec(parent_file_id=file_id_b, relation=RELATION_COMPARED, role=ROLE_SIDE_B, position=1),
+            ],
+        )
+
+        if project_id is not None:
+            project = await project_repo.get_owned_project(session, project_id, user_id)
+            await async_link_file_to_project(session, file_rec.id, project.id)
+
+        await session.commit()
+        file_id, schema_name, filename = file_rec.id, file_rec.schemaname, file_rec.filename
+
+    return {
+        "comparison": comparison,
+        "file": {"id": str(file_id), "schema_name": schema_name, "filename": filename},
     }
 
 

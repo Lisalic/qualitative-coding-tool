@@ -49,10 +49,9 @@ See [tools/prompt-manager.md](tools/prompt-manager.md).
 | PUT | `/api/codebook/{ref}` | JSON `{codes}` | saves a new version (the codebook editor's Refine mode, and View Codebook's save) | direct |
 | POST | `/api/codebook-preview/` | JSON `{api_key, database, model, prompt?, sample_percentage, content_scope, existing_codes?}` | `202 {job_id, status}` → result `{proposals, partial?}` — creates nothing | **job** |
 | POST | `/api/codebook/manual` | JSON `{database, name, description?, project_id?, codes}` | `{message, file}` — the codebook editor's only create path | direct |
+| POST | `/api/compare-codebooks/` | `as_form(CompareCodebooksRequest)` | `202 {job_id, status}` → result `{comparison, file}` | **job** |
 | POST | `/api/integrate-codebook-preview/` | JSON `{api_key, codebooks, model, prompt?, existing_codes?}` | `202 {job_id, status}` → result `{proposals, partial?}` — creates nothing | **job** |
 | POST | `/api/codebook/integrate` | JSON `{codebooks, name, description?, project_id, codes, assist_runs?}` | `{message, file}` — the integrate editor's only create path | direct |
-
-`compare-codebooks` (an LLM-generated, job-backed comparison) has been retired in favor of the deterministic `GET /api/comparison/codebooks` — see the Comparisons section below.
 
 See [tools/codebook.md](tools/codebook.md), [tools/view-codebook.md](tools/view-codebook.md), [tools/compare-codebooks.md](tools/compare-codebooks.md), [tools/integrate-codebook.md](tools/integrate-codebook.md).
 
@@ -66,22 +65,14 @@ See [tools/codebook.md](tools/codebook.md), [tools/view-codebook.md](tools/view-
 | PUT | `/api/coding/{ref}/revision` | JSON (codebook edits and/or row edits) | saves the whole editing session as at most one new version | direct |
 | POST | `/api/coding/{ref}/recode` | JSON `{api_key, item_ids, model?, methodology?}` | `202 {job_id, status}` → result `{proposals, ...}` — stages proposals, writes nothing | **job** |
 | POST | `/api/coding/{ref}/duplicate` | `{display_name, from_version_no?}` | forks the whole artifact | direct |
+| POST | `/api/compare-codings/` | form: `coding_a`, `coding_b`, `api_key`, `name` (required), `model`, `prompt`, `description`, `project_id` (optional) | `202 {job_id, status}` → result `{comparison, file}` | **job** |
 | POST | `/api/summarize-coding/` | form: `coding`, `api_key`, `name` (required), `model`, `prompt`, `description`, `project_id` (optional) | `202 {job_id, status}` → result `{summary, file}` | **job** |
 
-`summarize-coding` uses raw `Form(...)` params, not a Pydantic schema. `compare-codings` (an LLM-generated, job-backed comparison) has been retired in favor of the deterministic `GET /api/comparison/codings` — see the Comparisons section below.
+`compare-codings` and `summarize-coding` use raw `Form(...)` params, not Pydantic schemas — unlike the job endpoints built on `as_form(...)`.
 
 See [tools/apply-codebook.md](tools/apply-codebook.md), [tools/view-coding.md](tools/view-coding.md), [tools/compare-codings.md](tools/compare-codings.md), [tools/summarize-coding.md](tools/summarize-coding.md).
 
-## Comparisons — `backend/app/api/comparison_routes.py`
-
-Deterministic, no-LLM cross-artifact diffs. No API key, no background job — computed and returned synchronously.
-
-| Method | Path | Query | Response | Kind |
-|---|---|---|---|---|
-| GET | `/api/comparison/codebooks` | `file_a`, `file_b` (ref or id), `version_a?`, `version_b?` | structural code diff: `added`/`removed`/`renamed`/`redefined`/`moved`/`reordered`/`unchanged`, `unrelated_histories`, `is_empty` | direct |
-| GET | `/api/comparison/codings` | `file_a`, `file_b` (ref or id), `version_a?`, `version_b?` | classification diff: row/coded counts, `rows_recoded`/`rows_newly_coded`/`rows_newly_uncoded`, per-code deltas with evidence | direct |
-
-Backed by `backend/app/services/comparison_service.py` (`compare_codebooks`/`compare_codings`) and `backend/app/core/codebook_diff.py`/`coding_diff.py`. Swapping A/B is a tested reversibility invariant. See [tools/compare-codebooks.md](tools/compare-codebooks.md), [tools/compare-codings.md](tools/compare-codings.md).
+Structural (no-LLM) diffing between two versions of the *same* codebook/coding artifact — as opposed to the LLM narrative comparison of two arbitrary artifacts above — lives at `GET /api/artifacts/{ref}/diff` (`backend/app/api/version_routes.py`), not as a standalone comparison endpoint.
 
 ## Export — `backend/app/api/export_routes.py`
 
@@ -146,22 +137,20 @@ See [tools/projects.md](tools/projects.md).
 
 ## Request schemas (Pydantic, `backend/app/api/schemas.py`)
 
-Every request body in the tables above is a JSON body validated against one
-of these models — there is no remaining endpoint built on `as_form(...)`.
-That adapter (which turned a Pydantic model into a FastAPI dependency
-reading `multipart/form-data` fields) existed for exactly one caller,
-`CompareCodebooksRequest`; once `compare-codebooks` was retired (see the
-Comparisons section above), `as_form` had zero remaining callers and was
-deleted rather than kept as unused infrastructure. The handful of
-endpoints still on multipart (`summarize-coding`, and the retired
-one-shot `FilterDataRequest`/`GenerateCodebookRequest`/
-`ApplyCodebookRequest` tools before them) never went through it: they
-take raw `Form(...)` parameters per field, no Pydantic model in between.
-The editors (`FilterPreviewRequest`, `ManualFilterRequest`,
+`CompareCodebooksRequest` is the one remaining endpoint built on `as_form(...)`
+(`multipart/form-data`, whitespace-stripped, unknown fields ignored): `api_key`
+(required), `codebook_a`/`codebook_b` (required, `proj_<hex>` pattern each,
+`^proj_[A-Za-z0-9_]+$`), `name` (required), `model`/`prompt`/`description`/
+`project_id` (all optional). The one-shot `FilterDataRequest`/
+`GenerateCodebookRequest`/`ApplyCodebookRequest` schemas this table used to
+compare it against were retired along with their endpoints; the editors that
+replaced them (`FilterPreviewRequest`, `ManualFilterRequest`,
 `CodebookPreviewRequest`, `ManualCodebookRequest`, `ManualCodingRequest`,
 `RecodeItemsRequest`) are JSON bodies instead, since each carries a list
 (decided ids, existing codes, or row ids) that doesn't map onto flat form
-fields — see the request bodies in the tables above.
+fields — see the request bodies in the tables above. `compare-codings`/
+`summarize-coding` take raw `Form(...)` parameters per field, no Pydantic
+model in between.
 
 ## Errors
 

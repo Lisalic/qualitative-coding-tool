@@ -1,25 +1,25 @@
 """Pydantic request/response contracts for the filter/codebook/coding editors.
 
-These models are the single source of truth for the shape of data the
-frontend sends to the FastAPI handlers -- every request body below is a
-JSON body FastAPI validates against one of these models directly.
+These models are the single source of truth for the shape of data sent from
+the frontend `FormData` builders to the FastAPI handlers. They are consumed
+by the routes through :func:`as_form`, which adapts a Pydantic model into a
+FastAPI `Depends`-able that reads `multipart/form-data` fields.
 
-(This module used to also export ``as_form``, an adapter that turned a
-Pydantic model into a FastAPI dependency reading ``multipart/form-data``
-fields, for the one endpoint -- the now-retired LLM ``compare-codebooks``
--- that used a Pydantic model over multipart instead of JSON. It had zero
-remaining callers once that endpoint was removed and was deleted rather
-than kept as unused infrastructure. The handful of endpoints still on
-multipart -- ``summarize-coding``, the earlier one-shot AI tools --
-never went through it: they take raw ``Form(...)`` parameters per field,
-with no Pydantic model in between.)
+Keeping the wire format as `multipart/form-data` means the frontend tool
+panels don't have to change their transport, while the backend gets strict
+field-level validation (422 on bad input) and accurate OpenAPI docs.
 """
 from __future__ import annotations
 
+import inspect
 import re
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, Type, TypeVar
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from fastapi import Form
+from fastapi.exceptions import RequestValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+
+T = TypeVar("T", bound=BaseModel)
 
 
 _SCHEMA_PATTERN = r"^proj_[A-Za-z0-9_]+$"
@@ -74,6 +74,43 @@ def _validate_codebook_ref_value(value: str) -> str:
             "codebook must be a numeric File id or a proj_<hex> schema name"
         ) from exc
     return raw
+
+
+def as_form(cls: Type[T]):
+    """Adapt a Pydantic model into a FastAPI dependency that reads form fields.
+
+    The returned callable has an ``inspect.Signature`` that mirrors the model's
+    fields, each with a ``Form(...)`` default. FastAPI introspects this
+    signature to build the multipart parser. Validation errors produced by the
+    Pydantic constructor propagate as ``RequestValidationError`` (HTTP 422).
+    """
+    parameters: list[inspect.Parameter] = []
+    for field_name, field_info in cls.model_fields.items():
+        if field_info.is_required():
+            form_default: Any = Form(...)
+        else:
+            form_default = Form(field_info.default)
+        parameters.append(
+            inspect.Parameter(
+                name=field_name,
+                kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                default=form_default,
+                annotation=field_info.annotation,
+            )
+        )
+
+    async def _as_form(**data: Any) -> T:
+        try:
+            return cls(**data)
+        except ValidationError as exc:
+            # FastAPI only converts ValidationError -> 422 when it happens
+            # during its own parameter-solving. Pydantic v2 raises its own
+            # ValidationError type, so we re-raise it as the one FastAPI knows.
+            raise RequestValidationError(errors=exc.errors()) from exc
+
+    _as_form.__signature__ = inspect.Signature(parameters)  # type: ignore[attr-defined]
+    _as_form.__name__ = f"as_form_{cls.__name__}"
+    return _as_form
 
 
 class _StrippingModel(BaseModel):
@@ -525,6 +562,24 @@ class ManualCodebookRequest(_StrippingModel):
     @classmethod
     def _strip_db_suffix(cls, value: Any) -> Any:
         return _strip_db_suffix_value(value)
+
+
+# ---------------------------------------------------------------------------
+# CompareCodebooks
+# ---------------------------------------------------------------------------
+
+
+class CompareCodebooksRequest(_StrippingModel):
+    """Payload for ``POST /api/compare-codebooks/``."""
+
+    codebook_a: str = Field(pattern=_SCHEMA_PATTERN)
+    codebook_b: str = Field(pattern=_SCHEMA_PATTERN)
+    api_key: str = Field(min_length=1)
+    name: str = Field(min_length=1, description="Display name for the comparison")
+    model: str = Field(min_length=1, description="OpenRouter model slug")
+    prompt: Optional[str] = Field(default=None)
+    description: Optional[str] = Field(default=None)
+    project_id: int = Field(description="Owning project -- every artifact belongs to one")
 
 
 # ---------------------------------------------------------------------------

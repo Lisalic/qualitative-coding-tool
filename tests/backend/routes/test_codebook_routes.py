@@ -3,8 +3,8 @@ GET /api/codebook, PUT /api/codebook/{ref}, POST /api/codebook/{ref}/import.
 
 These run against the in-memory async SQLite database
 (``override_async_db``) rather than a mocked sync ``engine``. The
-AI/job-kickoff routes in this module (generate-codebook) are covered
-separately in ``test_ai_and_raw_sql_routes.py`` at the
+AI/job-kickoff routes in this module (generate-codebook, compare-codebooks)
+are covered separately in ``test_ai_and_raw_sql_routes.py`` at the
 validation/auth-guard/202-shape boundary; their full job-handler behavior is
 covered by ``tests/backend/services/test_codebook_service.py``.
 """

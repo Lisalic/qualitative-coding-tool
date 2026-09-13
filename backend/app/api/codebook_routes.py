@@ -4,12 +4,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.schemas import (
     CodebookPreviewRequest,
+    CompareCodebooksRequest,
     DuplicateCodebookRequest,
     ImportCodebookRequest,
     IntegrateCodebookPreviewRequest,
     IntegrateCodebookRequest,
     ManualCodebookRequest,
     SaveCodebookRequest,
+    as_form,
 )
 from backend.app.core.auth_dependency import require_user_id
 from backend.app.database import get_async_db
@@ -299,3 +301,28 @@ async def duplicate_codebook(
             "display_name": file_rec.filename,
         }
     )
+
+
+@router.post("/compare-codebooks/")
+async def compare_codebooks(
+    payload: CompareCodebooksRequest = Depends(as_form(CompareCodebooksRequest)),
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
+) -> JSONResponse:
+    """Kick off a background job that compares two codebooks owned by the
+    authenticated user via the LLM, and return immediately with a job id
+    to poll instead of blocking the request.
+    """
+    job = await codebook_service.start_compare_codebooks_job(
+        db,
+        user_id,
+        codebook_a=payload.codebook_a,
+        codebook_b=payload.codebook_b,
+        api_key=payload.api_key,
+        model=payload.model,
+        prompt=payload.prompt or "",
+        name=payload.name,
+        description=payload.description,
+        project_id=payload.project_id,
+    )
+    return JSONResponse({"job_id": job.id, "status": job.status}, status_code=202)

@@ -14,16 +14,16 @@ job_type ``"codebook_preview"``) that proposes codes without creating
 anything, and a synchronous manual submit (``create_manual_codebook``)
 that materializes the researcher's accepted draft. Both share
 ``_assemble_source_records`` for sampling; only the preview job calls the
-LLM.
-
-``compare_codebooks`` (the LLM-generated, one-shot codebook-comparison
-job and its ``POST /api/compare-codebooks/`` route) has been retired:
-comparing two codebooks now goes through the deterministic, no-LLM
-``GET /api/comparison/codebooks`` route (``api/comparison_routes.py`` /
-``services/comparison_service.py``) instead. Any ``codebook_comparison``
-File rows created by the old job before this change remain readable --
-this module's ``get_codebook``/``list_codebooks`` still serve them -- but
-nothing creates new ones this way any more.
+LLM. ``compare_codebooks`` is a separate, still one-shot, background job
+(same job-queue pattern Stage 4/6 established for
+``summarize-coding``/``filter-data``): a synchronous ``start_*_job`` that
+validates and enqueues, and an ``@register_handler``-registered handler
+that does the actual LLM-call/persistence work off the request path.
+Structural code-identity diffing (added/removed/renamed/redefined/moved/
+reordered) is a separate concern, handled deterministically by
+``GET /api/artifacts/{ref}/diff`` for two versions of the same codebook's
+own history -- this job is for a model-written narrative comparison
+between two (possibly unrelated) codebooks instead.
 """
 
 from __future__ import annotations
@@ -61,10 +61,14 @@ from backend.app.versioning_models import (
     ASSIST_STAGE_INTEGRATE,
     ORIGIN_EDITED,
     ORIGIN_FORKED,
+    ORIGIN_GENERATED,
     ORIGIN_IMPORTED,
+    RELATION_COMPARED,
     RELATION_DERIVED_FROM,
     RELATION_MERGED_FROM,
     ROLE_MERGE_INPUT,
+    ROLE_SIDE_A,
+    ROLE_SIDE_B,
     ROLE_SOURCE_DATA,
     ArtifactVersion,
 )
@@ -680,6 +684,183 @@ async def create_manual_codebook(
     await session.commit()
     await session.refresh(file_rec)
     return file_rec
+
+
+# ---------------------------------------------------------------------------
+# compare_codebooks: background job kickoff + handler
+# ---------------------------------------------------------------------------
+
+
+async def start_compare_codebooks_job(
+    session: AsyncSession,
+    user_id: int,
+    *,
+    codebook_a: str,
+    codebook_b: str,
+    api_key: str,
+    model: str | None,
+    prompt: str,
+    name: str,
+    description: str | None = None,
+    project_id: int | None = None,
+) -> Job:
+    """Validate and enqueue a ``compare_codebooks`` background job.
+
+    Both schema names must resolve to a file owned by ``user_id`` via
+    ``repositories/file_repo.py`` before anything is enqueued. Keeps the
+    ``proj_<id>``-shape guard and ``api_key`` requirement.
+
+    ``name`` is required (matching ``create_project``'s
+    blank-name-check convention): the job
+    handler persists the comparison as a ``File`` artifact directly, so
+    it needs a display name up front rather than via a later separate
+    save step.
+    """
+    schema_a = require_valid_schema(codebook_a, field_name="codebook_a")
+    schema_b = require_valid_schema(codebook_b, field_name="codebook_b")
+    if not api_key:
+        raise ValidationAppError("api_key is required")
+    if not name or not name.strip():
+        raise ValidationAppError("name is required")
+
+    file_id_a = await file_repo.resolve_file_id(session, schema_a, user_id)
+    file_id_b = await file_repo.resolve_file_id(session, schema_b, user_id)
+
+    return await enqueue_job(
+        session,
+        user_id=user_id,
+        job_type="compare_codebooks",
+        payload={
+            "user_id": user_id,
+            "file_id_a": file_id_a,
+            "file_id_b": file_id_b,
+            "model": model,
+            "prompt": (prompt or "").strip(),
+            "name": name,
+            "description": description,
+            "project_id": project_id,
+        },
+        runtime_extra={"api_key": api_key},
+    )
+
+
+@register_handler("compare_codebooks")
+async def _run_compare_codebooks_job(job_id: int, payload: dict) -> dict:
+    """Handler for ``job_type="compare_codebooks"``.
+
+    Reads both codebooks' content via ``version_service.read_codebook_markdown``
+    after sealing each one's head via ``version_service.pin_parent`` (the
+    read-as-parent seal trigger), then ``await``s
+    ``codebook_generator.get_client`` directly.
+
+    Persists the comparison as a ``File`` (``file_type="codebook_comparison"``)
+    the same way ``_materialize_codebook`` persists a codebook -- no more
+    separate ``/api/save-comparison/`` step required.
+    ``artifact_edges`` rows link the new file to BOTH source codebooks,
+    ordered ``side_a``/``side_b`` -- that ordering is load-bearing, since
+    the comparison prose refers to the codebooks by name in that order.
+    """
+    user_id = payload["user_id"]
+    file_id_a = payload["file_id_a"]
+    file_id_b = payload["file_id_b"]
+    api_key = payload["api_key"]
+    model = payload["model"]
+    prompt = payload.get("prompt", "")
+    name = payload.get("name")
+    description = payload.get("description")
+    project_id = payload.get("project_id")
+
+    async with AsyncSessionLocal() as session:
+        # Read-as-parent: seal each codebook's head before reading its
+        # content, so the comparison can pin exactly which revision of
+        # each side it was built from.
+        await version_service.pin_parent(session, file_id_a)
+        await version_service.pin_parent(session, file_id_b)
+        text_a = await version_service.read_codebook_markdown(session, file_id_a)
+        text_b = await version_service.read_codebook_markdown(session, file_id_b)
+        file_a = await session.get(File, file_id_a)
+        file_b = await session.get(File, file_id_b)
+        await session.commit()
+
+    if not text_a and not text_b:
+        raise ValidationAppError("No content found in either codebook")
+
+    name_a = (file_a.filename if file_a else None) or "Codebook A"
+    name_b = (file_b.filename if file_b else None) or "Codebook B"
+
+    system_prompt = (
+        "You are an expert qualitative researcher. Compare the two provided codebooks.\n"
+        "Provide a clear, structured comparison including:\n"
+        "- Major similarities and differences\n"
+        "- Conflicting or duplicate codes\n"
+        "- Suggestions for merging or refining codes\n"
+        "- An overall recommendation and confidence level.\n"
+        f"Refer to the codebooks by their names, \"{name_a}\" and \"{name_b}\", "
+        "not as \"Codebook A\"/\"Codebook B\".\n"
+        "Return the full comparison as text (no extra JSON or metadata)."
+    )
+    user_prompt = (
+        f'Codebook "{name_a}": {text_a} Codebook "{name_b}": {text_b} '
+        f"Please compare them in detail. Additional instructions: {prompt}"
+    )
+
+    # Codebooks are compact taxonomies -- nothing to aggregate the way a
+    # coding comparison compacts its per-code rows -- so a comparison that
+    # overflows the window can only fail loudly (no batching: a comparison
+    # is inherently over both whole codebooks).
+    if not context_window.prompt_fits(
+        model,
+        prompt_chars=len(system_prompt) + len(user_prompt),
+        output_reserve_tokens=context_window.BOUNDED_OUTPUT_TOKENS,
+    ):
+        raise ContextBudgetError(
+            f"These two codebooks are too large to compare with {model}. "
+            "Choose a larger-context model."
+        )
+
+    comparison = await codebook_generator_module.get_client(system_prompt, user_prompt, api_key, model)
+
+    final_description = (description or "").strip() if description is not None else None
+    if final_description == "":
+        final_description = None
+
+    async with AsyncSessionLocal() as session:
+        new_schema = f"cmp_{secrets.token_hex(6)}"
+        file_rec = File(
+            user_id=user_id,
+            filename=name,
+            schemaname=new_schema,
+            file_type="codebook_comparison",
+            description=final_description,
+        )
+        session.add(file_rec)
+        await session.flush()
+
+        await version_service.commit_blob_version(
+            session,
+            file_id=file_rec.id,
+            author_user_id=user_id,
+            origin=ORIGIN_GENERATED,
+            content=comparison,
+            job_id=job_id,
+            model=model,
+            parents=[
+                EdgeSpec(parent_file_id=file_id_a, relation=RELATION_COMPARED, role=ROLE_SIDE_A, position=0),
+                EdgeSpec(parent_file_id=file_id_b, relation=RELATION_COMPARED, role=ROLE_SIDE_B, position=1),
+            ],
+        )
+
+        if project_id is not None:
+            project = await project_repo.get_owned_project(session, project_id, user_id)
+            await async_link_file_to_project(session, file_rec.id, project.id)
+
+        await session.commit()
+        file_id, schema_name, filename = file_rec.id, file_rec.schemaname, file_rec.filename
+
+    return {
+        "comparison": comparison,
+        "file": {"id": str(file_id), "schema_name": schema_name, "filename": filename},
+    }
 
 
 # ---------------------------------------------------------------------------

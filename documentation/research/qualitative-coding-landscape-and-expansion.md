@@ -1,12 +1,14 @@
 # Qualitative Coding in the Social Sciences — Methods, Rigor, Transparency, Competitors, and Expansion Avenues
 
-**Prepared:** 2026-08-23 · **Revised:** 2026-08-28, 2026-09-07
+**Prepared:** 2026-08-23 · **Revised:** 2026-08-28, 2026-09-07, 2026-09-12
 **Subject:** Research briefing for the Qualitative Coding Tool (this repository)
 **Purpose:** Establish what qualitative coding actually requires as a *method*, what standards of rigor and transparency the field enforces, what comparable tools already do, and — the main deliverable — an enumerated set of concrete avenues for expanding this application.
 
-**What changed in this revision (2026-09-07).** Sections §5.4, Part 6, and Parts 7–8 have been re-audited against the current codebase: implemented avenues removed, partially-implemented ones re-rated (S/M/L and ★) with an explanation of what remains, and Part 8's top-ten and roadmap re-ranked. Parts 1–5.3 (the literature review) and Part 9 (sources) are unchanged — they are not claims about this codebase.
+**What changed in the 2026-09-12 status revision.** The completed campaign added deterministic analysis-ready exports and a project bundle, corpus coverage, stronger job accounting and terminal-state behavior, and a revised comparison architecture. Deterministic codebook comparison now belongs beside coding comparison in version history. LLM-powered codebook and coding comparisons are restored as stored, viewable cross-artifact analyses and are included in project export. This status is owner-declared while the implementation session completes; this documentation update does not independently re-audit its code.
 
-The headline change since the last revision is the **human-in-the-loop editor rewrite**: the one-shot AI endpoints were *deleted*, and filtering, codebook generation and coding now each have a single entry point where the researcher works by hand and the AI can only propose into a review tray. Row memos landed alongside it, as did retrieval filters on the rows API. This is the strongest alignment with the research literature the product has — and it introduced exactly one new gap (GAP-4: AI assistance now leaves no durable trace), which is why that revision *added* an avenue as well as removing two. **Since then, GAP-4 has been closed**: `coding_entries.coder`/`coder_model` (B1, per-quote attribution) and the new `artifact_assists` table (C2, per-version assist provenance — model/prompts read from the job itself, never trusted from the client) now record exactly what the AI contributed and what the human did with it, without touching `origin`/`model` on the version. Running total: 96 avenues at first pass → 84 → 83 → **81** now, with 16 shipped.
+**What changed in the 2026-09-07 revision.** Sections §5.4, Part 6, and Parts 7–8 were re-audited against the then-current codebase: implemented avenues removed, partially-implemented ones re-rated (S/M/L and ★) with an explanation of what remained, and Part 8's top-ten and roadmap re-ranked. Parts 1–5.3 (the literature review) and Part 9 (sources) were unchanged — they are not claims about this codebase.
+
+The headline change since the earlier revisions is the **human-in-the-loop editor rewrite**: filtering, codebook generation, and coding each have a single entry point where the researcher works by hand and the AI proposes into a review tray. Row memos, retrieval filters, coder attribution, and per-version AI-assist provenance reinforce that design. The numbered avenues now remain in place as stable historical identifiers; shipped and superseded entries are marked rather than removed, so the document is no longer presented as a live numerical backlog.
 
 ---
 
@@ -16,9 +18,11 @@ The headline change since the last revision is the **human-in-the-loop editor re
 - **Part 4** covers the empirical evidence on LLM-assisted coding — what actually works, and what the failure modes are.
 - **Part 5** is the competitive landscape.
 - **Part 6** is an honest, code-grounded gap analysis of the app as it stands today.
-- **Part 7** is the payload: **83 numbered expansion avenues** (96 at first pass — 14 have shipped, 1 was newly created by the editor rewrite), grouped into nine themes, each with a rationale, a pointer into this codebase, and an effort/impact estimate.
+- **Part 7** is the payload: **83 historical expansion avenues**, grouped into nine themes. Completed and superseded entries remain for traceability; use the roadmap audit rather than the raw count as the dispatch backlog.
 - **Part 8** sequences them into a roadmap and names the ten highest-leverage bets.
 - **Part 9** lists sources.
+
+For campaign execution, use `qualitative-coding-ticket-status.md` for current ticket state, `qualitative-coding-implementation-tickets.md` for the durable contracts, and `agent-worktree-orchestration-process.md` for the operating procedure. This research file never authorizes a worker assignment by itself.
 
 Effort is rated **S** (days), **M** (a couple of weeks), **L** (a month or more). Impact is rated ★ to ★★★★★ in terms of how much it moves the tool toward being defensible for published research.
 
@@ -341,10 +345,10 @@ These tools *acquire and describe* data well but have essentially no qualitative
 | Data ingest breadth | **Weak** — Reddit `.zst` only | NVivo, 4CAT |
 | **AI-assist disclosure** | **Good — resolved** | `coding_entries.coder`/`coder_model` (per-quote) and `artifact_assists` (per-version: model, prompts, accepted/dismissed counts, read from the job itself) now record exactly what the AI contributed, without touching `origin`/`model` on the version. Closes what was GAP-4 |
 | Rigor apparatus (IRR, saturation) | **Absent** | Nobody does this well — *open territory* |
-| Transparency/reporting output | **Weak** — the underlying data is captured; nothing renders it as a methods section or disclosure statement | Nobody does this well — *open territory* |
-| Interoperability | **Absent** — but the codebook's data model (stable code identity, exclusion criteria, structured fields) is close to REFI-QDA shape | REFI-QDA members |
+| Transparency/reporting output | **Fair** — deterministic CSV/JSON, long/wide coding exports, code summaries, and a project bundle now exist; a methods section and AI-disclosure report do not | Nobody does disclosure reporting well — *open territory* |
+| Interoperability | **Partial** — the deterministic project bundle makes the app's own artifacts portable, including stored comparisons, but REFI-QDA `.qdc`/`.qdpx` remains absent | REFI-QDA members |
 | Collaboration | **Absent** — single-owner | Dedoose, Delve, Taguette |
-| Analysis/visualization | **Minimal** — code frequency computed and shown; no dashboards, co-occurrence, or crosstabs | MAXQDA, NVivo |
+| Analysis/visualization | **Fair** — code frequency and corpus coverage are shown; deterministic codebook/coding history comparison and stored LLM cross-artifact comparison cover different analytic questions; no co-occurrence or crosstabs | MAXQDA, NVivo |
 
 ---
 
@@ -354,15 +358,17 @@ These tools *acquire and describe* data well but have essentially no qualitative
 
 This is a direct, architectural implementation of the literature's central finding (§4.2): AI should *assist*, not *automate*, and researchers insisted on retaining autonomy over interpretive decisions. No competing tool enforces this at the level of "the one-shot path does not exist." **It also introduced one new gap, since closed** — see GAP-4 — because making the human the author of every artifact had the side effect of erasing the AI's contribution from the record entirely; B1/C2 (per-quote coder attribution, per-version assist provenance) have since restored it through a channel separate from `origin`/`model`.
 
+The subsequent campaign closed two other major product gaps. Analysis-ready CSV/JSON exports and a deterministic project bundle let coded work leave the application. Comparison is now deliberately split by epistemic role: deterministic codebook and coding comparison explain changes between versions of one artifact, while restored LLM-powered codebook and coding comparison interprets separate artifacts. LLM comparison results are stored as viewable files and travel with project export rather than masquerading as computed agreement statistics.
+
 Gap IDs are renumbered to reflect only what remains; the mapping to previous IDs is kept in parentheses for traceability.
 
 | # | Observation | Where | Why it matters methodologically |
 |---|---|---|---|
 | GAP-1 *(was 1, softened)* | **No sampling strategy beyond `ORDER BY RANDOM()`.** Purposive selection is now *possible by hand* — the editors let a researcher read and hand-pick rows, and `POST /api/coding/manual` accepts explicit row ids — but there is still no *supported, recorded* strategy (stratified, maximum-variation, extreme-case), and `sample_percentage` still draws at random. | `raw_data_repo.py::sample_submissions`/`sample_comments`; `coding/manual` | Hand-picking is a real purposive workflow, so this is no longer a hard block — but a strategy the tool can *name and record* is what TROUT-AI T7 asks for, and hand-picking doesn't scale past a few hundred rows. |
-| GAP-2 *(was 2)* | **No export of any kind.** No CSV, XLSX, JSON, QDPX, or report — confirmed still absent across `backend/app/api/`. | no export endpoints anywhere | Data is trapped. Blocks archiving, statistics, co-authorship, and the entire REFI-QDA interop story. **Still the single most indefensible remaining gap**, and increasingly odd next to how much analytic work the editors now let a researcher invest. |
+| **GAP-2 *(RESOLVED)*** | **Native export was absent.** **Fixed:** deterministic CSV/JSON exports now cover codebooks, codings, memos, summaries, analysis-ready long/wide layouts, and a project bundle. Stored comparison artifacts are included in project export. | export routes/services and project-bundle export | Closed for native formats. REFI-QDA and publication-ready reporting remain separate interoperability/reporting work. |
 | GAP-3 *(was 3)* | **Single-owner data model.** `File`/`Project` still carry only `user_id`; no sharing, roles, or teams. | `database.py` | Qualitative coding is overwhelmingly team-based. Blocks peer debriefing and any real double-coding/IRR workflow by construction. Now the *primary* structural blocker, since the single-researcher rigor stack is largely built. |
 | **GAP-4 *(RESOLVED)*** | **AI assistance leaves no durable trace.** An artifact assembled with heavy AI help used to be stored identically to a hand-built one. **Fixed**: `coding_entries.coder`/`coder_model` (B1) record who produced each coded quote and with what model; `artifact_assists` (C2) records, per version, every assistant run that contributed — model, prompts, proposed/accepted/dismissed counts — sourced from the referenced `jobs` row rather than trusted from the client. `origin`/`model` on `ArtifactVersion` are untouched, exactly as this row originally recommended. | `backend/app/core/coder_rollup.py`, `backend/app/services/assist_service.py`, `storage_models.py::CodingEntry`, `versioning_models.py::ArtifactAssist` | Closed. TROUT-AI **T14**/**T15** are now satisfiable — see avenue C2 (shipped) and, downstream, C3/C4. |
-| GAP-5 *(was 5)* | **Cross-artifact comparison is still LLM prose, not computed metrics.** `compare_codebooks`/`compare_codings` still return a self-assessed essay — now conspicuously the only part of the pipeline that was not rebuilt around verifiable, structured output. | `codebook_service.py:749`, `coding_service.py:1136` vs. `version_routes.py::diff_artifact` | Still the natural home for κ/α/AC1 and a confusion matrix. The structural-diff machinery (`core/codebook_diff.py`) already solves the codebook half — it just needs to accept two arbitrary file refs rather than two versions of one file. |
+| **GAP-5 *(RESOLVED, SCOPE CORRECTED)*** | **Comparison previously conflated structural history with cross-artifact interpretation.** **Fixed:** deterministic codebook comparison now lives in version history with the coding history comparison and matching UI; LLM-powered codebook and coding comparison is restored for separate artifacts, with results stored and viewable as files. | version-history comparison, LLM comparison jobs/views, comparison-file storage, project export | Closed as a product-architecture gap. LLM output remains interpretive and must not be presented as κ/α/AC1 or other computed reliability evidence. |
 | GAP-6 *(was 6)* | **Second-cycle coding is absent.** The pipeline still ends at codes → prose summary. | whole pipeline | Codes are not themes. Under Braun & Clarke the tool now supports Phases 1–2 *well* (the editors add real familiarization, which it previously lacked) but still skips Phases 3–5 entirely. |
 | GAP-7 *(was 7)* | **Reddit-only ingest** (`.zst` → `submissions`/`comments`). | `storage_models.py` | Excludes interviews, focus groups, open-ended survey items, documents — most of the qualitative research market. The editors make this gap *more* costly: a genuinely good hand-coding workspace is wasted on a corpus type most qualitative researchers don't have. |
 | GAP-8 *(was 8)* | **In-flight jobs are still lost on restart** (API key held only in the runner's closure). | `jobs/service.py` (documented trade-off) | Less severe than before — the editors persist working state to `localStorage`, so a lost preview job no longer loses the researcher's decisions, only the run. |
@@ -371,13 +377,13 @@ Gap IDs are renumbered to reflect only what remains; the mapping to previous IDs
 
 **Fair summary, updated.** The original finding — "the engineering is well ahead of the methodology" — no longer holds on the *process* axis. The editors implement, architecturally, what the literature asks for: familiarization before coding, the analyst as author, AI as a proposer whose every suggestion is individually accepted or dismissed, memos written while reading, and iteration that doesn't re-litigate settled decisions. That is a genuinely strong methodological position, and it is the app's clearest differentiator.
 
-What remains open is now sharply defined and falls in three buckets: **(1) nothing can leave** (GAP-2), **(2) nothing is measured** — no IRR, no saturation, no agreement statistics (GAP-5), and **(3) nobody else can join** — no teams (GAP-3). GAP-4 (no record of where the AI helped) is now closed. Notably, these are largely *output* problems rather than *capability* problems: the app now does the analytic work well, records where the AI contributed, and still cannot show most of that to anyone outside the browser tab (no methods appendix, no disclosure statement, no export).
+What remains open is now more specific: **(1) methodological measurement** — no IRR, saturation, or calibrated agreement statistics; **(2) publication reporting and standard interoperability** — no methods/disclosure generator or REFI-QDA exchange; and **(3) collaboration** — no teams. Native export, AI-assist provenance, coverage, and the comparison split are now present. The next credibility gains come from explaining and validating results, not from adding another generic comparison mode.
 
 ---
 
 # Part 7 — Expansion avenues
 
-**83 avenues, in nine themes** (96 in the first revision → 84 → 83 now; 14 have shipped in total, 1 new avenue added). Each: what it is, why the literature demands it, where it lands in this codebase, and effort/impact. Where an avenue's scope shrank because part of it shipped, the entry says so and the **S/M/L** rating reflects only what remains.
+**83 historical avenues, in nine themes.** Each records what it is, why the literature demands it, where it lands in this codebase, and its original effort/impact. Completed and superseded entries remain in place for traceability and are not work requests.
 
 ## Theme A — Methodological depth: become a real QDA tool, not a coding script
 
@@ -472,8 +478,8 @@ Walk the 20 questions across the 5 themes, pre-answering what the system knows (
 **C5. AI disclosure statement for journals.** ★★★★ · **S**
 A short COPE/ICMJE-compliant paragraph naming tool, model, version and tasks, correctly targeted at the **Methods** section (analysis/coding) rather than Acknowledgements (writing).
 
-**C6. Reproducibility bundle export.** ★★★★ · **M**
-A single archive: source data (or a hash + acquisition recipe), codebook versions, all prompts, model settings, coded output with offsets, memos, notes, the audit trail, and a `manifest.json`. Depositable in **QDR**, OSF, or Zenodo with a citable DOI. Blocked only on export (D3) existing at all.
+**C6. Reproducibility bundle export.** ★★★★ · **M** *(partially shipped)*
+A deterministic native project bundle now exports project artifacts, analysis-ready data, and stored comparison files. What remains for a true reproducibility deposit is a documented manifest covering source hashes/acquisition recipes, complete prompt and model settings, the full audit trail, external schema guarantees, and validation for QDR/OSF/Zenodo deposit.
 
 **C7. ATI-style annotated evidence export.** ★★★ · **S**
 Claim → annotation → excerpt → source. This is now *exactly* the `code → quote → start_offset/end_offset → post_id` chain in `coding_entries`, and row memos supply the "analytic note" layer ATI also expects. Export as ATI-compatible annotations so reviewers can click a claim and land on the underlying data. Novel; nobody offers it.
@@ -484,8 +490,8 @@ Peer debriefing and reviewer access without an account. Delve markets peer debri
 **C9. Prompt library with versioning.** ★★★ · **S**
 The `prompts` table and `PromptManager.jsx` remain unversioned — extend to immutable versions, hashes, and "which artifacts used this prompt version." Required by TROUT-AI T15 and by B5. The gap is more conspicuous now that the assistant is invoked repeatedly within a single editing session rather than once per artifact.
 
-**C10. Cost and token accounting.** ★★★ · **S**
-Per job, per project, cumulative. More useful than before: the editors invite *many* small assistant runs instead of one big one, so per-session cost is now a number researchers will actually want.
+**C10. Cost and token accounting. — RESOLVED** ★★★ · **S**
+Jobs now record calls, duration, tokens, and cost when known, while preserving unknown values as unknown rather than inventing zeroes. Project-level reporting can build on the stored accounting without changing the job contract.
 
 ## Theme D — Interoperability and data ingest: stop being an island
 
@@ -495,8 +501,8 @@ Round-trip codebooks with NVivo, ATLAS.ti, MAXQDA, Quirkos, f4analyse. The data 
 **D2. REFI-QDA Project (`.qdpx`) export.** ★★★★ · **M**
 Full project exchange — sources, codes, coded segments, memos, variables. **Both preconditions have now shipped**: character offsets (via the evidence-matching rewrite) and memos (via `RowMemo`), which `.qdpx` models as a first-class element. This is now a serialization job over data that exists in the right shape, sequenced after D1.
 
-**D3. Plain tabular exports.** ★★★★★ · **S**
-CSV/XLSX/JSON of coded segments, code frequencies, codebooks, and memos. Unblocks R/Python/SPSS analysis, and takes an afternoon. Confirmed still completely absent. **Remains the highest-priority item in the entire document** — and the case is stronger than ever: the editors now let a researcher invest hours of genuine hand-coding, and none of it can leave the browser.
+**D3. Plain tabular exports. — RESOLVED** ★★★★★ · **S**
+Shipped deterministic CSV/JSON exports for codebooks, coded segments, memos, summaries, code frequencies, and analysis-ready long/wide layouts, plus a deterministic project bundle. Stored LLM comparison files are included in project export. XLSX remains unnecessary until a real consumer requires it.
 
 **D4. Generic text ingest.** ★★★★★ · **L**
 Interview transcripts, focus groups, open-ended survey responses, field notes, documents (PDF/DOCX/TXT), and generic CSV with a column mapper. **This is the biggest market-size lever in the document**, and the editors raise its value sharply: the app now has a hand-coding workspace good enough that interview researchers would plausibly want it, applied to the one data type they don't have. *Where:* a `documents`/`text_units` table alongside `submissions`/`comments`, generalizing the pipeline over a "unit of analysis" abstraction; `core/item_types.py`'s submission/comment split is a workable template for a third type.
@@ -521,8 +527,8 @@ Upload a CSV of human codings to serve as the gold standard (B7) or as coder A i
 
 ## Theme E — Analysis and visualization: make the coded data answer questions
 
-**E1. Code frequency and distribution dashboard.** ★★★ · **S**
-Partially shipped: `code_frequency` is returned by `GET /api/coding/{ref}` and rendered in the codebook sidebar. What remains: share-of-corpus percentages, codes-per-post distribution, family rollups, and the uncoded percentage — a dashboard rather than a count list.
+**E1. Code frequency and distribution dashboard. — RESOLVED** ★★★ · **S**
+The corpus coverage dashboard presents coded/uncoded coverage, coverage percentage, code-family rollups, and code counts in the coding workspace. More advanced distribution analysis belongs in the later crosstab and reliability work rather than another coverage widget.
 
 **E2. Code co-occurrence matrix and network.** ★★★★ · **M**
 Which codes appear together on the same post/thread? MAXQDA's Code Relations Browser is the reference. A SQL self-join on `coding_entries`; with real offsets this also supports proximity- and overlap-based co-occurrence, not just same-item.
@@ -545,11 +551,11 @@ Browsing by code and searching text now exist (`code=`, `q=`, `only=` on the row
 **E8. Semantic search and embedding-based exploration.** ★★★ · **L**
 Cluster the corpus, surface exemplars and outliers, let researchers read before coding. Less critical than it was — the editors' reader panes now provide real familiarization (Braun & Clarke Phase 1) that the app previously skipped entirely — but still the way to make familiarization *scale* past what a person can read.
 
-**E9. Code-density heatmap over the corpus.** ★★ · **S**
-Which regions of the data are heavily coded and which are barren — a fast visual diagnostic for codebook fit, complementary to the `Uncoded (N)` selector.
+**E9. Corpus code-density view. — RESOLVED THROUGH E1** ★★ · **S**
+The coverage dashboard now exposes coded/uncoded balance and code-family density. A separate heatmap would duplicate that diagnostic unless a concrete spatial or temporal visualization requirement emerges.
 
-**E10. Cross-artifact codebook comparison as computed diff, not prose.** ★★★★ · **S**
-Replace `compare_codebooks`' essay with a structural comparison: codes only in A, only in B, matched by name, matched by `code_uid` where lineage makes that meaningful, definitional divergence — with the LLM used only for semantic matching of unrelated codebooks. **The hard part is already built**: `core/codebook_diff.py` computes exactly this for two versions of one artifact. Extend it to accept two file refs. Reuse, not new algorithm design — and now the last unreformed corner of the product (GAP-5).
+**E10. Separate structural history comparison from interpretive cross-artifact comparison. — RESOLVED** ★★★★ · **S**
+The initial proposal put deterministic comparison between arbitrary artifacts, but that overextended identity-based diffing into cases where string or stable-ID matches are usually uninformative. The implemented boundary is stronger: deterministic codebook comparison lives in version history and matches the existing coding version-history UI; LLM-powered codebook and coding comparison handles separate artifacts. LLM results are stored, viewable, and included in project export, while remaining explicitly interpretive rather than computed reliability evidence.
 
 ## Theme F — Collaboration: qualitative research is a team sport
 
@@ -651,11 +657,11 @@ Cache on (model, prompt hash, params). **More valuable than before**: the editor
 **I4. Model pinning and catalog snapshots.** ★★★ · **S**
 Bind model constants at call time, store the catalog snapshot per run, warn when a previously used model disappears (GAP-9). The artifact-level half shipped (`ArtifactVersion.model`); the forward-looking half remains.
 
-**I5. Rate-limit and quota handling with clear user feedback.** ★★★ · **S**
-Free OpenRouter models are frequently overloaded; the retry path exists but the failure semantics of a *partially* completed assist run need to be explicit in the editors.
+**I5. Rate-limit and quota handling with clear user feedback.** ★★★ · **S** *(partially resolved)*
+Partial, retryable-failure, failed, and cancelled jobs now have explicit terminal semantics, and salvaged output/accounting is preserved. Provider-specific quota messaging and resumable recovery remain part of I1/I2 rather than a new job state.
 
-**I6. Batch-size and cost estimation before submitting.** ★★★ · **S**
-`context_window.max_prompt_chars` already computes the batching; show "this will be 14 calls, ~$0.90, ~6 minutes" before the user commits.
+**I6. Batch-size and cost estimation before submitting. — RESOLVED THROUGH C10** ★★★ · **S**
+The shared AI-assist flow now exposes estimated calls, duration, and cost where provider data permits, with unknown values represented honestly.
 
 **I7. Streaming progress with partial results.** ★★★ · **M** *(upgraded — was ★★)*
 Stream proposals into the review tray as they arrive rather than at the end of the run. **More valuable than before**: the editors are interactive, and a researcher waiting on a multi-minute assist run is now blocked at their desk rather than off doing something else. `ProgressTracker` and the polling infrastructure are already in place.
@@ -666,11 +672,11 @@ Stream proposals into the review tray as they arrive rather than at the end of t
 
 ## 8.1 The ten highest-leverage bets
 
-Ranked by (methodological credibility gained) × (evidence in the literature) ÷ (effort), with dependencies noted. **Updated** — the human adjudication queue has shipped and drops off; B1 and C2 have since shipped too (B1 partially clearing #2, C2 fully clearing what was #3) — both left in place below with their resolved status noted, rather than renumbering the table.
+Historical ranking by (methodological credibility gained) × (evidence in the literature) ÷ (effort), with dependencies noted. Completed entries remain to explain campaign sequencing; use `qualitative-coding-roadmap-audit.md` for the next dispatch queue rather than selecting the first unresolved row mechanically.
 
 | Rank | Avenue | Why it wins |
 |---|---|---|
-| 1 | **D3 — Tabular export** | Still an afternoon's work removing an indefensible blocker, and the case is now stronger: researchers can invest hours of genuine hand-coding in the editors and none of it can leave. Nothing in Theme E, C6's repro bundle, or the statistics story works without it. |
+| 1 | **D3 — Tabular export — RESOLVED** | Deterministic CSV/JSON, analysis-ready layouts, and project-bundle export shipped. Retained here to record why it was the first campaign priority. |
 | 2 | **B1 (RESOLVED) + B3 — Coder identity and real IRR metrics** | B1 shipped: `coding_entries.coder`/`coder_model` records which entries are hand-coded vs. AI-proposed, rolled up per row. B3 (κ/α/AC1 with a per-code breakdown) is the remaining half — now genuinely unblocked rather than theoretically so. |
 | 3 | **C2 — AI-assist provenance channel — RESOLVED** | Shipped as `artifact_assists`: model, prompts, and accepted/dismissed counts per assistant run, sourced from the job rather than the client. Closed GAP-4. TROUT-AI disclosure (C4) is no longer blocked on this. |
 | 4 | **C3 + C4 — Methods appendix and TROUT-AI disclosure** | Nobody offers this, and the app's answer to T14 is now genuinely distinctive: "the AI proposed, a human accepted each item individually, here are the counts." Substantially a rendering task over data already held. |
@@ -681,13 +687,9 @@ Ranked by (methodological credibility gained) × (evidence in the literature) ÷
 | 9 | **F1 — Teams** | The single-researcher workflow is now good; nearly everything left in Theme B and C8 is blocked on the absence of a second user rather than on missing analytic machinery. |
 | 10 | **G2 — Quote traceability checker** | A documented ethical failure with no market equivalent, directly on-point for a Reddit tool with sensitive-community sample data in the repo. Natural home is the quote bank (E6). |
 
-**Honourable mention:** **E10** (cross-artifact codebook diff) — `core/codebook_diff.py` already exists, and the compare pages are now the last unreformed corner of the product.
-
 ## 8.2 A phased sequence
 
-**Phase 1 — "Let the work out, and say who did it" (≈ 2–4 weeks).** *Goal: nothing left that undermines the credibility the editors and the version spine already bought.*
-D3 (export) → C2 (assist provenance) → I4 (model pinning residual) → E1 (frequency dashboard) → C1 (audit-trail rollup).
-*Outcome:* the analytic work can leave the browser, and the record honestly says where the AI helped.
+**Completed foundation — "Let the work out, and say who did it."** D3 export, C2 assist provenance, E1 coverage, job accounting/partial semantics, and the corrected comparison architecture have shipped. The remaining foundation work is I4 (model-run snapshots) and C1 (audit-trail rollup).
 
 **Phase 2 — "Measure it" (≈ 6–10 weeks).** *Goal: the tool produces numbers, not just artifacts.*
 B1 (coder identity) → B2 (blind double-coding) → B3 (IRR metrics) → A6 (saturation) → B9 (confidence-ordered review tray) → A4 (reflexivity).
@@ -705,13 +707,13 @@ D4 (generic text ingest — the biggest market lever) → H3/H4 (screening, poli
 
 ## 8.3 The strategic thesis in one paragraph
 
-**Updated.** The first revision argued that the market was splitting into tools that are methodologically credible but weakly AI-enabled and tools that are strongly AI-enabled but methodologically illiterate, and that nobody was building the tool that verifies quotes, tracks provenance, keeps a human adjudicating, and documents itself by default. This app has now built **all four**: evidence matching rejects hallucinated quotes and codes before storage, the version spine records what produced every artifact, the one-shot AI paths were *deleted* so the AI can only propose and a human accepts every item individually, and — since GAP-4 closed — the record of *where* the AI helped is durable too (`coding_entries.coder`/`coder_model`, `artifact_assists`), not just that a human ultimately authored the result. That combination — verified quotes, full provenance including the AI's own contribution, and an architecturally-enforced human-in-the-loop — is the strongest alignment with the research literature in the entire product, and no competitor enforces it architecturally. What remains is **documenting and exporting it to anyone outside the browser tab**: nothing computes inter-coder reliability yet (B1 is shipped, B3 is not), nothing renders a methods section or a disclosure statement, nothing exports in any format, and there is still no second user. Closing that is mostly Theme C (now genuinely unblocked) plus a single afternoon's export work.
+**Updated.** The app now combines verified quotes, version and AI-assist provenance, an architecturally enforced human-in-the-loop, deterministic native exports, coverage reporting, and an honest separation between structural history comparison and LLM interpretation across artifacts. That is a stronger position than either "all comparison must be computed" or "let the model narrate everything." What remains is methodological validation and publication reporting: no inter-coder reliability engine, saturation report, methods/disclosure generator, REFI-QDA exchange, or second user. Those gaps now matter more than adding another general-purpose AI analysis surface.
 
 ## 8.4 What *not* to build
 
 - **Don't chase Dovetail on transcription/repository polish.** Well-funded, crowded, and orthogonal to the defensible advantage.
 - **The `origin=edited` decision was correctly left alone when GAP-4 was fixed.** Overloading `origin`/`model` to mean "AI helped" would have destroyed their audit value. `artifact_assists` (C2) and `coding_entries.coder` (B1) are the separate channels that closed the gap instead — a worked example, now shipped, of the principle this bullet originally warned about.
-- **Don't add more free-form LLM prose outputs.** `compare_codebooks`/`compare_codings` are now the last unreformed corner of the product — everything around them was rebuilt around verifiable, structured, human-reviewed output and these two were not. Convert them to computed results (E10) by reusing `core/codebook_diff.py`, not by rebuilding it.
+- **Don't confuse LLM interpretation with deterministic evidence.** Keep structural codebook/coding comparison in version history. Keep cross-artifact LLM comparison stored, viewable, exportable, and clearly labeled; never present its narrative as κ/α/AC1, a structural diff, or an objective match score.
 - **Don't impose IRR universally.** For reflexive TA it is a category error; Braun & Clarke are explicit. Make it a per-tradition option (A9).
 - **Don't market full automation** — and note the app is now architecturally incapable of it, which is the *better* story. Every study reviewed here concludes that LLMs should augment rather than replace; the editors embody that correctly. Lead with it.
 ---

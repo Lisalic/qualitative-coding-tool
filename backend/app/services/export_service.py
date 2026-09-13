@@ -7,6 +7,11 @@ and ``wide`` (one row per dataset item, including uncoded ones, with a
 column per code) -- see ``export_coding``. The summary export groups by
 ``code_uid``, never by code name, so a rename doesn't fragment history --
 see ``export_summary``/``repositories/export_repo.py::get_code_frequencies_by_uid``.
+The project bundle (``export_project_bundle``) also carries any
+``codebook_comparison``/``coding_comparison`` artifact in the project as
+its raw markdown blob under ``comparisons/`` -- unlike codebook/coding, a
+comparison has no structured rows to serialize into CSV, so its content
+is exported as-is rather than reshaped.
 
 Privacy: ``include_source_text``/``include_author`` on ``export_coding``
 and ``export_project_bundle`` both default to ``False`` -- an export is
@@ -441,7 +446,7 @@ async def export_project_bundle(
 ) -> tuple[bytes, str, str]:
     """Deterministic ZIP bundle of every artifact in a project: a
     manifest with a SHA-256 per file, the project's lineage graph, and
-    every codebook/coding (long + wide + summary)/memos export.
+    every codebook/coding (long + wide + summary)/memos/comparison export.
 
     Byte-deterministic: entries are written in sorted-path order with a
     fixed ``date_time`` (2026-01-01 00:00:00), so identical content always
@@ -483,12 +488,19 @@ async def export_project_bundle(
             bundle_files[f"codings/{f.id}_{f_slug}_summary.csv"] = sum_csv.encode("utf-8")
             bundle_files[f"codings/{f.id}_{f_slug}_summary.json"] = sum_json.encode("utf-8")
 
+        elif f.file_type in ("codebook_comparison", "coding_comparison"):
+            content = await version_service.read_blob(session, f.id)
+            if content is not None:
+                bundle_files[f"comparisons/{f.id}_{f_slug}_comparison.md"] = content.encode("utf-8")
+
         memos = await export_repo.get_row_memos(session, f.id)
         if memos:
             m_csv, _, _ = await export_memos(session, f.id, user_id, export_format="csv")
             m_json, _, _ = await export_memos(session, f.id, user_id, export_format="json")
             bundle_files[f"memos/{f.id}_{f_slug}_memos.csv"] = m_csv.encode("utf-8")
             bundle_files[f"memos/{f.id}_{f_slug}_memos.json"] = m_json.encode("utf-8")
+
+    _MEDIA_TYPES_BY_EXT = {"json": "application/json", "csv": "text/csv", "md": "text/markdown"}
 
     manifest_entries = []
     for path in sorted(bundle_files.keys()):
@@ -499,7 +511,7 @@ async def export_project_bundle(
                 "path": path,
                 "sha256": hashlib.sha256(content).hexdigest(),
                 "bytes": len(content),
-                "media_type": "application/json" if ext == "json" else "text/csv",
+                "media_type": _MEDIA_TYPES_BY_EXT.get(ext, "text/csv"),
             }
         )
 

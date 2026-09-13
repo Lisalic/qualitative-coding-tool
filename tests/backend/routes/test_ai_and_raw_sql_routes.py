@@ -9,8 +9,8 @@ the opt-in integration suite (tests/backend/integration/). Here we test
 what's reachable without Postgres: request validation (422), auth
 gating, schema-name guards, and -- for the AI routes -- that requests are
 accepted/rejected correctly at the kickoff boundary. codebook_routes.py's
-generate-codebook AI endpoint is a background-job kickoff (Stage 7): this
-file covers its 422/401/404/202 guard behavior,
+AI endpoints (generate-codebook, compare-codebooks) are now background-job
+kickoffs (Stage 7): this file covers their 422/401/404/202 guard behavior,
 while the job handlers themselves (LLM-call mocking, persistence) are
 covered in tests/backend/services/test_codebook_service.py.
 
@@ -455,17 +455,45 @@ class TestManualFilterRoute:
 
 
 # ---------------------------------------------------------------------------
-# codebook_routes.py -- generate-codebook
+# codebook_routes.py -- generate-codebook / compare-codebooks
 #
-# Stage 7 converted it into a background-job kickoff endpoint (same
+# Stage 7 converted both into background-job kickoff endpoints (same
 # pattern as data_routes.py::filter_data in Stage 6) and added the
-# `require_user_id` auth dependency it was missing (checked it late,
-# inline). Sampling/LLM-call/persistence now happen in the job handler,
-# not synchronously in the route, so validation guard clauses that used
-# to return a synchronous 400 (e.g. "no records sampled") now surface as
-# a failed job instead -- covered in
+# `require_user_id` auth dependency both were missing (generate-codebook
+# checked it late, inline; compare-codebooks never checked it at all -- see
+# TestCompareCodebooksAuth below). Sampling/LLM-call/persistence now happen
+# in the job handler, not synchronously in the route, so validation guard
+# clauses that used to return a synchronous 400 (e.g. "no records sampled")
+# now surface as a failed job instead -- covered in
 # tests/backend/services/test_codebook_service.py, not here.
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def codebook_route_backed_by_sqlite_jobs(async_sqlite_engine, monkeypatch):
+    """Same shape as `route_backed_by_sqlite_jobs` above, but also points
+    `codebook_service`'s module-level `AsyncSessionLocal` at the in-memory
+    SQLite engine, since its job handlers open their own session the same
+    way `data_service`'s do.
+    """
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from backend.app.database import get_async_db
+    from backend.app.main import app as fastapi_app
+
+    SessionLocal = async_sessionmaker(async_sqlite_engine, expire_on_commit=False)
+
+    async def _get_async_db():
+        async with SessionLocal() as session:
+            yield session
+
+    fastapi_app.dependency_overrides[get_async_db] = _get_async_db
+    monkeypatch.setattr("backend.app.jobs.service.AsyncSessionLocal", SessionLocal)
+    monkeypatch.setattr("backend.app.services.codebook_service.AsyncSessionLocal", SessionLocal)
+    try:
+        yield SessionLocal
+    finally:
+        fastapi_app.dependency_overrides.pop(get_async_db, None)
 
 
 async def _make_codebook_file(SessionLocal, user_id: int, *, file_type: str = "raw_data"):
@@ -485,6 +513,71 @@ async def _make_codebook_file(SessionLocal, user_id: int, *, file_type: str = "r
         await session.commit()
         await session.refresh(file_rec)
         return file_rec
+
+
+class TestCompareCodebooksValidation:
+    @pytest.mark.parametrize(
+        "form",
+        [
+            {"codebook_a": "not_proj", "codebook_b": "proj_b", "api_key": "k", "name": "n", "model": "m", "project_id": 1},
+            {"codebook_a": "proj_a", "codebook_b": "not_proj", "api_key": "k", "name": "n", "model": "m", "project_id": 1},
+        ],
+    )
+    def test_non_proj_schema_returns_422(self, client, form) -> None:
+        # A Pydantic field-pattern check (like generate-codebook's
+        # `database` field), so it fails at request-parsing time -- 422,
+        # not a hand-rolled 400.
+        resp = client.post("/api/compare-codebooks/", data=form)
+        assert resp.status_code == 422
+
+    def test_requires_auth(self, client) -> None:
+        # Regression test: this endpoint used to never call
+        # get_user_id_from_request at all -- reachable by anyone with the
+        # schema names, no login needed. `require_user_id` closes that gap.
+        resp = client.post(
+            "/api/compare-codebooks/",
+            data={"codebook_a": "proj_a", "codebook_b": "proj_b", "api_key": "k", "name": "n"},
+        )
+        assert resp.status_code == 401
+
+    def test_unowned_codebook_returns_404(self, client, override_async_db, auth_cookies) -> None:
+        resp = client.post(
+            "/api/compare-codebooks/",
+            data={
+                "codebook_a": "proj_missing_a",
+                "codebook_b": "proj_missing_b",
+                "api_key": "k",
+                "name": "n",
+                "model": "m",
+                "project_id": 1,
+            },
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 404
+
+
+class TestCompareCodebooksKickoff:
+    async def test_valid_kickoff_returns_202_with_job_id(
+        self, client, codebook_route_backed_by_sqlite_jobs, default_project, make_token
+    ) -> None:
+        file_a = await _make_codebook_file(codebook_route_backed_by_sqlite_jobs, user_id=1, file_type="codebook")
+        file_b = await _make_codebook_file(codebook_route_backed_by_sqlite_jobs, user_id=1, file_type="codebook")
+        resp = client.post(
+            "/api/compare-codebooks/",
+            data={
+                "codebook_a": file_a.schemaname,
+                "codebook_b": file_b.schemaname,
+                "api_key": "k",
+                "name": "n",
+                "model": "m",
+                "project_id": default_project,
+            },
+            cookies={"access_token": make_token(sub="1")},
+        )
+        assert resp.status_code == 202
+        body = resp.json()
+        assert body["status"] == "pending"
+        assert isinstance(body["job_id"], int)
 
 
 # ---------------------------------------------------------------------------

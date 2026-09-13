@@ -577,6 +577,39 @@ async def test_export_project_bundle_is_deterministic_and_privacy_scoped(session
 
 
 @pytest.mark.asyncio
+async def test_export_project_bundle_includes_comparison_markdown(session, user_id):
+    from backend.app.database import Project, async_link_file_to_project
+
+    project = Project(user_id=user_id, projectname="Cmp Project", description="")
+    session.add(project)
+    await session.commit()
+    await session.refresh(project)
+
+    cmp_file = await _make_file(session, user_id, "A vs B", "codebook_comparison")
+    await version_service.commit_blob_version(
+        session, file_id=cmp_file.id, author_user_id=user_id, origin="generated",
+        content="# Comparison\n\nA and B differ on...",
+    )
+    await async_link_file_to_project(session, cmp_file.id, project.id)
+    await session.commit()
+
+    bundle, _, _ = await export_service.export_project_bundle(session, project.id, user_id)
+
+    import zipfile
+    import io as _io
+
+    with zipfile.ZipFile(_io.BytesIO(bundle)) as zf:
+        names = zf.namelist()
+        comparison_paths = [n for n in names if n.startswith("comparisons/") and n.endswith("_comparison.md")]
+        assert len(comparison_paths) == 1
+        assert zf.read(comparison_paths[0]).decode("utf-8") == "# Comparison\n\nA and B differ on..."
+
+        manifest = json.loads(zf.read("manifest.json"))
+        entry = next(e for e in manifest["files"] if e["path"] == comparison_paths[0])
+        assert entry["media_type"] == "text/markdown"
+
+
+@pytest.mark.asyncio
 async def test_export_project_bundle_unowned_project_raises(session, user_id, other_user_id):
     from backend.app.core.exceptions import ForbiddenError
     from backend.app.database import Project

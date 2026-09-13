@@ -367,6 +367,255 @@ class TestDuplicateCodebook:
 
 
 # ---------------------------------------------------------------------------
+# start_compare_codebooks_job -- validation + enqueue
+# ---------------------------------------------------------------------------
+
+
+class TestStartCompareCodebooksJobValidation:
+    async def test_non_proj_schema_a_raises(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            with pytest.raises(ValidationAppError, match="codebook_a"):
+                await codebook_service.start_compare_codebooks_job(
+                    session,
+                    user.id,
+                    codebook_a="not_proj",
+                    codebook_b="proj_b",
+                    api_key="k",
+                    model=None,
+                    prompt="",
+                    name="my comparison",
+                )
+
+    async def test_non_proj_schema_b_raises(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            with pytest.raises(ValidationAppError, match="codebook_b"):
+                await codebook_service.start_compare_codebooks_job(
+                    session,
+                    user.id,
+                    codebook_a="proj_a",
+                    codebook_b="not_proj",
+                    api_key="k",
+                    model=None,
+                    prompt="",
+                    name="my comparison",
+                )
+
+    async def test_missing_api_key_raises(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            with pytest.raises(ValidationAppError, match="api_key"):
+                await codebook_service.start_compare_codebooks_job(
+                    session,
+                    user.id,
+                    codebook_a="proj_a",
+                    codebook_b="proj_b",
+                    api_key="",
+                    model=None,
+                    prompt="",
+                    name="my comparison",
+                )
+
+    async def test_blank_name_raises(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            with pytest.raises(ValidationAppError, match="name"):
+                await codebook_service.start_compare_codebooks_job(
+                    session,
+                    user.id,
+                    codebook_a="proj_a",
+                    codebook_b="proj_b",
+                    api_key="k",
+                    model=None,
+                    prompt="",
+                    name="   ",
+                )
+
+    async def test_unowned_codebook_a_raises_not_found(self, session_factory) -> None:
+        async with session_factory() as session:
+            owner = await _make_user(session, "owner@x.com")
+            other = await _make_user(session, "other@x.com")
+            file_a = await _make_file(session, owner.id, file_type="codebook", schemaname="proj_a")
+            file_b = await _make_file(session, other.id, file_type="codebook", schemaname="proj_b")
+            with pytest.raises(NotFoundError):
+                await codebook_service.start_compare_codebooks_job(
+                    session,
+                    other.id,
+                    codebook_a=file_a.schemaname,
+                    codebook_b=file_b.schemaname,
+                    api_key="k",
+                    model=None,
+                    prompt="",
+                    name="my comparison",
+                )
+
+
+class TestStartCompareCodebooksJobEnqueue:
+    async def test_enqueues_pending_job_without_persisting_api_key(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_a = await _make_file(session, user.id, file_type="codebook", schemaname="proj_a")
+            file_b = await _make_file(session, user.id, file_type="codebook", schemaname="proj_b")
+
+            job = await codebook_service.start_compare_codebooks_job(
+                session,
+                user.id,
+                codebook_a=file_a.schemaname,
+                codebook_b=file_b.schemaname,
+                api_key="sk-secret",
+                model="some-model",
+                prompt="focus on overlaps",
+                name="my comparison",
+            )
+
+            assert job.status == "pending"
+            assert job.job_type == "compare_codebooks"
+            assert job.payload["file_id_a"] == file_a.id
+            assert job.payload["file_id_b"] == file_b.id
+            assert job.payload["name"] == "my comparison"
+            assert "api_key" not in job.payload
+
+            await _wait_for_terminal_status(session, job.id, user.id)
+
+
+# ---------------------------------------------------------------------------
+# _run_compare_codebooks_job -- end-to-end
+# ---------------------------------------------------------------------------
+
+
+class TestCompareCodebooksJobHandlerEndToEnd:
+    async def test_reads_both_contents_and_calls_llm(self, session_factory, monkeypatch) -> None:
+        get_client_mock = AsyncMock(return_value="the comparison text")
+        monkeypatch.setattr(
+            "backend.app.services.codebook_service.codebook_generator_module.get_client",
+            get_client_mock,
+        )
+
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_a = await _make_file(session, user.id, file_type="codebook", schemaname="proj_a")
+            file_b = await _make_file(session, user.id, file_type="codebook", schemaname="proj_b")
+            file_a_id, file_b_id = file_a.id, file_b.id
+            await _seed_codes(session, file_a_id, user.id, "codebook A text")
+            await _seed_codes(session, file_b_id, user.id, "codebook B text")
+            await session.commit()
+
+            job = await codebook_service.start_compare_codebooks_job(
+                session,
+                user.id,
+                codebook_a=file_a.schemaname,
+                codebook_b=file_b.schemaname,
+                api_key="sk-secret",
+                model=None,
+                prompt="",
+                name="A vs B",
+                description="  a nice comparison  ",
+            )
+
+            finished = await _wait_for_terminal_status(session, job.id, user.id)
+            assert finished.status == "succeeded", finished.error
+            assert finished.result["comparison"] == "the comparison text"
+            file_info = finished.result["file"]
+            assert file_info["filename"] == "A vs B"
+            assert file_info["schema_name"].startswith("cmp_")
+
+            assert get_client_mock.called
+            call_args = get_client_mock.call_args.args
+            assert "codebook A text" in call_args[1]
+            assert "codebook B text" in call_args[1]
+            assert call_args[2] == "sk-secret"
+
+            # The new File was actually persisted, with content and
+            # FileDependency links to BOTH source codebooks.
+            new_file_id = int(file_info["id"])
+            result = await session.execute(select(File).where(File.id == new_file_id))
+            new_file = result.scalar_one()
+            assert new_file.file_type == "codebook_comparison"
+            assert new_file.description == "a nice comparison"
+
+            content = await version_service.read_blob(session, new_file_id)
+            assert content == "the comparison text"
+
+            edges = await version_repo.list_parent_edges(session, new_file_id)
+            parent_ids = {e.parent_file_id for e in edges}
+            assert parent_ids == {file_a_id, file_b_id}
+            by_role = {e.role: e.parent_file_id for e in edges}
+            assert by_role["side_a"] == file_a_id
+            assert by_role["side_b"] == file_b_id
+
+    async def test_no_content_marks_job_failed(self, session_factory, monkeypatch) -> None:
+        get_client_mock = AsyncMock(return_value="should not be called")
+        monkeypatch.setattr(
+            "backend.app.services.codebook_service.codebook_generator_module.get_client",
+            get_client_mock,
+        )
+
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_a = await _make_file(session, user.id, file_type="codebook", schemaname="proj_a")
+            file_b = await _make_file(session, user.id, file_type="codebook", schemaname="proj_b")
+
+            job = await codebook_service.start_compare_codebooks_job(
+                session,
+                user.id,
+                codebook_a=file_a.schemaname,
+                codebook_b=file_b.schemaname,
+                api_key="sk-secret",
+                model=None,
+                prompt="",
+                name="A vs B",
+            )
+
+            finished = await _wait_for_terminal_status(session, job.id, user.id)
+            assert finished.status == "failed"
+            # A codebook file with zero versions at all fails at the
+            # read-as-parent seal step (version_service.pin_parent) with a
+            # clearer error than the old "no content" -- there's no
+            # content to be missing when there's no version history yet.
+            assert "No version history" in finished.error
+            assert not get_client_mock.called
+
+    async def test_raises_context_budget_error_when_codebooks_dont_fit(self, session_factory, monkeypatch) -> None:
+        # Codebooks are compact taxonomies with nothing to aggregate, so a
+        # comparison that overflows the window fails loudly rather than
+        # leaning on a silent middle-out truncation.
+        get_client_mock = AsyncMock(return_value="should not be called")
+        monkeypatch.setattr(
+            "backend.app.services.codebook_service.codebook_generator_module.get_client",
+            get_client_mock,
+        )
+        monkeypatch.setattr(
+            "backend.app.services.codebook_service.context_window.prompt_fits",
+            lambda model, **kwargs: False,
+        )
+
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_a = await _make_file(session, user.id, file_type="codebook", schemaname="proj_a")
+            file_b = await _make_file(session, user.id, file_type="codebook", schemaname="proj_b")
+            await _seed_codes(session, file_a.id, user.id, "codebook A text")
+            await _seed_codes(session, file_b.id, user.id, "codebook B text")
+            await session.commit()
+
+            job = await codebook_service.start_compare_codebooks_job(
+                session,
+                user.id,
+                codebook_a=file_a.schemaname,
+                codebook_b=file_b.schemaname,
+                api_key="sk-secret",
+                model=None,
+                prompt="",
+                name="A vs B",
+            )
+
+            finished = await _wait_for_terminal_status(session, job.id, user.id)
+            assert finished.status == "failed"
+            assert "larger-context model" in finished.error
+            assert not get_client_mock.called
+
+
+# ---------------------------------------------------------------------------
 # codebook_preview + create_manual_codebook (the /codebook-editor pair)
 # ---------------------------------------------------------------------------
 

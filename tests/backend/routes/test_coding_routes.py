@@ -10,12 +10,10 @@ classification) -- see `backend/app/services/coding_service.py`'s module
 docstring. Per CLAUDE.md's early-prototyping rule there is no
 compatibility shim for the old routes; they are gone, not deprecated.
 
-`summarize-coding` keeps its existing `202 {job_id, status}` kickoff
-contract, unchanged by this overhaul except for what its handler now
-persists -- see `tests/backend/services/test_coding_service.py` for that
-deeper coverage. (`compare-codings` was retired in favor of the
-deterministic `GET /api/comparison/codings` route -- see
-`tests/backend/routes/test_comparison_routes.py`.)
+`compare-codings`/`summarize-coding` keep their existing
+`202 {job_id, status}` kickoff contract, unchanged by this overhaul except
+for what their handlers now persist -- see
+`tests/backend/services/test_coding_service.py` for that deeper coverage.
 Apply Codebook itself has one entry point now, `POST /api/coding/manual`
 (synchronous, no job), covered by `TestManualCodingRoute` below.
 """
@@ -819,6 +817,74 @@ class TestGetCodingComparison:
             headers=_auth_headers(make_token, sub=str(other.id)),
         )
         assert resp.status_code == 404
+
+
+class TestCompareCodingsGuard:
+    def test_requires_auth(self, client) -> None:
+        resp = client.post(
+            "/api/compare-codings/",
+            data={"coding_a": "proj_a", "coding_b": "proj_b", "api_key": "k", "name": "n"},
+        )
+        assert resp.status_code == 401
+
+    @pytest.mark.parametrize(
+        "form",
+        [
+            {"coding_a": "not_proj", "coding_b": "proj_b", "api_key": "k", "name": "n", "model": "m", "project_id": "1"},
+            {"coding_a": "proj_a", "coding_b": "not_proj", "api_key": "k", "name": "n", "model": "m", "project_id": "1"},
+        ],
+    )
+    def test_non_proj_schema_returns_400(self, client, auth_cookies, form) -> None:
+        resp = client.post("/api/compare-codings/", data=form, cookies=auth_cookies)
+        assert resp.status_code == 400
+
+    async def test_unowned_schema_returns_404(
+        self, client, route_backed_by_sqlite_jobs, make_token
+    ) -> None:
+        user = await _make_user(route_backed_by_sqlite_jobs)
+        resp = client.post(
+            "/api/compare-codings/",
+            data={
+                "coding_a": "proj_missing_a",
+                "coding_b": "proj_missing_b",
+                "api_key": "k",
+                "name": "n",
+                "model": "m",
+                "project_id": "1",
+            },
+            headers=_auth_headers(make_token, sub=str(user.id)),
+        )
+        assert resp.status_code == 404
+
+    async def test_valid_kickoff_returns_202_with_job_id(
+        self, client, route_backed_by_sqlite_jobs, make_token, monkeypatch
+    ) -> None:
+        user = await _make_user(route_backed_by_sqlite_jobs)
+        project = await _make_project(route_backed_by_sqlite_jobs, user.id)
+        file_a = await _make_file(route_backed_by_sqlite_jobs, user.id, content="coding a text")
+        file_b = await _make_file(route_backed_by_sqlite_jobs, user.id, content="coding b text")
+        llm_mock = AsyncMock(return_value="mocked comparison result")
+        # compare_codings' job handler imports get_client via a LOCAL
+        # import inside the handler body, so it must be patched at its
+        # source module, not on coding_service.
+        monkeypatch.setattr("backend.scripts.codebook_generator.get_client", llm_mock)
+
+        resp = client.post(
+            "/api/compare-codings/",
+            data={
+                "coding_a": file_a.schemaname,
+                "coding_b": file_b.schemaname,
+                "api_key": "k",
+                "name": "n",
+                "model": "m",
+                "project_id": str(project.id),
+            },
+            headers=_auth_headers(make_token, sub=str(user.id)),
+        )
+        assert resp.status_code == 202
+        body = resp.json()
+        assert body["status"] == "pending"
+        assert isinstance(body["job_id"], int)
 
 
 class TestSummarizeCodingGuard:

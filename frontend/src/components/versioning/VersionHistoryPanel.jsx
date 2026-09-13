@@ -69,6 +69,65 @@ function CodebookDiffEntry({ section, entry }) {
   );
 }
 
+/** A scrollable, count-badged list of codebook diff entries for one
+ * section -- the codebook counterpart of `CodingChangeList` below, so a
+ * long "Redefined" or "Renamed" section reads the same way a long
+ * "Applied coding" list does, instead of a flat wall of plain-text lines.
+ */
+function CodebookDiffList({ sectionKey, label, tone, entries }) {
+  if (!entries?.length) return null;
+
+  return (
+    <section className="min-w-0 border border-line bg-white/[0.02]">
+      <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
+        <h4 className={`text-sm font-semibold ${tone}`}>{label}</h4>
+        <span className="border border-line px-2 py-0.5 text-xs text-paper/60">{entries.length}</span>
+      </div>
+      <div className="max-h-[60vh] overflow-y-auto">
+        {entries.map((entry, idx) => (
+          <div
+            key={idx}
+            className="border-b border-line-soft px-4 py-2.5 transition-colors last:border-b-0 hover:bg-white/[0.03]"
+          >
+            <CodebookDiffEntry section={sectionKey} entry={entry} />
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/** What changed in a codebook's own structure between two versions --
+ * added/removed/renamed/redefined/moved/reordered codes -- with the same
+ * stat-chip-plus-evidence-list treatment `CodingDiffSummary` gives a
+ * coding artifact's diff, rather than a bare "N (label)" heading over a
+ * plain-text list.
+ */
+function CodebookDiffSummary({ codebookDiff }) {
+  const stats = CODEBOOK_DIFF_SECTIONS.map((s) => ({
+    value: (codebookDiff[s.key] || []).length,
+    label: s.label,
+  })).filter((s) => s.value > 0);
+
+  if (stats.length === 0) return null;
+
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="text-xs font-semibold uppercase tracking-wide text-paper/50">Codebook</span>
+      <div className="flex flex-wrap gap-1.5">
+        {stats.map((s) => (
+          <StatChip key={s.label} value={s.value} label={s.label} />
+        ))}
+      </div>
+      <div className="flex min-w-0 flex-col gap-3 border-t border-line-soft pt-3">
+        {CODEBOOK_DIFF_SECTIONS.map(({ key, label, tone }) => (
+          <CodebookDiffList key={key} sectionKey={key} label={label} tone={tone} entries={codebookDiff[key]} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** A single "N label" stat -- the coding/data diff's headline numbers
  * (rows recoded, newly coded/uncoded, rows added/removed). Zero-value
  * stats are omitted by the caller so a diff between two untouched
@@ -578,20 +637,8 @@ export default function VersionHistoryPanel({ history, fileType, onDuplicateFrom
             )}
 
             {codebookHasChanges && (
-              <div className="flex flex-col gap-2 border-t border-line-soft pt-2">
-                <span className="text-xs font-semibold uppercase tracking-wide text-paper/50">Codebook</span>
-                {CODEBOOK_DIFF_SECTIONS.map(({ key, label, tone }) =>
-                  (codebookDiff[key] || []).length > 0 ? (
-                    <div key={key} className="flex flex-col gap-1">
-                      <span className={`text-xs font-semibold uppercase tracking-wide ${tone}`}>
-                        {label} ({codebookDiff[key].length})
-                      </span>
-                      {codebookDiff[key].map((entry, idx) => (
-                        <CodebookDiffEntry key={idx} section={key} entry={entry} />
-                      ))}
-                    </div>
-                  ) : null,
-                )}
+              <div className="border-t border-line-soft pt-2">
+                <CodebookDiffSummary codebookDiff={codebookDiff} />
               </div>
             )}
 
