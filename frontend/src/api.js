@@ -198,7 +198,7 @@ async function _pollJob(jobId, {
     onStatusChange?.(status);
     onProgress?.(job?.progress || null);
 
-    if (status === "succeeded" || status === "completed") {
+    if (status === "succeeded") {
       const out = {
         ok: true,
         status: 200,

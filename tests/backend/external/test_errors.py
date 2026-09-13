@@ -4,6 +4,7 @@ from backend.app.external.errors import (
     ExternalServiceError,
     extract_http_error_code,
     is_retryable_error,
+    redact_secret,
 )
 
 
@@ -55,3 +56,23 @@ class TestIsRetryableError:
 
     def test_unknown_exception_with_no_code_is_retryable(self) -> None:
         assert is_retryable_error(Exception("connection reset")) is True
+
+
+class TestRedactSecret:
+    def test_strips_secret_occurrences(self) -> None:
+        text = "AuthenticationError: invalid key sk-or-v1-abc123 for request"
+        assert redact_secret(text, "sk-or-v1-abc123") == (
+            "AuthenticationError: invalid key [REDACTED] for request"
+        )
+
+    def test_no_secret_is_a_no_op(self) -> None:
+        text = "some ordinary error message"
+        assert redact_secret(text, None) == text
+        assert redact_secret(text, "") == text
+
+    def test_empty_text_is_a_no_op(self) -> None:
+        assert redact_secret("", "sk-or-v1-abc123") == ""
+
+    def test_secret_absent_from_text_is_unchanged(self) -> None:
+        text = "a totally unrelated failure"
+        assert redact_secret(text, "sk-or-v1-abc123") == text

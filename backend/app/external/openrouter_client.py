@@ -14,8 +14,11 @@ from typing import Any, Awaitable, Callable, TypeVar
 
 from openai import AsyncOpenAI
 
+from backend.app.core.logging import get_logger
 from backend.app.external.errors import ExternalServiceError, extract_http_error_code, is_retryable_error
 from backend.app.jobs.progress import get_current_accounting_tracker
+
+logger = get_logger(__name__)
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
 
@@ -94,12 +97,15 @@ async def chat_completion(
         response = await client.chat.completions.create(**kwargs)
         duration_ms = int((time.perf_counter() - start_time) * 1000)
 
-        # Record accounting if tracker is active
+        # Record accounting if tracker is active. Preserve a missing usage
+        # block as None (unknown) rather than coercing it to 0 -- some
+        # providers don't report usage, and 0 would misreport that as a
+        # known-free call.
         tracker = get_current_accounting_tracker()
         if tracker is not None:
             usage = getattr(response, "usage", None)
-            p_tokens = getattr(usage, "prompt_tokens", 0) or 0
-            c_tokens = getattr(usage, "completion_tokens", 0) or 0
+            p_tokens = getattr(usage, "prompt_tokens", None) if usage is not None else None
+            c_tokens = getattr(usage, "completion_tokens", None) if usage is not None else None
             tracker.record_call(
                 model=model,
                 prompt_tokens=p_tokens,
@@ -109,7 +115,7 @@ async def chat_completion(
             try:
                 await tracker.flush()
             except Exception:
-                pass
+                logger.warning("Failed to flush accounting for job %s", tracker.job_id, exc_info=True)
 
         content = response.choices[0].message.content
         if not content:

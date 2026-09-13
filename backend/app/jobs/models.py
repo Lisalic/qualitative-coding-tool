@@ -13,16 +13,14 @@ from backend.app.database import Base
 JOB_STATUSES = (
     "pending",
     "running",
-    "completed",
+    "succeeded",
     "partial",
     "retryable_failure",
     "failed",
     "cancelled",
-    "succeeded",  # kept for backwards compatibility
 )
 
 TERMINAL_STATUSES = frozenset({
-    "completed",
     "succeeded",
     "failed",
     "cancelled",

@@ -31,6 +31,7 @@ from backend.app.core.exceptions import NotFoundError, ValidationAppError
 from backend.app.database import File, User
 from backend.app.repositories import version_repo
 from backend.app.jobs import service as jobs_service
+from backend.app.jobs.models import TERMINAL_STATUSES
 from backend.app.services import coding_service, file_service, version_service
 from backend.app.storage_models import CodingEntry, Submission
 from backend.app.versioning_models import ArtifactVersion, CodebookCode
@@ -60,7 +61,7 @@ async def _wait_for_terminal_status(session, job_id: int, user_id: int, timeout:
     while True:
         session.expire_all()
         job = await jobs_service.get_job(session, job_id, user_id)
-        if job.status in ("succeeded", "failed"):
+        if job.status in TERMINAL_STATUSES:
             return job
         if asyncio.get_event_loop().time() > deadline:
             raise AssertionError(f"job {job_id} did not reach a terminal status within {timeout}s")

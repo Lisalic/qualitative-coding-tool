@@ -13,8 +13,9 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.exceptions import ForbiddenError, NotFoundError
+from backend.app.core.logging import get_logger
 from backend.app.database import AsyncSessionLocal
-from backend.app.external.errors import ExternalServiceError, is_retryable_error
+from backend.app.external.errors import ExternalServiceError, is_retryable_error, redact_secret
 from backend.app.jobs.models import Job, TERMINAL_STATUSES
 from backend.app.jobs.progress import (
     JobAccountingTracker,
@@ -22,6 +23,8 @@ from backend.app.jobs.progress import (
 )
 from backend.app.jobs.registry import get_handler
 from backend.app.jobs.runner import get_job_runner
+
+logger = get_logger(__name__)
 
 
 async def enqueue_job(
@@ -87,7 +90,7 @@ async def _execute_job(job_id: int, job_type: str, payload: dict[str, Any]) -> N
     """Run the handler registered for ``job_type`` and persist the outcome.
 
     Enforces explicit terminal states (QC-006):
-    - succeeded / completed: finished with valid output.
+    - succeeded: finished with valid output.
     - partial: explicitly returned partial status with salvaged output.
     - retryable_failure: transient external error suitable for retry.
     - failed: permanent error or empty output.
@@ -98,9 +101,9 @@ async def _execute_job(job_id: int, job_type: str, payload: dict[str, Any]) -> N
 
     async with AsyncSessionLocal() as session:
         try:
-            await session.execute(
+            start_res = await session.execute(
                 update(Job)
-                .where(Job.id == job_id)
+                .where(Job.id == job_id, Job.status.notin_(TERMINAL_STATUSES))
                 .values(
                     status="running",
                     started_at=datetime.now(timezone.utc),
@@ -108,6 +111,10 @@ async def _execute_job(job_id: int, job_type: str, payload: dict[str, Any]) -> N
                 )
             )
             await session.commit()
+            if (start_res.rowcount or 0) == 0:
+                # Already marked terminal (e.g. cancelled) before this task
+                # got to run -- don't resurrect it into "running".
+                return
 
             handler = get_handler(job_type)
             result = await handler(job_id, payload)
@@ -115,10 +122,22 @@ async def _execute_job(job_id: int, job_type: str, payload: dict[str, Any]) -> N
             now = datetime.now(timezone.utc)
             final_accounting = tracker.to_dict()
 
-            # Inspect result for explicit partial status or empty output
-            if isinstance(result, dict) and result.get("status") == "partial":
+            # Inspect result for explicit partial status or empty output.
+            # Two handler conventions both mean "partial": an explicit
+            # status="partial" (summarize_coding/recode_items, which also
+            # carry salvaged_output), and a bare partial=True flag
+            # (filter_preview's per-batch coverage tracking, which has no
+            # salvaged_output of its own -- the result itself IS the
+            # partial output). Without checking the second form, a
+            # filter_preview job that only partially covered its input
+            # would be marked "succeeded" at the job level even though its
+            # own result payload says partial=True.
+            is_partial = isinstance(result, dict) and (
+                result.get("status") == "partial" or result.get("partial") is True
+            )
+            if is_partial:
                 salvaged = result.get("salvaged_output") or result.get("salvaged") or result
-                reason = result.get("partial_reason") or result.get("error") or "Partial completion"
+                reason = result.get("partial_reason") or result.get("partial_error") or result.get("error") or "Partial completion"
                 await session.execute(
                     update(Job)
                     .where(Job.id == job_id, Job.status.notin_(TERMINAL_STATUSES))
@@ -162,7 +181,7 @@ async def _execute_job(job_id: int, job_type: str, payload: dict[str, Any]) -> N
             await session.rollback()
             await session.execute(
                 update(Job)
-                .where(Job.id == job_id, Job.status.notin_(TERMINAL_STATUSES))
+                .where(Job.id == job_id, (Job.status == "cancelled") | Job.status.notin_(TERMINAL_STATUSES))
                 .values(
                     status="cancelled",
                     error="Job was cancelled",
@@ -171,13 +190,24 @@ async def _execute_job(job_id: int, job_type: str, payload: dict[str, Any]) -> N
                 )
             )
             await session.commit()
+            logger.info("Job %s (%s) cancelled", job_id, job_type)
+            # Re-raise so the task actually completes cancelled, not
+            # successfully -- swallowing this breaks asyncio's contract
+            # that a cancelled task's own cancellation always propagates.
+            raise
 
         except Exception as exc:
             await session.rollback()
             now = datetime.now(timezone.utc)
             final_accounting = tracker.to_dict()
-            err_str = str(exc)
+            # Never log or persist the raw payload (it carries the
+            # caller's OpenRouter api_key via runtime_extra) and strip the
+            # key out of the exception text too, in case the SDK echoed it
+            # back in an auth-failure message.
+            api_key = payload.get("api_key")
+            err_str = redact_secret(str(exc), api_key)
             err_code = getattr(exc, "code", None)
+            logger.exception("Job %s (%s) failed", job_id, job_type)
 
             salvaged = getattr(exc, "salvaged_output", None)
             if salvaged is not None:

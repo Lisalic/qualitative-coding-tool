@@ -49,3 +49,19 @@ def is_retryable_error(error: Exception) -> bool:
     all), which are presumed transient.
     """
     return extract_http_error_code(error) not in NON_RETRYABLE_HTTP_CODES
+
+
+def redact_secret(text: str, secret: str | None) -> str:
+    """Strip a known secret (e.g. the caller's OpenRouter API key) out of
+    an error message before it is persisted or logged.
+
+    The API key is deliberately never written to the ``jobs`` table (see
+    ``jobs/service.py::enqueue_job``'s ``runtime_extra`` handling), but an
+    SDK exception's message can itself echo the key it was called with
+    (e.g. in a request-debug string on an auth failure). This is the
+    matching guard on the read side: any exception text a job persists to
+    ``jobs.error`` goes through here first.
+    """
+    if not secret or not text:
+        return text
+    return text.replace(secret, "[REDACTED]")

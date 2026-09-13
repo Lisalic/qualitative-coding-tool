@@ -24,9 +24,20 @@ def test_paid_model_pricing_deterministic_calculation():
 
 
 def test_missing_or_unknown_model_pricing_fallback():
-    # Unknown model defaults cleanly to 0.0
+    # Unknown model pricing is None -- never guessed as a known $0.0.
     cost = calculate_cost("unknown-provider/nonexistent-model", prompt_tokens=5000, completion_tokens=1000)
-    assert cost == 0.0
+    assert cost is None
+
+    meta = get_model_pricing("unknown-provider/nonexistent-model")
+    assert meta["known"] is False
+    assert meta["paid"] is None
+
+
+def test_unknown_token_counts_never_coerced_to_zero():
+    # A provider that didn't report usage yields an unknown (None) cost,
+    # not a misleadingly precise $0.00.
+    assert calculate_cost("anthropic/claude-opus-5", prompt_tokens=None, completion_tokens=2000) is None
+    assert calculate_cost("anthropic/claude-opus-5", prompt_tokens=1000, completion_tokens=None) is None
 
 
 def test_estimate_batch_cost_conservative():

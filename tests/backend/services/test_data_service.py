@@ -28,6 +28,7 @@ from backend.app.core.exceptions import NotFoundError, ValidationAppError
 from backend.app.database import File, User
 from backend.app.repositories import version_repo
 from backend.app.jobs import service as jobs_service
+from backend.app.jobs.models import TERMINAL_STATUSES
 from backend.app.services import data_service
 from backend.app.storage_models import Comment, Submission
 
@@ -67,14 +68,17 @@ async def _make_file(session, user_id: int, *, file_type: str = "raw_data", sche
 
 
 async def _wait_for_terminal_status(session, job_id: int, user_id: int, timeout: float = 5.0):
-    """Same polling helper as tests/backend/services/test_coding_service.py."""
+    """Poll until the job reaches any real terminal status -- not just
+    succeeded/failed, since a batch-capped filter_preview legitimately
+    lands on "partial" (see jobs/service.py's partial-detection).
+    """
     import asyncio
 
     deadline = asyncio.get_event_loop().time() + timeout
     while True:
         session.expire_all()
         job = await jobs_service.get_job(session, job_id, user_id)
-        if job.status in ("succeeded", "failed"):
+        if job.status in TERMINAL_STATUSES:
             return job
         if asyncio.get_event_loop().time() > deadline:
             raise AssertionError(f"job {job_id} did not reach a terminal status within {timeout}s")
@@ -783,7 +787,10 @@ class TestFilterPreviewJobHandler:
             )
             finished = await _wait_for_terminal_status(session, job.id, user.id)
 
-            assert finished.status == "succeeded", finished.error
+            # A batch-capped run is a partial completion at the job level
+            # too, not just a flag buried in the result -- jobs/service.py
+            # promotes any result.partial=True to status="partial".
+            assert finished.status == "partial", finished.error
             assert finished.result["partial"] is True
             assert finished.result["batches_processed"] == {"posts": 3, "comments": 1}
             assert finished.result["batches_total"] == {"posts": 8, "comments": 1}
@@ -847,6 +854,8 @@ class TestFilterPreviewJobHandler:
             )
             finished = await _wait_for_terminal_status(session, job.id, user.id)
 
+            assert finished.status == "partial"
+            assert finished.error == "upstream 429"
             assert finished.result["partial"] is True
             assert finished.result["partial_error"] == "upstream 429"
 

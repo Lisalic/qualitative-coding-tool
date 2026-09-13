@@ -65,12 +65,22 @@ async def _slow_handler(job_id: int, payload: dict) -> dict:
     return {"done": True}
 
 
+@register_handler("test_leaks_api_key")
+async def _leaks_api_key_handler(job_id: int, payload: dict) -> dict:
+    raise ValueError(f"auth failed for key {payload['api_key']}")
+
+
+@register_handler("test_noop_race")
+async def _noop_race_handler(job_id: int, payload: dict) -> dict:
+    return {"ok": True}
+
+
 async def _wait_terminal(session, job_id: int, user_id: int, timeout: float = 3.0) -> Job:
     deadline = asyncio.get_event_loop().time() + timeout
     while True:
         session.expire_all()
         job = await service.get_job(session, job_id, user_id)
-        if job.status in ("succeeded", "completed", "partial", "retryable_failure", "failed", "cancelled"):
+        if job.status in ("succeeded", "partial", "retryable_failure", "failed", "cancelled"):
             return job
         if asyncio.get_event_loop().time() > deadline:
             raise AssertionError(f"Job {job_id} did not complete within {timeout}s")
@@ -170,3 +180,35 @@ async def test_cancellation_race_condition_does_not_corrupt_terminal_state(sessi
     )
     res = await session.execute(stmt)
     assert res.rowcount == 0  # Not updated because job was already terminal
+
+
+async def test_execute_job_does_not_resurrect_a_job_cancelled_before_it_started(session, user_id):
+    """Regression test: if a job is marked 'cancelled' before its background
+    task's first DB write runs (the runner loses the race against
+    cancel_job), _execute_job must not flip it back to 'running' (and,
+    from there, eventually 'succeeded'). Job row is created directly
+    (bypassing enqueue_job) so no real background task races this call.
+    """
+    job = Job(job_type="test_noop_race", user_id=user_id, status="cancelled", payload={})
+    session.add(job)
+    await session.commit()
+    await session.refresh(job)
+
+    await service._execute_job(job.id, "test_noop_race", {})
+
+    refreshed = await service.get_job(session, job.id, user_id)
+    assert refreshed.status == "cancelled"
+
+
+async def test_job_error_redacts_api_key_from_exception_text(session, user_id):
+    job = await service.enqueue_job(
+        session,
+        user_id=user_id,
+        job_type="test_leaks_api_key",
+        payload={},
+        runtime_extra={"api_key": "sk-or-v1-supersecret"},
+    )
+    refreshed = await _wait_terminal(session, job.id, user_id)
+    assert refreshed.status == "failed"
+    assert "sk-or-v1-supersecret" not in refreshed.error
+    assert "[REDACTED]" in refreshed.error

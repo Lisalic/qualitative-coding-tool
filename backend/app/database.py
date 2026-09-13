@@ -105,11 +105,19 @@ def get_db():
 
 
 async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
-    """Async session for FastAPI; callers commit/rollback explicitly (matches get_db)."""
+    """Async session for FastAPI; callers commit/rollback explicitly (matches get_db).
+
+    Catches ``BaseException``, not just ``Exception``: a cancelled request
+    (client disconnect) raises ``asyncio.CancelledError``/``GeneratorExit``
+    at this generator's ``yield``, and both inherit from ``BaseException``,
+    not ``Exception`` -- an ``except Exception`` here would silently skip
+    the explicit rollback for exactly the disconnect case that leaves a
+    transaction open longest.
+    """
     async with AsyncSessionLocal() as session:
         try:
             yield session
-        except Exception:
+        except BaseException:
             await session.rollback()
             raise
 

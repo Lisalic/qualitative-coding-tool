@@ -165,9 +165,11 @@ export default function AiAssistPanel({
                 </span>
                 <span>
                   Est. cost:{" "}
-                  {estimate.is_paid
-                    ? `~$${estimate.estimated_cost_usd.toFixed(4)} USD`
-                    : "$0.00 (free tier)"}
+                  {estimate.estimated_cost_usd == null
+                    ? "unknown"
+                    : estimate.is_paid
+                      ? `~$${estimate.estimated_cost_usd.toFixed(4)} USD`
+                      : "$0.00 (free tier)"}
                 </span>
               </div>
             )}
@@ -249,10 +251,16 @@ export default function AiAssistPanel({
             <div className="border border-line/60 bg-surface-raised/50 px-3 py-1.5 text-xs text-paper/70">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span>
-                  Calls: {accounting.call_count} • Tokens: {accounting.total_tokens || (accounting.prompt_tokens + accounting.completion_tokens)}
+                  Calls: {accounting.call_count} • Tokens:{" "}
+                  {accounting.total_tokens != null
+                    ? accounting.total_tokens
+                    : accounting.prompt_tokens != null && accounting.completion_tokens != null
+                      ? accounting.prompt_tokens + accounting.completion_tokens
+                      : "unknown"}
                 </span>
                 <span>
-                  Duration: {accounting.duration_ms}ms • Cost: ${accounting.estimated_cost_usd?.toFixed(4) || "0.0000"} USD
+                  Duration: {accounting.duration_ms}ms • Cost:{" "}
+                  {accounting.estimated_cost_usd != null ? `$${accounting.estimated_cost_usd.toFixed(4)} USD` : "unknown"}
                 </span>
               </div>
             </div>

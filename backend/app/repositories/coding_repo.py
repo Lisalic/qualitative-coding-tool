@@ -537,7 +537,11 @@ async def render_coding_text(session: AsyncSession, file_id: int, *, version_no:
     result = await session.execute(
         select(CodingEntry)
         .where(CodingEntry.file_id == file_id, condition)
-        .order_by(CodingEntry.row_type, CodingEntry.post_id, CodingEntry.code)
+        # `.id` is the final tiebreak: several quotes for the same code on
+        # the same item share every other column here, and without it
+        # their relative order (and so the rendered text's bytes) is
+        # undefined rather than merely alphabetical.
+        .order_by(CodingEntry.row_type, CodingEntry.post_id, CodingEntry.code, CodingEntry.id)
     )
     entries = result.scalars().all()
     if not entries:

@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from backend.app.core.exceptions import ForbiddenError, NotFoundError
 from backend.app.database import User
 from backend.app.jobs import service
-from backend.app.jobs.models import Job
+from backend.app.jobs.models import Job, TERMINAL_STATUSES
 from backend.app.jobs.registry import register_handler
 
 
@@ -47,7 +47,7 @@ async def _wait_for_terminal_status(session, job_id: int, user_id: int, timeout:
     while True:
         _expire_all(session)
         job = await service.get_job(session, job_id, user_id)
-        if job.status in ("succeeded", "failed"):
+        if job.status in TERMINAL_STATUSES:
             return job
         if asyncio.get_event_loop().time() > deadline:
             raise AssertionError(f"job {job_id} did not reach a terminal status within {timeout}s")

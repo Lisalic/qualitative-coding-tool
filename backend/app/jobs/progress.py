@@ -5,7 +5,9 @@ it push interim ``(current, total)`` updates mid-run so ``GET /api/jobs/{id}``
 can report progress before the job reaches a terminal status.
 
 ``JobAccountingTracker`` captures call counts, token counts, duration, and
-dollar cost using documented model pricing (QC-005).
+dollar cost using documented model pricing (QC-005). Token counts and cost
+are preserved as ``None`` (unknown) rather than coerced to 0 whenever the
+provider didn't report usage.
 """
 
 from __future__ import annotations
@@ -15,7 +17,10 @@ from dataclasses import asdict, dataclass
 from typing import Any
 from sqlalchemy import update
 
+from backend.app.core.logging import get_logger
 from backend.app.database import AsyncSessionLocal
+
+logger = get_logger(__name__)
 from backend.app.external.pricing import calculate_cost
 from backend.app.jobs.models import Job
 
@@ -34,7 +39,10 @@ def set_current_accounting_tracker(tracker: JobAccountingTracker | None) -> None
 
 
 async def update_job_progress(job_id: int, current: int, total: int, label: str = "batches") -> None:
-    """Best-effort progress update for a running job."""
+    """Best-effort progress update for a running job. A failure here must
+    never abort the job it's reporting on -- swallowed, but logged so a
+    persistently-failing progress channel doesn't go unnoticed.
+    """
     try:
         async with AsyncSessionLocal() as session:
             await session.execute(
@@ -44,11 +52,13 @@ async def update_job_progress(job_id: int, current: int, total: int, label: str 
             )
             await session.commit()
     except Exception:
-        pass
+        logger.warning("Failed to update progress for job %s", job_id, exc_info=True)
 
 
 async def update_job_accounting(job_id: int, accounting: dict[str, Any]) -> None:
-    """Best-effort accounting update for a running or finished job."""
+    """Best-effort accounting update for a running or finished job. Same
+    swallow-but-log rationale as ``update_job_progress``.
+    """
     try:
         async with AsyncSessionLocal() as session:
             await session.execute(
@@ -58,7 +68,7 @@ async def update_job_accounting(job_id: int, accounting: dict[str, Any]) -> None
             )
             await session.commit()
     except Exception:
-        pass
+        logger.warning("Failed to update accounting for job %s", job_id, exc_info=True)
 
 
 @dataclass
@@ -68,28 +78,41 @@ class JobAccountingTracker:
     job_id: int
     model: str = ""
     call_count: int = 0
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    total_tokens: int = 0
+    prompt_tokens: int | None = 0
+    completion_tokens: int | None = 0
+    total_tokens: int | None = 0
     duration_ms: int = 0
-    estimated_cost_usd: float = 0.0
+    estimated_cost_usd: float | None = 0.0
 
     def record_call(
         self,
         *,
         model: str,
-        prompt_tokens: int = 0,
-        completion_tokens: int = 0,
+        prompt_tokens: int | None = 0,
+        completion_tokens: int | None = 0,
         duration_ms: int = 0,
     ) -> None:
         self.call_count += 1
         if model:
             self.model = model
-        safe_p = max(0, prompt_tokens or 0)
-        safe_c = max(0, completion_tokens or 0)
-        self.prompt_tokens += safe_p
-        self.completion_tokens += safe_c
-        self.total_tokens = self.prompt_tokens + self.completion_tokens
+
+        # Once any call reports unknown usage, the running total is unknown
+        # too -- there is no way to partially recover it later.
+        if prompt_tokens is None or self.prompt_tokens is None:
+            self.prompt_tokens = None
+        else:
+            self.prompt_tokens += max(0, prompt_tokens)
+
+        if completion_tokens is None or self.completion_tokens is None:
+            self.completion_tokens = None
+        else:
+            self.completion_tokens += max(0, completion_tokens)
+
+        if self.prompt_tokens is None or self.completion_tokens is None:
+            self.total_tokens = None
+        else:
+            self.total_tokens = self.prompt_tokens + self.completion_tokens
+
         self.duration_ms += max(0, duration_ms or 0)
         self.estimated_cost_usd = calculate_cost(
             self.model, self.prompt_tokens, self.completion_tokens
