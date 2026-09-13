@@ -330,7 +330,7 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
               <button
                 type="button"
                 className={tabBtn}
-                onClick={() => navigate("/codebook-generate", { state: { projectId: project.id } })}
+                onClick={() => navigate("/codebook", { state: { projectId: project.id } })}
               >
                 Add Codebook
               </button>

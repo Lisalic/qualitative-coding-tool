@@ -1,8 +1,8 @@
+import { useState } from "react";
 import CodeLegend from "../CodeLegend";
 import Panel from "../../shell/Panel";
+import CodingCoverageDashboard from "./CodingCoverageDashboard";
 import { btnSm } from "../../../lib/uiClasses";
-
-const btnSmall = btnSm;
 
 function truncate(text, max = 60) {
   const value = String(text || "");
@@ -10,27 +10,12 @@ function truncate(text, max = 60) {
 }
 
 /**
- * Right rail: the codebook, dual-purpose depending on context. With no
- * text selected in the reader pane, clicking a code filters the document
- * list to rows carrying it (server-side, across the whole artifact, not
- * just the loaded page). With a pending text selection, clicking a code
- * instead tags that selection onto the active document -- the sidebar
- * equivalent of the code-picker popup that appears at the selection
- * itself (see HighlightedContent), for discoverability.
- *
- * The Edit/Done toggle only switches PRESENTATION -- which of
- * CodeLegend's two renderings (editable rows vs. filter/tag rows) is on
- * screen -- it is not a save boundary any more. `draftTree` is the same
- * live draft whichever mode is showing (see useViewCodingPage's
- * docstring), so a code added in edit mode is immediately taggable after
- * hitting Done, with nothing saved yet. "Cancel" reverts the draft to
- * the last-saved codebook and drops back to the read-only view; "Done"
- * just drops back to the read-only view, keeping the draft as-is for
- * whenever the bottom bar's Save Changes runs. A code renamed here is
- * not retroactively renamed on rows already tagged with its old name --
- * see useViewCodingPage's module docstring for that trade-off.
+ * Right rail: dual-mode sidebar supporting Codebook browsing/editing
+ * and descriptive Corpus Coverage analytics.
  */
 export default function CodingCodebookSidebar({
+  schema,
+  refreshKey,
   codebookTree,
   getCodeColor,
   pendingSelection,
@@ -45,56 +30,90 @@ export default function CodingCodebookSidebar({
   onFinishEdit,
   onCancelEdit,
 }) {
+  const [activeTab, setActiveTab] = useState("codebook");
+
   const handleCodeToggle = ({ code_uid: codeUid, name }) => {
     if (pendingSelection) {
-      // Tagging needs the stable identity.
       onApplyCode(codeUid);
       return;
     }
-    // The server-side row filter (`GET /api/coding/{ref}/rows?code=`) is
-    // still name-based.
     onToggleFilterCode(name);
   };
 
   const title = (
-    <>
-      Codebook
-      {isDirty && <span className="ml-1.5 text-xs font-normal normal-case text-paper/50">(edited)</span>}
-    </>
+    <div className="flex items-center gap-3">
+      <button
+        type="button"
+        className={`text-xs font-semibold uppercase tracking-wider pb-0.5 border-b-2 transition-colors ${
+          activeTab === "codebook"
+            ? "border-paper text-paper"
+            : "border-transparent text-paper/50 hover:text-paper"
+        }`}
+        onClick={() => setActiveTab("codebook")}
+      >
+        Codebook
+      </button>
+      <button
+        type="button"
+        className={`text-xs font-semibold uppercase tracking-wider pb-0.5 border-b-2 transition-colors ${
+          activeTab === "coverage"
+            ? "border-paper text-paper"
+            : "border-transparent text-paper/50 hover:text-paper"
+        }`}
+        onClick={() => setActiveTab("coverage")}
+      >
+        Coverage
+      </button>
+      {isDirty && activeTab === "codebook" && (
+        <span className="text-xs font-normal normal-case text-paper/50">(edited)</span>
+      )}
+    </div>
   );
 
-  const actions = !isEditMode ? (
-    <button type="button" className={btnSmall} onClick={onBeginEdit}>
-      Edit
-    </button>
-  ) : (
-    <>
-      <button type="button" className={btnSmall} onClick={onCancelEdit}>
-        Cancel
+  const actions = activeTab === "codebook" ? (
+    !isEditMode ? (
+      <button type="button" className={btnSm} onClick={onBeginEdit}>
+        Edit
       </button>
-      <button type="button" className={btnSmall} onClick={onFinishEdit}>
-        Done
-      </button>
-    </>
-  );
+    ) : (
+      <>
+        <button type="button" className={btnSm} onClick={onCancelEdit}>
+          Cancel
+        </button>
+        <button type="button" className={btnSm} onClick={onFinishEdit}>
+          Done
+        </button>
+      </>
+    )
+  ) : null;
 
   return (
-    <Panel title={title} actions={actions} className="h-full" bodyClassName="flex flex-col gap-2">
-      {!isEditMode && pendingSelection && (
-        <div className="shrink-0 border border-paper bg-surface-raised px-2.5 py-2 text-xs">
-          Tagging &ldquo;{truncate(pendingSelection.text)}&rdquo; &mdash; click a code below.
-        </div>
-      )}
+    <Panel title={title} actions={actions} className="min-h-0 flex-1" bodyClassName="flex flex-col gap-2">
+      {activeTab === "coverage" ? (
+        <CodingCoverageDashboard
+          schema={schema}
+          refreshKey={refreshKey}
+          getCodeColor={getCodeColor}
+        />
+      ) : (
+        <>
+          {!isEditMode && pendingSelection && (
+            <div className="shrink-0 border border-line bg-surface-raised px-2.5 py-2 text-xs">
+              Click a code to tag &ldquo;{truncate(pendingSelection.text)}&rdquo;.
+            </div>
+          )}
 
-      <CodeLegend
-        codebookTree={codebookTree}
-        isEditMode={isEditMode}
-        draftTree={draftTree}
-        onDraftTreeChange={onDraftTreeChange}
-        selectedFilterCodes={!isEditMode && activeFilterCode ? [activeFilterCode] : []}
-        onCodeToggle={handleCodeToggle}
-        getCodeColor={getCodeColor}
-      />
+          <CodeLegend
+            codebookTree={codebookTree}
+            isEditMode={isEditMode}
+            draftTree={draftTree}
+            onDraftTreeChange={onDraftTreeChange}
+            selectedFilterCodes={!isEditMode && activeFilterCode ? [activeFilterCode] : []}
+            onCodeToggle={handleCodeToggle}
+            getCodeColor={getCodeColor}
+          />
+        </>
+      )}
     </Panel>
   );
 }

@@ -7,33 +7,46 @@ changing.
 """
 
 import asyncio
-from typing import Awaitable, Protocol
+from typing import Any, Awaitable, Protocol
 
 
 class JobRunner(Protocol):
-    def submit(self, coro: Awaitable[None]) -> None:
+    def submit(self, coro: Awaitable[None], job_id: int | None = None) -> Any:
         """Schedule ``coro`` to run in the background. Does not await it."""
+        ...
+
+    def cancel(self, job_id: int) -> bool:
+        """Cancel a running background job task if active."""
         ...
 
 
 class AsyncioJobRunner:
-    """``JobRunner`` backed by ``asyncio.create_task``.
-
-    CRITICAL: ``asyncio.create_task`` returns a ``Task`` that is only weakly
-    referenced by the event loop -- if nothing else holds a reference to it,
-    it can be garbage-collected mid-run, which silently cancels it (a
-    well-documented asyncio footgun). This class keeps every created task in
-    ``self._tasks`` and removes it via a done-callback once it completes, so
-    tasks are never dropped before they finish.
-    """
+    """``JobRunner`` backed by ``asyncio.create_task`` with cancellation tracking."""
 
     def __init__(self) -> None:
         self._tasks: set[asyncio.Task] = set()
+        self._tasks_by_job_id: dict[int, asyncio.Task] = {}
 
-    def submit(self, coro: Awaitable[None]) -> None:
+    def submit(self, coro: Awaitable[None], job_id: int | None = None) -> asyncio.Task:
         task = asyncio.create_task(coro)
         self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        if job_id is not None:
+            self._tasks_by_job_id[job_id] = task
+
+        def _cleanup(t: asyncio.Task) -> None:
+            self._tasks.discard(t)
+            if job_id is not None:
+                self._tasks_by_job_id.pop(job_id, None)
+
+        task.add_done_callback(_cleanup)
+        return task
+
+    def cancel(self, job_id: int) -> bool:
+        task = self._tasks_by_job_id.get(job_id)
+        if task and not task.done():
+            task.cancel()
+            return True
+        return False
 
 
 _runner: JobRunner = AsyncioJobRunner()

@@ -1,4 +1,4 @@
-"""Pydantic request/response contracts for the three core tool-panel flows.
+"""Pydantic request/response contracts for the filter/codebook/coding editors.
 
 These models are the single source of truth for the shape of data sent from
 the frontend `FormData` builders to the FastAPI handlers. They are consumed
@@ -29,11 +29,11 @@ ContentScope = Literal["both", "posts", "comments"]
 
 def _content_scope_field() -> Any:
     """Which of a source file's submissions/comments tables an AI tool
-    should sample from. Shared across Filter/Generate/Apply so the three
-    form builders (buildFilterDataForm/buildGenerateCodebookForm/
-    buildApplyCodebookForm in apiContracts.js) send the same field name.
-    Defaults to "both" -- today's behavior for every one of these tools,
-    unchanged for any existing caller that doesn't send this field.
+    should sample from. Shared across the filter/codebook/apply editors'
+    AI-assist and manual-create builders in apiContracts.js so they all
+    send the same field name. Defaults to "both" -- today's behavior for
+    every one of these tools, unchanged for any existing caller that
+    doesn't send this field.
     """
     return Field(
         default="both",
@@ -56,9 +56,9 @@ def _strip_db_suffix_value(value: Any) -> Any:
 
 def _validate_codebook_ref_value(value: str) -> str:
     """A codebook reference is either a numeric ``File`` id or a
-    ``proj_<hex>`` schema name -- both accepted, nothing else. Shared by
-    ApplyCodebookRequest and ManualCodingRequest, which resolve the same
-    kind of reference through ``file_repo.resolve_file_id``.
+    ``proj_<hex>`` schema name -- both accepted, nothing else. Used by
+    ``ManualCodingRequest``, which resolves it through
+    ``file_repo.resolve_file_id``.
     """
     raw = value.strip()
     if not raw:
@@ -123,89 +123,6 @@ class _StrippingModel(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# FilterData
-# ---------------------------------------------------------------------------
-
-
-class FilterDataRequest(_StrippingModel):
-    """Payload for ``POST /api/filter-data/``.
-
-    The frontend builder is ``buildFilterDataForm`` in
-    ``frontend/src/lib/apiContracts.js``.
-    """
-
-    api_key: str = Field(min_length=1, description="OpenRouter API key from the client")
-    database: str = Field(
-        pattern=_SCHEMA_PATTERN,
-        description="Source Postgres schema (proj_<hex>)",
-    )
-    name: str = Field(min_length=1, description="Display name for the new filtered file")
-    model: str = Field(min_length=1, description="OpenRouter model slug")
-    project_id: Optional[int] = Field(
-        default=None, description="Optional project to attach the resulting file to"
-    )
-    prompt: Optional[str] = Field(
-        default=None, description="Filter prompt; skipped when only tags are used"
-    )
-    description: Optional[str] = Field(default=None)
-    min_words: int = Field(default=0, ge=0, description="Minimum word count predicate")
-    sample_percentage: float = Field(
-        default=100.0,
-        ge=1.0,
-        le=100.0,
-        description="Random-sample percentage per table before AI",
-    )
-    filter_tags: Optional[str] = Field(
-        default=None,
-        description="Comma-separated keywords to pre-filter with tag expansion",
-    )
-    content_scope: ContentScope = _content_scope_field()
-
-    @field_validator("database", mode="before")
-    @classmethod
-    def _strip_db_suffix(cls, value: Any) -> Any:
-        if not isinstance(value, str):
-            return value
-        value = value.strip()
-        if value.endswith(".db"):
-            value = value[:-3]
-        return value
-
-
-class FilterDataFileInfo(BaseModel):
-    id: str
-    schema_name: str
-    filename: str
-
-
-class FilterDataTagInfo(BaseModel):
-    original_tags: list[str]
-    expanded_terms: list[str]
-
-
-class FilterDataResponse(BaseModel):
-    message: str
-    submissions_length: int
-    comments_length: int
-    posts_filtered_count: int
-    comments_filtered_count: int
-    file: Optional[FilterDataFileInfo] = None
-    tag_filter: Optional[FilterDataTagInfo] = None
-    partial: bool = False
-    partial_error: Optional[str] = Field(
-        default=None,
-        description=(
-            "Why coverage stopped early, when it was an error rather than a "
-            "free model's batch cap. Read by FilterDataPanel.jsx to explain a "
-            "partial run; a null here means the cap, not a failure."
-        ),
-    )
-    batches_processed: Optional[dict[str, int]] = None
-    batches_total: Optional[dict[str, int]] = None
-    orphaned_comments: int = 0
-
-
-# ---------------------------------------------------------------------------
 # Filter editor: AI preview + manual submit
 #
 # The two halves of the human-in-the-loop filter screen
@@ -214,10 +131,10 @@ class FilterDataResponse(BaseModel):
 # AI filter available inside it as an assistive tool rather than as the
 # whole operation.
 #
-# Both are JSON bodies rather than `as_form` multipart, unlike
-# `FilterDataRequest` above: each carries id lists, and the codebase's
-# rule is multipart for the flat AI-tool forms and JSON for anything
-# with a nested list (same reasoning as `RecodeItemsRequest`).
+# Both are JSON bodies rather than `as_form` multipart: each carries id
+# lists, and the codebase's rule is multipart for flat AI-tool forms and
+# JSON for anything with a nested list (same reasoning as
+# `RecodeItemsRequest`).
 #
 # `FilterPreviewRequest` deliberately has no `name`/`project_id`: a
 # preview creates no artifact at all, it only answers "which of the rows
@@ -228,8 +145,8 @@ class FilterDataResponse(BaseModel):
 class FilterPreviewRequest(_StrippingModel):
     """Payload for ``POST /api/filter-preview/``.
 
-    Same AI-filter knobs as ``FilterDataRequest`` (prompt, tags, model,
-    ``min_words``, sampling, content scope), plus the two lists that make
+    The AI-filter knobs (prompt, tags, model, ``min_words``, sampling,
+    content scope), plus the two lists that make
     it a *preview*: ``decided_post_ids``/``decided_comment_ids`` are the
     rows the user has already explicitly included or excluded in the
     editor, and are removed from the candidate pool before sampling --
@@ -372,51 +289,8 @@ class MemoUpsertResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# GenerateCodebook
-# ---------------------------------------------------------------------------
-
-
-class GenerateCodebookRequest(_StrippingModel):
-    """Payload for ``POST /api/generate-codebook/``."""
-
-    api_key: str = Field(min_length=1)
-    database: str = Field(pattern=_SCHEMA_PATTERN)
-    name: str = Field(min_length=1, description="Display name for the generated codebook")
-    model: Optional[str] = Field(
-        default=None, description="OpenRouter model slug; falls back to server default"
-    )
-    prompt: Optional[str] = Field(default=None)
-    description: Optional[str] = Field(default=None)
-    project_id: Optional[int] = Field(default=None)
-    sample_percentage: float = Field(default=100.0, ge=0.0, le=100.0)
-    content_scope: ContentScope = _content_scope_field()
-
-    @field_validator("database", mode="before")
-    @classmethod
-    def _strip_db_suffix(cls, value: Any) -> Any:
-        if not isinstance(value, str):
-            return value
-        value = value.strip()
-        if value.endswith(".db"):
-            value = value[:-3]
-        return value
-
-
-class GenerateCodebookFileInfo(BaseModel):
-    id: str
-    schema_name: str
-    filename: str
-    description: Optional[str] = None
-
-
-class GenerateCodebookResponse(BaseModel):
-    codebook: str
-    file: GenerateCodebookFileInfo
-
-
-# ---------------------------------------------------------------------------
-# Codebook editor (/codebook-editor) -- the human-in-the-loop counterpart to
-# GenerateCodebook above, mirroring the FilterPreview/ManualFilter pair.
+# Codebook editor -- an AI-assist preview and a manual submit, mirroring
+# the FilterPreview/ManualFilter pair.
 #
 # Both are JSON bodies rather than `as_form` multipart, because each carries
 # a nested list (the same reasoning as FilterPreviewRequest). The split is
@@ -522,51 +396,6 @@ class CompareCodebooksRequest(_StrippingModel):
 
 
 # ---------------------------------------------------------------------------
-# ApplyCodebook
-# ---------------------------------------------------------------------------
-
-
-class ApplyCodebookRequest(_StrippingModel):
-    """Payload for ``POST /api/apply-codebook/``."""
-
-    api_key: str = Field(min_length=1)
-    database: str = Field(pattern=_SCHEMA_PATTERN)
-    codebook: str = Field(
-        min_length=1,
-        description="Either a numeric File id or a proj_<hex> schema name",
-    )
-    report_name: str = Field(min_length=1, description="Display name for the coding output")
-    methodology: Optional[str] = Field(
-        default=None, description="Optional instructions steering the classifier"
-    )
-    model: Optional[str] = Field(default=None)
-    description: Optional[str] = Field(default=None)
-    project_id: Optional[int] = Field(default=None)
-    sample_percentage: float = Field(default=100.0, ge=1.0, le=100.0)
-    content_scope: ContentScope = _content_scope_field()
-
-    @field_validator("database", mode="before")
-    @classmethod
-    def _strip_db_suffix(cls, value: Any) -> Any:
-        if not isinstance(value, str):
-            return value
-        value = value.strip()
-        if value.endswith(".db"):
-            value = value[:-3]
-        return value
-
-    @field_validator("codebook")
-    @classmethod
-    def _validate_codebook_ref(cls, value: str) -> str:
-        return _validate_codebook_ref_value(value)
-
-
-class ApplyCodebookResponse(BaseModel):
-    classification_output: str
-    file: Optional[GenerateCodebookFileInfo] = None
-
-
-# ---------------------------------------------------------------------------
 # AI coding output (backend/scripts/codebook_apply.py::classify_posts)
 #
 # The shape the model is asked to return: one object per (item, code)
@@ -597,12 +426,11 @@ class AICodingPayload(BaseModel):
 #
 # A coding artifact now owns its own codebook snapshot, its own copy of
 # every sampled post/comment, and its coding -- these back the editor and
-# recode routes in coding_routes.py, not Apply Codebook's kickoff (that's
-# still ApplyCodebookRequest above). Sent as JSON bodies, not
+# recode routes in coding_routes.py. Sent as JSON bodies, not
 # multipart/form-data (unlike the ``as_form`` models above), since a
 # per-row list of code/evidence/notes entries doesn't map onto flat form
-# fields the way FilterData/GenerateCodebook/ApplyCodebook's scalar
-# fields do -- same reasoning as ``PostContentsRequest`` below.
+# fields the way the editors' scalar fields do -- same reasoning as
+# ``PostContentsRequest`` below.
 # ---------------------------------------------------------------------------
 
 
@@ -765,9 +593,8 @@ class RecodeItemsRequest(_StrippingModel):
 class ManualCodingRequest(_StrippingModel):
     """Payload for ``POST /api/coding/manual`` -- start a coding artifact
     by hand: copy the chosen rows in and snapshot the codebook, but code
-    nothing. The human-in-the-loop counterpart to ApplyCodebookRequest,
-    with no ``api_key``/``model``/``methodology`` because it calls no
-    model.
+    nothing. Carries no ``api_key``/``model``/``methodology`` because it
+    calls no model.
 
     JSON rather than ``as_form`` because it can carry explicit row-id
     lists (same reasoning as ManualFilterRequest).

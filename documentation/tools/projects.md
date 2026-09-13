@@ -59,7 +59,7 @@ Files are organized into tabs: `database` (`raw_data`), `filtered` (`filtered_da
 - Delete: removes the `File` row and its content rows (`FileDependency`, `FileTable`, `submissions`/`comments`/`artifact_content`/`coding_entries` for that `file_id`) — but does **not** drop any leftover legacy Postgres schema for that file (deliberate, see [architecture.md#storage](../architecture.md#storage)).
 - Merge: a new `raw_data` File artifact, linked to its source files via `FileDependency` and to the chosen project.
 
-"Add X" buttons in `ProjectFilesSection` navigate to the corresponding tool page. `/filter`, `/codebook-generate`, and `/codebook-apply` carry `state.projectId`, which those panels read via `useInitialProjectId` to pre-select the project on arrival. `/import` has no project selector to preselect (project is chosen as a required form field instead), and `/summarize-coding` has no project-scoped picker at all, so neither button passes `state.projectId`.
+"Add X" buttons in `ProjectFilesSection` navigate to the corresponding tool page. `/filter`, `/codebook`, and `/codebook-apply` carry `state.projectId`, which those editors read via `useInitialProjectId` to pre-select the project on arrival. `/import` has no project selector to preselect (project is chosen as a required form field instead), and `/summarize-coding` has no project-scoped picker at all, so neither button passes `state.projectId`.
 
 ## Troubleshooting
 

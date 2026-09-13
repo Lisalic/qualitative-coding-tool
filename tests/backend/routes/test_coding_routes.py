@@ -10,10 +10,12 @@ classification) -- see `backend/app/services/coding_service.py`'s module
 docstring. Per CLAUDE.md's early-prototyping rule there is no
 compatibility shim for the old routes; they are gone, not deprecated.
 
-`apply-codebook`/`compare-codings`/`summarize-coding` keep their existing
+`compare-codings`/`summarize-coding` keep their existing
 `202 {job_id, status}` kickoff contract, unchanged by this overhaul except
 for what their handlers now persist -- see
 `tests/backend/services/test_coding_service.py` for that deeper coverage.
+Apply Codebook itself has one entry point now, `POST /api/coding/manual`
+(synchronous, no job), covered by `TestManualCodingRoute` below.
 """
 
 from unittest.mock import AsyncMock, MagicMock
@@ -793,93 +795,6 @@ class TestGetCodingComparison:
             headers=_auth_headers(make_token, sub=str(other.id)),
         )
         assert resp.status_code == 404
-
-
-class TestApplyCodebookValidation:
-    def test_requires_auth(self, client) -> None:
-        resp = client.post(
-            "/api/apply-codebook/",
-            data={"api_key": "k", "database": "proj_a", "codebook": "1", "report_name": "r"},
-        )
-        assert resp.status_code == 401
-
-    def test_missing_required_fields_returns_422(self, client, auth_cookies) -> None:
-        resp = client.post("/api/apply-codebook/", data={}, cookies=auth_cookies)
-        assert resp.status_code == 422
-
-    def test_invalid_codebook_ref_returns_422(self, client, auth_cookies) -> None:
-        resp = client.post(
-            "/api/apply-codebook/",
-            data={
-                "api_key": "k",
-                "database": "proj_a",
-                "codebook": "not-numeric-or-proj",
-                "report_name": "r",
-            },
-            cookies=auth_cookies,
-        )
-        assert resp.status_code == 422
-
-    async def test_unowned_database_returns_404(
-        self, client, route_backed_by_sqlite_jobs, make_token
-    ) -> None:
-        user = await _make_user(route_backed_by_sqlite_jobs)
-        resp = client.post(
-            "/api/apply-codebook/",
-            data={
-                "api_key": "k",
-                "database": "proj_missing",
-                "codebook": "1",
-                "report_name": "r",
-            },
-            headers=_auth_headers(make_token, sub=str(user.id)),
-        )
-        assert resp.status_code == 404
-
-    async def test_codebook_not_found_returns_404(
-        self, client, route_backed_by_sqlite_jobs, make_token
-    ) -> None:
-        user = await _make_user(route_backed_by_sqlite_jobs)
-        source_file = await _make_file(route_backed_by_sqlite_jobs, user.id, file_type="raw_data")
-        resp = client.post(
-            "/api/apply-codebook/",
-            data={
-                "api_key": "k",
-                "database": source_file.schemaname,
-                "codebook": "proj_missing",
-                "report_name": "r",
-            },
-            headers=_auth_headers(make_token, sub=str(user.id)),
-        )
-        assert resp.status_code == 404
-
-
-class TestApplyCodebookKickoff:
-    async def test_valid_kickoff_returns_202_with_job_id(
-        self, client, route_backed_by_sqlite_jobs, make_token, monkeypatch
-    ) -> None:
-        user = await _make_user(route_backed_by_sqlite_jobs)
-        source_file = await _make_file(route_backed_by_sqlite_jobs, user.id, file_type="raw_data")
-        codebook_file = await _make_file(
-            route_backed_by_sqlite_jobs, user.id, file_type="codebook", content="CODEBOOK: code A"
-        )
-        classify_mock = AsyncMock(return_value=("POST_ID: p1\nCODE: A\nEVIDENCE: \"x\"", "sys", "usr"))
-        monkeypatch.setattr("backend.app.services.coding_service.classify_posts", classify_mock)
-
-        resp = client.post(
-            "/api/apply-codebook/",
-            data={
-                "api_key": "k",
-                "database": source_file.schemaname,
-                "codebook": str(codebook_file.id),
-                "report_name": "r",
-            },
-            headers=_auth_headers(make_token, sub=str(user.id)),
-        )
-        assert resp.status_code == 202
-        body = resp.json()
-        assert body["status"] == "pending"
-        assert isinstance(body["job_id"], int)
 
 
 class TestCompareCodingsGuard:

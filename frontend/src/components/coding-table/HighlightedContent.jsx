@@ -612,6 +612,13 @@ const HighlightedContent = ({
               value={popoverFilter}
               onChange={(e) => setPopoverFilter(e.target.value)}
               placeholder="Search codes..."
+              // Marks this input for CodingReaderPane's 1-9 shortcut: it
+              // autofocuses the instant a selection is made, so without
+              // this the shortcut's own hint text would be a lie -- the
+              // digit would land in this filter box instead of applying
+              // a code. A bare digit is not a realistic code-name search
+              // anyway, so letting the shortcut win here costs nothing.
+              data-code-search-input="true"
               className="mb-1.5 border border-paper bg-white/5 px-2 py-1 text-xs text-paper placeholder:text-paper/40 focus:outline-none focus:ring-1 focus:ring-paper"
             />
             <div className="flex flex-col gap-1 overflow-y-auto">

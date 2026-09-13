@@ -1,52 +1,34 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { apiFetch, requestJson } from "../../api";
-import CodeLegend from "../coding-table/CodeLegend";
-import EntryModal from "../data/EntryModal";
 import { useRowMemos } from "../data/useRowMemos";
 import ArtifactCreatedMessage from "../feedback/ArtifactCreatedMessage";
 import PageShell from "../shell/PageShell";
-import Panel from "../shell/Panel";
+import PageEmptyState from "../primitives/PageEmptyState";
 import { useInitialProjectId } from "../tool-panels/useInitialProjectId";
 import { useToolPanelData } from "../tool-panels/useToolPanelData";
 import {
   MissingFieldsError,
   buildManualCodebookPayload,
 } from "../../lib/apiContracts";
-import { flattenTreeToCodes, getCodeColor, groupCodesByFamily } from "../../lib/codingUtils";
-import { btn, btnActive, btnPrimary, input, select } from "../../lib/uiClasses";
-import CodebookAiPanel from "./CodebookAiPanel";
-import CodebookProposalTray from "./CodebookProposalTray";
+import { flattenTreeToCodes, groupCodesByFamily } from "../../lib/codingUtils";
+import { btn, btnActive, btnPrimary, select } from "../../lib/uiClasses";
+import CodebookCodesRail from "./CodebookCodesRail";
+import CodebookReaderPane from "./CodebookReaderPane";
 import CodebookSourceReader from "./CodebookSourceReader";
 import { useCodebookEditorState } from "./useCodebookEditorState";
 
 const PROJ_SCHEMA_RE = /^proj_[A-Za-z0-9_]+$/;
 
-const noop = () => {};
-
-function StepHeading({ number, title, description }) {
-  return (
-    <div className="flex items-start gap-3">
-      <span className="flex h-6 w-6 shrink-0 items-center justify-center border border-paper text-xs font-bold">
-        {number}
-      </span>
-      <div>
-        <h2 className="text-sm font-semibold">{title}</h2>
-        {description ? <p className="mt-0.5 text-xs text-paper/60">{description}</p> : null}
-      </div>
-    </div>
-  );
-}
-
 /**
  * Write a codebook by hand, with the data in front of you.
  *
- * The human-in-the-loop counterpart of `/codebook-generate`: instead of
- * writing a prompt and receiving a finished codebook, the researcher reads
- * the source corpus on the left and builds the code list on the right,
- * with the generator available inside the screen as an assistant whose
- * codes arrive in a review tray (`CodebookProposalTray`) rather than in
- * the codebook. Nothing is created or saved until an explicit submit.
+ * 3-pane workspace, matching the filter and coding editors' shape: a
+ * compact row list on the left, one row's full text in the center, and
+ * the draft codebook plus the AI assist tool on the right. The AI
+ * generator's codes arrive in a review tray (`CodebookProposalTray`)
+ * rather than in the codebook directly. Nothing is created or saved
+ * until an explicit submit.
  *
  * Two modes, because a codebook is rarely right on the first pass:
  *   New    -- create a fresh codebook (`POST /api/codebook/manual`).
@@ -84,9 +66,7 @@ export default function CodebookEditor() {
   const [limit, setLimit] = useState(25);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-
-  const [selectedEntry, setSelectedEntry] = useState(null);
-  const [showModal, setShowModal] = useState(false);
+  const [activeKey, setActiveKey] = useState(null);
 
   const [submitting, setSubmitting] = useState(false);
   const [createdFile, setCreatedFile] = useState(null);
@@ -101,6 +81,7 @@ export default function CodebookEditor() {
     setPage(0);
     setCreatedFile(null);
     setSavedMessage("");
+    setActiveKey(null);
   }, [database]);
 
   const fetchEntries = useCallback(async () => {
@@ -163,10 +144,29 @@ export default function CodebookEditor() {
     [codebooks],
   );
 
-  const openRow = (row, rowType) => {
-    setSelectedEntry({ ...row, type: rowType });
-    setShowModal(true);
-  };
+  const rows = useMemo(() => {
+    const submissions = (entries?.submissions || []).map((row) => ({ ...row, rowType: "submission" }));
+    const comments = (entries?.comments || []).map((row) => ({ ...row, rowType: "comment" }));
+    return [...submissions, ...comments];
+  }, [entries]);
+
+  const totalRows = (entries?.total_submissions || 0) + (entries?.total_comments || 0);
+  const hasNextPage =
+    (entries?.total_submissions || 0) > (page + 1) * limit ||
+    (entries?.total_comments || 0) > (page + 1) * limit;
+
+  useEffect(() => {
+    if (rows.length === 0) {
+      setActiveKey(null);
+      return;
+    }
+    if (!activeKey || !rows.some((r) => `${r.rowType}:${r.id}` === activeKey)) {
+      setActiveKey(`${rows[0].rowType}:${rows[0].id}`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows]);
+
+  const activeRow = rows.find((r) => `${r.rowType}:${r.id}` === activeKey) || null;
 
   const handleSubmit = async () => {
     setSubmitting(true);
@@ -243,255 +243,174 @@ export default function CodebookEditor() {
     (mode === "refine" ? Boolean(targetCodebook) : Boolean(name.trim()));
 
   return (
-    <PageShell title="Codebook Editor" width="full" bodyClassName="flex flex-col gap-3">
-      <section className="flex flex-col gap-3 border border-line bg-surface p-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <StepHeading
-            number="1"
-            title="Choose what you're building"
-            description="Read the data on the left, write the codebook on the right."
-          />
-          <div className="flex gap-2" role="group" aria-label="Editor mode">
-            <button
-              type="button"
-              className={`${btn} ${mode === "new" ? btnActive : ""}`}
-              aria-pressed={mode === "new"}
-              onClick={() => setMode("new")}
-              disabled={submitting}
-            >
-              New codebook
-            </button>
-            <button
-              type="button"
-              className={`${btn} ${mode === "refine" ? btnActive : ""}`}
-              aria-pressed={mode === "refine"}
-              onClick={() => setMode("refine")}
-              disabled={submitting}
-            >
-              Refine existing
-            </button>
-          </div>
+    <PageShell title="Codebook" width="full" scroll="fill" bodyClassName="gap-3">
+      <div className="flex shrink-0 flex-wrap items-end gap-3 border border-line bg-surface p-2.5">
+        <div className="flex gap-2" role="group" aria-label="Editor mode">
+          <button
+            type="button"
+            className={`${btn} ${mode === "new" ? btnActive : ""}`}
+            aria-pressed={mode === "new"}
+            onClick={() => setMode("new")}
+            disabled={submitting}
+          >
+            New
+          </button>
+          <button
+            type="button"
+            className={`${btn} ${mode === "refine" ? btnActive : ""}`}
+            aria-pressed={mode === "refine"}
+            onClick={() => setMode("refine")}
+            disabled={submitting}
+          >
+            Refine existing
+          </button>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="codebookEditorSource" className="text-sm">
-              Source database
+        <div className="flex min-w-[200px] flex-1 flex-col gap-1.5">
+          <label htmlFor="codebookEditorSource" className="text-sm">
+            Source database
+          </label>
+          <select
+            id="codebookEditorSource"
+            value={database}
+            onChange={(event) => setDatabase(event.target.value)}
+            className={select}
+            disabled={submitting}
+          >
+            <option value="">Select a database</option>
+            {sourceOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {mode === "refine" && (
+          <div className="flex min-w-[200px] flex-1 flex-col gap-1.5">
+            <label htmlFor="codebookEditorTarget" className="text-sm">
+              Codebook to refine
             </label>
             <select
-              id="codebookEditorSource"
-              value={database}
-              onChange={(event) => setDatabase(event.target.value)}
+              id="codebookEditorTarget"
+              value={targetCodebook}
+              onChange={(event) => setTargetCodebook(event.target.value)}
               className={select}
               disabled={submitting}
             >
-              <option value="">Select a database</option>
-              {sourceOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
+              <option value="">Select a codebook</option>
+              {codebookOptions.map((option) => (
+                <option key={option.id} value={option.metadata?.schema || option.id}>
+                  {option.name}
                 </option>
               ))}
             </select>
           </div>
+        )}
 
-          {mode === "refine" ? (
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="codebookEditorTarget" className="text-sm">
-                Codebook to refine
-              </label>
-              <select
-                id="codebookEditorTarget"
-                value={targetCodebook}
-                onChange={(event) => setTargetCodebook(event.target.value)}
-                className={select}
-                disabled={submitting}
-              >
-                <option value="">Select a codebook</option>
-                {codebookOptions.map((option) => (
-                  <option key={option.id} value={option.metadata?.schema || option.id}>
-                    {option.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="codebookEditorName" className="text-sm">
-                Codebook name
-              </label>
-              <input
-                id="codebookEditorName"
-                type="text"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="my-codebook"
-                className={input}
-                disabled={submitting}
-              />
-            </div>
-          )}
+        {database && (
+          <div className="text-sm text-paper/60">
+            {totalRows} row{totalRows === 1 ? "" : "s"} total
+          </div>
+        )}
+      </div>
 
-          {mode === "new" ? (
-            <>
-              <div className="flex flex-col gap-1.5 md:col-span-2">
-                <label htmlFor="codebookEditorDescription" className="text-sm">
-                  Description (optional)
-                </label>
-                <textarea
-                  id="codebookEditorDescription"
-                  value={description}
-                  onChange={(event) => setDescription(event.target.value)}
-                  placeholder="Optional description for the codebook"
-                  rows={2}
-                  className={`${input} w-full resize-y`}
-                  disabled={submitting}
-                />
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <label htmlFor="codebookEditorProject" className="text-sm">
-                  Project (optional)
-                </label>
-                <select
-                  id="codebookEditorProject"
-                  value={selectedProject || ""}
-                  onChange={(event) => setSelectedProject(event.target.value)}
-                  className={select}
-                  disabled={submitting}
-                >
-                  <option value="">No project</option>
-                  {(projects || []).map((project) => (
-                    <option key={project.id} value={String(project.id)}>
-                      {project.projectname}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </>
-          ) : null}
-        </div>
-      </section>
-
-      {error || panelDataError ? (
-        <p className="border border-error bg-error/10 px-3 py-2 text-sm text-error">
+      {(error || panelDataError) && (
+        <p className="shrink-0 border border-error bg-error/10 px-4 py-2 text-sm text-error">
           {error || panelDataError}
         </p>
-      ) : null}
+      )}
 
-      {savedMessage ? (
-        <p role="status" className="border border-success bg-success/10 px-3 py-2 text-sm text-success">
+      {savedMessage && (
+        <p role="status" className="shrink-0 border border-success bg-success/10 px-4 py-2 text-sm text-success">
           {savedMessage}
         </p>
-      ) : null}
+      )}
 
-      {createdFile ? (
-        <ArtifactCreatedMessage
-          name={createdFile.filename}
-          viewPath="/codebook-view"
-          viewState={{ selected: createdFile.schema_name }}
-        />
-      ) : null}
-
-      {!database ? (
-        <section className="border border-line bg-surface p-6 text-center text-sm text-paper/60">
-          Select a source database to start reading and coding.
-        </section>
-      ) : (
-        <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2">
-          <CodebookSourceReader
-            entries={entries}
-            loading={loading}
-            page={page}
-            limit={limit}
-            onPageChange={setPage}
-            onLimitChange={(next) => {
-              setLimit(next);
-              setPage(0);
-            }}
-            getMemo={getMemo}
-            onOpenRow={openRow}
+      {createdFile && (
+        <div className="shrink-0">
+          <ArtifactCreatedMessage
+            name={createdFile.filename}
+            viewPath="/codebook-view"
+            viewState={{ selected: createdFile.schema_name }}
           />
-
-          <div className="flex flex-col gap-3">
-            <Panel title={`Draft codes (${draftCount})`} padded={false}>
-              <CodeLegend
-                codebookTree={editor.draft}
-                isEditMode
-                draftTree={editor.draft}
-                onDraftTreeChange={editor.updateDraft}
-                disabled={submitting}
-                selectedFilterCodes={[]}
-                onCodeToggle={noop}
-                getCodeColor={getCodeColor}
-                showDetails
-              />
-            </Panel>
-
-            <CodebookProposalTray
-              proposals={editor.proposals}
-              onAccept={editor.accept}
-              onDismiss={editor.dismiss}
-              onAcceptAll={editor.acceptEvery}
-              onDismissAll={editor.dismissEvery}
-              disabled={submitting}
-            />
-
-            <CodebookAiPanel
-              database={database}
-              existingCodes={editor.existingCodes}
-              onProposals={editor.receiveProposals}
-              disabled={submitting}
-            />
-          </div>
         </div>
       )}
 
-      {database ? (
-        <div className="sticky bottom-0 z-20 flex flex-wrap items-center justify-between gap-3 border border-line bg-surface px-3 py-2">
-          <span className="text-sm text-paper/70">
-            {draftCount} code{draftCount === 1 ? "" : "s"}
-            {proposed > 0 ? ` · ${proposed} awaiting review` : ""}
-            {aiAccepted > 0 ? ` · ${aiAccepted} from AI` : ""}
-          </span>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              className={btn}
-              onClick={editor.clearDraft}
-              disabled={submitting || (draftCount === 0 && proposed === 0)}
-            >
-              Clear draft
-            </button>
-            <button
-              type="button"
-              className={btnPrimary}
-              onClick={handleSubmit}
-              disabled={!canSubmit}
-            >
-              {submitting
-                ? "Saving..."
-                : mode === "refine"
-                  ? "Save to codebook"
-                  : "Create codebook"}
-            </button>
-          </div>
-        </div>
-      ) : null}
+      {!database ? (
+        <PageEmptyState message="Select a database to build a codebook." />
+      ) : (
+        <>
+          <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden lg:grid-cols-[minmax(220px,280px)_minmax(0,1fr)_minmax(280px,340px)] lg:grid-rows-1">
+            <CodebookSourceReader
+              rows={rows}
+              activeKey={activeKey}
+              onSelectRow={(row) => setActiveKey(`${row.rowType}:${row.id}`)}
+              loading={loading}
+              page={page}
+              limit={limit}
+              onLimitChange={(next) => {
+                setLimit(next);
+                setPage(0);
+              }}
+              hasNextPage={hasNextPage}
+              onPrevPage={() => setPage((p) => Math.max(0, p - 1))}
+              onNextPage={() => setPage((p) => p + 1)}
+              getMemo={getMemo}
+            />
 
-      <EntryModal
-        entry={selectedEntry}
-        isOpen={showModal}
-        onClose={() => setShowModal(false)}
-        database={database}
-        memo={
-          selectedEntry ? getMemo(selectedEntry.type, selectedEntry.id) : null
-        }
-        onSaveMemo={
-          selectedEntry
-            ? (body) => saveMemo(selectedEntry.type, selectedEntry.id, body)
-            : null
-        }
-      />
+            <CodebookReaderPane
+              activeRow={activeRow}
+              memo={activeRow ? getMemo(activeRow.rowType, activeRow.id) : null}
+              onSaveMemo={saveMemo}
+            />
+
+            <CodebookCodesRail
+              mode={mode}
+              name={name}
+              onNameChange={setName}
+              description={description}
+              onDescriptionChange={setDescription}
+              selectedProject={selectedProject}
+              onProjectChange={setSelectedProject}
+              projectOptions={projects}
+              editor={editor}
+              database={database}
+              disabled={submitting}
+            />
+          </div>
+
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border border-line bg-surface px-4 py-2">
+            <span className="text-sm text-paper/70">
+              {draftCount} code{draftCount === 1 ? "" : "s"}
+              {proposed > 0 ? ` · ${proposed} awaiting review` : ""}
+              {aiAccepted > 0 ? ` · ${aiAccepted} from AI` : ""}
+            </span>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className={btn}
+                onClick={editor.clearDraft}
+                disabled={submitting || (draftCount === 0 && proposed === 0)}
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                className={btnPrimary}
+                onClick={handleSubmit}
+                disabled={!canSubmit}
+              >
+                {submitting
+                  ? "Saving..."
+                  : mode === "refine"
+                    ? "Save to codebook"
+                    : "Create codebook"}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </PageShell>
   );
 }

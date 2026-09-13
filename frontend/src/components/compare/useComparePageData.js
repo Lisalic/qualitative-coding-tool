@@ -23,6 +23,11 @@ export default function useComparePageData({
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
 
+  // Computed deterministic comparison states (QC-002)
+  const [computedData, setComputedData] = useState(null);
+  const [computedLoading, setComputedLoading] = useState(false);
+  const [computedError, setComputedError] = useState("");
+
   useEffect(() => {
     setA(initialA || "");
   }, [initialA]);
@@ -51,6 +56,55 @@ export default function useComparePageData({
       mounted = false;
     };
   }, [fileType, initialA]);
+
+  // Automatically compute deterministic comparison when both A and B are selected
+  useEffect(() => {
+    if (!a || !b) {
+      setComputedData(null);
+      setComputedError("");
+      return;
+    }
+
+    let mounted = true;
+    setComputedLoading(true);
+    setComputedError("");
+
+    const endpoint =
+      fileType === "coding"
+        ? `/api/comparison/codings?file_a=${encodeURIComponent(a)}&file_b=${encodeURIComponent(b)}`
+        : `/api/comparison/codebooks?file_a=${encodeURIComponent(a)}&file_b=${encodeURIComponent(b)}`;
+
+    apiFetch(endpoint)
+      .then(async (res) => {
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.detail || errData.error || "Failed to compute comparison");
+        }
+        return res.json();
+      })
+      .then((data) => {
+        if (mounted) {
+          setComputedData(data);
+          setComputedLoading(false);
+        }
+      })
+      .catch((err) => {
+        if (mounted) {
+          setComputedError(err.message);
+          setComputedLoading(false);
+        }
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [a, b, fileType]);
+
+  const handleSwap = () => {
+    const tempA = a;
+    setA(b);
+    setB(tempA);
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -88,6 +142,11 @@ export default function useComparePageData({
       return;
     }
 
+    if (!model) {
+      setError("Select an AI model");
+      return;
+    }
+
     const apiKey = localStorage.getItem("apiKey");
     if (!apiKey) {
       setError("Set your API key in the navbar first");
@@ -99,7 +158,7 @@ export default function useComparePageData({
     form.append(fieldBName, b);
     form.append("api_key", apiKey);
     form.append("name", name.trim());
-    if (model) form.append("model", model);
+    form.append("model", model);
     if (additionalPrompt.trim()) form.append("prompt", additionalPrompt.trim());
     form.append("project_id", selectedProject);
 
@@ -107,42 +166,25 @@ export default function useComparePageData({
       setLoading(true);
 
       if (usesJobPolling) {
-        // Endpoint has been converted to the background-job pattern
-        // (kicks off a job and returns 202 {job_id, status}) -- poll
-        // /api/jobs/{id} until it resolves rather than blocking on the
-        // initial request. The job also persists the comparison as a
-        // File artifact directly (see `name` above), so `data.file` is
-        // the created artifact -- no separate save step needed.
-        const { ok, data, error: pollError } = await postFormAndPoll(
-          compareEndpoint,
-          form,
-        );
-        if (!ok) {
-          setError(pollError || "Failed to compare");
-        } else {
-          setComparison(data?.comparison || "");
-          setCreatedFile(data?.file || null);
-        }
-        return;
-      }
-
-      const response = await apiFetch(compareEndpoint, {
-        method: "POST",
-        body: form,
-      });
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      const data = await response.json();
-      if (data.error) {
-        setError(data.error);
-      } else {
+        const data = await postFormAndPoll(compareEndpoint, form);
         setComparison(data.comparison || "");
-        setCreatedFile(data?.file || null);
+        setCreatedFile(data.file || null);
+      } else {
+        const response = await apiFetch(compareEndpoint, {
+          method: "POST",
+          body: form,
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || errorData.detail || "Comparison failed");
+        }
+
+        const data = await response.json();
+        setComparison(data.comparison);
       }
-    } catch (submitError) {
-      setError(String(submitError));
+    } catch (err) {
+      setError(err.message);
     } finally {
       setLoading(false);
     }
@@ -168,5 +210,9 @@ export default function useComparePageData({
     selectedProject,
     setSelectedProject,
     submitCompare,
+    computedData,
+    computedLoading,
+    computedError,
+    handleSwap,
   };
 }

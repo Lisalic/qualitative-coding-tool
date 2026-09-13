@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import CodeLegend from "../coding-table/CodeLegend";
+import ExportDropdown from "../export/ExportDropdown";
 import PageEmptyState from "../primitives/PageEmptyState";
 import PromptPanel from "../primitives/PromptPanel";
 import PageShell from "../shell/PageShell";
 import Panel from "../shell/Panel";
 import { hasPromptInfo } from "../../lib/promptInfo";
-import { getCodeColor } from "../../lib/codingUtils";
 import { btn, btnPrimary as btnPrimaryClasses, input } from "../../lib/uiClasses";
 
 const btnClasses = btn;
@@ -72,6 +72,13 @@ export default function CodebookWorkspaceSection({
       <button
         type="button"
         className={btnClasses}
+        onClick={() => navigate("/integrate-codebook", { state: { codebookA: selectedCodebook } })}
+      >
+        Integrate
+      </button>
+      <button
+        type="button"
+        className={btnClasses}
         onClick={() => navigate(`/versions?ref=${encodeURIComponent(selectedCodebook)}`)}
       >
         History
@@ -83,6 +90,7 @@ export default function CodebookWorkspaceSection({
       >
         Lineage
       </button>
+      <ExportDropdown fileId={selectedCodebook} artifactType="codebook" />
       {hasPromptInfo(promptInfo) && (
         <button type="button" className={btnClasses} onClick={() => setShowPrompt((v) => !v)}>
           {showPrompt ? "Hide" : "Show"} Prompt
@@ -103,19 +111,19 @@ export default function CodebookWorkspaceSection({
         <>
           <button
             type="button"
-            className={btnClasses}
-            onClick={onCancelEdit}
-            disabled={saveState.status === "saving"}
+            className={btnPrimary}
+            onClick={onSaveEdit}
+            disabled={saveState === "saving"}
           >
-            Cancel
+            {saveState === "saving" ? "Saving…" : "Save"}
           </button>
           <button
             type="button"
-            className={btnPrimary}
-            onClick={() => onSaveEdit(nameDraft.trim())}
-            disabled={saveState.status === "saving"}
+            className={btnClasses}
+            onClick={onCancelEdit}
+            disabled={saveState === "saving"}
           >
-            {saveState.status === "saving" ? "Saving..." : "Save"}
+            Cancel
           </button>
         </>
       )}
@@ -124,55 +132,45 @@ export default function CodebookWorkspaceSection({
 
   return (
     <PageShell
-      title={selectedCodebookName || selectedCodebook}
+      title={selectedCodebookName || "View Codebook"}
       actions={actions}
       width="wide"
       bodyClassName="flex flex-col gap-3"
     >
-      {isEditMode && (
-        <div className="flex items-center gap-2.5">
-          <label htmlFor="codebook-name">Name:</label>
-          <input
-            id="codebook-name"
-            type="text"
-            value={nameDraft}
-            onChange={(e) => setNameDraft(e.target.value)}
-            className={inputClasses}
-          />
+      {showPrompt && (
+        <PromptPanel {...promptInfo} />
+      )}
+      {error && (
+        <div className="border border-line bg-paper px-3 py-2 text-sm text-ink font-mono">
+          {error}
         </div>
       )}
-
-      {showPrompt && <PromptPanel {...promptInfo} />}
-
-      {loading && <p className="text-paper/70">Loading...</p>}
-      {error && (
-        <p className="border border-error bg-error/10 px-3 py-2 text-sm text-error">{error}</p>
-      )}
-
-      {saveState.status === "error" && saveState.message && (
-        <div className="border border-error bg-error/10 px-3 py-2 text-sm text-error">{saveState.message}</div>
-      )}
-      {saveState.status === "success" && (
-        <div className="border border-success bg-success/10 px-3 py-2 text-sm text-success">Saved.</div>
-      )}
-
-      {!loading && !error && codebookTree.length === 0 && !isEditMode ? (
-        <PageEmptyState message="This codebook has no codes yet." />
-      ) : (
-        <Panel title="Codes">
-          <CodeLegend
-            codebookTree={codebookTree}
-            isEditMode={isEditMode}
-            draftTree={codebookDraft}
-            onDraftTreeChange={setCodebookDraft}
-            disabled={saveState.status === "saving"}
-            selectedFilterCodes={[]}
-            onCodeToggle={noop}
-            getCodeColor={getCodeColor}
-            showDetails
-          />
-        </Panel>
-      )}
+      <Panel title={isEditMode ? "Edit Codebook" : "Codebook Contents"}>
+        {loading ? (
+          <div className="text-sm text-paper/60 py-4">Loading codebook…</div>
+        ) : isEditMode ? (
+          <div className="flex flex-col gap-3">
+            <div>
+              <label className="block text-xs uppercase tracking-wider text-paper/60 font-semibold mb-1">
+                Codebook Name
+              </label>
+              <input
+                type="text"
+                className={inputClasses}
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+              />
+            </div>
+            <CodeLegend
+              codes={codebookDraft}
+              isEditable={true}
+              onChange={setCodebookDraft}
+            />
+          </div>
+        ) : (
+          <CodeLegend codes={codebookTree} onCodeToggle={noop} />
+        )}
+      </Panel>
     </PageShell>
   );
 }

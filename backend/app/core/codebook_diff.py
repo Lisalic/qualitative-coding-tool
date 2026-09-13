@@ -17,6 +17,8 @@ Each change class is disjoint and computed from the same join:
                      separately so a pure reorder never masquerades as a
                      substantive edit)
 - ``unchanged``  -- uid in both, nothing differs
+- ``matched_by_name`` -- for unrelated codebooks with disjoint uids,
+                         documented matching by normalized name.
 
 A code can be both renamed AND redefined AND moved at once; it appears
 in every matching bucket. ``reordered``/``unchanged`` are mutually
@@ -41,9 +43,18 @@ class CodebookDiff:
     moved: list[dict] = field(default_factory=list)
     reordered: list[dict] = field(default_factory=list)
     unchanged: list[dict] = field(default_factory=list)
+    matched_by_name: list[dict] = field(default_factory=list)
+    unrelated_histories: bool = False
 
     def is_empty(self) -> bool:
-        return not (self.added or self.removed or self.renamed or self.redefined or self.moved)
+        return not (
+            self.added
+            or self.removed
+            or self.renamed
+            or self.redefined
+            or self.moved
+            or self.matched_by_name
+        )
 
 
 def _as_dict(code: Any) -> dict:
@@ -64,14 +75,28 @@ def _as_dict(code: Any) -> dict:
     }
 
 
-def diff_codes(from_codes: Sequence[Any], to_codes: Sequence[Any]) -> CodebookDiff:
+def diff_codes(
+    from_codes: Sequence[Any],
+    to_codes: Sequence[Any],
+    *,
+    match_unrelated: bool = True,
+) -> CodebookDiff:
     """Diff two lists of codes (``CodebookCode`` ORM rows or plain dicts
     with the same fields), keyed on ``code_uid``.
+
+    If ``match_unrelated`` is True and the codebooks have completely disjoint
+    identities (unrelated histories), codes with matching names are paired
+    under ``matched_by_name`` per documented cross-artifact comparison rules.
     """
     by_uid_from = {c["code_uid"]: c for c in (_as_dict(c) for c in from_codes)}
     by_uid_to = {c["code_uid"]: c for c in (_as_dict(c) for c in to_codes)}
 
     result = CodebookDiff()
+
+    # Detect unrelated histories
+    shared_uids = set(by_uid_from) & set(by_uid_to)
+    if by_uid_from and by_uid_to and not shared_uids:
+        result.unrelated_histories = True
 
     for uid, code in by_uid_from.items():
         if uid not in by_uid_to:
@@ -104,5 +129,41 @@ def diff_codes(from_codes: Sequence[Any], to_codes: Sequence[Any]) -> CodebookDi
                 result.reordered.append(entry)
             else:
                 result.unchanged.append(entry)
+
+    # Documented rule: if unrelated histories and match_unrelated is enabled,
+    # match codes in removed and added by normalized name
+    if result.unrelated_histories and match_unrelated:
+        from_by_name = {c["name"].strip().lower(): c for c in result.removed}
+        to_by_name = {c["name"].strip().lower(): c for c in result.added}
+        common_names = set(from_by_name) & set(to_by_name)
+
+        if common_names:
+            new_removed = []
+            for c in result.removed:
+                norm = c["name"].strip().lower()
+                if norm in common_names:
+                    match_from = c
+                    match_to = to_by_name[norm]
+                    result.matched_by_name.append(
+                        {
+                            "name": match_from["name"],
+                            "code_uid_from": match_from["code_uid"],
+                            "code_uid_to": match_to["code_uid"],
+                            "from": match_from,
+                            "to": match_to,
+                            "redefined": any(
+                                match_from.get(f) != match_to.get(f) for f in _CONTENT_FIELDS
+                            ),
+                            "moved": match_from["family_uid"] != match_to["family_uid"],
+                        }
+                    )
+                else:
+                    new_removed.append(c)
+            result.removed = new_removed
+
+            # Filter out matched codes from added
+            result.added = [
+                c for c in result.added if c["name"].strip().lower() not in common_names
+            ]
 
     return result

@@ -77,11 +77,10 @@ def patch_async_session_local(monkeypatch, SessionLocal):
     """``_execute_job`` opens its own session via the module-level
     ``AsyncSessionLocal`` imported into ``backend.app.jobs.service`` --
     point that at the in-memory SQLite engine backing this test's session.
-    ``coding_service``'s job handlers (``_run_apply_codebook_job``/
-    ``_run_compare_codings_job``/``_run_summarize_coding_job``/
-    ``_run_recode_items_job``) open their own sessions the same way, via
-    the module-level ``AsyncSessionLocal`` imported into
-    ``backend.app.services.coding_service``.
+    ``coding_service``'s job handlers (``_run_compare_codings_job``/
+    ``_run_summarize_coding_job``/``_run_recode_items_job``) open their
+    own sessions the same way, via the module-level ``AsyncSessionLocal``
+    imported into ``backend.app.services.coding_service``.
     """
     monkeypatch.setattr("backend.app.jobs.service.AsyncSessionLocal", SessionLocal)
     monkeypatch.setattr("backend.app.services.coding_service.AsyncSessionLocal", SessionLocal)
@@ -901,126 +900,6 @@ class TestGetCodingComparison:
             await coding_service.get_coding_comparison(session, user_id, None)
 
 
-# ---------------------------------------------------------------------------
-# start_apply_codebook_job -- validation + enqueue
-# ---------------------------------------------------------------------------
-
-
-class TestStartApplyCodebookJobValidation:
-    async def test_missing_api_key_raises(self, session, user_id) -> None:
-        source = await _make_file(session, user_id, file_type="raw_data", schemaname="proj_raw2")
-        codebook_file = await _make_file(
-            session, user_id, file_type="codebook", schemaname="proj_cb3", content="cb"
-        )
-        with pytest.raises(ValidationAppError, match="api_key"):
-            await coding_service.start_apply_codebook_job(
-                session,
-                user_id,
-                database=source.schemaname,
-                codebook=str(codebook_file.id),
-                methodology="",
-                api_key="",
-                model=None,
-                sample_percentage=100.0,
-                report_name="r",
-                project_id=None,
-            )
-
-    async def test_unowned_database_raises_not_found(self, session, user_id) -> None:
-        with pytest.raises(NotFoundError):
-            await coding_service.start_apply_codebook_job(
-                session,
-                user_id,
-                database="proj_missing",
-                codebook="1",
-                methodology="",
-                api_key="k",
-                model=None,
-                sample_percentage=100.0,
-                report_name="r",
-                project_id=None,
-            )
-
-    async def test_unowned_codebook_raises_not_found(self, session, user_id) -> None:
-        source = await _make_file(session, user_id, file_type="raw_data", schemaname="proj_raw3")
-        with pytest.raises(NotFoundError):
-            await coding_service.start_apply_codebook_job(
-                session,
-                user_id,
-                database=source.schemaname,
-                codebook="proj_missing_cb",
-                methodology="",
-                api_key="k",
-                model=None,
-                sample_percentage=100.0,
-                report_name="r",
-                project_id=None,
-            )
-
-    async def test_codebook_owned_by_another_user_raises_not_found(self, session, user_id) -> None:
-        """The old ``_resolve_codebook_schema`` trusted a ``proj_``-prefixed
-        ``codebook`` value with no ownership check at all -- only the
-        numeric-id form was ever verified. Both forms are ownership-scoped
-        via ``file_repo`` now.
-        """
-        source = await _make_file(session, user_id, file_type="raw_data", schemaname="proj_raw3b")
-        other_id = await _make_user(session, "other-codebook@example.com")
-        other_codebook = await _make_file(
-            session, other_id, file_type="codebook", schemaname="proj_not_mine", content="cb"
-        )
-        with pytest.raises(NotFoundError):
-            await coding_service.start_apply_codebook_job(
-                session,
-                user_id,
-                database=source.schemaname,
-                codebook=other_codebook.schemaname,
-                methodology="",
-                api_key="k",
-                model=None,
-                sample_percentage=100.0,
-                report_name="r",
-                project_id=None,
-            )
-
-
-class TestStartApplyCodebookJobEnqueue:
-    async def test_enqueues_pending_job_without_persisting_api_key(self, session, user_id) -> None:
-        source = await _make_file(session, user_id, file_type="raw_data", schemaname="proj_raw_enq")
-        codebook_file = await _make_file(
-            session, user_id, file_type="codebook", schemaname="proj_cb_enq", content="cb text"
-        )
-
-        job = await coding_service.start_apply_codebook_job(
-            session,
-            user_id,
-            database=source.schemaname,
-            codebook=str(codebook_file.id),
-            methodology="be thorough",
-            api_key="sk-secret",
-            model="m",
-            sample_percentage=100.0,
-            report_name="r",
-            project_id=None,
-        )
-
-        assert job.status == "pending"
-        assert job.job_type == "apply_codebook"
-        assert job.payload["source_file_id"] == source.id
-        assert job.payload["codebook_file_id"] == codebook_file.id
-        assert "api_key" not in job.payload
-        # Enqueue behavior is fully asserted above; deliberately not waiting
-        # for the background job to finish here -- it would make a real
-        # (failing) OpenRouter call with this test's fake api_key. The full
-        # execution path, mocked, is covered by
-        # TestApplyCodebookJobHandlerEndToEnd below.
-
-
-# ---------------------------------------------------------------------------
-# _run_apply_codebook_job -- end-to-end, including coding_entries and the
-# coding artifact's own copy of its sampled rows
-# ---------------------------------------------------------------------------
-
-
 _CODEBOOK_WITH_ALPHA_BETA = (
     "### Code Family: F\n"
     "#### Code Name: Alpha\n"
@@ -1028,333 +907,6 @@ _CODEBOOK_WITH_ALPHA_BETA = (
     "#### Code Name: Beta\n"
     "Definition: about beta\n"
 )
-
-
-class TestApplyCodebookJobHandlerParentDeletedMidRun:
-    """A user can delete an artifact while a job that reads it is still
-    waiting on its (minutes-long) LLM call. The two parents are deliberately
-    NOT treated the same: the codebook's codes were already read into the
-    new artifact's own snapshot, so only its lineage edge is lost, while
-    the source data file's rows have yet to be copied in -- proceeding
-    there would ship a coding artifact whose entries reference rows it
-    never received.
-
-    Both tests delete the parent from inside the `classify_posts` mock,
-    which is exactly the window the real handler leaves open.
-    """
-
-    async def _seed(self, session, user_id):
-        source = await _make_file(session, user_id, file_type="raw_data", schemaname="proj_rawmid")
-        session.add(
-            Submission(file_id=source.id, id="s1", title="t1", selftext="quote one here", word_count=3)
-        )
-        await session.commit()
-        codebook_file = await _make_file(session, user_id, file_type="codebook", schemaname="proj_cbmid")
-        await _seed_codebook_markdown(session, codebook_file.id, user_id, _CODEBOOK_WITH_ALPHA_BETA)
-        # SQLite hands a deleted row's id to the next INSERT, so without
-        # a file sitting above the one these tests delete, the coding
-        # artifact the job creates would be born holding the very id its
-        # deleted parent had -- and every assertion below would compare
-        # the new artifact against itself. Postgres never reuses a
-        # sequence value, so this filler exists only to make the SQLite
-        # fixture behave like the real database.
-        await _make_file(session, user_id, file_type="raw_data", schemaname="proj_idfiller")
-        return source, codebook_file
-
-    async def test_codebook_deleted_mid_run_keeps_the_artifact_and_drops_the_edge(
-        self, session, user_id, monkeypatch, SessionLocal
-    ) -> None:
-        source, codebook_file = await self._seed(session, user_id)
-        # Captured before `_wait_for_terminal_status`'s `expire_all()` --
-        # see the note in `TestApplyCodebookJobHandlerEndToEnd`.
-        source_schema, codebook_id = source.schemaname, codebook_file.schemaname
-
-        async def _classify_then_delete(*args, **kwargs):
-            async with SessionLocal() as other:
-                await file_service.delete_database(other, user_id, codebook_id)
-            return (
-                [{"item_id": "t3_s1", "code": "Alpha", "quotes": ["quote one"]}],
-                "sys prompt",
-                "user prompt",
-                {"batches_processed": 1, "batches_total": 1, "error": None},
-            )
-
-        monkeypatch.setattr("backend.app.services.coding_service.classify_posts", _classify_then_delete)
-
-        job = await coding_service.start_apply_codebook_job(
-            session, user_id, database=source_schema, codebook=codebook_id,
-            methodology="", api_key="sk-secret", model="m", sample_percentage=100.0,
-            report_name="survives", project_id=None,
-        )
-        finished = await _wait_for_terminal_status(session, job.id, user_id)
-        assert finished.status == "succeeded", finished.error
-
-        new_file_id = int(finished.result["file"]["id"])
-        # The snapshot is complete even though the codebook is gone.
-        assert [c.name for c in await version_service.read_codes(session, new_file_id)] == ["Alpha", "Beta"]
-        entries = (
-            await session.execute(select(CodingEntry).where(CodingEntry.file_id == new_file_id))
-        ).scalars().all()
-        assert [(e.post_id, e.code) for e in entries] == [("s1", "Alpha")]
-        # Only the source edge remains; no edge points at the deleted codebook.
-        # No edge points at the deleted codebook -- only the source
-        # remains. Compared by schemaname, not id: SQLite hands the
-        # deleted row's id straight to the next INSERT, so an id
-        # comparison here would silently be comparing the new artifact
-        # against itself.
-        edges = await version_repo.list_parent_edges(session, new_file_id)
-        parents = (
-            await session.execute(select(File.schemaname).where(File.id.in_([e.parent_file_id for e in edges])))
-        ).scalars().all()
-        assert parents == [source_schema]
-
-    async def test_source_data_deleted_mid_run_fails_the_job(
-        self, session, user_id, monkeypatch, SessionLocal
-    ) -> None:
-        source, codebook_file = await self._seed(session, user_id)
-        source_schema = source.schemaname
-
-        async def _classify_then_delete(*args, **kwargs):
-            async with SessionLocal() as other:
-                await file_service.delete_database(other, user_id, source_schema)
-            return (
-                [{"item_id": "t3_s1", "code": "Alpha", "quotes": ["quote one"]}],
-                "sys prompt",
-                "user prompt",
-                {"batches_processed": 1, "batches_total": 1, "error": None},
-            )
-
-        monkeypatch.setattr("backend.app.services.coding_service.classify_posts", _classify_then_delete)
-
-        job = await coding_service.start_apply_codebook_job(
-            session, user_id, database=source_schema, codebook=codebook_file.schemaname,
-            methodology="", api_key="sk-secret", model="m", sample_percentage=100.0,
-            report_name="doomed", project_id=None,
-        )
-        finished = await _wait_for_terminal_status(session, job.id, user_id)
-        assert finished.status == "failed"
-        assert "no longer exists" in (finished.error or "")
-
-        # No half-built artifact left behind.
-        codings = (
-            await session.execute(select(File).where(File.user_id == user_id, File.filename == "doomed"))
-        ).scalars().all()
-        assert codings == []
-
-
-class TestApplyCodebookJobHandlerEndToEnd:
-    async def test_populates_own_rows_codebook_snapshot_and_coding_entries(
-        self, session, user_id, monkeypatch
-    ) -> None:
-        """The realistic multi-post, multi-code case: `classify_posts`'s
-        structured `{item_id, code, quotes}` output must pass the
-        anti-hallucination gate (item exists, code exists in the codebook,
-        quote exists in the item's own text) and land as one
-        `coding_entries` row per quote, the sampled submissions must be
-        copied into the new file's own `submissions` table, and
-        `artifact_content` must hold the codebook snapshot (not any raw AI
-        output -- that is never stored at all now).
-        """
-        source = await _make_file(session, user_id, file_type="raw_data", schemaname="proj_raw4")
-        session.add_all(
-            [
-                Submission(file_id=source.id, id="s1", title="t1", selftext="quote one and quote two", word_count=5),
-                Submission(file_id=source.id, id="s2", title="t2", selftext="quote three appears here", word_count=5),
-            ]
-        )
-        await session.commit()
-
-        codebook_file = await _make_file(session, user_id, file_type="codebook", schemaname="proj_cb4")
-        await _seed_codebook_markdown(session, codebook_file.id, user_id, _CODEBOOK_WITH_ALPHA_BETA)
-
-        raw_entries = [
-            {"item_id": "t3_s1", "code": "Alpha", "quotes": ["quote one"]},
-            {"item_id": "t3_s1", "code": "Beta", "quotes": ["quote two"]},
-            {"item_id": "t3_s2", "code": "Alpha", "quotes": ["quote three"]},
-        ]
-        classify_mock = AsyncMock(return_value=(raw_entries, "sys prompt", "user prompt", {"batches_processed": 1, "batches_total": 1, "error": None}))
-        monkeypatch.setattr("backend.app.services.coding_service.classify_posts", classify_mock)
-
-        # Capture ids before _wait_for_terminal_status's session.expire_all()
-        # -- accessing an ORM attribute on an expired instance afterward
-        # triggers an implicit lazy-load that isn't valid on an AsyncSession
-        # outside an awaited call (see conftest.py's _expire_all docstring).
-        source_id = source.id
-        codebook_file_id = codebook_file.id
-
-        job = await coding_service.start_apply_codebook_job(
-            session,
-            user_id,
-            database=source.schemaname,
-            codebook=str(codebook_file_id),
-            methodology="be thorough",
-            api_key="sk-secret",
-            model="m",
-            sample_percentage=100.0,
-            report_name="my report",
-            project_id=None,
-        )
-
-        finished = await _wait_for_terminal_status(session, job.id, user_id)
-        assert finished.status == "succeeded", finished.error
-        result = finished.result
-        assert result["accepted"] == 3
-        assert result["rejected_unknown_item"] == 0
-        assert result["rejected_unknown_code"] == 0
-        assert result["rejected_quote_not_found"] == 0
-        new_file_id = int(result["file"]["id"])
-        assert result["file"]["filename"] == "my report"
-
-        # The new coding artifact's own codebook snapshot holds the
-        # applied codebook's codes (code_uid preserved), not any raw AI
-        # output -- nothing unverified is ever stored.
-        stored_codes = await version_service.read_codes(session, new_file_id)
-        assert [c.name for c in stored_codes] == ["Alpha", "Beta"]
-
-        # The coding artifact owns its own copy of every sampled row.
-        copied_subs = (
-            await session.execute(select(Submission).where(Submission.file_id == new_file_id))
-        ).scalars().all()
-        assert {s.id for s in copied_subs} == {"s1", "s2"}
-
-        entries = (
-            await session.execute(select(CodingEntry).where(CodingEntry.file_id == new_file_id))
-        ).scalars().all()
-        by_key = {(e.post_id, e.code): (e.quote, e.start_offset, e.end_offset) for e in entries}
-        assert by_key == {
-            ("s1", "Alpha"): ("quote one", 0, 9),
-            ("s1", "Beta"): ("quote two", 14, 23),
-            ("s2", "Alpha"): ("quote three", 0, 11),
-        }
-
-        edges = await version_repo.list_parent_edges(session, new_file_id)
-        parent_ids = {e.parent_file_id for e in edges}
-        assert parent_ids == {source_id, codebook_file_id}
-        by_parent = {e.parent_file_id: e for e in edges}
-        assert by_parent[source_id].role == "source_data"
-        assert by_parent[codebook_file_id].role == "codebook"
-        # The codebook edge is pinned to the exact revision applied.
-        codebook_head = await version_repo.head_version(session, codebook_file_id)
-        assert by_parent[codebook_file_id].parent_version_id == codebook_head.id
-
-        # api_key never persisted to the jobs table, but did reach
-        # classify_posts via runtime_extra.
-        assert "api_key" not in job.payload
-        assert classify_mock.called
-        call_args = classify_mock.call_args.args
-        assert call_args[0] == _CODEBOOK_WITH_ALPHA_BETA.strip()
-        assert call_args[3] == "sk-secret"
-
-    async def test_rejects_hallucinated_item_code_and_quote(self, session, user_id, monkeypatch) -> None:
-        """Every entry here fails a different check -- none of them reach
-        coding_entries, and the job result reports exactly why.
-        """
-        source = await _make_file(session, user_id, file_type="raw_data", schemaname="proj_raw4c")
-        session.add(Submission(file_id=source.id, id="s1", title="t", selftext="the real content", word_count=3))
-        await session.commit()
-        codebook_file = await _make_file(session, user_id, file_type="codebook", schemaname="proj_cb4c")
-        await _seed_codebook_markdown(session, codebook_file.id, user_id, _CODEBOOK_WITH_ALPHA_BETA)
-
-        raw_entries = [
-            # unknown item -- not in the run's valid_keys
-            {"item_id": "t3_ghost", "code": "Alpha", "quotes": ["the real content"]},
-            # unknown code -- not in the codebook
-            {"item_id": "t3_s1", "code": "NotACode", "quotes": ["the real content"]},
-            # quote never appears in s1's content
-            {"item_id": "t3_s1", "code": "Alpha", "quotes": ["never appears anywhere"]},
-        ]
-        monkeypatch.setattr(
-            "backend.app.services.coding_service.classify_posts",
-            AsyncMock(return_value=(raw_entries, "", "", {"batches_processed": 1, "batches_total": 1, "error": None})),
-        )
-
-        job = await coding_service.start_apply_codebook_job(
-            session,
-            user_id,
-            database=source.schemaname,
-            codebook=str(codebook_file.id),
-            methodology="",
-            api_key="k",
-            model=None,
-            sample_percentage=100.0,
-            report_name="r",
-            project_id=None,
-        )
-        finished = await _wait_for_terminal_status(session, job.id, user_id)
-        assert finished.status == "succeeded", finished.error
-        assert finished.result["accepted"] == 0
-        assert finished.result["rejected_unknown_item"] == 1
-        assert finished.result["rejected_unknown_code"] == 1
-        assert finished.result["rejected_quote_not_found"] == 1
-
-        new_file_id = int(finished.result["file"]["id"])
-        entries = (
-            await session.execute(select(CodingEntry).where(CodingEntry.file_id == new_file_id))
-        ).scalars().all()
-        assert entries == []
-
-    async def test_each_quote_for_a_repeated_post_code_pair_gets_its_own_row(
-        self, session, user_id, monkeypatch
-    ) -> None:
-        source = await _make_file(session, user_id, file_type="raw_data", schemaname="proj_raw4b")
-        session.add(Submission(file_id=source.id, id="s1", title="t", selftext="one and two both here", word_count=5))
-        await session.commit()
-        codebook_file = await _make_file(session, user_id, file_type="codebook", schemaname="proj_cb4b")
-        await _seed_codebook_markdown(session, codebook_file.id, user_id, _CODEBOOK_WITH_ALPHA_BETA)
-
-        raw_entries = [{"item_id": "t3_s1", "code": "Alpha", "quotes": ["one", "two"]}]
-        monkeypatch.setattr(
-            "backend.app.services.coding_service.classify_posts",
-            AsyncMock(return_value=(raw_entries, "", "", {"batches_processed": 1, "batches_total": 1, "error": None})),
-        )
-
-        job = await coding_service.start_apply_codebook_job(
-            session,
-            user_id,
-            database=source.schemaname,
-            codebook=str(codebook_file.id),
-            methodology="",
-            api_key="k",
-            model=None,
-            sample_percentage=100.0,
-            report_name="r",
-            project_id=None,
-        )
-        finished = await _wait_for_terminal_status(session, job.id, user_id)
-        assert finished.status == "succeeded", finished.error
-        new_file_id = int(finished.result["file"]["id"])
-
-        entries = (
-            await session.execute(select(CodingEntry).where(CodingEntry.file_id == new_file_id))
-        ).scalars().all()
-        assert len(entries) == 2
-        assert {e.quote for e in entries} == {"one", "two"}
-        assert all(e.code == "Alpha" for e in entries)
-
-    async def test_empty_codebook_content_marks_job_failed(self, session, user_id, monkeypatch) -> None:
-        source = await _make_file(session, user_id, file_type="raw_data", schemaname="proj_raw5")
-        codebook_file = await _make_file(
-            session, user_id, file_type="codebook", schemaname="proj_cb5", content=None
-        )
-        classify_mock = AsyncMock(return_value=("output", "s", "u", {"batches_processed": 1, "batches_total": 1, "error": None}))
-        monkeypatch.setattr("backend.app.services.coding_service.classify_posts", classify_mock)
-
-        job = await coding_service.start_apply_codebook_job(
-            session,
-            user_id,
-            database=source.schemaname,
-            codebook=str(codebook_file.id),
-            methodology="",
-            api_key="k",
-            model=None,
-            sample_percentage=100.0,
-            report_name="r",
-            project_id=None,
-        )
-        finished = await _wait_for_terminal_status(session, job.id, user_id)
-        assert finished.status == "failed"
-        assert "codebook not found or empty" in finished.error
-        assert not classify_mock.called
 
 
 # ---------------------------------------------------------------------------
@@ -1957,3 +1509,96 @@ class TestCreateManualCoding:
                 session, other_id, database=source.schemaname, codebook=codebook_file.schemaname,
                 report_name="by hand", description=None, project_id=None,
             )
+
+
+class TestCreateManualCodingParentDeletedMidCall:
+    """A user can delete an artifact while a concurrent request has
+    already sampled it and is about to materialize the new coding
+    artifact. The two parents are deliberately NOT treated the same: the
+    codebook's codes were already read into the new artifact's own
+    snapshot, so only its lineage edge is lost, while the source data
+    file's rows have yet to be copied in -- proceeding there would ship a
+    coding artifact whose entries reference rows it never received.
+
+    Both tests delete the parent from inside a monkeypatched
+    ``_materialize_coding_artifact`` -- the row-copy step, which is
+    exactly the window ``TestApplyCodebookJobHandlerParentDeletedMidRun``
+    exercised via a monkeypatched ``classify_posts`` before the one-shot
+    apply-codebook path was retired.
+    """
+
+    async def _seed(self, session, user_id):
+        source = await _make_file(session, user_id, file_type="raw_data", schemaname="proj_rawmidm")
+        session.add(
+            Submission(file_id=source.id, id="s1", title="t1", selftext="quote one here", word_count=3)
+        )
+        await session.commit()
+        codebook_file = await _make_file(session, user_id, file_type="codebook", schemaname="proj_cbmidm")
+        await _seed_codebook_markdown(session, codebook_file.id, user_id, _CODEBOOK_WITH_ALPHA_BETA)
+        # SQLite hands a deleted row's id to the next INSERT, so without a
+        # file sitting above the one these tests delete, the coding
+        # artifact created below would be born holding the very id its
+        # deleted parent had -- and every assertion would compare the new
+        # artifact against itself. Postgres never reuses a sequence value,
+        # so this filler exists only to make the SQLite fixture behave
+        # like the real database.
+        await _make_file(session, user_id, file_type="raw_data", schemaname="proj_idfillerm")
+        return source, codebook_file
+
+    async def test_codebook_deleted_mid_call_keeps_the_artifact_and_drops_the_edge(
+        self, session, user_id, monkeypatch, SessionLocal
+    ) -> None:
+        source, codebook_file = await self._seed(session, user_id)
+        codebook_id = codebook_file.schemaname
+        real_materialize = coding_service._materialize_coding_artifact
+
+        async def _delete_then_materialize(*args, **kwargs):
+            async with SessionLocal() as other:
+                await file_service.delete_database(other, user_id, codebook_id)
+            return await real_materialize(*args, **kwargs)
+
+        monkeypatch.setattr(coding_service, "_materialize_coding_artifact", _delete_then_materialize)
+
+        file_rec, _ = await coding_service.create_manual_coding(
+            session, user_id, database=source.schemaname, codebook=codebook_id,
+            report_name="survives", description=None, project_id=None,
+        )
+
+        # The snapshot is complete even though the codebook is gone.
+        assert [c.name for c in await version_service.read_codes(session, file_rec.id)] == ["Alpha", "Beta"]
+        # Only the source edge remains -- no edge points at the deleted
+        # codebook. Compared by schemaname, not id: SQLite hands the
+        # deleted row's id straight to the next INSERT, so an id
+        # comparison here would silently be comparing the new artifact
+        # against itself.
+        edges = await version_repo.list_parent_edges(session, file_rec.id)
+        parents = (
+            await session.execute(select(File.schemaname).where(File.id.in_([e.parent_file_id for e in edges])))
+        ).scalars().all()
+        assert parents == [source.schemaname]
+
+    async def test_source_data_deleted_mid_call_raises_and_leaves_nothing_behind(
+        self, session, user_id, monkeypatch, SessionLocal
+    ) -> None:
+        source, codebook_file = await self._seed(session, user_id)
+        source_schema = source.schemaname
+        real_materialize = coding_service._materialize_coding_artifact
+
+        async def _delete_then_materialize(*args, **kwargs):
+            async with SessionLocal() as other:
+                await file_service.delete_database(other, user_id, source_schema)
+            return await real_materialize(*args, **kwargs)
+
+        monkeypatch.setattr(coding_service, "_materialize_coding_artifact", _delete_then_materialize)
+
+        with pytest.raises(NotFoundError):
+            await coding_service.create_manual_coding(
+                session, user_id, database=source_schema, codebook=codebook_file.schemaname,
+                report_name="doomed", description=None, project_id=None,
+            )
+
+        # No half-built artifact left behind.
+        codings = (
+            await session.execute(select(File).where(File.user_id == user_id, File.filename == "doomed"))
+        ).scalars().all()
+        assert codings == []

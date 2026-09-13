@@ -48,6 +48,8 @@ class CodingDiff:
     rows_recoded: int = 0
     rows_newly_coded: int = 0
     rows_newly_uncoded: int = 0
+    matching_rows: int = 0
+    unrelated_corpus: bool = False
     # Only codes whose applied count actually changed between the two
     # versions -- sorted by the size of that change, largest first, so
     # the most consequential recodes surface without a separate sort in
@@ -110,10 +112,17 @@ def diff_coding_entries(from_entries: Sequence[Any], to_entries: Sequence[Any]) 
     rows_recoded = 0
     rows_newly_coded = 0
     rows_newly_uncoded = 0
+    matching_rows = 0
+
+    shared_rows = set(from_by_row) & set(to_by_row)
+    unrelated_corpus = bool(from_by_row and to_by_row and not shared_rows)
+
     for row in set(from_by_row) | set(to_by_row):
         before = from_by_row.get(row, set())
         after = to_by_row.get(row, set())
         if before == after:
+            if before:
+                matching_rows += 1
             continue
         rows_recoded += 1
         if not before:
@@ -146,6 +155,8 @@ def diff_coding_entries(from_entries: Sequence[Any], to_entries: Sequence[Any]) 
         rows_recoded=rows_recoded,
         rows_newly_coded=rows_newly_coded,
         rows_newly_uncoded=rows_newly_uncoded,
+        matching_rows=matching_rows,
+        unrelated_corpus=unrelated_corpus,
         code_counts=code_counts,
         applied=applied,
         removed=removed,

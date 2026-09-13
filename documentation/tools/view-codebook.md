@@ -10,7 +10,7 @@ Sidebar → View Codebook (Views group), or `/codebook-view` → `pages/ViewCode
 
 ## Prerequisites
 
-At least one codebook artifact (from [Generate Codebook](generate-codebook.md), or a saved [Compare Codebooks](compare-codebooks.md) result). No API key needed — this tool is read/write against stored content, not an LLM call.
+At least one codebook artifact (from [Codebook](codebook.md), or a saved [Compare Codebooks](compare-codebooks.md) result). No API key needed — this tool is read/write against stored content, not an LLM call.
 
 ## Inputs
 

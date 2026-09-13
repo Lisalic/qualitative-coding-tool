@@ -20,15 +20,18 @@ directly -- no more per-schema ``information_schema``/``to_regclass``
 introspection, since the fixed tables (and their ``word_count`` column)
 always exist for every file.
 
-``filter_data`` becomes a background job (same job-queue pattern Stage 4
-established for ``summarize-coding``): ``start_filter_data_job`` validates
-and enqueues, ``_run_filter_data_job`` (registered for job_type
-``"filter_data"``) does the actual sampling/AI-filtering/materialization
-work, decomposed into ``_sample_source_rows`` / ``_apply_tag_or_ai_filter``
-/ ``_materialize_filtered_schema``. The per-ID ``SELECT``+``INSERT``+
-``begin_nested()`` Python loop the old synchronous route used is replaced
-by one call to ``repositories/raw_data_repo.py::copy_rows_by_id`` -- a
-set-based ``INSERT ... SELECT`` for each of submissions/comments.
+Filtering has one entry point, the filter editor: an AI preview
+(``start_filter_preview_job`` / ``_run_filter_preview_job``, job_type
+``"filter_preview"``) that suggests row ids without creating anything,
+and a synchronous manual submit (``create_manual_filtered_data``) that
+materializes the researcher's accepted selection. Both share
+``_sample_source_rows`` / ``_apply_tag_or_ai_filter`` (via
+``_run_ai_filter``) for sampling and the AI pass, and
+``_materialize_filtered_schema`` for persistence. The per-ID
+``SELECT``+``INSERT``+``begin_nested()`` Python loop the old synchronous
+route used is replaced by one call to
+``repositories/raw_data_repo.py::copy_rows_by_id`` -- a set-based
+``INSERT ... SELECT`` for each of submissions/comments.
 """
 
 from __future__ import annotations
@@ -63,7 +66,6 @@ from backend.app.storage_models import Comment, Submission
 from backend.app.versioning_models import (
     ORIGIN_EDITED,
     ORIGIN_FORKED,
-    ORIGIN_GENERATED,
     RELATION_DERIVED_FROM,
     ROLE_SOURCE_DATA,
 )
@@ -325,7 +327,7 @@ async def get_post_contents(
 
 
 # ---------------------------------------------------------------------------
-# filter_data: background job kickoff + handler
+# filter_preview: sampling, exclusion, and AI-filter helpers
 # ---------------------------------------------------------------------------
 
 
@@ -347,57 +349,6 @@ def _word_count_expr_ai_ready(rows: list, content_type: str) -> str:
             parts.append(f"[{cid}] {body}")
     return "\n---\n".join(parts)
 
-
-async def start_filter_data_job(
-    session: AsyncSession,
-    user_id: int,
-    *,
-    database: str,
-    name: str,
-    api_key: str,
-    model: str | None,
-    prompt: str | None,
-    min_words: int,
-    sample_percentage: float,
-    filter_tags: str | None,
-    description: str | None,
-    project_id: int | None,
-    content_scope: str = "both",
-) -> Job:
-    """Validate and enqueue a ``filter_data`` background job.
-
-    Keeps the same guard-clause validation the old synchronous route did
-    (schema must look like ``proj_<id>``, ``api_key`` required) plus the
-    new ownership check (``database`` must resolve to a file owned by
-    ``user_id``) -- all of which raise before anything is persisted or a
-    background task is spawned. ``api_key`` goes into ``runtime_extra`` so
-    it's never written to the ``jobs`` table.
-    """
-    schema = require_valid_schema(database, field_name="database")
-    if not api_key:
-        raise ValidationAppError("api_key is required")
-
-    source_file_id = await file_repo.resolve_file_id(session, schema, user_id)
-
-    return await enqueue_job(
-        session,
-        user_id=user_id,
-        job_type="filter_data",
-        payload={
-            "source_file_id": source_file_id,
-            "user_id": user_id,
-            "name": name,
-            "model": model,
-            "prompt": (prompt or "").strip(),
-            "min_words": min_words,
-            "sample_percentage": sample_percentage,
-            "filter_tags": filter_tags,
-            "description": description,
-            "project_id": project_id,
-            "content_scope": content_scope,
-        },
-        runtime_extra={"api_key": api_key},
-    )
 
 
 def _exclude_clause(ids: list[str] | None, param: str) -> tuple[str, dict[str, Any], list]:
@@ -457,10 +408,9 @@ async def _sample_source_rows(
 
     ``exclude_submission_ids``/``exclude_comment_ids`` narrow the
     candidate pool before counting *and* before sampling, so an excluded
-    row can neither consume a sample slot nor be proposed. Only the
-    filter editor's preview job passes them (the rows the user already
-    included or excluded by hand); the one-shot ``filter_data`` job
-    leaves them empty and behaves exactly as before.
+    row can neither consume a sample slot nor be proposed. The filter
+    editor's preview job passes them (the rows the user already included
+    or excluded by hand).
 
     Uses ``text()`` against the fixed ``submissions``/``comments`` tables
     scoped by ``file_id`` -- safe (no identifier interpolation; ``file_id``
@@ -633,10 +583,6 @@ async def _materialize_filtered_schema(
     project_id: int | None,
     post_ids: list[str],
     comment_ids: list[str],
-    system_prompt: str | None,
-    user_instructions: str | None,
-    prompt_meta: dict | None,
-    origin: str = ORIGIN_GENERATED,
     message: str | None = None,
 ) -> tuple[File, dict[str, int]]:
     """Create the new ``filtered_data`` ``File`` row, its dependency on the
@@ -645,24 +591,18 @@ async def _materialize_filtered_schema(
     ``raw_data_repo.copy_rows_by_id`` -- the set-based replacement for the
     old per-ID ``SELECT``+``INSERT``+``begin_nested()`` loop.
 
-    Filter Data filters posts and comments independently (two separate
-    AI calls / tag predicates), so the result can legitimately contain a
-    comment whose parent post didn't survive filtering. Rather than
-    silently producing that incoherent-looking dataset, ``counts`` gains
-    an ``"orphaned_comments"`` entry: comments copied into the new file
-    whose ``link_id`` doesn't match any submission id also copied in
-    (comparing against ``post_ids`` directly -- both are bare Reddit ids
-    with the ``t3_`` prefix already stripped at import, so no
-    id-qualification is needed here).
+    A filter can legitimately keep a comment whose parent post it
+    dropped. Rather than silently producing that incoherent-looking
+    dataset, ``counts`` gains an ``"orphaned_comments"`` entry: comments
+    copied into the new file whose ``link_id`` doesn't match any
+    submission id also copied in (comparing against ``post_ids``
+    directly -- both are bare Reddit ids with the ``t3_`` prefix already
+    stripped at import, so no id-qualification is needed here).
 
-    Shared by both ways a ``filtered_data`` artifact can come into
-    existence -- the one-shot AI job (``_run_filter_data_job``,
-    ``origin=ORIGIN_GENERATED``) and the filter editor's hand-composed
-    submit (``create_manual_filtered_data``, ``origin=ORIGIN_EDITED``).
-    Only the provenance recorded on v1 differs; the artifact's structure,
-    lineage pin, row copy and counts are identical, so a manually
-    composed filtered database is a first-class artifact rather than a
-    second kind of thing.
+    The filter editor's only way to create a ``filtered_data`` artifact:
+    always ``origin=ORIGIN_EDITED`` with no LLM provenance, since the
+    researcher's accepted selection is what gets committed regardless of
+    whether the AI preview helped assemble it.
     """
     # The source file was read before the (minutes-long) LLM call and
     # its matched rows are copied in below -- if it was deleted in that
@@ -688,8 +628,8 @@ async def _materialize_filtered_schema(
     # why this is commit_data_version (a range table), not
     # commit_blob_version.
     await version_service.commit_data_version(
-        session, file_id=file_rec.id, author_user_id=user_id, origin=origin, message=message,
-        system_prompt=system_prompt, user_instructions=user_instructions or None, prompt_meta=prompt_meta,
+        session, file_id=file_rec.id, author_user_id=user_id, origin=ORIGIN_EDITED, message=message,
+        system_prompt=None, user_instructions=None, prompt_meta=None,
         parents=[EdgeSpec(parent_file_id=source_file_id, relation=RELATION_DERIVED_FROM, role=ROLE_SOURCE_DATA)],
     )
 
@@ -811,15 +751,13 @@ async def duplicate_data(
     return file_rec
 
 # ---------------------------------------------------------------------------
-# The two filter jobs.
+# The filter editor's AI pass.
 #
 # `_run_ai_filter` is the whole AI pass -- tag expansion, sampling,
-# LLM call, coverage bookkeeping -- shared verbatim by both. What the
-# two handlers do with the ids it returns is the only difference:
-# `filter_data` materializes a `filtered_data` artifact immediately,
-# while `filter_preview` hands the ids back to the filter editor as
-# *suggestions* for a human to accept, reject, or extend before anything
-# is created (`create_manual_filtered_data` is the submit half).
+# LLM call, coverage bookkeeping. `filter_preview`'s handler hands the
+# ids it returns back to the filter editor as *suggestions* for a human
+# to accept, reject, or extend before anything is created
+# (`create_manual_filtered_data` is the submit half).
 # ---------------------------------------------------------------------------
 
 
@@ -955,53 +893,6 @@ async def _run_ai_filter(
     )
 
 
-@register_handler("filter_data")
-async def _run_filter_data_job(job_id: int, payload: dict) -> dict:
-    """Handler for ``job_type="filter_data"`` -- the one-shot AI filter
-    behind ``/filter``, which produces a ``filtered_data`` artifact
-    directly with no human review step.
-
-    Runs in the background job runner's context (no request-scoped
-    session), so it opens its own session via the module-level
-    ``AsyncSessionLocal`` -- same pattern as ``jobs/service.py::_execute_job``
-    and Stage 4's ``coding_service._run_summarize_coding_job``.
-    """
-    async with AsyncSessionLocal() as session:
-        outcome = await _run_ai_filter(session, job_id, payload)
-
-        file_rec, counts = await _materialize_filtered_schema(
-            session,
-            user_id=payload["user_id"],
-            source_file_id=payload["source_file_id"],
-            name=payload.get("name"),
-            description=payload.get("description"),
-            project_id=payload.get("project_id"),
-            post_ids=outcome.post_ids,
-            comment_ids=outcome.comment_ids,
-            system_prompt=outcome.system_prompt,
-            user_instructions=outcome.user_instructions,
-            prompt_meta=outcome.prompt_meta,
-        )
-        await session.commit()
-        file_id, schema_name, filename = file_rec.id, file_rec.schemaname, file_rec.filename
-
-    result: dict[str, Any] = {
-        "message": "Database filtered and saved",
-        "submissions_length": len(outcome.submissions_text),
-        "comments_length": len(outcome.comments_text),
-        "posts_filtered_count": counts["submissions"],
-        "comments_filtered_count": counts["comments"],
-        "orphaned_comments": counts.get("orphaned_comments", 0),
-        "file": {"id": str(file_id), "schema_name": schema_name, "filename": filename},
-    }
-    if outcome.has_tags:
-        result["tag_filter"] = {
-            "original_tags": outcome.original_tags_meta,
-            "expanded_terms": outcome.expanded_terms_sql,
-        }
-    result.update(_coverage_result_fields(outcome.coverage))
-    return result
-
 
 # ---------------------------------------------------------------------------
 # Filter editor: AI preview (suggests ids) + manual submit (creates the file)
@@ -1025,12 +916,13 @@ async def start_filter_preview_job(
 ) -> Job:
     """Validate and enqueue a ``filter_preview`` background job.
 
-    Same validation and same ``runtime_extra`` API-key handling as
-    ``start_filter_data_job``, but the job it enqueues creates nothing --
-    it answers "of the rows I haven't decided on, which would you keep?"
-    and returns ids. That is what lets the filter editor run the AI tool
-    repeatedly and treat each run as a suggestion rather than a
-    commitment.
+    Guards a ``proj_<id>``-shaped schema and a present ``api_key`` before
+    persisting or spawning a background task, with ``api_key`` going into
+    ``runtime_extra`` so it's never written to the ``jobs`` table. The job
+    it enqueues creates nothing -- it answers "of the rows I haven't
+    decided on, which would you keep?" and returns ids. That is what lets
+    the filter editor run the AI tool repeatedly and treat each run as a
+    suggestion rather than a commitment.
     """
     schema = require_valid_schema(database, field_name="database")
     if not api_key:
@@ -1103,10 +995,9 @@ async def create_manual_filtered_data(
 ) -> tuple[File, dict[str, int]]:
     """Create a ``filtered_data`` artifact from a hand-picked set of rows.
 
-    The submit half of the filter editor, and the manual counterpart of
-    ``_run_filter_data_job``. Synchronous rather than a background job:
-    there is no LLM call here, only the same set-based ``INSERT ...
-    SELECT`` per table that the AI path ends with.
+    The filter editor's submit step. Synchronous rather than a background
+    job: there is no LLM call here, only a set-based ``INSERT ... SELECT``
+    per table.
 
     Recorded as ``origin=ORIGIN_EDITED`` with no ``system_prompt`` or
     ``prompt_meta`` even when the AI preview tool helped assemble the
@@ -1128,10 +1019,6 @@ async def create_manual_filtered_data(
         project_id=project_id,
         post_ids=post_ids,
         comment_ids=comment_ids,
-        system_prompt=None,
-        user_instructions=None,
-        prompt_meta=None,
-        origin=ORIGIN_EDITED,
         message=f"Composed by hand from {len(post_ids)} posts and {len(comment_ids)} comments",
     )
     await session.commit()

@@ -131,20 +131,21 @@ async def existing_file_ids(session: AsyncSession, file_ids: set[int]) -> set[in
 async def require_existing_file_ids(session: AsyncSession, file_ids: set[int]) -> None:
     """Raise ``NotFoundError`` if any of ``file_ids`` no longer exists.
 
-    For the case a background job hits when the artifact it is about to
-    read *content* out of was deleted during its (minutes-long) LLM call:
-    apply-codebook and filter both copy their source file's rows into the
-    artifact they are creating, at the very end of the run. A source that
-    vanished mid-run copies zero rows, which would otherwise ship a
-    finished-looking artifact whose coding entries reference rows it
-    doesn't have. Failing the job with a clear message is the only
-    honest outcome -- unlike a missing *lineage* parent, which
+    For the case a caller hits when the artifact it is about to read
+    *content* out of was deleted after being read but before the new
+    artifact is materialized: the filter editor's manual submit and the
+    coding editor's manual create both copy their source file's rows into
+    the artifact they are creating, at the very end of the call. A source
+    that vanished in that window copies zero rows, which would otherwise
+    ship a finished-looking artifact whose entries reference rows it
+    doesn't have. Failing with a clear message is the only honest outcome
+    -- unlike a missing *lineage* parent, which
     ``version_service.link_parents`` can safely skip.
     """
     missing = set(file_ids) - await existing_file_ids(session, set(file_ids))
     if missing:
         raise NotFoundError(
-            "Source file no longer exists (deleted while this job was running): "
+            "Source file no longer exists (deleted while this was in progress): "
             + ", ".join(str(i) for i in sorted(missing))
         )
 

@@ -8,11 +8,17 @@ boundary. Adds the auth/ownership scoping ``get_codebook`` never had, and
 supersedes the Stage-0 guard-clause patch on ``list_codebooks`` with a
 real service-layer implementation.
 
-``generate_codebook`` and ``compare_codebooks`` become background jobs (same
-job-queue pattern Stage 4/6 established for ``summarize-coding``/
-``filter-data``): each gets a synchronous ``start_*_job`` that validates and
-enqueues, and an ``@register_handler``-registered handler that does the
-actual sampling/LLM-call/persistence work off the request path.
+Codebook generation has one entry point, the codebook editor: an AI
+preview (``start_codebook_preview_job`` / ``_run_codebook_preview_job``,
+job_type ``"codebook_preview"``) that proposes codes without creating
+anything, and a synchronous manual submit (``create_manual_codebook``)
+that materializes the researcher's accepted draft. Both share
+``_assemble_source_records`` for sampling; only the preview job calls the
+LLM. ``compare_codebooks`` is a separate, still one-shot, background job
+(same job-queue pattern Stage 4/6 established for
+``summarize-coding``/``filter-data``): a synchronous ``start_*_job`` that
+validates and enqueues, and an ``@register_handler``-registered handler
+that does the actual LLM-call/persistence work off the request path.
 
 On the "local-import-shadowing" question the plan flagged for the old
 ``compare_codebooks`` route (``from backend.app.database import engine`` and
@@ -33,7 +39,7 @@ what the pre-existing regression test's workaround comment documents. Both
 issues disappear structurally here: this module calls
 ``codebook_generator_module.MODEL_3``/``codebook_generator_module.get_client``
 through the one already-module-level-imported reference, the same way
-``generate_codebook``'s handler below calls
+``_run_codebook_preview_job`` below calls
 ``codebook_generator_module.generate_codebook_map_reduce`` -- there is no
 second, locally-scoped binding of the same name to shadow.
 """
@@ -352,65 +358,6 @@ async def duplicate_codebook(
     return file_rec
 
 
-# ---------------------------------------------------------------------------
-# generate_codebook: background job kickoff + handler
-# ---------------------------------------------------------------------------
-
-
-async def start_generate_codebook_job(
-    session: AsyncSession,
-    user_id: int,
-    *,
-    database: str,
-    api_key: str,
-    prompt: str,
-    name: str,
-    description: str | None,
-    project_id: int | None,
-    model: str | None,
-    sample_percentage: float,
-    content_scope: str = "both",
-) -> Job:
-    """Validate and enqueue a ``generate_codebook`` background job.
-
-    Keeps the same guard-clause validation the old synchronous route did
-    (schema must look like ``proj_<id>``, ``api_key`` required) plus the new
-    ownership check (``database`` must resolve to a file owned by
-    ``user_id``) -- both raise before anything is persisted or a background
-    task is spawned. ``api_key`` goes into ``runtime_extra`` so it's never
-    written to the ``jobs`` table.
-
-    Deliberate behavior change from the old synchronous route: "no records
-    were sampled from the selected database" used to be a synchronous 400
-    from this call. Since sampling now happens inside the job handler (it
-    needs a DB session, and the whole point of this stage is to get that
-    off the request path), that check now surfaces as a failed job instead
-    -- same as the equivalent ``filter_data`` conversion in Stage 6.
-    """
-    schema = require_valid_schema(database, field_name="database")
-    if not api_key:
-        raise ValidationAppError("api_key is required")
-
-    source_file_id = await file_repo.resolve_file_id(session, schema, user_id)
-
-    return await enqueue_job(
-        session,
-        user_id=user_id,
-        job_type="generate_codebook",
-        payload={
-            "source_file_id": source_file_id,
-            "user_id": user_id,
-            "name": name,
-            "model": model,
-            "prompt": (prompt or "").strip(),
-            "description": description,
-            "project_id": project_id,
-            "sample_percentage": sample_percentage,
-            "content_scope": content_scope,
-        },
-        runtime_extra={"api_key": api_key},
-    )
-
 
 async def _assemble_source_records(
     session: AsyncSession,
@@ -469,24 +416,15 @@ async def _materialize_codebook(
     description: str | None,
     project_id: int | None,
     code_rows: list[dict],
-    origin: str,
     message: str | None = None,
-    job_id: int | None = None,
-    model: str | None = None,
-    system_prompt: str | None = None,
-    user_instructions: str | None = None,
-    prompt_meta: dict | None = None,
 ) -> File:
     """Create a new ``codebook`` File from ``code_rows`` and commit it as
     that file's v1, linked back to the data it was built from.
 
-    The single write path for a brand-new codebook, shared by the one-shot
-    ``generate_codebook`` job and the editor's ``create_manual_codebook``
-    -- the codebook counterpart of
-    ``data_service._materialize_filtered_schema``, and for the same
-    reason: two entry points that produce the same artifact type must not
-    be able to drift into producing structurally different artifacts.
-    Only ``origin`` and the provenance fields differ between them.
+    The codebook editor's only way to create a new codebook. Always
+    ``origin=ORIGIN_EDITED`` with no LLM provenance, since the researcher's
+    accepted draft is what gets committed regardless of whether the AI
+    preview helped write it.
 
     Does not commit -- the caller owns the transaction boundary.
     """
@@ -509,14 +447,9 @@ async def _materialize_codebook(
         session,
         file_id=file_rec.id,
         author_user_id=user_id,
-        origin=origin,
+        origin=ORIGIN_EDITED,
         codes=code_rows,
         message=message,
-        job_id=job_id,
-        model=model,
-        system_prompt=system_prompt,
-        user_instructions=user_instructions,
-        prompt_meta=prompt_meta,
         parents=[EdgeSpec(parent_file_id=source_file_id, relation=RELATION_DERIVED_FROM, role=ROLE_SOURCE_DATA)],
     )
 
@@ -526,76 +459,6 @@ async def _materialize_codebook(
 
     return file_rec
 
-
-@register_handler("generate_codebook")
-async def _run_generate_codebook_job(job_id: int, payload: dict) -> dict:
-    """Handler for ``job_type="generate_codebook"``.
-
-    Runs in the background job runner's context (no request-scoped
-    session), so it opens its own session via the module-level
-    ``AsyncSessionLocal`` -- same pattern as
-    ``data_service._run_filter_data_job``. Sampling goes through
-    ``_assemble_source_records`` (``repositories/raw_data_repo.py`` under
-    the hood) and persistence through ``_materialize_codebook``, both
-    shared with the editor's preview/manual paths;
-    ``codebook_generator.generate_codebook_map_reduce`` is a native
-    ``async def``, so it's ``await``ed directly.
-    """
-    source_file_id = payload["source_file_id"]
-    user_id = payload["user_id"]
-    api_key = payload["api_key"]
-    model = payload.get("model") or codebook_generator_module.MODEL_1
-    prompt = payload.get("prompt", "")
-    name = payload.get("name")
-    description = payload.get("description")
-    project_id = payload.get("project_id")
-    sample_percentage = payload["sample_percentage"]
-    content_scope = payload.get("content_scope") or "both"
-
-    async with AsyncSessionLocal() as session:
-        assembled = await _assemble_source_records(
-            session, source_file_id, sample_percentage, content_scope
-        )
-
-        codebook_text, system_prompt, rendered_prompt, coverage = await codebook_generator_module.generate_codebook_map_reduce(
-            assembled, api_key, prompt, MODEL=model, progress=ProgressTracker(job_id)
-        )
-        codebook_text = str(codebook_text or "")
-
-        file_rec = await _materialize_codebook(
-            session,
-            user_id=user_id,
-            source_file_id=source_file_id,
-            name=name,
-            description=description,
-            project_id=project_id,
-            code_rows=[dict(r) for r in parse_json_to_codes(codebook_text)],
-            origin=ORIGIN_GENERATED,
-            job_id=job_id,
-            model=model,
-            system_prompt=system_prompt,
-            user_instructions=prompt or None,
-            prompt_meta=version_service.prompt_meta(rendered_prompt, batches=coverage["batches_total"]),
-        )
-
-        await session.commit()
-        file_id, schema_name, filename, saved_description = (
-            file_rec.id,
-            file_rec.schemaname,
-            file_rec.filename,
-            file_rec.description,
-        )
-
-    return {
-        "codebook": codebook_text,
-        "file": {
-            "id": str(file_id),
-            "schema_name": schema_name,
-            "filename": filename,
-            "description": saved_description,
-        },
-        **context_window.coverage_result_fields(coverage),
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -646,7 +509,7 @@ async def start_codebook_preview_job(
 ) -> Job:
     """Validate and enqueue a ``codebook_preview`` background job.
 
-    Same guards as ``start_generate_codebook_job`` (valid schema, api_key
+    Same guards as ``start_compare_codebooks_job`` (valid schema, api_key
     present, source owned by ``user_id``), and the same ``runtime_extra``
     handling so the key is never written to the ``jobs`` table. Takes no
     ``name``/``project_id`` because this job creates no artifact.
@@ -752,13 +615,11 @@ async def create_manual_codebook(
     """Create a codebook the researcher composed by hand in the codebook
     editor (with or without help from the preview assistant).
 
-    Shares ``_materialize_codebook`` with the one-shot generate job, so
-    the resulting artifact is structurally identical -- only its
-    provenance differs. ``origin=edited`` with null ``model``/
-    ``system_prompt``/``prompt_meta`` is deliberate and matches
-    ``data_service.create_manual_filtered_data``: an assist during
-    editing is not the same claim as "a model produced this", and the
-    version spine's provenance fields mean the stronger claim.
+    ``origin=edited`` with null ``model``/``system_prompt``/``prompt_meta``
+    is deliberate and matches ``data_service.create_manual_filtered_data``:
+    an assist during editing is not the same claim as "a model produced
+    this", and the version spine's provenance fields mean the stronger
+    claim.
     """
     schema = require_valid_schema(database, field_name="database")
     source_file_id = await file_repo.resolve_file_id(session, schema, user_id)
@@ -772,7 +633,6 @@ async def create_manual_codebook(
         description=description,
         project_id=project_id,
         code_rows=code_rows,
-        origin=ORIGIN_EDITED,
         message=f"Composed by hand from {len(code_rows)} codes",
     )
 
@@ -807,8 +667,8 @@ async def start_compare_codebooks_job(
     ``repositories/file_repo.py`` before anything is enqueued. Keeps the
     old ``proj_<id>``-shape guard and ``api_key`` requirement.
 
-    ``name`` is required (matching ``start_generate_codebook_job``'s
-    ``name``/``create_project``'s blank-name-check convention): the job
+    ``name`` is required (matching ``create_project``'s
+    blank-name-check convention): the job
     handler now persists the comparison as a ``File`` artifact directly,
     so it needs a display name up front rather than via a later separate
     save step.
@@ -851,8 +711,8 @@ async def _run_compare_codebooks_job(job_id: int, payload: dict) -> dict:
     ``codebook_generator.get_client`` directly.
 
     Persists the comparison as a ``File`` (``file_type="codebook_comparison"``)
-    the same way ``_run_generate_codebook_job`` persists a generated
-    codebook -- no more separate ``/api/save-comparison/`` step required.
+    the same way ``_materialize_codebook`` persists a codebook -- no more
+    separate ``/api/save-comparison/`` step required.
     ``artifact_edges`` rows link the new file to BOTH source codebooks,
     ordered ``side_a``/``side_b`` -- that ordering is load-bearing, since
     the comparison prose refers to the codebooks by name in that order.

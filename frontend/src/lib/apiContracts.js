@@ -1,13 +1,14 @@
 /**
- * Single source of truth for the three tool-panel flows. The tool panels
- * import `EXAMPLE_PROMPTS` and the `buildXForm` helpers from here instead of
- * building `FormData` objects inline.
+ * Single source of truth for the filter/codebook/coding editors' payloads.
+ * Each editor imports `EXAMPLE_PROMPTS` and its `buildX` helpers from here
+ * instead of building request bodies inline.
  *
- * The shape of each builder's arguments mirrors the corresponding Pydantic
- * model in `backend/app/api/schemas.py` (FilterDataRequest,
- * GenerateCodebookRequest, ApplyCodebookRequest). When a field is required on
- * the server, `assertRequired` rejects missing values up front so the user
- * sees a clear error instead of a 422 from the backend.
+ * Each builder's arguments mirror the corresponding Pydantic model in
+ * `backend/app/api/schemas.py` (FilterPreviewRequest, ManualFilterRequest,
+ * CodebookPreviewRequest, ManualCodebookRequest, ManualCodingRequest,
+ * RecodeItemsRequest). When a field is required on the server,
+ * `assertRequired` rejects missing values up front so the user sees a
+ * clear error instead of a 422 from the backend.
  */
 
 export const EXAMPLE_PROMPTS = {
@@ -85,139 +86,6 @@ function assertCodebookRef(codebook, flow) {
     );
   }
   return raw;
-}
-
-/**
- * Build the multipart/form-data body for POST /api/filter-data/.
- * Mirrors `FilterDataRequest` in `backend/app/api/schemas.py`.
- */
-export function buildFilterDataForm({
-  apiKey,
-  database,
-  name,
-  model,
-  projectId,
-  prompt,
-  description,
-  minWords,
-  samplePercentage,
-  filterTags,
-  contentScope,
-}) {
-  assertRequired({ apiKey, database, name, model }, "filter-data");
-  const normalizedDatabase = assertProjSchema(
-    database,
-    "database",
-    "filter-data",
-  );
-
-  const fd = new FormData();
-  fd.append("api_key", apiKey);
-  fd.append("database", normalizedDatabase);
-  fd.append("name", name.trim());
-  fd.append("model", model);
-  fd.append("sample_percentage", String(clampPct(samplePercentage)));
-
-  if (projectId !== undefined && projectId !== null && projectId !== "") {
-    fd.append("project_id", String(projectId));
-  }
-  if (!isBlank(prompt)) fd.append("prompt", prompt);
-  if (!isBlank(description)) fd.append("description", description);
-  if (!isBlank(filterTags)) fd.append("filter_tags", filterTags.trim());
-  if (!isBlank(contentScope)) fd.append("content_scope", contentScope);
-
-  const mw = Number(minWords);
-  if (Number.isFinite(mw) && mw > 0) fd.append("min_words", String(mw));
-
-  return fd;
-}
-
-/**
- * Build the multipart/form-data body for POST /api/generate-codebook/.
- * Mirrors `GenerateCodebookRequest`.
- */
-export function buildGenerateCodebookForm({
-  apiKey,
-  database,
-  name,
-  model,
-  prompt,
-  description,
-  projectId,
-  samplePercentage,
-  contentScope,
-}) {
-  assertRequired({ apiKey, database, name }, "generate-codebook");
-  const normalizedDatabase = assertProjSchema(
-    database,
-    "database",
-    "generate-codebook",
-  );
-
-  const fd = new FormData();
-  fd.append("api_key", apiKey);
-  fd.append("database", normalizedDatabase);
-  fd.append("name", name.trim());
-  fd.append(
-    "sample_percentage",
-    String(clampPct(samplePercentage, { min: 0 })),
-  );
-
-  if (!isBlank(model)) fd.append("model", model);
-  if (!isBlank(prompt)) fd.append("prompt", prompt);
-  if (!isBlank(description)) fd.append("description", description);
-  if (projectId !== undefined && projectId !== null && projectId !== "") {
-    fd.append("project_id", String(projectId));
-  }
-  if (!isBlank(contentScope)) fd.append("content_scope", contentScope);
-
-  return fd;
-}
-
-/**
- * Build the multipart/form-data body for POST /api/apply-codebook/.
- * Mirrors `ApplyCodebookRequest`.
- */
-export function buildApplyCodebookForm({
-  apiKey,
-  database,
-  codebook,
-  reportName,
-  methodology,
-  model,
-  description,
-  projectId,
-  samplePercentage,
-  contentScope,
-}) {
-  assertRequired(
-    { apiKey, database, codebook, reportName },
-    "apply-codebook",
-  );
-  const normalizedDatabase = assertProjSchema(
-    database,
-    "database",
-    "apply-codebook",
-  );
-
-  const rawCodebook = assertCodebookRef(codebook, "apply-codebook");
-
-  const fd = new FormData();
-  fd.append("api_key", apiKey);
-  fd.append("database", normalizedDatabase);
-  fd.append("codebook", rawCodebook);
-  fd.append("report_name", reportName.trim());
-  fd.append("sample_percentage", String(clampPct(samplePercentage)));
-
-  if (!isBlank(methodology)) fd.append("methodology", methodology);
-  if (!isBlank(model)) fd.append("model", model);
-  if (!isBlank(description)) fd.append("description", description);
-  if (projectId !== undefined && projectId !== null && projectId !== "") {
-    fd.append("project_id", String(projectId));
-  }
-  if (!isBlank(contentScope)) fd.append("content_scope", contentScope);
-
-  return fd;
 }
 
 /**
@@ -426,10 +294,9 @@ export function buildManualCodebookPayload({
  * Build the JSON body for POST /api/coding/manual.
  * Mirrors `ManualCodingRequest` in `backend/app/api/schemas.py`.
  *
- * The by-hand counterpart to `buildApplyCodebookForm`: same source and
- * codebook fields, no `apiKey`/`model`/`methodology`, because starting a
- * coding artifact by hand calls no model. JSON rather than FormData since
- * it can carry explicit row-id lists.
+ * No `apiKey`/`model`/`methodology`, because starting a coding artifact
+ * by hand calls no model. JSON rather than FormData since it can carry
+ * explicit row-id lists.
  */
 export function buildManualCodingPayload({
   database,

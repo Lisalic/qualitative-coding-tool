@@ -3,13 +3,11 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.schemas import (
-    ApplyCodebookRequest,
     DuplicateCodingRequest,
     ManualCodingRequest,
     RecodeItemsRequest,
     SaveCodingRevisionRequest,
     UpdateCodingMetadataRequest,
-    as_form,
 )
 from backend.app.core.auth_dependency import require_user_id
 from backend.app.database import get_async_db
@@ -252,38 +250,6 @@ async def get_coding_comparison(
         }
     )
 
-
-@router.post("/apply-codebook/")
-async def apply_codebook(
-    payload: ApplyCodebookRequest = Depends(as_form(ApplyCodebookRequest)),
-    user_id: int = Depends(require_user_id),
-    db: AsyncSession = Depends(get_async_db),
-):
-    """Kick off a background job that classifies a raw/filtered data
-    source against a codebook and persists the result as a self-contained
-    coding artifact (its own codebook snapshot, its own copy of the
-    sampled rows, and their coding), and return immediately with a job id
-    to poll instead of blocking the request on the LLM call (see
-    backend/app/jobs/).
-
-    The ``codebook`` field accepts either a numeric File id or a
-    ``proj_<hex>`` schema name; this is enforced by
-    :class:`ApplyCodebookRequest`.
-    """
-    job = await coding_service.start_apply_codebook_job(
-        db,
-        user_id,
-        database=payload.database,
-        codebook=payload.codebook,
-        methodology=payload.methodology,
-        api_key=payload.api_key,
-        model=payload.model,
-        sample_percentage=payload.sample_percentage,
-        report_name=payload.report_name,
-        project_id=payload.project_id,
-        content_scope=payload.content_scope,
-    )
-    return JSONResponse({"job_id": job.id, "status": job.status}, status_code=202)
 
 
 @router.post("/compare-codings/")

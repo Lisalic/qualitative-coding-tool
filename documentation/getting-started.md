@@ -5,7 +5,7 @@
 - Python 3 with `pip`, for the FastAPI backend.
 - Node.js with `npm`, for the Vite/React frontend.
 - A running PostgreSQL instance.
-- An [OpenRouter](https://openrouter.ai/) API key, for the six AI-backed tools (Filter Data, Generate Codebook, Apply Codebook, Compare Codebooks, Compare Codings, Summarize Coding). Not needed to import, browse, or view data.
+- An [OpenRouter](https://openrouter.ai/) API key, for the AI-assist panels in the Filter/Codebook/Apply Codebook editors, and for Compare Codebooks/Compare Codings/Summarize Coding. Not needed to import, browse, or view data, or to mark rows/write codes by hand.
 
 ## Install
 
@@ -53,8 +53,8 @@ cd frontend && npm run dev
 2. Set your OpenRouter API key in the navbar (top of every page) — required before any AI tool will run.
 3. Create a project from the home page — see [Projects](tools/projects.md).
 4. Import a `.zst` dataset into that project — see [Import Data](tools/import-data.md).
-5. Optionally filter the raw data down to a subset — see [Filter Data](tools/filter-data.md).
-6. Generate a codebook from the raw or filtered data — see [Generate Codebook](tools/generate-codebook.md).
+5. Optionally filter the raw data down to a subset — see [Filter](tools/filter.md).
+6. Write a codebook from the raw or filtered data — see [Codebook](tools/codebook.md).
 7. Apply the codebook to produce coded output — see [Apply Codebook](tools/apply-codebook.md).
 8. Compare codebooks/codings or summarize the coding output, as needed.
 

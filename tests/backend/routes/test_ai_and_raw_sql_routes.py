@@ -317,92 +317,10 @@ class TestPostContentsGuard:
         }
 
 
-class TestFilterDataValidation:
-    def test_requires_auth(self, client) -> None:
-        resp = client.post(
-            "/api/filter-data/",
-            data={"api_key": "k", "database": "proj_a", "name": "n", "model": "m"},
-        )
-        assert resp.status_code == 401
-
-    def test_missing_required_fields_returns_422(self, client, auth_cookies) -> None:
-        # With every Form(...) field absent, FastAPI's own missing-field
-        # checks are collected passively (not raised immediately) while
-        # `require_user_id` raises eagerly -- so this needs valid auth to
-        # actually exercise the missing-fields guard rather than 401 first.
-        resp = client.post("/api/filter-data/", data={}, cookies=auth_cookies)
-        assert resp.status_code == 422
-
-    def test_non_proj_database_returns_422(self, client) -> None:
-        resp = client.post(
-            "/api/filter-data/",
-            data={"api_key": "k", "database": "not_proj", "name": "n", "model": "m"},
-        )
-        assert resp.status_code == 422
-
-    def test_sample_percentage_out_of_range_returns_422(self, client) -> None:
-        resp = client.post(
-            "/api/filter-data/",
-            data={
-                "api_key": "k",
-                "database": "proj_a",
-                "name": "n",
-                "model": "m",
-                "sample_percentage": "0",
-            },
-        )
-        assert resp.status_code == 422
-
-    def test_unowned_database_returns_404(self, client, override_async_db, auth_cookies) -> None:
-        resp = client.post(
-            "/api/filter-data/",
-            data={"api_key": "k", "database": "proj_missing", "name": "n", "model": "m"},
-            cookies=auth_cookies,
-        )
-        assert resp.status_code == 404
-
-
-class TestFilterDataKickoff:
-    """``filter-data`` now kicks off a background job (Stage 6, same
-    pattern as ``summarize-coding`` in Stage 4) instead of running the
-    tag-expansion/AI-filtering/materialization pipeline inline -- the
-    schema/api_key/ownership guard clauses still reject synchronously
-    (``data_service.start_filter_data_job`` raises before touching the job
-    table), but a valid request now returns
-    ``202 {"job_id", "status": "pending"}`` instead of a blocking
-    ``200`` with the filtered counts. See
-    ``tests/backend/services/test_data_service.py`` for the job handler's
-    own behavior (sampling, tag/AI filtering, materialization).
-    """
-
-    async def test_valid_kickoff_returns_202_with_job_id(
-        self, client, route_backed_by_sqlite_jobs, make_token
-    ) -> None:
-        file_rec = await _make_file(
-            route_backed_by_sqlite_jobs,
-            user_id=1,
-            submissions=[{"id": "s1", "title": "t", "selftext": "x", "word_count": 1}],
-        )
-        resp = client.post(
-            "/api/filter-data/",
-            data={
-                "api_key": "k",
-                "database": file_rec.schemaname,
-                "name": "n",
-                "model": "m",
-            },
-            cookies={"access_token": make_token(sub="1")},
-        )
-        assert resp.status_code == 202
-        body = resp.json()
-        assert body["status"] == "pending"
-        assert isinstance(body["job_id"], int)
-
-
 class TestFilterPreviewGuards:
-    """``/api/filter-preview/`` is the filter editor's assistive AI run:
-    same guards as ``/filter-data/``, but a JSON body (it carries id
-    lists) and a job whose result is ids rather than an artifact.
+    """``/api/filter-preview/`` is the filter editor's AI-assist run: a
+    JSON body (it carries id lists) and a job whose result is ids rather
+    than an artifact -- nothing is created.
     """
 
     def test_requires_auth(self, client) -> None:
@@ -585,58 +503,6 @@ async def _make_codebook_file(SessionLocal, user_id: int, *, file_type: str = "r
         await session.commit()
         await session.refresh(file_rec)
         return file_rec
-
-
-class TestGenerateCodebookValidation:
-    def test_missing_required_fields_returns_422(self, client, auth_cookies) -> None:
-        # With every Form(...) field absent, FastAPI's own missing-field
-        # checks are collected passively (not raised immediately) while
-        # `require_user_id` raises eagerly -- so this needs valid auth to
-        # actually exercise the missing-fields guard rather than 401 first
-        # (same ordering documented on TestFilterDataValidation above).
-        resp = client.post("/api/generate-codebook/", data={}, cookies=auth_cookies)
-        assert resp.status_code == 422
-
-    def test_requires_auth(self, client) -> None:
-        # Regression test: the old route checked auth only after already
-        # doing the raw-SQL sample and the LLM call. `require_user_id` now
-        # runs as a route dependency, before the job is even enqueued.
-        resp = client.post(
-            "/api/generate-codebook/",
-            data={"api_key": "k", "database": "proj_a", "name": "n"},
-        )
-        assert resp.status_code == 401
-
-    def test_non_proj_database_returns_422(self, client) -> None:
-        resp = client.post(
-            "/api/generate-codebook/",
-            data={"api_key": "k", "database": "not_proj", "name": "n"},
-        )
-        assert resp.status_code == 422
-
-    def test_unowned_database_returns_404(self, client, override_async_db, auth_cookies) -> None:
-        resp = client.post(
-            "/api/generate-codebook/",
-            data={"api_key": "k", "database": "proj_missing", "name": "n"},
-            cookies=auth_cookies,
-        )
-        assert resp.status_code == 404
-
-
-class TestGenerateCodebookKickoff:
-    async def test_valid_kickoff_returns_202_with_job_id(
-        self, client, codebook_route_backed_by_sqlite_jobs, make_token
-    ) -> None:
-        file_rec = await _make_codebook_file(codebook_route_backed_by_sqlite_jobs, user_id=1)
-        resp = client.post(
-            "/api/generate-codebook/",
-            data={"api_key": "k", "database": file_rec.schemaname, "name": "n"},
-            cookies={"access_token": make_token(sub="1")},
-        )
-        assert resp.status_code == 202
-        body = resp.json()
-        assert body["status"] == "pending"
-        assert isinstance(body["job_id"], int)
 
 
 class TestCompareCodebooksValidation:

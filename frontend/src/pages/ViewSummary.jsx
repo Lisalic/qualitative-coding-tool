@@ -1,5 +1,6 @@
 import React from "react";
 import ErrorDisplay from "../components/feedback/ErrorDisplay";
+import ExportDropdown from "../components/export/ExportDropdown";
 import ArtifactPicker from "../components/primitives/ArtifactPicker";
 import MarkdownDisplay from "../components/primitives/MarkdownDisplay";
 import PageShell from "../components/shell/PageShell";
@@ -27,17 +28,22 @@ export default function ViewSummary() {
       width="wide"
       bodyClassName="flex flex-col gap-3"
       actions={
-        <ArtifactPicker
-          showProjectFilter={true}
-          projects={projectsList || []}
-          selectedProject={selectedProject}
-          onProjectChange={setSelectedProject}
-          items={available}
-          selectedId={selected}
-          onSelect={setSelected}
-          emptyMessage="No summaries available"
-          placeholder="Select summary…"
-        />
+        <div className="flex items-center gap-2">
+          <ArtifactPicker
+            showProjectFilter={true}
+            projects={projectsList || []}
+            selectedProject={selectedProject}
+            onProjectChange={setSelectedProject}
+            items={available}
+            selectedId={selected}
+            onSelect={setSelected}
+            emptyMessage="No summaries available"
+            placeholder="Select summary…"
+          />
+          {selected && (
+            <ExportDropdown fileId={selected} artifactType="summary" />
+          )}
+        </div>
       }
     >
       {loading ? (
@@ -45,16 +51,18 @@ export default function ViewSummary() {
           Loading...
         </div>
       ) : null}
-      <ErrorDisplay message={error} type="error" variant="alert" />
 
-      {content ? (
-        <Panel scroll={false}>
-          {/* A wide page still needs a readable measure for prose. */}
-          <MarkdownDisplay content={content} className="max-w-[75ch] text-paper" />
-        </Panel>
-      ) : loading || error ? null : (
+      {error ? <ErrorDisplay error={error} /> : null}
+
+      {!loading && !selected ? (
         <PageEmptyState message="Select a summary to view" />
-      )}
+      ) : null}
+
+      {!loading && selected && content ? (
+        <Panel title="Summary Output" scroll="page" bodyClassName="p-4">
+          <MarkdownDisplay content={content} />
+        </Panel>
+      ) : null}
     </PageShell>
   );
 }

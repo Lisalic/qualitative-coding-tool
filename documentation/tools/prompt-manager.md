@@ -6,7 +6,7 @@ Save, reuse, edit, and delete prompt text across sessions, scoped by which tool 
 
 ## Where to find it
 
-Not a route — a modal (`components/forms/PromptManager.jsx`) opened by the "Load prompt" button next to the prompt textarea on three of the six AI tools: [Filter Data](filter-data.md), [Generate Codebook](generate-codebook.md), and [Apply Codebook](apply-codebook.md) (`promptType` = `filter`/`generate`/`apply` respectively). [Compare Codebooks](compare-codebooks.md), [Compare Codings](compare-codings.md), and [Summarize Coding](summarize-coding.md) each have their own inline example-prompt button instead and do not integrate with this saved library.
+Not a route — a modal (`components/forms/PromptManager.jsx`) opened by the "Load prompt" button next to a prompt textarea. Three `promptType`s wire into it: `filter` on [Filter](filter.md)'s AI-assist panel, `generate` on [Codebook](codebook.md)'s AI-assist panel, and `apply` on the Apply Codebook workspace's AI-recode bar (`CodingRecodeBar.jsx`'s methodology field). [Compare Codebooks](compare-codebooks.md), [Compare Codings](compare-codings.md), and [Summarize Coding](summarize-coding.md) each have their own inline example-prompt button instead and do not integrate with this saved library.
 
 ## Prerequisites
 
@@ -40,7 +40,7 @@ Rows in the `prompts` table, scoped to the user.
 |---|---|
 | "Please enter prompt content" | Blank prompt text on save |
 | 404/403 editing or deleting a prompt | Prompt doesn't exist, or belongs to another user |
-| Saved prompt doesn't appear for Compare/Summarize tools | Those three tools' prompt fields don't wire into this library at all — they use a plain textarea (`CompareModelPromptPanel`) instead of `PromptTextareaWithActions`, unlike [Filter Data](filter-data.md)/[Generate Codebook](generate-codebook.md)/[Apply Codebook](apply-codebook.md) |
+| Saved prompt doesn't appear for Compare/Summarize tools | Those three tools' prompt fields don't wire into this library at all — they use a plain textarea (`CompareModelPromptPanel`) instead of `PromptTextareaWithActions` |
 
 ## Developer reference
 

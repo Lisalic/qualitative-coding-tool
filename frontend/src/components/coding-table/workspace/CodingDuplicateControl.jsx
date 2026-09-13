@@ -1,11 +1,5 @@
 import { useState } from "react";
-
-const inputClasses =
-  "border border-paper bg-white/5 px-3 py-2 text-sm text-paper placeholder:text-paper/40 focus:outline-none focus:ring-2 focus:ring-paper disabled:opacity-50";
-const btnSmall =
-  "border border-paper px-3 py-2 text-sm transition-colors hover:bg-paper hover:text-ink disabled:opacity-40";
-const btnPrimary =
-  "border-2 border-paper px-3 py-2 text-sm font-semibold transition-colors hover:bg-paper hover:text-ink disabled:opacity-40";
+import { inputSm, btnSm, btnPrimary } from "../../../lib/uiClasses";
 
 /**
  * Forks a whole coding artifact -- its codebook snapshot, its own rows,
@@ -49,7 +43,7 @@ export default function CodingDuplicateControl({ defaultName, onDuplicate, disab
 
   if (!open) {
     return (
-      <button type="button" className={btnSmall} onClick={startOpen} disabled={disabled}>
+      <button type="button" className={btnSm} onClick={startOpen} disabled={disabled}>
         Duplicate
       </button>
     );
@@ -59,7 +53,7 @@ export default function CodingDuplicateControl({ defaultName, onDuplicate, disab
     <div className="flex flex-wrap items-center gap-2">
       <input
         type="text"
-        className={inputClasses}
+        className={inputSm}
         value={name}
         onChange={(e) => setName(e.target.value)}
         placeholder="New coding name"
@@ -73,7 +67,7 @@ export default function CodingDuplicateControl({ defaultName, onDuplicate, disab
       >
         {status.state === "saving" ? "Duplicating..." : "Confirm"}
       </button>
-      <button type="button" className={btnSmall} onClick={cancel} disabled={status.state === "saving"}>
+      <button type="button" className={btnSm} onClick={cancel} disabled={status.state === "saving"}>
         Cancel
       </button>
       {status.state === "error" && status.message && (

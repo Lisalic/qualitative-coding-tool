@@ -5,11 +5,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.core.auth_dependency import require_user_id
 from backend.app.api.schemas import (
     DuplicateDataRequest,
-    FilterDataRequest,
     FilterPreviewRequest,
     ManualFilterRequest,
     PostContentsRequest,
-    as_form,
 )
 from backend.app.database import get_async_db
 from backend.app.repositories import version_repo
@@ -114,34 +112,6 @@ async def get_post_contents(
     return JSONResponse(contents)
 
 
-@router.post("/filter-data/")
-async def filter_data(
-    payload: FilterDataRequest = Depends(as_form(FilterDataRequest)),
-    user_id: int = Depends(require_user_id),
-    db: AsyncSession = Depends(get_async_db),
-) -> JSONResponse:
-    """Kick off a background job that filters posts/comments (optionally
-    via tag pre-filtering and/or an AI call) and materializes the result
-    as a new ``filtered_data`` file, and return immediately with a job id
-    to poll instead of blocking the request -- see backend/app/jobs/.
-    """
-    job = await data_service.start_filter_data_job(
-        db,
-        user_id,
-        database=payload.database,
-        name=payload.name,
-        api_key=payload.api_key,
-        model=payload.model,
-        prompt=payload.prompt,
-        min_words=payload.min_words,
-        sample_percentage=payload.sample_percentage,
-        filter_tags=payload.filter_tags,
-        description=payload.description,
-        project_id=payload.project_id,
-        content_scope=payload.content_scope,
-    )
-    return JSONResponse({"job_id": job.id, "status": job.status}, status_code=202)
-
 
 @router.post("/filter-preview/")
 async def filter_preview(
@@ -152,12 +122,11 @@ async def filter_preview(
     """Kick off a background job that runs the AI filter and returns the
     row ids it would keep, **without creating anything**.
 
-    The assistive half of the filter editor. Unlike ``/filter-data/``,
-    which is the whole operation, this is a suggestion the user can
-    accept, reject or add to before submitting; the rows they have
-    already ruled on are passed in so a repeated run proposes new
-    candidates instead of re-litigating settled ones. A JSON body rather
-    than ``as_form`` because it carries those id lists.
+    The filter editor's AI-assist step: a suggestion the user can accept,
+    reject or add to before submitting; the rows they have already ruled
+    on are passed in so a repeated run proposes new candidates instead of
+    re-litigating settled ones. A JSON body rather than ``as_form``
+    because it carries those id lists.
     """
     job = await data_service.start_filter_preview_job(
         db,

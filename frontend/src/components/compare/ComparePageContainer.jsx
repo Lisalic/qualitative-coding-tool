@@ -3,6 +3,7 @@ import CompareModelPromptPanel from "./CompareModelPromptPanel";
 import PageShell from "../shell/PageShell";
 import { btnPrimary } from "../../lib/uiClasses";
 import CompareResultPanel from "./CompareResultPanel";
+import ComputedComparisonResults from "./ComputedComparisonResults";
 import useComparePageData from "./useComparePageData";
 
 const CONFIG_BY_MODE = {
@@ -72,6 +73,10 @@ export default function ComparePageContainer({
     selectedProject,
     setSelectedProject,
     submitCompare,
+    computedData,
+    computedLoading,
+    computedError,
+    handleSwap,
   } = useComparePageData({
     fileType: config.fileType,
     compareEndpoint: config.compareEndpoint,
@@ -88,37 +93,52 @@ export default function ComparePageContainer({
       width="wide"
       bodyClassName="flex flex-col gap-3"
     >
-      <form onSubmit={submitCompare}>
-        <div className="flex flex-col gap-3 lg:flex-row">
-          <CompareDualSelectPanel
-            panelTitle={config.panelTitle}
-            labelA={config.labelA}
-            labelB={config.labelB}
-            placeholderOption={config.placeholderOption}
-            options={items}
-            valueA={a}
-            valueB={b}
-            onChangeA={setA}
-            onChangeB={setB}
-          />
+      <div className="flex flex-col gap-3">
+        <CompareDualSelectPanel
+          panelTitle={config.panelTitle}
+          labelA={config.labelA}
+          labelB={config.labelB}
+          placeholderOption={config.placeholderOption}
+          options={items}
+          valueA={a}
+          valueB={b}
+          onChangeA={setA}
+          onChangeB={setB}
+        />
 
-          <CompareModelPromptPanel
-            model={model}
-            onModelChange={setModel}
-            name={name}
-            onNameChange={setName}
-            projects={projects}
-            selectedProject={selectedProject}
-            onProjectChange={setSelectedProject}
-            additionalPrompt={additionalPrompt}
-            onAdditionalPromptChange={setAdditionalPrompt}
-            examplePromptText={config.examplePromptText}
+        {/* Deterministic split comparison results */}
+        {(computedData || computedLoading || computedError) && (
+          <ComputedComparisonResults
+            mode={mode}
+            data={computedData}
+            loading={computedLoading}
+            error={computedError}
+            onSwap={handleSwap}
           />
+        )}
+      </div>
+
+      {/* Optional AI narrative assist */}
+      <form onSubmit={submitCompare} className="mt-2 border-t border-line pt-4">
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-paper/70">
+          Optional AI Synthesis Narrative
         </div>
+        <CompareModelPromptPanel
+          model={model}
+          onModelChange={setModel}
+          name={name}
+          onNameChange={setName}
+          projects={projects}
+          selectedProject={selectedProject}
+          onProjectChange={setSelectedProject}
+          additionalPrompt={additionalPrompt}
+          onAdditionalPromptChange={setAdditionalPrompt}
+          examplePromptText={config.examplePromptText}
+        />
 
         <div className="mt-3 flex justify-center">
           <button className={btnPrimary} type="submit" disabled={loading}>
-            {loading ? "Comparing..." : "Compare"}
+            {loading ? "Generating AI Narrative..." : "Generate AI Synthesis"}
           </button>
         </div>
       </form>

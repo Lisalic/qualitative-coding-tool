@@ -1,12 +1,8 @@
 import AiModelFormGroup from "../../models/AiModelFormGroup";
+import PromptTextareaWithActions from "../../forms/PromptTextareaWithActions";
 import ProgressBar from "../../feedback/ProgressBar";
-
-const inputClasses =
-  "border border-paper bg-white/5 px-2.5 py-2 text-sm text-paper placeholder:text-paper/40 focus:outline-none focus:ring-2 focus:ring-paper disabled:opacity-50";
-const btnClasses =
-  "w-full border-2 border-paper px-3 py-2 text-sm font-semibold transition-colors hover:bg-paper hover:text-ink disabled:opacity-40";
-const btnSmall =
-  "border border-paper px-2.5 py-1.5 text-xs transition-colors hover:bg-paper hover:text-ink disabled:opacity-40";
+import { EXAMPLE_PROMPTS } from "../../../lib/apiContracts";
+import { btnPrimary, btnSm } from "../../../lib/uiClasses";
 
 /**
  * Compact panel shown at the bottom of the document list whenever at
@@ -32,12 +28,12 @@ export default function CodingRecodeBar({
   if (!selectedCount) return null;
 
   return (
-    <div className="flex flex-col gap-2.5 border-t-2 border-paper bg-ink p-3">
+    <div className="flex flex-col gap-2.5 border-t-2 border-line-strong bg-ink p-3">
       <div className="flex items-center justify-between gap-2">
         <div className="text-sm font-semibold">
           {selectedCount} selected
         </div>
-        <button type="button" className={btnSmall} onClick={onClearSelection} disabled={loading}>
+        <button type="button" className={btnSm} onClick={onClearSelection} disabled={loading}>
           Clear
         </button>
       </div>
@@ -50,17 +46,20 @@ export default function CodingRecodeBar({
         label="Model"
       />
 
-      <input
-        type="text"
-        className={inputClasses}
+      <PromptTextareaWithActions
+        id="codingRecodeMethodology"
+        label="Methodology"
         value={methodology}
-        onChange={(e) => onMethodologyChange(e.target.value)}
-        placeholder="Methodology (optional)"
+        onChange={onMethodologyChange}
+        placeholder="Optional instructions for the classifier"
+        rows={2}
+        promptType="apply"
+        exampleText={EXAMPLE_PROMPTS.apply}
         disabled={loading}
       />
 
-      <button type="button" className={btnClasses} onClick={onRecode} disabled={loading}>
-        {loading ? "Recoding..." : "Recode with AI"}
+      <button type="button" className={`w-full ${btnPrimary}`} onClick={onRecode} disabled={loading}>
+        {loading ? "Recoding…" : "Recode with AI"}
       </button>
 
       {loading && progress && (
@@ -72,7 +71,7 @@ export default function CodingRecodeBar({
       )}
 
       {!error && summary && (
-        <div className="border border-paper/30 bg-white/5 px-2.5 py-2 text-xs text-paper/80">{summary}</div>
+        <div className="border border-line bg-surface-raised px-2.5 py-2 text-xs text-paper/80">{summary}</div>
       )}
     </div>
   );

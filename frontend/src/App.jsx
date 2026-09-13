@@ -7,11 +7,9 @@ import AuthGate from "./components/auth/AuthGate";
 
 const ImportPage = React.lazy(() => import("./pages/Import"));
 const Filter = React.lazy(() => import("./pages/Filter"));
-const FilterEditor = React.lazy(() => import("./pages/FilterEditor"));
 const Data = React.lazy(() => import("./pages/Data"));
 const FilteredData = React.lazy(() => import("./pages/FilteredData"));
-const GenerateCodebook = React.lazy(() => import("./pages/GenerateCodebook"));
-const CodebookEditor = React.lazy(() => import("./pages/CodebookEditor"));
+const Codebook = React.lazy(() => import("./pages/Codebook"));
 const ViewCodebook = React.lazy(() => import("./pages/ViewCodebook"));
 const ApplyCodebook = React.lazy(() => import("./pages/ApplyCodebook"));
 const ViewCoding = React.lazy(() => import("./pages/ViewCoding"));
@@ -95,14 +93,6 @@ function App() {
                   }
                 />
                 <Route
-                  path="/filter-editor"
-                  element={
-                    <ProtectedRoute>
-                      <FilterEditor />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
                   path="/filtered-data"
                   element={
                     <ProtectedRoute>
@@ -111,18 +101,10 @@ function App() {
                   }
                 />
                 <Route
-                  path="/codebook-generate"
+                  path="/codebook"
                   element={
                     <ProtectedRoute>
-                      <GenerateCodebook />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/codebook-editor"
-                  element={
-                    <ProtectedRoute>
-                      <CodebookEditor />
+                      <Codebook />
                     </ProtectedRoute>
                   }
                 />

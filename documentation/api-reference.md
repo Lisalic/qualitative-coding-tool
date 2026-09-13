@@ -45,26 +45,28 @@ See [tools/prompt-manager.md](tools/prompt-manager.md).
 | Method | Path | Body | Response | Kind |
 |---|---|---|---|---|
 | GET | `/api/codebook` | query `codebook_id` | `{codebook, systemprompt, userprompt}` | direct |
-| GET | `/api/parse-codebook` | query `codebook_id` | `{"parsed": [{family_name, content, codes: [{code_name, content}]}]}` | direct |
 | GET | `/api/list-codebooks` | — | `{"codebooks": [{id, name, metadata, description, source}]}` | direct |
-| POST | `/api/save-file-codebook/` | `schema_name`, `content` (required), `display_name` (optional) | `{message, id, display_name}` | direct |
-| POST | `/api/generate-codebook/` | `as_form(GenerateCodebookRequest)` — see below | `202 {job_id, status}` → result `{codebook, file}` | **job** |
+| PUT | `/api/codebook/{ref}` | JSON `{codes}` | saves a new version (the codebook editor's Refine mode, and View Codebook's save) | direct |
+| POST | `/api/codebook-preview/` | JSON `{api_key, database, model, prompt?, sample_percentage, content_scope, existing_codes?}` | `202 {job_id, status}` → result `{proposals, partial?}` — creates nothing | **job** |
+| POST | `/api/codebook/manual` | JSON `{database, name, description?, project_id?, codes}` | `{message, file}` — the codebook editor's only create path | direct |
 | POST | `/api/compare-codebooks/` | `as_form(CompareCodebooksRequest)` | `202 {job_id, status}` → result `{comparison, file}` | **job** |
 
-See [tools/generate-codebook.md](tools/generate-codebook.md), [tools/view-codebook.md](tools/view-codebook.md), [tools/compare-codebooks.md](tools/compare-codebooks.md).
+See [tools/codebook.md](tools/codebook.md), [tools/view-codebook.md](tools/view-codebook.md), [tools/compare-codebooks.md](tools/compare-codebooks.md).
 
 ## Coding — `backend/app/api/coding_routes.py`
 
 | Method | Path | Body | Response | Kind |
 |---|---|---|---|---|
-| GET | `/api/coded-data` | query `coded_id` | `{coded_data, codebook_text, codebook_tree, systemprompt, userprompt}` | direct |
-| POST | `/api/save-file-coded-data/` | `schema_name`, `content`, `display_name` (optional) | `{message, id, filename}` | direct |
-| POST | `/api/save-file-coded-data-duplicate/` | `source_schema_name`, `content`, `display_name` (all required) | `{message, id, schema_name, filename}` | direct |
-| POST | `/api/apply-codebook/` | `as_form(ApplyCodebookRequest)` | `202 {job_id, status}` → result `{classification_output, file}` | **job** |
+| POST | `/api/coding/manual` | JSON `{database, codebook, report_name, description?, project_id?, sample_percentage?, content_scope?, post_ids?, comment_ids?}` | `{message, file, counts}` — the Apply Codebook editor's only create path, always uncoded | direct |
+| GET | `/api/coding/{ref}` | — | codebook snapshot + parsed tree + row/coded counts + code frequency | direct |
+| GET | `/api/coding/{ref}/rows` | query `limit`/`offset`/`only`/`code`/`q` | one page of the artifact's own rows, each with its codes | direct |
+| PUT | `/api/coding/{ref}/revision` | JSON (codebook edits and/or row edits) | saves the whole editing session as at most one new version | direct |
+| POST | `/api/coding/{ref}/recode` | JSON `{api_key, item_ids, model?, methodology?}` | `202 {job_id, status}` → result `{proposals, ...}` — stages proposals, writes nothing | **job** |
+| POST | `/api/coding/{ref}/duplicate` | `{display_name, from_version_no?}` | forks the whole artifact | direct |
 | POST | `/api/compare-codings/` | form: `coding_a`, `coding_b`, `api_key`, `name` (required), `model`, `prompt`, `description`, `project_id` (optional) | `202 {job_id, status}` → result `{comparison, file}` | **job** |
 | POST | `/api/summarize-coding/` | form: `coding`, `api_key`, `name` (required), `model`, `prompt`, `description`, `project_id` (optional) | `202 {job_id, status}` → result `{summary, file}` | **job** |
 
-`compare-codings` and `summarize-coding` use raw `Form(...)` params, not Pydantic schemas — unlike the other four job endpoints.
+`compare-codings` and `summarize-coding` use raw `Form(...)` params, not Pydantic schemas — unlike the job endpoints built on `as_form(...)`.
 
 See [tools/apply-codebook.md](tools/apply-codebook.md), [tools/view-coding.md](tools/view-coding.md), [tools/compare-codings.md](tools/compare-codings.md), [tools/summarize-coding.md](tools/summarize-coding.md).
 
@@ -76,9 +78,10 @@ See [tools/apply-codebook.md](tools/apply-codebook.md), [tools/view-coding.md](t
 | GET | `/api/file-entries/` | query `schema`, `limit` (default 10), `offset` (default 0) | `{submissions, comments, total_submissions, total_comments, database, date_created}` | direct |
 | GET | `/api/comments/{submission_id}` | query `database` (default `"original"`) | `{"comments": [...]}` ordered by `created_utc` | direct |
 | POST | `/api/post-contents/` | JSON `{schema, post_ids}` | `{"contents": {post_id: {title, content}}}` | direct |
-| POST | `/api/filter-data/` | `as_form(FilterDataRequest)` | `202 {job_id, status}` → result `{message, submissions_length, comments_length, posts_filtered_count, comments_filtered_count, file, tag_filter?}` | **job** |
+| POST | `/api/filter-preview/` | JSON `{api_key, database, model, prompt?, filter_tags?, min_words?, sample_percentage, content_scope, decided_post_ids?, decided_comment_ids?}` | `202 {job_id, status}` → result `{post_ids, comment_ids, partial?}` — creates nothing | **job** |
+| POST | `/api/filtered-data/manual` | JSON `{database, name, description?, project_id?, post_ids, comment_ids}` | `{message, file, counts}` — the filter editor's only create path | direct |
 
-See [tools/data-browser.md](tools/data-browser.md), [tools/filter-data.md](tools/filter-data.md).
+See [tools/data-browser.md](tools/data-browser.md), [tools/filter.md](tools/filter.md).
 
 ## Projects — `backend/app/api/project_routes.py`
 
@@ -116,23 +119,18 @@ See [tools/projects.md](tools/projects.md).
 
 ## Request schemas (Pydantic, `backend/app/api/schemas.py`)
 
-The four endpoints built on `as_form(...)` validate against these models (`multipart/form-data`, whitespace-stripped, unknown fields ignored). A `proj_<hex>` pattern is `^proj_[A-Za-z0-9_]+$`.
-
-| Field | `FilterDataRequest` | `GenerateCodebookRequest` | `ApplyCodebookRequest` | `CompareCodebooksRequest` |
-|---|---|---|---|---|
-| `api_key` | required, min 1 | required, min 1 | required, min 1 | required, min 1 |
-| `database` / `codebook_a`+`codebook_b` | required, `proj_` pattern, `.db` suffix stripped | required, `proj_` pattern, `.db` stripped | required, `proj_` pattern, `.db` stripped | required, `proj_` pattern each |
-| `name` | required, min 1 | required, min 1 | (`report_name`) required, min 1 | required, min 1 |
-| `model` | required, min 1 | optional | optional | optional |
-| `codebook` | — | — | required, min 1 — numeric File id **or** `proj_<hex>` | — |
-| `project_id` | optional int | optional int | optional int | optional int |
-| `prompt` | optional | optional | (`methodology`) optional | optional |
-| `description` | optional | optional | optional | optional |
-| `sample_percentage` | `100.0`, `ge=1, le=100` | `100.0`, **`ge=0`**, `le=100` | `100.0`, `ge=1, le=100` | — |
-| `min_words` | `0`, `ge=0` | — | — | — |
-| `filter_tags` | optional | — | — | — |
-
-Note `GenerateCodebookRequest.sample_percentage` allows `0`, unlike the other two — a 0% sample is rejected downstream in the service layer (empty-content check), not by the schema.
+`CompareCodebooksRequest` is the one remaining endpoint built on `as_form(...)`
+(`multipart/form-data`, whitespace-stripped, unknown fields ignored): `api_key`
+(required), `codebook_a`/`codebook_b` (required, `proj_<hex>` pattern each,
+`^proj_[A-Za-z0-9_]+$`), `name` (required), `model`/`prompt`/`description`/
+`project_id` (all optional). The one-shot `FilterDataRequest`/
+`GenerateCodebookRequest`/`ApplyCodebookRequest` schemas this table used to
+compare it against were retired along with their endpoints; the editors that
+replaced them (`FilterPreviewRequest`, `ManualFilterRequest`,
+`CodebookPreviewRequest`, `ManualCodebookRequest`, `ManualCodingRequest`,
+`RecodeItemsRequest`) are JSON bodies instead, since each carries a list
+(decided ids, existing codes, or row ids) that doesn't map onto flat form
+fields — see the request bodies in the tables above.
 
 ## Errors
 

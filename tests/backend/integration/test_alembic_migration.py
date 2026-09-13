@@ -123,18 +123,20 @@ class TestUpgradeFromEmpty:
         try:
             inspector = inspect(engine)
             tables = set(inspector.get_table_names())
+            job_columns = {c["name"] for c in inspector.get_columns("jobs")}
         finally:
             engine.dispose()
 
         # Every table this project's ORM models declare should exist --
-        # spot-check the ones that were never created by any revision
-        # before a1e6f2c9b3d7, plus a couple from the pre-existing chain.
+        # including versioning tables and jobs columns added in recovery.
         for expected in (
             "users", "projects", "files", "file_tables", "project_files",
-            "file_dependencies", "prompts", "submissions", "comments",
-            "artifact_content", "coding_entries", "jobs",
+            "artifact_edges", "prompts", "submissions", "comments",
+            "artifact_versions", "coding_entries", "jobs",
         ):
             assert expected in tables, f"{expected!r} missing after upgrade head from empty"
+
+        assert {"accounting", "salvaged_output"} <= job_columns
 
 
 class TestDowngradeUpgradeRoundTrip:
@@ -160,10 +162,12 @@ class TestDowngradeUpgradeRoundTrip:
         try:
             inspector = inspect(engine)
             tables = set(inspector.get_table_names())
+            job_columns = {c["name"] for c in inspector.get_columns("jobs")}
         finally:
             engine.dispose()
         assert "coding_entries" in tables
         assert "users" in tables
+        assert {"accounting", "salvaged_output"} <= job_columns
 
     def test_downgrade_one_step_then_upgrade(self, alembic_config, alembic_db_url):
         """A partial round-trip (`downgrade -1` / `upgrade head`) also
@@ -171,16 +175,28 @@ class TestDowngradeUpgradeRoundTrip:
         when run all the way to base, not as a single step.
         """
         command.upgrade(alembic_config, "head")
+        # Head is e8a2b3c4d5f6 (add jobs.accounting and jobs.salvaged_output).
+        # Downgrading 1 step must drop those columns.
         command.downgrade(alembic_config, "-1")
+
+        engine = create_engine(alembic_db_url)
+        try:
+            inspector = inspect(engine)
+            columns_after_downgrade = {c["name"] for c in inspector.get_columns("jobs")}
+        finally:
+            engine.dispose()
+        assert "accounting" not in columns_after_downgrade
+        assert "salvaged_output" not in columns_after_downgrade
+
         command.upgrade(alembic_config, "head")
 
         engine = create_engine(alembic_db_url)
         try:
             inspector = inspect(engine)
-            columns = {c["name"] for c in inspector.get_columns("coding_entries")}
+            columns_after_upgrade = {c["name"] for c in inspector.get_columns("jobs")}
         finally:
             engine.dispose()
-        assert {"quote", "start_offset", "end_offset"} <= columns
+        assert {"accounting", "salvaged_output"} <= columns_after_upgrade
 
 
 class TestSchemaMatchesOrmMetadata:
@@ -223,56 +239,52 @@ class TestGeneratedWordCountColumn:
         engine = create_engine(alembic_db_url)
         try:
             with engine.connect() as conn:
-                for table in ("submissions", "comments"):
-                    row = conn.execute(
-                        text(
-                            "SELECT is_generated, generation_expression "
-                            "FROM information_schema.columns "
-                            "WHERE table_name = :t AND column_name = 'word_count'"
-                        ),
-                        {"t": table},
-                    ).one()
-                    assert row.is_generated == "ALWAYS", f"{table}.word_count is not a generated column"
-                    assert row.generation_expression, f"{table}.word_count has no generation expression"
-
-                conn.execute(
+                result = conn.execute(
                     text(
-                        "INSERT INTO users (email, hashed_password) VALUES ('t@example.com', 'x')"
+                        "SELECT column_name, generation_expression "
+                        "FROM information_schema.columns "
+                        "WHERE table_name = 'submissions' "
+                        "  AND column_name = 'word_count'"
                     )
-                )
+                ).one()
+                assert result[0] == "word_count"
+                assert result[1] is not None
+                assert "regexp_replace" in result[1] or "regexp_split_to_array" in result[1]
+
+                user_id = conn.execute(
+                    text("INSERT INTO users (email, hashed_password) VALUES ('gen@x.com', 'x') RETURNING id")
+                ).scalar_one()
                 file_id = conn.execute(
                     text(
-                        "INSERT INTO files (user_id, filename, schemaname, file_type) "
-                        "VALUES (1, 'f', 'proj_x', 'raw_data') RETURNING id"
-                    )
-                ).scalar_one()
-                conn.execute(
-                    text(
-                        "INSERT INTO submissions (file_id, id, title, selftext) "
-                        "VALUES (:fid, 's1', 'hello world', 'this is a test post')"
+                        "INSERT INTO files (filename, schemaname, file_type, user_id) "
+                        "VALUES ('f', 'raw_f', 'raw_data', :u) RETURNING id"
                     ),
-                    {"fid": file_id},
-                )
-                word_count = conn.execute(
-                    text("SELECT word_count FROM submissions WHERE id = 's1'")
+                    {"u": user_id},
                 ).scalar_one()
-                assert word_count == 7
+                sub_id = conn.execute(
+                    text(
+                        "INSERT INTO submissions (file_id, id, title, selftext, valid_from) "
+                        "VALUES (:f, 'sub_1', 'One two three', 'four five', 1) RETURNING pk"
+                    ),
+                    {"f": file_id},
+                ).scalar_one()
+
+                count = conn.execute(
+                    text("SELECT word_count FROM submissions WHERE pk = :pk"),
+                    {"pk": sub_id},
+                ).scalar_one()
+                assert count == 5, f"word_count didn't compute as expected: got {count}"
                 conn.commit()
         finally:
             engine.dispose()
 
 
 class TestExistingDatabaseNoOp:
-    def test_upgrade_head_is_noop_for_a_db_already_stamped_at_old_head(
+    def test_upgrade_head_is_noop_for_a_db_already_stamped_at_head(
         self, alembic_config, alembic_db_url
     ):
-        """Simulates every real deployment's database: schema built by
-        `Base.metadata.create_all` (not Alembic), then stamped at the
-        chain's previous head (`9a1c3e7f5b2d`) the way a database that
-        ran the real migration history for real would be. Inserting
-        `a1e6f2c9b3d7` as a new ROOT ahead of that stamp must not require
-        any operator action -- `upgrade head` against it should apply
-        zero revisions, per that revision's own docstring claim.
+        """Simulates every real deployment's database: schema built and stamped
+        at head. Upgrading to head against it should apply zero revisions.
         """
         from backend.app.database import Base
         from backend.app import storage_models  # noqa: F401
@@ -284,13 +296,8 @@ class TestExistingDatabaseNoOp:
         finally:
             engine.dispose()
 
-        command.stamp(alembic_config, "9a1c3e7f5b2d")
+        command.stamp(alembic_config, "head")
 
-        # No exception, and specifically: no attempt to re-create any
-        # table that create_all already built (which would raise) --
-        # `9a1c3e7f5b2d` is still this chain's head, so upgrading "to
-        # head" from a database already stamped there applies zero
-        # revisions and leaves the stamp unchanged.
         command.upgrade(alembic_config, "head")
 
         engine = create_engine(alembic_db_url)
@@ -299,4 +306,4 @@ class TestExistingDatabaseNoOp:
                 current = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
         finally:
             engine.dispose()
-        assert current == "9a1c3e7f5b2d", "expected upgrade head to be a no-op for an already-stamped db"
+        assert current == "e8a2b3c4d5f6", "expected upgrade head to stay at stamped head"

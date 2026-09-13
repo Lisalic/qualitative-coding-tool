@@ -68,10 +68,23 @@ that stacked a centered max-width container inside global padding inside a
 content that already carries a border goes in an unpadded `Panel` rather than
 gaining a second frame. Before this, a codebook row sat four borders deep.
 
-**Form pages** (Import, Filter, Generate Codebook, Apply Codebook, Compare,
-Summarize) all share one shape: `width="wide"`, two side-by-side `Panel`s —
-source on the left, output and instructions on the right — and a centered
-primary button beneath. `FormShell`'s `columns` prop provides it.
+**Simple form pages** (Import, Compare, Summarize) share one shape:
+`PageShell width="wide"`, with the page's fields laid out as one or two
+`Panel`s and a centered primary button beneath. `FormShell`'s `columns`
+prop gives a two-`Panel` "source on the left, output on the right" split
+to any form that wants one — today that's Apply Codebook's setup step
+(`components/coding-editor/CodingSetupPanel.jsx`), the create step before
+its workspace opens.
+
+**The editor workspaces** (Filter, Codebook, Apply Codebook, and View
+Coding) are not form pages — they share a 3-pane shape instead: a compact
+row/document list on the left, one item's full content in the center, and
+either decisions/AI-assist (Filter) or the codebook/AI-assist (Codebook,
+Apply Codebook) on the right. `PageShell width="full" scroll="fill"` with
+a `grid ... lg:grid-cols-[minmax(220px,280px)_minmax(0,1fr)_minmax(...,...)]`
+body gives the 3 panes the full remaining viewport height. See
+`components/coding-table/workspace/CodingWorkspaceSection.jsx` for the
+reference implementation the other two editors were built to match.
 
 ## Spacing
 

@@ -6,7 +6,6 @@ from backend.app.api.schemas import (
     CodebookPreviewRequest,
     CompareCodebooksRequest,
     DuplicateCodebookRequest,
-    GenerateCodebookRequest,
     ImportCodebookRequest,
     ManualCodebookRequest,
     SaveCodebookRequest,
@@ -235,32 +234,6 @@ async def duplicate_codebook(
         }
     )
 
-
-@router.post("/generate-codebook/")
-async def generate_codebook(
-    payload: GenerateCodebookRequest = Depends(as_form(GenerateCodebookRequest)),
-    user_id: int = Depends(require_user_id),
-    db: AsyncSession = Depends(get_async_db),
-) -> JSONResponse:
-    """Kick off a background job that samples a raw-data file, asks the LLM
-    to build a codebook, and persists it as a new ``codebook`` file -- and
-    return immediately with a job id to poll instead of blocking the
-    request. See backend/app/jobs/.
-    """
-    job = await codebook_service.start_generate_codebook_job(
-        db,
-        user_id,
-        database=payload.database,
-        api_key=payload.api_key,
-        prompt=payload.prompt or "",
-        name=payload.name,
-        description=payload.description,
-        project_id=payload.project_id,
-        model=payload.model,
-        sample_percentage=payload.sample_percentage,
-        content_scope=payload.content_scope,
-    )
-    return JSONResponse({"job_id": job.id, "status": job.status}, status_code=202)
 
 
 @router.post("/compare-codebooks/")

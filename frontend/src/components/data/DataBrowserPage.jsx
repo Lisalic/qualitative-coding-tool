@@ -65,15 +65,13 @@ export default function DataBrowserPage({ page, pageTitle }) {
           >
             History
           </button>
-          {/* Hand-build a filtered database from this one, with the AI filter
-              available inside the editor as an assistive tool. Distinct from
-              `/filter`, which runs the AI filter as the whole operation with
-              no review step. */}
+          {/* Hand-build a filtered database from this one, with the AI
+              filter available as an assistive tool inside the editor. */}
           <button
             type="button"
             className={btn}
             onClick={() =>
-              navigate("/filter-editor", {
+              navigate("/filter", {
                 state: { sourceDatabase: selectedDatabase, displayName },
               })
             }

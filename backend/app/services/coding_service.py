@@ -25,16 +25,17 @@ CLAUDE.md's early-prototyping rule, there is no compatibility shim for
 coding artifacts created before this change; re-running Apply Codebook
 produces a self-contained one.
 
-Apply Codebook (``start_apply_codebook_job``) still samples and codes;
-this also adds ``start_recode_items_job``, which re-runs the AI over a
-caller-chosen subset of a coding artifact's *own* rows with a
-caller-chosen model and returns the classification as reviewable
-proposals -- it does not itself write to ``coding_entries``.
-``save_coding_revision`` is the single write path for a coding
-artifact's whole editing session (codebook edits, manual row tags, and/or
-accepted recode proposals), committing at most one new
-``artifact_versions`` row per save via
-``coding_repo.replace_entries_for_items``.
+Coding has one entry point, the coding editor: ``create_manual_coding``
+starts a coding artifact with every row uncoded, via
+``_materialize_coding_artifact`` -- the coding counterpart of
+``data_service._materialize_filtered_schema``. ``start_recode_items_job``
+re-runs the AI over a caller-chosen subset of a coding artifact's *own*
+rows with a caller-chosen model and returns the classification as
+reviewable proposals -- it does not itself write to ``coding_entries``.
+``save_coding_revision`` is the single write path for a coding artifact's
+whole editing session (codebook edits, manual row tags, and/or accepted
+recode proposals), committing at most one new ``artifact_versions`` row
+per save via ``coding_repo.replace_entries_for_items``.
 """
 
 from __future__ import annotations
@@ -454,7 +455,7 @@ async def duplicate_coding(
 
 
 # ---------------------------------------------------------------------------
-# start_apply_codebook_job: kickoff + handler
+# create_manual_coding and the shared helpers/materializer it uses
 # ---------------------------------------------------------------------------
 
 
@@ -564,58 +565,6 @@ def _validate_and_resolve_coding_entries(
     return rows, counts
 
 
-async def start_apply_codebook_job(
-    session: AsyncSession,
-    user_id: int,
-    *,
-    database: str,
-    codebook: str,
-    methodology: str | None,
-    api_key: str,
-    model: str | None,
-    sample_percentage: float,
-    report_name: str,
-    project_id: int | None,
-    content_scope: str = "both",
-) -> Job:
-    """Validate and enqueue an ``apply_codebook`` background job.
-
-    Resolves both ``database`` (the raw/filtered data source) and
-    ``codebook`` (accepts a ``proj_<hex>`` schema name or a numeric File
-    id -- ``ApplyCodebookRequest`` already structurally validates which
-    shape it is) to ownership-checked ``file_id``s via
-    ``repositories/file_repo.py`` *before* enqueuing.
-
-    ``sample_percentage`` chooses *which* rows the new coding artifact
-    contains -- the artifact then copies exactly those rows in and codes
-    all of them (no further sampling happens inside the classifier).
-    """
-    if not api_key:
-        raise ValidationAppError("api_key is required")
-
-    source_file_id = await file_repo.resolve_file_id(session, database, user_id)
-    codebook_file_id = await file_repo.resolve_file_id(
-        session, codebook, user_id, file_types=_CODEBOOK_FILE_TYPES
-    )
-
-    return await enqueue_job(
-        session,
-        user_id=user_id,
-        job_type="apply_codebook",
-        payload={
-            "user_id": user_id,
-            "source_file_id": source_file_id,
-            "codebook_file_id": codebook_file_id,
-            "methodology": methodology or "",
-            "model": model,
-            "sample_percentage": sample_percentage,
-            "report_name": report_name,
-            "project_id": project_id,
-            "content_scope": content_scope,
-        },
-        runtime_extra={"api_key": api_key},
-    )
-
 
 def _format_in_reply_to(parent: dict[str, str]) -> str:
     title = (parent.get("title") or "").strip()
@@ -723,33 +672,23 @@ async def _materialize_coding_artifact(
     project_id: int | None,
     submission_ids: list[str],
     comment_ids: list[str],
-    coding_entries: list[dict],
-    origin: str,
     message: str | None = None,
-    job_id: int | None = None,
-    model: str | None = None,
-    system_prompt: str | None = None,
-    user_instructions: str | None = None,
-    prompt_meta: dict | None = None,
 ) -> File:
     """Build a self-contained ``coding`` artifact: its own copy of the
-    chosen rows (and their memos), its own codebook snapshot, and its
+    chosen rows (and their memos), its own codebook snapshot, and zero
     coding -- committed as that file's v1.
 
-    The single write path for a brand-new coding artifact, shared by the
-    one-shot ``apply_codebook`` job and the hand-started
-    ``create_manual_coding`` -- the coding counterpart of
-    ``data_service._materialize_filtered_schema``, and for the same
-    reason: two entry points producing the same artifact type must not be
-    able to drift into producing structurally different artifacts. Only
-    ``origin``, the provenance fields, and whether ``coding_entries`` is
-    empty differ between them.
+    The coding editor's only way to create a coding artifact
+    (``create_manual_coding``). ``bulk_insert_coding_entries`` is a
+    no-op on an empty list, leaving a valid v1 with a full codebook
+    snapshot, its own rows, and zero live entries -- which
+    ``list_coding_rows`` already renders as uncoded, and which the
+    ViewCoding workspace then codes row by row (or via
+    ``POST /api/coding/{ref}/recode``).
 
-    ``coding_entries=[]`` is the hand-started case:
-    ``bulk_insert_coding_entries`` is a no-op on an empty list, leaving a
-    valid v1 with a full codebook snapshot, its own rows, and zero live
-    entries -- which ``list_coding_rows`` already renders as uncoded, and
-    which the ViewCoding workspace then codes row by row.
+    Always ``origin=ORIGIN_EDITED`` with no LLM provenance -- see
+    ``data_service.create_manual_filtered_data`` for why that claim is
+    kept accurate even when the AI recode assistant helped.
 
     Does not commit -- the caller owns the transaction boundary.
     """
@@ -765,13 +704,13 @@ async def _materialize_coding_artifact(
         file_type="coding",
         description=final_description,
     )
-    # The source data file was read before the (minutes-long) LLM call and
-    # its rows are copied in below -- if it was deleted in that window the
-    # copy would silently produce zero rows, leaving a coding artifact
-    # whose entries point at rows it doesn't have. Fail instead. (A
-    # deleted *codebook* is not fatal the same way: its codes were already
-    # read into `codebook_codes` by the caller, so the snapshot is
-    # complete; only its lineage edge is lost, which
+    # The source data file was read earlier in this call and its rows
+    # are copied in below -- if a concurrent request deleted it in
+    # between, the copy would silently produce zero rows, leaving a
+    # coding artifact whose entries point at rows it doesn't have. Fail
+    # instead. (A deleted *codebook* is not fatal the same way: its codes
+    # were already read into `codebook_codes` by the caller, so the
+    # snapshot is complete; only its lineage edge is lost, which
     # `version_service.link_parents` drops on its own.)
     await file_repo.require_existing_file_ids(session, {source_file_id})
 
@@ -817,12 +756,11 @@ async def _materialize_coding_artifact(
     # model/prompts too, and its version_no is what entries are stamped
     # with.
     codebook_version = await version_service.commit_codebook_version(
-        session, file_id=file_rec.id, author_user_id=user_id, origin=origin, codes=snapshot_rows,
-        message=message, job_id=job_id, model=model, system_prompt=system_prompt,
-        user_instructions=user_instructions, prompt_meta=prompt_meta,
+        session, file_id=file_rec.id, author_user_id=user_id, origin=ORIGIN_EDITED, codes=snapshot_rows,
+        message=message,
     )
     await coding_repo.bulk_insert_coding_entries(
-        session, file_rec.id, coding_entries, version_no=codebook_version.version_no
+        session, file_rec.id, [], version_no=codebook_version.version_no
     )
 
     await version_service.link_parents(
@@ -852,84 +790,6 @@ async def _materialize_coding_artifact(
     return file_rec
 
 
-@register_handler("apply_codebook")
-async def _run_apply_codebook_job(job_id: int, payload: dict) -> dict:
-    """Handler for ``job_type="apply_codebook"``.
-
-    Runs in the background job runner's context (no request-scoped
-    session), so it opens its own sessions via the module-level
-    ``AsyncSessionLocal`` -- same pattern as
-    ``_run_summarize_coding_job``/``data_service._run_filter_data_job``.
-
-    Reads and classifies here; persistence goes through the shared
-    ``_materialize_coding_artifact`` (see its docstring for the
-    self-containment and one-version rules), which the hand-started
-    ``create_manual_coding`` also uses.
-    """
-    user_id = payload["user_id"]
-    source_file_id = payload["source_file_id"]
-    codebook_file_id = payload["codebook_file_id"]
-    methodology = payload.get("methodology") or ""
-    model = payload.get("model") or ""
-    sample_percentage = payload.get("sample_percentage", 100.0)
-    report_name = payload.get("report_name") or ""
-    project_id = payload.get("project_id")
-    api_key = payload["api_key"]
-    content_scope = payload.get("content_scope") or "both"
-
-    async with AsyncSessionLocal() as session:
-        codebook_text, codebook_codes = await _read_codebook_as_parent(session, codebook_file_id)
-        await session.commit()
-
-        submissions, comments = await _sample_rows_for_coding(
-            session, source_file_id, sample_percentage, content_scope
-        )
-        parent_context = await raw_data_repo.parent_post_context_for_comments(session, source_file_id, comments)
-        assembled = _assemble_posts_content(submissions, comments, parent_context=parent_context)
-        submission_ids = [s.id for s in submissions]
-        comment_ids = [c.id for c in comments]
-        content_by_key = {(SUBMISSION, s.id): (s.selftext or "") for s in submissions}
-        content_by_key.update({(COMMENT, c.id): (c.body or "") for c in comments})
-
-    valid_keys = set(content_by_key.keys())
-
-    raw_entries, system_prompt, rendered_prompt, coverage = await classify_posts(
-        codebook_text, assembled, methodology, api_key, model, progress=ProgressTracker(job_id)
-    )
-    coding_entries, validation_counts = _validate_and_resolve_coding_entries(
-        raw_entries, valid_keys=valid_keys, codes=codebook_codes, content_by_key=content_by_key
-    )
-
-    async with AsyncSessionLocal() as session:
-        file_rec = await _materialize_coding_artifact(
-            session,
-            user_id=user_id,
-            source_file_id=source_file_id,
-            codebook_file_id=codebook_file_id,
-            codebook_codes=codebook_codes,
-            display_name=(report_name or "").strip() or "coding",
-            description=None,
-            project_id=project_id,
-            submission_ids=submission_ids,
-            comment_ids=comment_ids,
-            coding_entries=coding_entries,
-            origin=ORIGIN_GENERATED,
-            job_id=job_id,
-            model=model,
-            system_prompt=system_prompt,
-            user_instructions=methodology or None,
-            prompt_meta=version_service.prompt_meta(rendered_prompt, batches=coverage["batches_total"]),
-        )
-
-        await session.commit()
-        file_id, schema_name, filename = file_rec.id, file_rec.schemaname, file_rec.filename
-
-    return {
-        "file": {"id": str(file_id), "schema_name": schema_name, "filename": filename},
-        **validation_counts,
-        **context_window.coverage_result_fields(coverage),
-    }
-
 
 async def create_manual_coding(
     session: AsyncSession,
@@ -948,9 +808,8 @@ async def create_manual_coding(
     """Start a coding artifact by hand: copy the chosen rows in and
     snapshot the codebook, but code nothing.
 
-    The human-in-the-loop entry point for the coding stage. It creates the
-    same artifact ``apply_codebook`` does -- via the same
-    ``_materialize_coding_artifact`` -- minus the classification, so the
+    The coding stage's only entry point. Creates the artifact via
+    ``_materialize_coding_artifact`` with no classification, so the
     researcher lands in the ViewCoding workspace with every row uncoded
     and tags them themselves, with ``POST /api/coding/{ref}/recode`` as an
     opt-in assistant on whichever rows they choose.
@@ -1000,8 +859,6 @@ async def create_manual_coding(
         project_id=project_id,
         submission_ids=post_ids,
         comment_ids=comment_ids,
-        coding_entries=[],
-        origin=ORIGIN_EDITED,
         message=f"Started by hand from {total} rows, uncoded",
     )
 

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import HighlightedContent from "../HighlightedContent";
 import PageEmptyState from "../../primitives/PageEmptyState";
 import Panel from "../../shell/Panel";
@@ -91,6 +91,33 @@ export default function CodingReaderPane({
   isAiProposed,
   readOnly = false,
 }) {
+  // 1-9 applies the Nth codebook code (availableCodes is name-sorted) to
+  // whatever text is currently selected -- the keyboard equivalent of
+  // clicking a code in the selection popup or the sidebar. Only live
+  // with a pending selection, so a stray digit typed elsewhere on the
+  // page (a memo, a search box) is never mistaken for a code shortcut --
+  // reinforced by skipping the shortcut whenever focus is in a form
+  // field, with one deliberate exception: the selection popup's own
+  // "Search codes..." input autofocuses the instant a selection is
+  // made, so exempting only THAT input is what makes the shortcut work
+  // at the moment a user would actually reach for it (see
+  // HighlightedContent.jsx's `data-code-search-input` marker).
+  useEffect(() => {
+    if (readOnly || !pendingSelection?.text) return undefined;
+    const onKeyDown = (e) => {
+      const tag = e.target?.tagName;
+      const isCodeSearchInput = e.target?.dataset?.codeSearchInput === "true";
+      if (!isCodeSearchInput && (tag === "INPUT" || tag === "TEXTAREA" || e.target?.isContentEditable)) return;
+      if (e.key < "1" || e.key > "9") return;
+      const code = availableCodes[Number(e.key) - 1];
+      if (!code) return;
+      e.preventDefault();
+      onApplyCode(code.code_uid);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [readOnly, pendingSelection, availableCodes, onApplyCode]);
+
   if (!activeRow) {
     return (
       <Panel className="h-full">
@@ -144,7 +171,7 @@ export default function CodingReaderPane({
           <div className="text-sm text-paper/50">
             {readOnly
               ? "No codes were applied in this version."
-              : "Not coded yet. Select text above and pick a code to tag it."}
+              : "Select text, then pick a code."}
           </div>
         ) : (
           <div className="flex flex-col gap-1.5">
@@ -167,8 +194,8 @@ export default function CodingReaderPane({
           to (see HighlightedContent's module comment for why that used
           to make the popup jump the instant it opened). */}
       {!readOnly && pendingSelection && (
-        <div className="shrink-0 border border-paper bg-surface-raised px-3 py-2 text-sm">
-          Text selected &mdash; pick a code from the popup or the codebook on the right to tag it.
+        <div className="shrink-0 border border-line bg-surface-raised px-3 py-2 text-sm">
+          Text selected &mdash; pick a code, or press 1-9.
           <button
             type="button"
             className="ml-2 text-paper/60 underline hover:text-paper"

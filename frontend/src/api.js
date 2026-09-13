@@ -198,8 +198,48 @@ async function _pollJob(jobId, {
     onStatusChange?.(status);
     onProgress?.(job?.progress || null);
 
-    if (status === "succeeded") {
-      return { ok: true, status: 200, data: job.result, error: null };
+    if (status === "succeeded" || status === "completed") {
+      const out = {
+        ok: true,
+        status: 200,
+        data: job?.result,
+        jobId,
+        error: null,
+      };
+      if (job?.accounting) out.accounting = job.accounting;
+      return out;
+    }
+    if (status === "partial") {
+      const out = {
+        ok: true,
+        isPartial: true,
+        status: 200,
+        data: job?.salvaged_output || job?.result,
+        jobId,
+        error: job?.error || "Job partially completed",
+      };
+      if (job?.accounting) out.accounting = job.accounting;
+      return out;
+    }
+    if (status === "retryable_failure") {
+      return {
+        ok: false,
+        isRetryable: true,
+        status: 200,
+        data: null,
+        job,
+        error: job.error || "Retryable error occurred",
+      };
+    }
+    if (status === "cancelled") {
+      return {
+        ok: false,
+        isCancelled: true,
+        status: 200,
+        data: null,
+        job,
+        error: "Job was cancelled",
+      };
     }
     if (status === "failed") {
       return { ok: false, status: 200, data: null, error: job.error || "Job failed" };
@@ -243,4 +283,16 @@ export async function postJsonAndPoll(path, body, opts = {}) {
     return kickoff;
   }
   return _pollJob(kickoff.data && kickoff.data.job_id, opts);
+}
+
+export async function cancelJob(jobId) {
+  const res = await apiFetch(`/api/jobs/${jobId}/cancel`, { method: "POST" });
+  if (!res.ok) throw new Error(`Failed to cancel job ${jobId}`);
+  return res.json();
+}
+
+export async function fetchJobEstimate(model, itemCount = 1) {
+  const res = await apiFetch(`/api/jobs/estimate?model=${encodeURIComponent(model)}&item_count=${itemCount}`);
+  if (!res.ok) return null;
+  return res.json();
 }

@@ -10,7 +10,25 @@ from sqlalchemy.sql import func
 
 from backend.app.database import Base
 
-JOB_STATUSES = ("pending", "running", "succeeded", "failed")
+JOB_STATUSES = (
+    "pending",
+    "running",
+    "completed",
+    "partial",
+    "retryable_failure",
+    "failed",
+    "cancelled",
+    "succeeded",  # kept for backwards compatibility
+)
+
+TERMINAL_STATUSES = frozenset({
+    "completed",
+    "succeeded",
+    "failed",
+    "cancelled",
+    "partial",
+    "retryable_failure",
+})
 
 
 class Job(Base):
@@ -23,8 +41,10 @@ class Job(Base):
     payload = Column(JSON, nullable=False, default=dict)
     result = Column(JSON, nullable=True)
     progress = Column(JSON, nullable=True)
+    accounting = Column(JSON, nullable=True)
     error = Column(Text, nullable=True)
     error_code = Column(Integer, nullable=True)
+    salvaged_output = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     started_at = Column(DateTime(timezone=True), nullable=True)
     finished_at = Column(DateTime(timezone=True), nullable=True)

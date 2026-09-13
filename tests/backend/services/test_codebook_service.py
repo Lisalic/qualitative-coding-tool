@@ -9,7 +9,6 @@ route/auth/response-shape behavior on top of this.
 
 from __future__ import annotations
 
-import hashlib
 import json
 from unittest.mock import AsyncMock
 
@@ -364,220 +363,6 @@ class TestDuplicateCodebook:
                 await codebook_service.duplicate_codebook(
                     session, other.id, "proj_dup_cb_not_mine", display_name="x"
                 )
-
-
-# ---------------------------------------------------------------------------
-# start_generate_codebook_job -- validation + enqueue
-# ---------------------------------------------------------------------------
-
-
-class TestStartGenerateCodebookJobValidation:
-    async def test_non_proj_database_raises(self, session_factory) -> None:
-        async with session_factory() as session:
-            user = await _make_user(session)
-            with pytest.raises(ValidationAppError, match="database"):
-                await codebook_service.start_generate_codebook_job(
-                    session,
-                    user.id,
-                    database="not_proj",
-                    api_key="k",
-                    prompt="",
-                    name="n",
-                    description=None,
-                    project_id=None,
-                    model=None,
-                    sample_percentage=100.0,
-                )
-
-    async def test_missing_api_key_raises(self, session_factory) -> None:
-        async with session_factory() as session:
-            user = await _make_user(session)
-            file_rec = await _make_file(session, user.id)
-            with pytest.raises(ValidationAppError, match="api_key"):
-                await codebook_service.start_generate_codebook_job(
-                    session,
-                    user.id,
-                    database=file_rec.schemaname,
-                    api_key="",
-                    prompt="",
-                    name="n",
-                    description=None,
-                    project_id=None,
-                    model=None,
-                    sample_percentage=100.0,
-                )
-
-    async def test_unowned_database_raises_not_found(self, session_factory) -> None:
-        async with session_factory() as session:
-            owner = await _make_user(session, "owner@x.com")
-            other = await _make_user(session, "other@x.com")
-            file_rec = await _make_file(session, owner.id)
-            with pytest.raises(NotFoundError):
-                await codebook_service.start_generate_codebook_job(
-                    session,
-                    other.id,
-                    database=file_rec.schemaname,
-                    api_key="k",
-                    prompt="",
-                    name="n",
-                    description=None,
-                    project_id=None,
-                    model=None,
-                    sample_percentage=100.0,
-                )
-
-
-class TestStartGenerateCodebookJobEnqueue:
-    async def test_enqueues_pending_job_without_persisting_api_key(self, session_factory) -> None:
-        async with session_factory() as session:
-            user = await _make_user(session)
-            file_rec = await _make_file(session, user.id)
-
-            job = await codebook_service.start_generate_codebook_job(
-                session,
-                user.id,
-                database=file_rec.schemaname,
-                api_key="sk-secret",
-                prompt="",
-                name="n",
-                description=None,
-                project_id=None,
-                model="some-model",
-                sample_percentage=100.0,
-            )
-
-            assert job.status == "pending"
-            assert job.job_type == "generate_codebook"
-            assert job.payload["source_file_id"] == file_rec.id
-            assert "api_key" not in job.payload
-
-            await _wait_for_terminal_status(session, job.id, user.id)
-
-
-# ---------------------------------------------------------------------------
-# _run_generate_codebook_job -- end-to-end
-# ---------------------------------------------------------------------------
-
-
-class TestGenerateCodebookJobHandlerEndToEnd:
-    async def test_samples_calls_llm_and_persists_new_codebook_file(
-        self, session_factory, monkeypatch
-    ) -> None:
-        generate_mock = AsyncMock(
-            return_value=(
-                json.dumps(
-                    {
-                        "codes": [
-                            {
-                                "family": "F",
-                                "name": "generated codebook",
-                                "definition": "a def",
-                                "inclusion": "when",
-                                "exclusion": "not when",
-                                "keywords": "kw",
-                                "example": "ex",
-                            }
-                        ]
-                    }
-                ),
-                "sys prompt",
-                "user prompt",
-            )
-        )
-        monkeypatch.setattr(
-            "backend.app.services.codebook_service.codebook_generator_module.generate_codebook",
-            generate_mock,
-        )
-
-        async with session_factory() as session:
-            user = await _make_user(session)
-            file_rec = await _make_file(session, user.id)
-            source_file_id = file_rec.id
-            session.add_all(
-                [
-                    Submission(file_id=file_rec.id, id="s1", title="t1", selftext="x1", word_count=5),
-                    Comment(file_id=file_rec.id, id="c1", body="b1", word_count=3),
-                ]
-            )
-            await session.commit()
-
-            job = await codebook_service.start_generate_codebook_job(
-                session,
-                user.id,
-                database=file_rec.schemaname,
-                api_key="sk-secret",
-                prompt="be thorough",
-                name="my codebook",
-                description="a desc",
-                project_id=None,
-                model=None,
-                sample_percentage=100.0,
-            )
-
-            finished = await _wait_for_terminal_status(session, job.id, user.id)
-            assert finished.status == "succeeded", finished.error
-            result = finished.result
-            assert "generated codebook" in result["codebook"]
-            assert result["file"]["filename"] == "my codebook"
-            assert result["file"]["description"] == "a desc"
-
-            assert generate_mock.called
-
-            new_file_id = int(result["file"]["id"])
-            new_file = await session.get(File, new_file_id)
-            assert new_file.file_type == "codebook"
-            assert new_file.schemaname.startswith("proj_")
-
-            head = await version_repo.head_version(session, new_file_id)
-            assert head.system_prompt == "sys prompt"
-            # The rendered prompt is deliberately NOT stored (it embeds the
-            # whole sampled corpus) -- only the user's own instructions,
-            # plus a length/hash of what was actually sent.
-            assert head.user_instructions == "be thorough"
-            assert head.prompt_meta["rendered_chars"] == len("user prompt")
-            assert head.prompt_meta["rendered_sha256"] == hashlib.sha256(b"user prompt").hexdigest()
-
-            codes = await version_service.read_codes(session, new_file_id)
-            assert [c.name for c in codes] == ["generated codebook"]
-            assert codes[0].definition == "a def"
-            assert codes[0].inclusion == "when"
-            assert codes[0].exclusion == "not when"
-            assert codes[0].keywords == "kw"
-            assert codes[0].example == "ex"
-
-            edges = await version_repo.list_parent_edges(session, new_file_id)
-            assert [e.parent_file_id for e in edges] == [source_file_id]
-            assert edges[0].relation == "derived_from"
-            assert edges[0].role == "source_data"
-
-    async def test_no_records_sampled_marks_job_failed(self, session_factory, monkeypatch) -> None:
-        generate_mock = AsyncMock(return_value=("should not run", "", ""))
-        monkeypatch.setattr(
-            "backend.app.services.codebook_service.codebook_generator_module.generate_codebook",
-            generate_mock,
-        )
-
-        async with session_factory() as session:
-            user = await _make_user(session)
-            file_rec = await _make_file(session, user.id)  # no submissions/comments
-
-            job = await codebook_service.start_generate_codebook_job(
-                session,
-                user.id,
-                database=file_rec.schemaname,
-                api_key="sk-secret",
-                prompt="",
-                name="n",
-                description=None,
-                project_id=None,
-                model=None,
-                sample_percentage=100.0,
-            )
-
-            finished = await _wait_for_terminal_status(session, job.id, user.id)
-            assert finished.status == "failed"
-            assert "No records were sampled" in finished.error
-            assert not generate_mock.called
 
 
 # ---------------------------------------------------------------------------
@@ -958,6 +743,32 @@ class TestCodebookPreviewJob:
 
             system_prompt = generate_mock.await_args.kwargs["existing_codes"]
             assert "F :: Bullying -- a def" in system_prompt
+
+    async def test_no_records_sampled_marks_job_failed(self, session_factory, monkeypatch) -> None:
+        generate_mock = AsyncMock(return_value=("should not run", "", ""))
+        monkeypatch.setattr(
+            "backend.app.services.codebook_service.codebook_generator_module.generate_codebook",
+            generate_mock,
+        )
+
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_rec = await _make_file(session, user.id)  # no submissions/comments
+
+            job = await codebook_service.start_codebook_preview_job(
+                session,
+                user.id,
+                database=file_rec.schemaname,
+                api_key="sk-secret",
+                model=None,
+                prompt="",
+                sample_percentage=100.0,
+            )
+
+            finished = await _wait_for_terminal_status(session, job.id, user.id)
+            assert finished.status == "failed"
+            assert "No records were sampled" in finished.error
+            assert not generate_mock.called
 
     async def test_api_key_is_required_and_never_persisted(self, session_factory) -> None:
         async with session_factory() as session:
