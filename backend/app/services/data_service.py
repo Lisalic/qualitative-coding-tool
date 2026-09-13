@@ -60,10 +60,11 @@ from backend.app.jobs.progress import ProgressTracker
 from backend.app.jobs.registry import register_handler
 from backend.app.jobs.service import enqueue_job
 from backend.app.repositories import file_repo, memo_repo, project_repo, raw_data_repo, version_repo
-from backend.app.services import version_service
+from backend.app.services import assist_service, version_service
 from backend.app.services.version_service import EdgeSpec
 from backend.app.storage_models import Comment, Submission
 from backend.app.versioning_models import (
+    ASSIST_STAGE_FILTER,
     ORIGIN_EDITED,
     ORIGIN_FORKED,
     RELATION_DERIVED_FROM,
@@ -487,22 +488,30 @@ async def _apply_tag_or_ai_filter(
     use_ai_comments: bool,
     submissions_text: str,
     comments_text: str,
-    filter_prompt: str,
+    include_prompt: str,
+    exclude_prompt: str,
+    examples_block: str,
     api_key: str,
     model: str | None,
     has_tags: bool,
     original_tags_meta: list[str],
     expanded_terms_sql: list[str],
     progress: ProgressTracker | None = None,
-) -> tuple[list[str], list[str], str, str, dict]:
-    """Resolve the final set of submission/comment ids to copy: either the
-    tag-matched sample ids directly (tags-only, no AI step) or the AI's
-    filtered id list (``filter_db_module.filter_posts_with_ai``/
-    ``filter_comments_with_ai``, both native ``async def`` as of Stage 9
-    and awaited directly -- no more ``asyncio.to_thread`` wrapper around a
-    sync OpenRouter SDK call).
+) -> tuple[list[str], list[str], list[str], list[str], str, str, dict]:
+    """Resolve the final include/exclude id sets: either the tag-matched
+    sample ids directly, all as includes (tags-only, no AI step), or the
+    AI's two-way triage (``filter_db_module.triage_posts_with_ai``/
+    ``triage_comments_with_ai``, both native ``async def`` and awaited
+    directly -- no ``asyncio.to_thread`` wrapper around a sync OpenRouter
+    SDK call).
 
-    The 6th return value, ``coverage``, is ``{}`` when no AI filtering ran
+    ``examples_block`` carries the "similar example" prompting strategy
+    (prior human decisions rendered as labelled examples, see
+    ``_build_examples_block``) -- passed straight through to the triage
+    call alongside whatever include/exclude criteria were given; it is the
+    caller's job to decide whether prompts, examples, or both are sent.
+
+    The 7th return value, ``coverage``, is ``{}`` when no AI filtering ran
     (tags-only), otherwise has a ``"posts"``/``"comments"`` key (whichever
     AI path(s) ran) each mapping to that call's
     ``{"batches_processed", "batches_total"}`` -- lets the caller detect and
@@ -512,24 +521,31 @@ async def _apply_tag_or_ai_filter(
     from backend.scripts import filter_db as filter_db_module
     from backend.scripts.filter_db import AIFilterError
 
-    post_ids: list[str] = []
-    comment_ids: list[str] = []
+    include_post_ids: list[str] = []
+    exclude_post_ids: list[str] = []
+    include_comment_ids: list[str] = []
+    exclude_comment_ids: list[str] = []
     system_prompt = ""
     user_instructions = ""
     rendered_prompt = ""
     coverage: dict[str, dict[str, int]] = {}
 
     if not use_ai_posts and sub_rows:
-        post_ids = [str(r._mapping["id"]) for r in sub_rows if r._mapping.get("id")]
+        include_post_ids = [str(r._mapping["id"]) for r in sub_rows if r._mapping.get("id")]
     if not use_ai_comments and comm_rows:
-        comment_ids = [str(r._mapping["id"]) for r in comm_rows if r._mapping.get("id")]
+        include_comment_ids = [str(r._mapping["id"]) for r in comm_rows if r._mapping.get("id")]
 
     if use_ai_posts and submissions_text:
         try:
-            post_ids, system_prompt, rendered_prompt, posts_coverage = await filter_db_module.filter_posts_with_ai(
-                filter_prompt, submissions_text, api_key, model, progress=progress
+            (
+                include_post_ids,
+                exclude_post_ids,
+                system_prompt,
+                rendered_prompt,
+                posts_coverage,
+            ) = await filter_db_module.triage_posts_with_ai(
+                include_prompt, exclude_prompt, examples_block, submissions_text, api_key, model, progress=progress
             )
-            user_instructions = filter_prompt
             coverage["posts"] = posts_coverage
         except AIFilterError:
             raise
@@ -538,8 +554,14 @@ async def _apply_tag_or_ai_filter(
 
     if use_ai_comments and comments_text:
         try:
-            comment_ids, _, _, comments_coverage = await filter_db_module.filter_comments_with_ai(
-                filter_prompt, comments_text, api_key, model, progress=progress
+            (
+                include_comment_ids,
+                exclude_comment_ids,
+                _,
+                _,
+                comments_coverage,
+            ) = await filter_db_module.triage_comments_with_ai(
+                include_prompt, exclude_prompt, examples_block, comments_text, api_key, model, progress=progress
             )
             coverage["comments"] = comments_coverage
         except AIFilterError:
@@ -547,7 +569,17 @@ async def _apply_tag_or_ai_filter(
         except Exception as exc:
             raise AIFilterError(f"AI filtering failed for comments: {exc}") from exc
 
-    if has_tags and not filter_prompt:
+    has_criteria = bool(include_prompt) or bool(exclude_prompt) or bool(examples_block)
+    if has_criteria:
+        parts = []
+        if include_prompt:
+            parts.append(f"Include: {include_prompt}")
+        if exclude_prompt:
+            parts.append(f"Exclude: {exclude_prompt}")
+        if examples_block:
+            parts.append("Autofill from prior decisions in this file.")
+        user_instructions = "\n".join(parts)
+    elif has_tags:
         tag_ctx = json.dumps(
             {"original_tags": original_tags_meta, "expanded_terms": expanded_terms_sql},
             ensure_ascii=False,
@@ -557,20 +589,95 @@ async def _apply_tag_or_ai_filter(
         # separate rendered prompt for a tags-only filter.
         user_instructions = tag_ctx[:8000]
 
-    if not isinstance(post_ids, list):
-        post_ids = []
-    if not isinstance(comment_ids, list):
-        comment_ids = []
+    if not isinstance(include_post_ids, list):
+        include_post_ids = []
+    if not isinstance(exclude_post_ids, list):
+        exclude_post_ids = []
+    if not isinstance(include_comment_ids, list):
+        include_comment_ids = []
+    if not isinstance(exclude_comment_ids, list):
+        exclude_comment_ids = []
 
     batches = sum(c["batches_total"] for c in coverage.values()) or None
     return (
-        post_ids,
-        comment_ids,
+        include_post_ids,
+        exclude_post_ids,
+        include_comment_ids,
+        exclude_comment_ids,
         system_prompt,
         user_instructions,
         version_service.prompt_meta(rendered_prompt, batches=batches),
         coverage,
     )
+
+
+# "Similar example" prompting: cap how many of the researcher's own
+# decisions get replayed back to the model per label, and how much of
+# each row's text is quoted, so the examples block stays a small,
+# predictable slice of the prompt budget rather than growing with the
+# size of the file.
+MAX_EXAMPLES_PER_LABEL = 6
+MAX_EXAMPLE_CHARS = 600
+
+
+def _truncate_example(text: str) -> str:
+    text = text or ""
+    if len(text) <= MAX_EXAMPLE_CHARS:
+        return text
+    return text[:MAX_EXAMPLE_CHARS].rstrip() + "…"
+
+
+async def _build_examples_block(
+    session: AsyncSession,
+    *,
+    source_file_id: int,
+    included_post_ids: list[str],
+    included_comment_ids: list[str],
+    excluded_post_ids: list[str],
+    excluded_comment_ids: list[str],
+) -> str:
+    """Render the researcher's own already-decided rows as labelled
+    examples for the "similar example" prompting strategy ("Autofill with
+    AI" in the filter editor).
+
+    Takes the LAST ``MAX_EXAMPLES_PER_LABEL`` ids from each direction --
+    the frontend's `Set` iteration order is insertion order, so the tail
+    is the researcher's most recent judgement, which is likely the most
+    representative of their current criteria. Empty string (no examples
+    section at all) when there is nothing decided yet.
+    """
+    inc_post_ids = included_post_ids[-MAX_EXAMPLES_PER_LABEL:]
+    inc_comment_ids = included_comment_ids[-MAX_EXAMPLES_PER_LABEL:]
+    exc_post_ids = excluded_post_ids[-MAX_EXAMPLES_PER_LABEL:]
+    exc_comment_ids = excluded_comment_ids[-MAX_EXAMPLES_PER_LABEL:]
+
+    if not (inc_post_ids or inc_comment_ids or exc_post_ids or exc_comment_ids):
+        return ""
+
+    inc_subs, inc_comments = await raw_data_repo.fetch_rows_by_id(
+        session, file_id=source_file_id, submission_ids=inc_post_ids, comment_ids=inc_comment_ids
+    )
+    exc_subs, exc_comments = await raw_data_repo.fetch_rows_by_id(
+        session, file_id=source_file_id, submission_ids=exc_post_ids, comment_ids=exc_comment_ids
+    )
+
+    def render(subs: list, comments: list) -> str:
+        lines = []
+        for s in subs:
+            body = _truncate_example(f"{s.title or ''}\n{s.selftext or ''}".strip())
+            lines.append(f"[{s.id}] {body}")
+        for c in comments:
+            lines.append(f"[{c.id}] {_truncate_example(c.body or '')}")
+        return "\n---\n".join(lines)
+
+    sections = []
+    included_text = render(inc_subs, inc_comments)
+    if included_text:
+        sections.append(f"INCLUDED:\n{included_text}")
+    excluded_text = render(exc_subs, exc_comments)
+    if excluded_text:
+        sections.append(f"EXCLUDED:\n{excluded_text}")
+    return "\n\n".join(sections)
 
 
 async def _materialize_filtered_schema(
@@ -627,7 +734,7 @@ async def _materialize_filtered_schema(
     # content is the submissions/comments rows copied below, which is
     # why this is commit_data_version (a range table), not
     # commit_blob_version.
-    await version_service.commit_data_version(
+    version = await version_service.commit_data_version(
         session, file_id=file_rec.id, author_user_id=user_id, origin=ORIGIN_EDITED, message=message,
         system_prompt=None, user_instructions=None, prompt_meta=None,
         parents=[EdgeSpec(parent_file_id=source_file_id, relation=RELATION_DERIVED_FROM, role=ROLE_SOURCE_DATA)],
@@ -674,7 +781,7 @@ async def _materialize_filtered_schema(
         await async_link_file_to_project(session, file_rec.id, project.id)
 
     await session.flush()
-    return file_rec, counts
+    return file_rec, counts, version
 
 
 # ---------------------------------------------------------------------------
@@ -765,8 +872,10 @@ async def duplicate_data(
 class _FilterOutcome:
     """What one AI filter pass decided, independent of what is done with it."""
 
-    post_ids: list[str]
-    comment_ids: list[str]
+    include_post_ids: list[str]
+    exclude_post_ids: list[str]
+    include_comment_ids: list[str]
+    exclude_comment_ids: list[str]
     system_prompt: str
     user_instructions: str
     prompt_meta: dict | None
@@ -810,14 +919,20 @@ async def _run_ai_filter(
     exclude_submission_ids: list[str] | None = None,
     exclude_comment_ids: list[str] | None = None,
 ) -> _FilterOutcome:
-    """Expand tags, sample the source, and run the AI filter.
+    """Expand tags, sample the source, and run the AI triage.
 
-    The complete AI half of filtering, extracted so the one-shot job and
-    the editor's preview job share one implementation rather than two
-    that drift. ``exclude_*_ids`` is the editor's contribution: rows the
-    user has already ruled on are removed from the candidate pool before
-    sampling, so a repeated preview run keeps proposing *new* rows
-    instead of the same ones.
+    The complete AI half of filtering, extracted so the job handler stays
+    thin. ``exclude_*_ids`` is the editor's contribution: rows the user
+    has already ruled on (in EITHER direction) are removed from the
+    candidate pool before sampling, so a repeated preview run keeps
+    proposing *new* rows instead of the same ones.
+
+    ``payload["use_examples"]`` selects the "similar example" prompting
+    mode ("Autofill with AI"): when true, the include/exclude prompt
+    boxes are ignored entirely and the researcher's own already-decided
+    rows (``payload["include_post_ids"]`` etc.) are rendered as labelled
+    examples instead -- the two are mutually exclusive so a normal
+    prompt-driven run is never silently biased by prior decisions.
     """
     from backend.scripts.tag_expansion import (
         comment_body_tag_predicate_sql,
@@ -828,8 +943,22 @@ async def _run_ai_filter(
 
     api_key = payload["api_key"]
     model = payload.get("model")
-    filter_prompt = (payload.get("prompt") or "").strip()
     content_scope = payload.get("content_scope") or "both"
+    use_examples = bool(payload.get("use_examples"))
+
+    include_prompt = "" if use_examples else (payload.get("include_prompt") or "").strip()
+    exclude_prompt = "" if use_examples else (payload.get("exclude_prompt") or "").strip()
+
+    examples_block = ""
+    if use_examples:
+        examples_block = await _build_examples_block(
+            session,
+            source_file_id=payload["source_file_id"],
+            included_post_ids=list(payload.get("include_post_ids") or []),
+            included_comment_ids=list(payload.get("include_comment_ids") or []),
+            excluded_post_ids=list(payload.get("exclude_post_ids") or []),
+            excluded_comment_ids=list(payload.get("exclude_comment_ids") or []),
+        )
 
     user_tags_list = parse_filter_tags_input(payload.get("filter_tags"))
     expanded_terms_sql: list[str] = []
@@ -840,8 +969,9 @@ async def _run_ai_filter(
         )
 
     has_tags = bool(user_tags_list)
-    use_ai_posts = (not has_tags) or bool(filter_prompt)
-    use_ai_comments = (not has_tags) or bool(filter_prompt)
+    has_criteria = bool(include_prompt) or bool(exclude_prompt) or bool(examples_block)
+    use_ai_posts = (not has_tags) or has_criteria
+    use_ai_comments = (not has_tags) or has_criteria
     sub_tag_sql, sub_tag_bind = submission_text_tag_predicate_sql(expanded_terms_sql)
     com_tag_sql, com_tag_bind = comment_body_tag_predicate_sql(expanded_terms_sql)
 
@@ -862,14 +992,25 @@ async def _run_ai_filter(
         exclude_comment_ids=exclude_comment_ids,
     )
 
-    post_ids, comment_ids, system_prompt, user_instructions, filter_prompt_meta, coverage = await _apply_tag_or_ai_filter(
+    (
+        include_post_ids,
+        exclude_post_ids,
+        include_comment_ids,
+        exclude_comment_ids,
+        system_prompt,
+        user_instructions,
+        filter_prompt_meta,
+        coverage,
+    ) = await _apply_tag_or_ai_filter(
         sub_rows=sub_rows,
         comm_rows=comm_rows,
         use_ai_posts=use_ai_posts,
         use_ai_comments=use_ai_comments,
         submissions_text=submissions_text,
         comments_text=comments_text,
-        filter_prompt=filter_prompt,
+        include_prompt=include_prompt,
+        exclude_prompt=exclude_prompt,
+        examples_block=examples_block,
         api_key=api_key,
         model=model,
         has_tags=has_tags,
@@ -879,8 +1020,10 @@ async def _run_ai_filter(
     )
 
     return _FilterOutcome(
-        post_ids=post_ids,
-        comment_ids=comment_ids,
+        include_post_ids=include_post_ids,
+        exclude_post_ids=exclude_post_ids,
+        include_comment_ids=include_comment_ids,
+        exclude_comment_ids=exclude_comment_ids,
         system_prompt=system_prompt,
         user_instructions=user_instructions,
         prompt_meta=filter_prompt_meta,
@@ -906,13 +1049,17 @@ async def start_filter_preview_job(
     database: str,
     api_key: str,
     model: str | None,
-    prompt: str | None,
+    include_prompt: str | None,
+    exclude_prompt: str | None,
+    use_examples: bool,
     min_words: int,
     sample_percentage: float,
     filter_tags: str | None,
     content_scope: str = "both",
-    decided_post_ids: list[str] | None = None,
-    decided_comment_ids: list[str] | None = None,
+    included_post_ids: list[str] | None = None,
+    included_comment_ids: list[str] | None = None,
+    excluded_post_ids: list[str] | None = None,
+    excluded_comment_ids: list[str] | None = None,
 ) -> Job:
     """Validate and enqueue a ``filter_preview`` background job.
 
@@ -920,13 +1067,34 @@ async def start_filter_preview_job(
     persisting or spawning a background task, with ``api_key`` going into
     ``runtime_extra`` so it's never written to the ``jobs`` table. The job
     it enqueues creates nothing -- it answers "of the rows I haven't
-    decided on, which would you keep?" and returns ids. That is what lets
-    the filter editor run the AI tool repeatedly and treat each run as a
-    suggestion rather than a commitment.
+    decided on, which would you include, and which would you exclude?"
+    and returns two id lists. That is what lets the filter editor run the
+    AI tool repeatedly and treat each run as a suggestion rather than a
+    commitment.
+
+    Requires *something* to go on: an include/exclude prompt, a tag
+    filter, or ``use_examples`` with at least one already-decided row --
+    otherwise the job would have no criteria at all and every row would
+    land in the "uncertain, skip" bucket the triage prompt asks for.
     """
     schema = require_valid_schema(database, field_name="database")
     if not api_key:
         raise ValidationAppError("api_key is required")
+
+    include_prompt = (include_prompt or "").strip()
+    exclude_prompt = (exclude_prompt or "").strip()
+    included_post_ids = list(included_post_ids or [])
+    included_comment_ids = list(included_comment_ids or [])
+    excluded_post_ids = list(excluded_post_ids or [])
+    excluded_comment_ids = list(excluded_comment_ids or [])
+    has_decisions = bool(
+        included_post_ids or included_comment_ids or excluded_post_ids or excluded_comment_ids
+    )
+
+    if use_examples and not has_decisions:
+        raise ValidationAppError("Autofill needs at least one row already included or excluded")
+    if not use_examples and not include_prompt and not exclude_prompt and not (filter_tags or "").strip():
+        raise ValidationAppError("An include or exclude criterion is required")
 
     source_file_id = await file_repo.resolve_file_id(session, schema, user_id)
 
@@ -938,13 +1106,17 @@ async def start_filter_preview_job(
             "source_file_id": source_file_id,
             "user_id": user_id,
             "model": model,
-            "prompt": (prompt or "").strip(),
+            "include_prompt": include_prompt,
+            "exclude_prompt": exclude_prompt,
+            "use_examples": use_examples,
             "min_words": min_words,
             "sample_percentage": sample_percentage,
             "filter_tags": filter_tags,
             "content_scope": content_scope,
-            "decided_post_ids": list(decided_post_ids or []),
-            "decided_comment_ids": list(decided_comment_ids or []),
+            "include_post_ids": included_post_ids,
+            "include_comment_ids": included_comment_ids,
+            "exclude_post_ids": excluded_post_ids,
+            "exclude_comment_ids": excluded_comment_ids,
         },
         runtime_extra={"api_key": api_key},
     )
@@ -961,17 +1133,35 @@ async def _run_filter_preview_job(job_id: int, payload: dict) -> dict:
     ``session.commit()``.
     """
     async with AsyncSessionLocal() as session:
+        already_decided_posts = list(payload.get("include_post_ids") or []) + list(
+            payload.get("exclude_post_ids") or []
+        )
+        already_decided_comments = list(payload.get("include_comment_ids") or []) + list(
+            payload.get("exclude_comment_ids") or []
+        )
         outcome = await _run_ai_filter(
             session,
             job_id,
             payload,
-            exclude_submission_ids=payload.get("decided_post_ids") or None,
-            exclude_comment_ids=payload.get("decided_comment_ids") or None,
+            exclude_submission_ids=already_decided_posts or None,
+            exclude_comment_ids=already_decided_comments or None,
         )
 
     result: dict[str, Any] = {
-        "post_ids": outcome.post_ids,
-        "comment_ids": outcome.comment_ids,
+        "include_post_ids": outcome.include_post_ids,
+        "include_comment_ids": outcome.include_comment_ids,
+        "exclude_post_ids": outcome.exclude_post_ids,
+        "exclude_comment_ids": outcome.exclude_comment_ids,
+        # Surfaced so `assist_service.record_assist_runs` can source a
+        # filter editor's assist-provenance record from THIS job rather
+        # than trusting anything the client sends -- see GAP-4/C2 in
+        # documentation/research/qualitative-coding-landscape-and-expansion.md.
+        # Never persisted as `ArtifactVersion` provenance (that stays
+        # reserved for `origin=ORIGIN_GENERATED`); only `ArtifactAssist`
+        # reads these.
+        "system_prompt": outcome.system_prompt,
+        "user_instructions": outcome.user_instructions,
+        "prompt_meta": outcome.prompt_meta,
     }
     if outcome.has_tags:
         result["tag_filter"] = {
@@ -992,6 +1182,7 @@ async def create_manual_filtered_data(
     project_id: int | None,
     post_ids: list[str],
     comment_ids: list[str],
+    assist_runs: list[dict] | None = None,
 ) -> tuple[File, dict[str, int]]:
     """Create a ``filtered_data`` artifact from a hand-picked set of rows.
 
@@ -1005,12 +1196,15 @@ async def create_manual_filtered_data(
     model produced this", and the version spine's provenance fields mean
     the stronger claim -- overstating it would make ``model``/
     ``system_prompt`` useless for auditing which artifacts an LLM
-    actually generated.
+    actually generated. ``assist_runs`` (see ``schemas.AssistRunIn``) is
+    the separate C2 channel that DOES record which ``filter_preview``
+    job(s) contributed and what the researcher did with their proposals
+    -- see ``services/assist_service.py``.
     """
     schema = require_valid_schema(database, field_name="database")
     source_file_id = await file_repo.resolve_file_id(session, schema, user_id)
 
-    file_rec, counts = await _materialize_filtered_schema(
+    file_rec, counts, version = await _materialize_filtered_schema(
         session,
         user_id=user_id,
         source_file_id=source_file_id,
@@ -1021,6 +1215,16 @@ async def create_manual_filtered_data(
         comment_ids=comment_ids,
         message=f"Composed by hand from {len(post_ids)} posts and {len(comment_ids)} comments",
     )
+    if assist_runs:
+        await assist_service.record_assist_runs(
+            session,
+            user_id=user_id,
+            file_id=file_rec.id,
+            version_id=version.id,
+            stage=ASSIST_STAGE_FILTER,
+            source_file_id=source_file_id,
+            runs=assist_runs,
+        )
     await session.commit()
     await session.refresh(file_rec)
     return file_rec, counts

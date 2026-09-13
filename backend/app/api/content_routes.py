@@ -18,7 +18,7 @@ async def save_comparison(
     title: str = Form(...),
     description: str = Form(None),
     file_type: str = Form(None),
-    project_id: int = Form(None),
+    project_id: int = Form(...),
     parent_file_ids: str = Form(None),
     user_id: int = Depends(require_user_id),
     db: AsyncSession = Depends(get_async_db),
@@ -49,7 +49,7 @@ async def save_summary(
     content: str = Form(...),
     name: str = Form(...),
     description: str = Form(None),
-    project_id: int = Form(None),
+    project_id: int = Form(...),
     user_id: int = Depends(require_user_id),
     db: AsyncSession = Depends(get_async_db),
 ) -> JSONResponse:

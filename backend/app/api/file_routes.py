@@ -21,7 +21,7 @@ async def upload_zst_file(
     data_type: str = Form(...),
     name: str = Form(None),
     description: str = Form(None),
-    project_id: int = Form(None),
+    project_id: int = Form(...),
     user_id: int | None = Depends(optional_user_id),
     db: AsyncSession = Depends(get_async_db),
 ):
@@ -108,6 +108,11 @@ async def merge_databases(
             db_list = databases
         else:
             raise HTTPException(status_code=400, detail="Invalid databases format")
+
+        # Every file belongs to a project, merges included.
+        if project_id in (None, ""):
+            raise HTTPException(status_code=400, detail="project_id is required")
+        project_id = int(project_id)
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=400, detail="Invalid databases format") from exc
     except HTTPException:

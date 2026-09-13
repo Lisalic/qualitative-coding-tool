@@ -60,10 +60,11 @@ from backend.app.jobs.progress import ProgressTracker
 from backend.app.jobs.registry import register_handler
 from backend.app.jobs.service import enqueue_job
 from backend.app.repositories import coding_repo, file_repo, memo_repo, project_repo, raw_data_repo, version_repo
-from backend.app.services import codebook_service, version_service
+from backend.app.services import assist_service, codebook_service, version_service
 from backend.app.services.version_service import EdgeSpec
-from backend.app.storage_models import Comment, Submission
+from backend.app.storage_models import CODER_AI, CODER_HUMAN, Comment, Submission
 from backend.app.versioning_models import (
+    ASSIST_STAGE_CODING,
     ORIGIN_EDITED,
     ORIGIN_FORKED,
     ORIGIN_GENERATED,
@@ -236,8 +237,7 @@ async def save_coding_revision(
     *,
     codes: list[dict] | None,
     rows: list[dict] | None,
-    model: str | None = None,
-    job_id: int | None = None,
+    assist_runs: list[dict] | None = None,
 ) -> File:
     """Save a coding artifact's whole editing session -- an updated
     codebook snapshot, updated row coding (manual tags and/or reviewed AI
@@ -246,6 +246,15 @@ async def save_coding_revision(
     ``artifact_versions`` row. Replaces the old separate
     ``save_coding_codebook``/``save_coding_rows``, which each minted
     their own version even when a researcher changed both in one sitting.
+
+    No ``model``/``job_id`` params any more -- that used to be the one
+    place an AI assist leaked onto this ``origin=ORIGIN_EDITED`` version's
+    ``model`` field (see ``versioning_models.ArtifactAssist`` for why that
+    is exactly what the C2 design forbids). ``assist_runs`` is the
+    replacement channel (recorded once the version is settled, below);
+    each row entry's own ``coder``/``assist_job_id`` (validated via
+    ``assist_service.resolve_ai_coder_model``) is the B1 per-quote
+    counterpart.
 
     Ordering matters and is the correctness crux here:
 
@@ -292,8 +301,6 @@ async def save_coding_revision(
             author_user_id=user_id,
             origin=ORIGIN_EDITED,
             codes=resolved_codes,
-            model=model,
-            job_id=job_id,
         )
         after_uids = {r["code_uid"] for r in resolved_codes}
         if head_before is None or codebook_version.id != head_before.id:
@@ -301,7 +308,7 @@ async def save_coding_revision(
 
     if version is None and rows:
         version = await version_service.commit_coding_version(
-            session, file_id=file_rec.id, author_user_id=user_id, origin=ORIGIN_EDITED, model=model, job_id=job_id,
+            session, file_id=file_rec.id, author_user_id=user_id, origin=ORIGIN_EDITED,
         )
 
     if version is None:
@@ -312,6 +319,10 @@ async def save_coding_revision(
     if rows:
         current_codes = await version_service.read_codes(session, file_rec.id)
         name_by_uid = {c.code_uid: c.name for c in current_codes}
+        # Cache: several entries in the same save routinely share one
+        # recode job_id, and each lookup validates the job (a DB read) --
+        # see assist_service.resolve_ai_coder_model.
+        model_by_assist_job_id: dict[int, str | None] = {}
 
         items = []
         for row in rows:
@@ -326,6 +337,15 @@ async def save_coding_revision(
                     raise ValidationAppError(
                         f"code_uid {code_uid!r} is not in this artifact's current codebook snapshot"
                     )
+                coder = entry.get("coder") or CODER_HUMAN
+                coder_model = None
+                if coder == CODER_AI:
+                    assist_job_id = entry.get("assist_job_id")
+                    if assist_job_id not in model_by_assist_job_id:
+                        model_by_assist_job_id[assist_job_id] = await assist_service.resolve_ai_coder_model(
+                            session, user_id=user_id, file_id=file_rec.id, job_id=assist_job_id
+                        )
+                    coder_model = model_by_assist_job_id[assist_job_id]
                 entries.append(
                     {
                         "code": code_name,
@@ -334,6 +354,8 @@ async def save_coding_revision(
                         "start_offset": entry.get("start_offset"),
                         "end_offset": entry.get("end_offset"),
                         "notes": entry.get("notes"),
+                        "coder": coder,
+                        "coder_model": coder_model,
                     }
                 )
             items.append({"row_type": row_type, "post_id": post_id, "entries": entries})
@@ -345,6 +367,16 @@ async def save_coding_revision(
             await coding_repo.close_entries_for_code_uid(
                 session, file_rec.id, removed_uid, version_no=version.version_no
             )
+
+    if assist_runs:
+        await assist_service.record_assist_runs(
+            session,
+            user_id=user_id,
+            file_id=file_rec.id,
+            version_id=version.id,
+            stage=ASSIST_STAGE_CODING,
+            runs=assist_runs,
+        )
 
     await session.commit()
     await session.refresh(file_rec)
@@ -935,7 +967,7 @@ async def _run_recode_items_job(job_id: int, payload: dict) -> dict:
     coding_file_id = payload["coding_file_id"]
     item_ids: list[str] = payload["item_ids"]
     methodology = payload.get("methodology") or ""
-    model = payload.get("model") or ""
+    model = payload["model"]
     api_key = payload["api_key"]
 
     requested_keys: list[tuple[str, str]] = []
@@ -986,7 +1018,7 @@ async def _run_recode_items_job(job_id: int, payload: dict) -> dict:
     if not assembled:
         raise ValidationAppError("None of the selected rows were found in this coding artifact")
 
-    raw_entries, _system_prompt, _user_prompt, coverage = await classify_posts(
+    raw_entries, system_prompt, rendered_prompt, coverage = await classify_posts(
         codebook_text, assembled, methodology, api_key, model, progress=ProgressTracker(job_id)
     )
     # Restricted to exactly the rows sent this run (not every row the
@@ -1037,6 +1069,12 @@ async def _run_recode_items_job(job_id: int, payload: dict) -> dict:
     return {
         "recoded_item_count": len(proposals),
         "proposals": proposals,
+        # Surfaced so `assist_service.record_assist_runs` can source a
+        # recode run's assist-provenance record from THIS job -- never
+        # trusted from the client. See GAP-4/C2.
+        "system_prompt": system_prompt,
+        "user_instructions": methodology,
+        "prompt_meta": version_service.prompt_meta(rendered_prompt, batches=coverage.get("batches_total")),
         **validation_counts,
         **context_window.coverage_result_fields(coverage),
     }
@@ -1054,7 +1092,7 @@ async def start_compare_codings_job(
     coding_a: str,
     coding_b: str,
     api_key: str,
-    model: str | None,
+    model: str,
     prompt: str,
     name: str,
     description: str | None = None,
@@ -1104,7 +1142,6 @@ async def _run_compare_codings_job(job_id: int, payload: dict) -> dict:
     ordered ``side_a``/``side_b``.
     """
     from backend.scripts import summarize_coding as summarize_coding_module
-    from backend.scripts.codebook_generator import MODEL_3
     from backend.scripts.codebook_generator import get_client as codebook_get_client
 
     user_id = payload["user_id"]
@@ -1143,7 +1180,7 @@ async def _run_compare_codings_job(job_id: int, payload: dict) -> dict:
         "not as \"Coding A\"/\"Coding B\".\n"
         "Return the full comparison in a markdown format."
     )
-    chosen_model = model or MODEL_3
+    chosen_model = model
 
     def _compare_user_prompt(body_a: str, body_b: str, *, aggregated: bool) -> str:
         note = (
@@ -1242,7 +1279,7 @@ async def start_summarize_coding_job(
     *,
     coding: str,
     api_key: str,
-    model: str | None,
+    model: str,
     prompt: str,
     name: str,
     description: str | None = None,

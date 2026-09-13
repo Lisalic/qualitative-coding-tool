@@ -1,6 +1,7 @@
 import ast
-import re
 import datetime
+import json
+import re
 
 from backend.app.ai_models import is_paid_model
 from backend.app.external import context_window
@@ -10,7 +11,6 @@ from backend.app.external.response_parsers import strip_markdown_fences
 from backend.app.jobs.progress import ProgressTracker
 from backend.scripts.openrouter_http import openrouter_user_message
 
-FREE_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
 MAX_RETRIES = 2
 
 MAX_BATCHES_FOR_FREE = 3
@@ -43,7 +43,7 @@ def _preview_response(response: str, max_len: int = 500) -> str:
     return f"{response[:half]}\n... [{len(response) - max_len} chars omitted] ...\n{response[-half:]}"
 
 
-async def get_client(system_prompt: str, user_prompt: str, api_key: str, model: str = FREE_MODEL) -> str:
+async def get_client(system_prompt: str, user_prompt: str, api_key: str, model: str = "") -> str:
     if not api_key:
         raise AIFilterError("OpenRouter API key is required", code=401)
 
@@ -92,24 +92,81 @@ async def get_client(system_prompt: str, user_prompt: str, api_key: str, model: 
         raise AIFilterError(msg, code=code) from e
 
 
+def _build_triage_system_prompt(label: str) -> str:
+    """System prompt for the shared include/exclude triage pass.
+
+    One prompt for both posts and comments (parameterized by ``label``)
+    replacing the two near-duplicate literals this module used to carry.
+    Unlike the old "return the ids to keep" contract, the model now labels
+    each item in EITHER direction and is told to leave an item out of both
+    arrays when it's not confident -- that third, unlabeled state is what
+    keeps a row "undecided" in the editor rather than forcing every row
+    into a binary call.
+    """
+    lower = label.lower()
+    return f"""You are an expert content analyst. Your task is to triage {lower} against the given criteria and sort each into "include" or "exclude".
+
+INSTRUCTIONS:
+1. Analyze each item in the provided content. Items are separated by "---".
+2. Each item starts with [ID] followed by the content.
+3. Classify each item as INCLUDE (matches the include criteria, or resembles the researcher's own INCLUDED examples) or EXCLUDE (matches the exclude criteria, or resembles the researcher's own EXCLUDED examples).
+4. If an item is genuinely ambiguous or you lack a criterion to judge it by, leave it out of BOTH lists rather than guessing.
+5. RETURN ONLY a valid JSON object with STRING IDs exactly as they appear in [ID] markers, shaped like:
+   {{"include": ["abc123", "xyz789"], "exclude": ["def456"]}}
+6. If nothing matches either direction, return: {{"include": [], "exclude": []}}
+
+CRITICAL: Return ONLY the raw JSON object. No markdown, no backticks, no explanation."""
+
+
+def _build_user_prompt(
+    label: str, include_prompt: str, exclude_prompt: str, examples_block: str, batch: str
+) -> str:
+    """Per-batch user prompt: whichever of criteria / prior-decision
+    examples were supplied, followed by the batch itself. Replaces the
+    single-criteria f-string this module used to build inline.
+    """
+    sections = []
+    if include_prompt:
+        sections.append(f"INCLUDE criteria: {include_prompt}")
+    if exclude_prompt:
+        sections.append(f"EXCLUDE criteria: {exclude_prompt}")
+    if examples_block:
+        sections.append(f"PRIOR DECISIONS BY THE RESEARCHER -- match this judgement:\n{examples_block}")
+    if not sections:
+        sections.append(f"Classify every {label.lower()} using your own best judgement.")
+    sections.append(f"{label} to analyze:\n{batch}")
+    return "\n\n".join(sections)
+
+
+def _ids_in_batch(batch: str) -> set:
+    """The set of ``[ID]`` markers actually present in a batch, so an id
+    the model hallucinates (not in the content it was sent) never gets
+    applied to a row -- there is no such row key on the editor side, and
+    it would otherwise ride along into the submit payload unexplained.
+    """
+    return set(re.findall(r"\[([^\[\]\n]+)\]", batch))
+
+
 async def _run_batched_filter(
     content_type: str,
-    filter_prompt: str,
+    include_prompt: str,
+    exclude_prompt: str,
+    examples_block: str,
     content: str,
     api_key: str,
     model: str,
     system_prompt: str,
     progress: ProgressTracker | None = None,
-) -> tuple[list, str, dict]:
+) -> tuple[list, list, str, dict]:
     """
-    Shared batched filtering logic for both posts and comments.
+    Shared batched triage logic for both posts and comments.
 
     Batch execution and error policy (batch 1 failure raises immediately,
     a later batch failure stops and keeps what succeeded) both come from
     ``context_window.run_sequential_batches``.
 
     Returns:
-        tuple: (list of IDs, last_user_prompt, coverage)
+        tuple: (include_ids, exclude_ids, last_user_prompt, coverage)
         ``coverage`` is
         ``{"batches_processed": int, "batches_total": int, "error": str | None}``
         -- when free-model batch capping (below) or a batch failure means
@@ -121,19 +178,21 @@ async def _run_batched_filter(
     posts and comments through this function can share one
     ``ProgressTracker`` for a single combined progress figure.
     """
-    chosen_model = model or FREE_MODEL
+    chosen_model = model
     paid_model = is_paid_model(chosen_model)
+    scaffolding_chars = (
+        len(system_prompt) + len(include_prompt) + len(exclude_prompt) + len(examples_block) + 1000
+    )
     max_content_chars = context_window.max_prompt_chars(
         chosen_model,
-        reserved_chars=len(system_prompt) + len(filter_prompt) + 1000,
-        # Output is one ID per matching post -- scales with the batch, so
-        # reserve a proportional slice of the window for it.
+        reserved_chars=scaffolding_chars,
+        # Output is one ID per matching item, in either list -- scales
+        # with the batch, so reserve a proportional slice of the window.
         output_reserve_tokens=context_window.proportional_output_reserve(chosen_model, 0.15),
     )
 
     _log_ai(f"FILTER_{content_type.upper()}", f"Starting with {chosen_model}", {
-        "content_chars": f"{len(content):,}",
-        "max_per_batch": f"{max_content_chars:,}"
+        "content_chars": f"{len(content):,}"
     })
 
     batches = context_window.batch_by_separator(content, max_content_chars)
@@ -160,25 +219,28 @@ async def _run_batched_filter(
 
     label = "Posts" if content_type == "posts" else "Comments"
     user_prompts = [
-        (f"Filter criteria: {filter_prompt}\n\n{label} to analyze:\n{batch}" if filter_prompt
-         else f"Return ALL {content_type.lower()} IDs:\n{batch}")
-        for batch in batches
+        _build_user_prompt(label, include_prompt, exclude_prompt, examples_block, batch) for batch in batches
     ]
 
-    async def _run_one_batch(i: int, batch: str) -> list:
+    async def _run_one_batch(i: int, batch: str) -> tuple[list, list]:
         _log_ai("BATCH", f"Processing batch {i+1}/{len(batches)}", {"chars": f"{len(batch):,}"})
         response = await get_client(system_prompt, user_prompts[i], api_key, chosen_model)
 
         _log_ai("RESPONSE", f"Batch {i+1} response ({len(response)} chars):")
         print(f"    {_preview_response(response, 300)}")
 
-        batch_ids = wrap_in_python_array(response)
-        _log_ai("BATCH_RESULT", f"Batch {i+1}: extracted {len(batch_ids)} IDs")
-        return batch_ids
+        include_ids, exclude_ids = parse_decision_object(response)
+        valid_ids = _ids_in_batch(batch)
+        include_ids = [i for i in include_ids if i in valid_ids]
+        exclude_ids = [i for i in exclude_ids if i in valid_ids and i not in include_ids]
+        _log_ai("BATCH_RESULT", f"Batch {i+1}: {len(include_ids)} include, {len(exclude_ids)} exclude")
+        return include_ids, exclude_ids
 
-    batch_id_lists, run_coverage = await context_window.run_sequential_batches(batches, _run_one_batch, progress=progress)
-    all_ids = [id_ for batch_ids in batch_id_lists for id_ in batch_ids]
-    unique_ids = list(dict.fromkeys(all_ids))
+    batch_results, run_coverage = await context_window.run_sequential_batches(batches, _run_one_batch, progress=progress)
+    all_include = [id_ for inc, _exc in batch_results for id_ in inc]
+    all_exclude = [id_ for _inc, exc in batch_results for id_ in exc]
+    unique_include = list(dict.fromkeys(all_include))
+    unique_exclude = list(dict.fromkeys(all_exclude))
     last_user_prompt = user_prompts[-1] if user_prompts else ""
 
     # `total_batches` (pre-free-model-cap) is the true denominator for
@@ -193,72 +255,75 @@ async def _run_batched_filter(
 
     if coverage["batches_processed"] < coverage["batches_total"]:
         _log_ai("COVERAGE", f"Only {coverage['batches_processed']}/{coverage['batches_total']} batches processed -- result is partial", coverage)
-    _log_ai("COMPLETE", f"Total unique IDs: {len(unique_ids)}")
+    _log_ai("COMPLETE", f"Total: {len(unique_include)} include, {len(unique_exclude)} exclude")
 
-    return unique_ids, last_user_prompt, coverage
+    return unique_include, unique_exclude, last_user_prompt, coverage
 
 
-async def filter_posts_with_ai(
-    filter_prompt: str, posts_content: str, api_key: str, model: str = "", *, progress: ProgressTracker | None = None
-) -> tuple[list, str, str, dict]:
+async def triage_posts_with_ai(
+    include_prompt: str,
+    exclude_prompt: str,
+    examples_block: str,
+    posts_content: str,
+    api_key: str,
+    model: str = "",
+    *,
+    progress: ProgressTracker | None = None,
+) -> tuple[list, list, str, str, dict]:
     """
-    Use AI to filter posts. Raises AIFilterError on first-batch failure.
+    Use AI to triage posts into include/exclude. Raises AIFilterError on
+    first-batch failure.
 
-    Returns ``(ids, system_prompt, last_user_prompt, coverage)`` -- see
-    ``_run_batched_filter`` for ``coverage``'s shape.
+    Returns ``(include_ids, exclude_ids, system_prompt, last_user_prompt, coverage)``
+    -- see ``_run_batched_filter`` for ``coverage``'s shape.
     """
-    system_prompt = """You are an expert content analyst. Your task is to filter posts and return ONLY a Python array of post IDs.
+    system_prompt = _build_triage_system_prompt("Posts")
 
-INSTRUCTIONS:
-1. Analyze each post in the provided content. Posts are separated by "---".
-2. Each post starts with [ID] followed by the content.
-3. Return ONLY IDs of posts that match the filtering criteria.
-4. RETURN ONLY a valid Python array of STRING IDs exactly as they appear in [ID] markers, e.g. ['abc123', 'xyz789']
-5. If no posts match, return: []
-
-CRITICAL: Return ONLY the raw Python array. No markdown, no backticks, no explanation."""
-
-    ids, last_user_prompt, coverage = await _run_batched_filter(
-        "posts", filter_prompt, posts_content, api_key, model, system_prompt, progress=progress
+    include_ids, exclude_ids, last_user_prompt, coverage = await _run_batched_filter(
+        "posts", include_prompt, exclude_prompt, examples_block, posts_content, api_key, model, system_prompt,
+        progress=progress,
     )
-    return ids, system_prompt, last_user_prompt, coverage
+    return include_ids, exclude_ids, system_prompt, last_user_prompt, coverage
 
 
-async def filter_comments_with_ai(
-    filter_prompt: str, comments_content: str, api_key: str, model: str = "", *, progress: ProgressTracker | None = None
-) -> tuple[list, str, str, dict]:
+async def triage_comments_with_ai(
+    include_prompt: str,
+    exclude_prompt: str,
+    examples_block: str,
+    comments_content: str,
+    api_key: str,
+    model: str = "",
+    *,
+    progress: ProgressTracker | None = None,
+) -> tuple[list, list, str, str, dict]:
     """
-    Use AI to filter comments. Raises AIFilterError on first-batch failure.
+    Use AI to triage comments into include/exclude. Raises AIFilterError on
+    first-batch failure.
 
-    Returns ``(ids, system_prompt, last_user_prompt, coverage)`` -- see
-    ``_run_batched_filter`` for ``coverage``'s shape.
+    Returns ``(include_ids, exclude_ids, system_prompt, last_user_prompt, coverage)``
+    -- see ``_run_batched_filter`` for ``coverage``'s shape.
     """
-    system_prompt = """You are an expert content analyst. Your task is to filter comments and return ONLY a Python array of comment IDs.
+    system_prompt = _build_triage_system_prompt("Comments")
 
-INSTRUCTIONS:
-1. Analyze each comment in the provided content. Comments are separated by "---".
-2. Each comment starts with [ID] followed by the content.
-3. Return ONLY IDs of comments that match the filtering criteria.
-4. RETURN ONLY a valid Python array of STRING IDs exactly as they appear in [ID] markers, e.g. ['abc123', 'xyz789']
-5. If no comments match, return: []
-
-CRITICAL: Return ONLY the raw Python array. No markdown, no backticks, no explanation."""
-
-    ids, last_user_prompt, coverage = await _run_batched_filter(
-        "comments", filter_prompt, comments_content, api_key, model, system_prompt, progress=progress
+    include_ids, exclude_ids, last_user_prompt, coverage = await _run_batched_filter(
+        "comments", include_prompt, exclude_prompt, examples_block, comments_content, api_key, model, system_prompt,
+        progress=progress,
     )
-    return ids, system_prompt, last_user_prompt, coverage
+    return include_ids, exclude_ids, system_prompt, last_user_prompt, coverage
 
 
-
-def wrap_in_python_array(content: str) -> list:
+def wrap_in_python_array(content) -> list:
     """
-    Parse AI response into a list of ID strings.
-    Handles various formats the AI might return.
+    Coerce a parsed value (or, if given a raw string, an AI response) into
+    a list of ID strings. Handles various formats the AI might return.
+
+    Kept for its regex fallback: ``parse_decision_object`` calls this on
+    the whole response when JSON parsing fails, in case the model reverted
+    to the old "just an array" habit.
     """
-    # Remove common markdown artifacts (identical logic to
-    # external/response_parsers.py::strip_markdown_fences, so reuse it
-    # directly instead of keeping a second copy).
+    if isinstance(content, list):
+        return [str(x) for x in content if x is not None]
+
     content = strip_markdown_fences(content)
 
     # Try to parse as Python literal
@@ -281,3 +346,35 @@ def wrap_in_python_array(content: str) -> list:
     filtered = [m for m in matches if re.match(r"^[A-Za-z0-9_:-]+$", m)]
     _log_ai("PARSE", f"Extracted {len(filtered)} IDs via regex fallback (from {len(matches)} quoted strings)")
     return filtered
+
+
+def parse_decision_object(content: str) -> tuple[list, list]:
+    """Parse an AI triage response into ``(include_ids, exclude_ids)``.
+
+    Expects ``{"include": [...], "exclude": [...]}`` (the current system
+    prompt's contract). Falls back to reading a bare JSON/Python array as
+    an include-only list -- some models still answer with just an array
+    despite instructions, and that answer is still useful.
+    """
+    stripped = strip_markdown_fences(content)
+
+    try:
+        obj = json.loads(stripped)
+    except Exception:
+        try:
+            obj = ast.literal_eval(stripped)
+        except Exception:
+            obj = None
+
+    if isinstance(obj, dict):
+        include_ids = wrap_in_python_array(obj.get("include") or [])
+        exclude_ids = wrap_in_python_array(obj.get("exclude") or [])
+        _log_ai("PARSE", f"Parsed decision object: {len(include_ids)} include, {len(exclude_ids)} exclude")
+        return include_ids, exclude_ids
+
+    if isinstance(obj, list):
+        _log_ai("PARSE_WARN", "Response was a bare array, not a decision object -- treating as include-only")
+        return wrap_in_python_array(obj), []
+
+    _log_ai("PARSE_WARN", "Response was neither a JSON object nor an array, falling back to regex array extraction")
+    return wrap_in_python_array(stripped), []

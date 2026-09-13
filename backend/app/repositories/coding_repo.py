@@ -29,8 +29,9 @@ from typing import Literal
 from sqlalchemy import and_, delete, exists, func, insert, literal, null, or_, select, union_all, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.core.coder_rollup import roll_up
 from backend.app.core.item_types import COMMENT, SUBMISSION, qualify_item_id
-from backend.app.storage_models import Comment, CodingEntry, Submission
+from backend.app.storage_models import CODER_HUMAN, Comment, CodingEntry, Submission
 
 RowFilter = Literal["all", "coded", "uncoded"]
 
@@ -81,6 +82,8 @@ async def bulk_insert_coding_entries(
             "start_offset": entry["start_offset"],
             "end_offset": entry["end_offset"],
             "notes": entry.get("notes"),
+            "coder": entry.get("coder") or CODER_HUMAN,
+            "coder_model": entry.get("coder_model"),
             "valid_from": version_no,
             "valid_to": None,
         }
@@ -156,6 +159,8 @@ async def replace_entries_for_items(
                     "start_offset": entry["start_offset"],
                     "end_offset": entry["end_offset"],
                     "notes": entry.get("notes"),
+                    "coder": entry.get("coder") or CODER_HUMAN,
+                    "coder_model": entry.get("coder_model"),
                     "valid_from": version_no,
                     "valid_to": None,
                 }
@@ -203,6 +208,11 @@ async def copy_entries(
     row for every version), so ``valid_from``/``valid_to`` are NOT copied
     verbatim -- every copied row is re-stamped ``valid_from=1,
     valid_to=NULL``, not the source's original range.
+
+    ``coder``/``coder_model`` (B1's per-quote attribution) ARE copied
+    verbatim, along with every other column -- ``non_id_cols`` below is
+    generic over the table's columns, so a fork preserves who coded each
+    quote without this function needing to know those columns exist.
     """
     non_id_cols = [
         c for c in CodingEntry.__table__.c if c.name not in ("id", "file_id", "valid_from", "valid_to")
@@ -427,8 +437,11 @@ async def list_rows_with_codes(
 ) -> list[dict]:
     """One page of a coding artifact's own submissions+comments -- every
     row it owns, coded or not -- each with its list of ``{code, quote,
-    start_offset, end_offset, notes}`` entries (empty for an uncoded row,
-    one entry per quote for a code supported by more than one).
+    start_offset, end_offset, notes, coder, coder_model}`` entries (empty
+    for an uncoded row, one entry per quote for a code supported by more
+    than one), plus a row-level ``coder`` rollup (``core/coder_rollup.py``
+    -- ``"ai"``/``"human"``/``"both"``/``None`` for uncoded) so the
+    document list can badge a row without re-deriving it client-side.
 
     ``only`` narrows to ``"coded"``/``"uncoded"`` rows; ``code`` narrows to
     rows carrying that exact code; ``q`` is a case-insensitive substring
@@ -471,27 +484,36 @@ async def list_rows_with_codes(
                 "start_offset": entry.start_offset,
                 "end_offset": entry.end_offset,
                 "notes": entry.notes,
+                "coder": entry.coder,
+                "coder_model": entry.coder_model,
             }
         )
 
-    return [
-        {
-            "row_type": r.row_type,
-            "post_id": r.item_id,
-            "item_id": qualify_item_id(r.row_type, r.item_id),
-            "title": r.title,
-            "content": r.body,
-            "codes": codes_by_key.get((r.row_type, r.item_id), []),
-        }
-        for r in page_rows
-    ]
+    result = []
+    for r in page_rows:
+        row_codes = codes_by_key.get((r.row_type, r.item_id), [])
+        result.append(
+            {
+                "row_type": r.row_type,
+                "post_id": r.item_id,
+                "item_id": qualify_item_id(r.row_type, r.item_id),
+                "title": r.title,
+                "content": r.body,
+                "codes": row_codes,
+                "coder": roll_up(entry["coder"] for entry in row_codes),
+            }
+        )
+    return result
 
 
 async def render_coding_text(session: AsyncSession, file_id: int, *, version_no: int | None = None) -> str:
-    """Canonical ``POST_ID:``/``CODE:``/``NOTES:``/``EVIDENCE:`` text for
-    the read-only Text View, generated from ``coding_entries`` rows --
-    the sole source of truth for a coding artifact's classification, so
-    there is no separate stored blob to drift from this rendering.
+    """Canonical ``POST_ID:``/``CODE:``/``CODER:``/``NOTES:``/
+    ``EVIDENCE:`` text for the read-only Text View, generated from
+    ``coding_entries`` rows -- the sole source of truth for a coding
+    artifact's classification, so there is no separate stored blob to
+    drift from this rendering. Safe to extend with ``CODER:`` because
+    this text is read-only and never parsed back into rows (unlike the
+    codebook markdown DSL) -- see ``frontend/src/lib/codingViewHelpers.js``.
 
     One ``coding_entries`` row is one quote, so a code supported by
     several quotes for the same item renders as several
@@ -535,6 +557,8 @@ async def render_coding_text(session: AsyncSession, file_id: int, *, version_no:
         out_lines.append(f"POST_ID: {qualify_item_id(row_type, post_id)}")
         for entry in grouped[(row_type, post_id)]:
             out_lines.append(f"CODE: {entry.code}")
+            coder_line = entry.coder_model and f"{entry.coder} ({entry.coder_model})" or entry.coder
+            out_lines.append(f"CODER: {coder_line}")
             if entry.notes:
                 out_lines.append(f"NOTES: {entry.notes}")
             out_lines.append(f"EVIDENCE: {entry.quote}")

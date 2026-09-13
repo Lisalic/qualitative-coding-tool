@@ -1,12 +1,10 @@
 """Tests for backend/scripts/filter_db.py.
 
-Stage 9 replaces ``get_client``'s sync ``OpenAI(...)`` client + hand-rolled
-retry/empty-completion handling with
-``external/openrouter_client.py::chat_completion`` -- these tests mock
-``chat_completion`` at the seam (``backend.scripts.filter_db.chat_completion``)
-and verify both the ``AIFilterError`` mapping (empty-completion vs. other
-failures) and the ``ast.literal_eval``-based array parsing
-(``wrap_in_python_array``) are unaffected by that plumbing swap.
+Covers the two-way AI triage contract (``{"include": [...], "exclude": [...]}``,
+parsed by ``parse_decision_object``) that replaced the old "array of ids to
+keep" contract, plus the ``get_client`` retry/error-mapping plumbing these
+tests already exercised (mocking ``chat_completion`` at the seam
+``backend.scripts.filter_db.chat_completion``).
 """
 
 from unittest.mock import AsyncMock, MagicMock
@@ -16,8 +14,9 @@ import pytest
 from backend.app.external.errors import ExternalServiceError
 from backend.scripts.filter_db import (
     AIFilterError,
-    filter_posts_with_ai,
     get_client,
+    parse_decision_object,
+    triage_posts_with_ai,
     wrap_in_python_array,
 )
 
@@ -36,13 +35,11 @@ class TestGetClient:
 
         assert result == "raw response"
         kwargs = mock.call_args.kwargs
-        # timeout/max_retries are now consistent across all 4 scripts (see
+        # timeout/max_retries are consistent across all 4 scripts (see
         # openrouter_client.chat_completion's docstring): a 30s cap and 2
         # total attempts bound one batch's worst case to ~60s instead of
         # the old 300s x 3 = ~15 minutes.
         assert kwargs["timeout"] == 30.0
-        # middle-out is off now: the script no longer requests it, so
-        # overflow surfaces as a real error instead of a silent truncation.
         assert kwargs.get("use_middle_out", False) is False
         assert kwargs["max_retries"] == 2
 
@@ -71,21 +68,67 @@ class TestGetClient:
         assert "Rate limited" in str(exc_info.value)
 
 
-class TestFilterPostsWithAi:
-    async def test_parses_ids_from_python_array_response(self, monkeypatch) -> None:
+class TestTriagePostsWithAi:
+    async def test_parses_include_and_exclude_from_decision_object(self, monkeypatch) -> None:
         monkeypatch.setattr(
             "backend.scripts.filter_db.chat_completion",
-            AsyncMock(return_value="['t3_abc', 't3_xyz']"),
+            AsyncMock(return_value='{"include": ["t3_abc"], "exclude": ["t3_xyz"]}'),
         )
 
-        ids, system_prompt, user_prompt, coverage = await filter_posts_with_ai(
-            "keep the good ones", "[t3_abc] hello\n---\n[t3_xyz] world", "sk-key"
+        include_ids, exclude_ids, system_prompt, user_prompt, coverage = await triage_posts_with_ai(
+            "keep the good ones", "drop the spam", "", "[t3_abc] hello\n---\n[t3_xyz] world", "sk-key"
         )
 
-        assert ids == ["t3_abc", "t3_xyz"]
+        assert include_ids == ["t3_abc"]
+        assert exclude_ids == ["t3_xyz"]
         assert "content analyst" in system_prompt
         assert "keep the good ones" in user_prompt
+        assert "drop the spam" in user_prompt
         assert coverage == {"batches_processed": 1, "batches_total": 1, "error": None}
+
+    async def test_examples_block_rendered_in_prompt_and_criteria_omitted(self, monkeypatch) -> None:
+        monkeypatch.setattr(
+            "backend.scripts.filter_db.chat_completion",
+            AsyncMock(return_value='{"include": [], "exclude": []}'),
+        )
+
+        _, _, _, user_prompt, _ = await triage_posts_with_ai(
+            "", "", "INCLUDED:\n[t3_1] good one", "[t3_abc] hello", "sk-key"
+        )
+
+        assert "PRIOR DECISIONS" in user_prompt
+        assert "[t3_1] good one" in user_prompt
+        assert "INCLUDE criteria" not in user_prompt
+        assert "EXCLUDE criteria" not in user_prompt
+
+    async def test_ids_not_in_batch_are_dropped(self, monkeypatch) -> None:
+        # A hallucinated id (not present in the batch's [ID] markers) must
+        # never be applied to a row -- there is no such row on the editor
+        # side to mark.
+        monkeypatch.setattr(
+            "backend.scripts.filter_db.chat_completion",
+            AsyncMock(return_value='{"include": ["t3_abc", "made_up_id"], "exclude": []}'),
+        )
+
+        include_ids, exclude_ids, _, _, _ = await triage_posts_with_ai(
+            "criteria", "", "", "[t3_abc] hello", "sk-key"
+        )
+
+        assert include_ids == ["t3_abc"]
+        assert exclude_ids == []
+
+    async def test_id_in_both_lists_counts_as_include_only(self, monkeypatch) -> None:
+        monkeypatch.setattr(
+            "backend.scripts.filter_db.chat_completion",
+            AsyncMock(return_value='{"include": ["t3_abc"], "exclude": ["t3_abc"]}'),
+        )
+
+        include_ids, exclude_ids, _, _, _ = await triage_posts_with_ai(
+            "criteria", "criteria2", "", "[t3_abc] hello", "sk-key"
+        )
+
+        assert include_ids == ["t3_abc"]
+        assert exclude_ids == []
 
     async def test_first_batch_failure_raises_immediately(self, monkeypatch) -> None:
         monkeypatch.setattr(
@@ -94,7 +137,7 @@ class TestFilterPostsWithAi:
         )
 
         with pytest.raises(AIFilterError):
-            await filter_posts_with_ai("criteria", "[t3_abc] hello", "sk-key")
+            await triage_posts_with_ai("criteria", "", "", "[t3_abc] hello", "sk-key")
 
     async def test_free_model_batch_cap_reports_partial_coverage(self, monkeypatch) -> None:
         # Force many small batches by capping the per-batch char budget, so
@@ -105,11 +148,11 @@ class TestFilterPostsWithAi:
         )
         monkeypatch.setattr(
             "backend.scripts.filter_db.chat_completion",
-            AsyncMock(return_value="[]"),
+            AsyncMock(return_value='{"include": [], "exclude": []}'),
         )
 
         content = "\n---\n".join([f"[t3_{i}] " + ("x" * 30) for i in range(10)])
-        ids, _, _, coverage = await filter_posts_with_ai("criteria", content, "sk-key", model="")
+        _, _, _, _, coverage = await triage_posts_with_ai("criteria", "", "", content, "sk-key", model="")
 
         assert coverage["batches_total"] > 3
         assert coverage["batches_processed"] == 3
@@ -121,11 +164,13 @@ class TestFilterPostsWithAi:
         monkeypatch.setattr("backend.scripts.filter_db.is_paid_model", lambda slug: True)
         monkeypatch.setattr(
             "backend.scripts.filter_db.chat_completion",
-            AsyncMock(return_value="[]"),
+            AsyncMock(return_value='{"include": [], "exclude": []}'),
         )
 
         content = "\n---\n".join([f"[t3_{i}] " + ("x" * 30) for i in range(10)])
-        ids, _, _, coverage = await filter_posts_with_ai("criteria", content, "sk-key", model="paid/model")
+        _, _, _, _, coverage = await triage_posts_with_ai(
+            "criteria", "", "", content, "sk-key", model="paid/model"
+        )
 
         assert coverage["batches_processed"] == coverage["batches_total"]
 
@@ -136,14 +181,16 @@ class TestFilterPostsWithAi:
         monkeypatch.setattr("backend.scripts.filter_db.is_paid_model", lambda slug: True)
         monkeypatch.setattr(
             "backend.scripts.filter_db.chat_completion",
-            AsyncMock(return_value="[]"),
+            AsyncMock(return_value='{"include": [], "exclude": []}'),
         )
         progress = MagicMock()
         progress.advance = AsyncMock()
         progress.add_total = AsyncMock()
 
         content = "\n---\n".join([f"[t3_{i}] " + ("x" * 30) for i in range(5)])
-        _, _, _, coverage = await filter_posts_with_ai("criteria", content, "sk-key", progress=progress)
+        _, _, _, _, coverage = await triage_posts_with_ai(
+            "criteria", "", "", content, "sk-key", progress=progress
+        )
 
         progress.add_total.assert_called_once_with(coverage["batches_total"])
         assert progress.advance.await_count == coverage["batches_total"]
@@ -151,9 +198,9 @@ class TestFilterPostsWithAi:
     async def test_no_progress_arg_does_not_raise(self, monkeypatch) -> None:
         monkeypatch.setattr(
             "backend.scripts.filter_db.chat_completion",
-            AsyncMock(return_value="['t3_abc']"),
+            AsyncMock(return_value='{"include": ["t3_abc"], "exclude": []}'),
         )
-        await filter_posts_with_ai("criteria", "[t3_abc] hello", "sk-key")
+        await triage_posts_with_ai("criteria", "", "", "[t3_abc] hello", "sk-key")
 
     async def test_mid_run_failure_returns_ids_from_earlier_batches_instead_of_raising(
         self, monkeypatch
@@ -169,17 +216,19 @@ class TestFilterPostsWithAi:
             "backend.scripts.filter_db.chat_completion",
             AsyncMock(
                 side_effect=[
-                    "['t3_0']",
+                    '{"include": ["t3_0"], "exclude": []}',
                     ExternalServiceError("Insufficient credits", code=402),
-                    "['t3_2']",
+                    '{"include": ["t3_2"], "exclude": []}',
                 ]
             ),
         )
 
         content = "\n---\n".join([f"[t3_{i}] " + ("x" * 30) for i in range(3)])
-        ids, _, _, coverage = await filter_posts_with_ai("criteria", content, "sk-key", model="paid/model")
+        include_ids, _, _, _, coverage = await triage_posts_with_ai(
+            "criteria", "", "", content, "sk-key", model="paid/model"
+        )
 
-        assert ids == ["t3_0"]
+        assert include_ids == ["t3_0"]
         assert coverage["batches_processed"] == 1
         assert coverage["batches_total"] == 3
         assert "Insufficient credits" in coverage["error"]
@@ -200,3 +249,40 @@ class TestWrapInPythonArray:
 
     def test_no_quoted_strings_returns_empty(self) -> None:
         assert wrap_in_python_array("nothing useful here") == []
+
+    def test_accepts_an_already_parsed_list(self) -> None:
+        assert wrap_in_python_array(["a", "b"]) == ["a", "b"]
+
+
+class TestParseDecisionObject:
+    def test_json_object(self) -> None:
+        include_ids, exclude_ids = parse_decision_object('{"include": ["a"], "exclude": ["b"]}')
+        assert include_ids == ["a"]
+        assert exclude_ids == ["b"]
+
+    def test_fenced_json(self) -> None:
+        include_ids, exclude_ids = parse_decision_object(
+            '```json\n{"include": ["a", "b"], "exclude": []}\n```'
+        )
+        assert include_ids == ["a", "b"]
+        assert exclude_ids == []
+
+    def test_python_literal_object(self) -> None:
+        include_ids, exclude_ids = parse_decision_object("{'include': ['a'], 'exclude': ['b']}")
+        assert include_ids == ["a"]
+        assert exclude_ids == ["b"]
+
+    def test_bare_list_treated_as_include_only(self) -> None:
+        include_ids, exclude_ids = parse_decision_object("['a', 'b']")
+        assert include_ids == ["a", "b"]
+        assert exclude_ids == []
+
+    def test_missing_keys_default_to_empty(self) -> None:
+        include_ids, exclude_ids = parse_decision_object('{"include": ["a"]}')
+        assert include_ids == ["a"]
+        assert exclude_ids == []
+
+    def test_garbage_falls_back_to_regex_include_only(self) -> None:
+        include_ids, exclude_ids = parse_decision_object('not json but "a" is quoted')
+        assert include_ids == ["a"]
+        assert exclude_ids == []

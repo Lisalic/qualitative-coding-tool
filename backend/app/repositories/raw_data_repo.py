@@ -93,6 +93,36 @@ async def bulk_insert_comments(session: AsyncSession, file_id: int, rows: list[d
     return len(payload)
 
 
+async def fetch_rows_by_id(
+    session: AsyncSession, *, file_id: int, submission_ids: list[str], comment_ids: list[str]
+) -> tuple[list[Submission], list[Comment]]:
+    """LIVE ``Submission``/``Comment`` rows for ``file_id`` matching the
+    given ids, in no particular order. Either id list may be empty, in
+    which case that side is skipped without a query.
+
+    Used to pull the researcher's own already-decided rows back out by id
+    for the "similar example" prompt (``data_service._build_examples_block``)
+    -- a small, targeted counterpart to ``copy_rows_by_id``'s bulk copy.
+    """
+    subs: list[Submission] = []
+    comments: list[Comment] = []
+    if submission_ids:
+        result = await session.execute(
+            _live(Submission, select(Submission)).where(
+                Submission.file_id == file_id, Submission.id.in_(submission_ids)
+            )
+        )
+        subs = list(result.scalars().all())
+    if comment_ids:
+        result = await session.execute(
+            _live(Comment, select(Comment)).where(
+                Comment.file_id == file_id, Comment.id.in_(comment_ids)
+            )
+        )
+        comments = list(result.scalars().all())
+    return subs, comments
+
+
 async def sample_submissions(
     session: AsyncSession, file_id: int, sample_percentage: float
 ) -> list[Submission]:

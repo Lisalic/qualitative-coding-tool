@@ -19,7 +19,8 @@ from sqlalchemy import select
 from backend.app.core.auth_dependency import require_user_id
 from backend.app.database import File, get_async_db
 from backend.app.repositories import file_repo, version_repo
-from backend.app.services import version_service
+from backend.app.services import assist_service, version_service
+from backend.app.versioning_models import ArtifactVersion
 
 router = APIRouter()
 
@@ -170,7 +171,53 @@ def _neighbor_out(file_rec: File, edge) -> dict:
         "role": edge.role,
         "position": edge.position,
         "parent_version_no": None,
+        "models": [],
+        "prompts": [],
     }
+
+
+async def _parent_provenance(db: AsyncSession, neighbor_id: int, version: ArtifactVersion | None) -> tuple[list[str], list[dict]]:
+    """Models and prompts behind one pinned parent revision: the
+    version's own provenance (set only for a one-shot ``origin=generated``
+    artifact -- compare/summarize) plus every AI-assist run recorded
+    against that version (set for an AI-assisted edit -- filter/codebook/
+    coding, see the ``artifact_assists`` channel in CLAUDE.md's Storage
+    model section). A revision can carry both, e.g. a coding artifact
+    recoded once via AI-assist and then hand-edited.
+    """
+    if version is None:
+        return [], []
+
+    models: list[str] = []
+    prompts: list[dict] = []
+
+    if version.model:
+        models.append(version.model)
+        prompts.append(
+            {
+                "stage": "generated",
+                "model": version.model,
+                "system_prompt": version.system_prompt,
+                "user_instructions": version.user_instructions,
+                "prompt_meta": version.prompt_meta,
+            }
+        )
+
+    assists = await assist_service.list_assists(db, neighbor_id, version_no=version.version_no)
+    for assist in assists:
+        if assist["model"] and assist["model"] not in models:
+            models.append(assist["model"])
+        prompts.append(
+            {
+                "stage": assist["stage"],
+                "model": assist["model"],
+                "system_prompt": assist["system_prompt"],
+                "user_instructions": assist["user_instructions"],
+                "prompt_meta": assist["prompt_meta"],
+            }
+        )
+
+    return models, prompts
 
 
 @router.get("/artifacts/{ref}/lineage")
@@ -199,19 +246,20 @@ async def lineage(
         result = await db.execute(select(File).where(File.id.in_(neighbor_ids)))
         neighbors = {f.id: f for f in result.scalars().all()}
 
-    parent_version_by_edge = {}
+    parent_version_by_edge: dict[int, ArtifactVersion | None] = {}
     for edge in parent_edges:
         if edge.parent_version_id is not None:
-            version = await version_repo.get_version(db, edge.parent_version_id)
-            parent_version_by_edge[edge.id] = version.version_no if version else None
+            parent_version_by_edge[edge.id] = await version_repo.get_version(db, edge.parent_version_id)
 
     parents = []
     for edge in sorted(parent_edges, key=lambda e: e.position):
         neighbor = neighbors.get(edge.parent_file_id)
         if neighbor is None:
             continue
+        version = parent_version_by_edge.get(edge.id)
         entry = _neighbor_out(neighbor, edge)
-        entry["parent_version_no"] = parent_version_by_edge.get(edge.id)
+        entry["parent_version_no"] = version.version_no if version else None
+        entry["models"], entry["prompts"] = await _parent_provenance(db, neighbor.id, version)
         parents.append(entry)
 
     children = []
@@ -233,3 +281,21 @@ async def lineage(
             "children": children,
         }
     )
+
+
+@router.get("/artifacts/{ref}/assists")
+async def list_artifact_assists(
+    ref: str,
+    version_no: int | None = None,
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
+) -> JSONResponse:
+    """Every AI-assist run recorded against an artifact, oldest first --
+    the C2 provenance channel (``versioning_models.ArtifactAssist``) that
+    closes GAP-4. ``version_no`` narrows to assists recorded on that one
+    version; omitted, returns the whole history. Read side for C3's
+    methods appendix and C4's TROUT-AI disclosure.
+    """
+    file_id = await file_repo.resolve_file_id(db, ref, user_id)
+    assists = await assist_service.list_assists(db, file_id, version_no=version_no)
+    return JSONResponse({"assists": assists})

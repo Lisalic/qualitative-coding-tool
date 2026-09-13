@@ -7,6 +7,7 @@ import pytest
 from backend.app.core.codebook_render import (
     materialize_fields_from_body,
     parse_json_to_codes,
+    parse_json_to_merge_proposals,
     parse_markdown_to_codes,
     render_codes_to_markdown,
 )
@@ -85,6 +86,85 @@ class TestParseJsonToCodes:
     def test_missing_codes_key_raises(self) -> None:
         with pytest.raises(ValueError):
             parse_json_to_codes('{"not_codes": []}')
+
+
+class TestParseJsonToMergeProposals:
+    def _payload(self, codes: list[dict]) -> str:
+        return json.dumps({"codes": codes})
+
+    def _proposal(self, **overrides) -> dict:
+        row = {
+            "family": "Anxiety",
+            "name": "Panic",
+            "definition": "a def",
+            "inclusion": "when",
+            "exclusion": "when not",
+            "keywords": "kw",
+            "example": "ex",
+            "sources": [{"codebook": 1, "family": "Anxiety", "name": "Panic"}],
+            "rationale": "",
+        }
+        row.update(overrides)
+        return row
+
+    def test_round_trips_all_fields(self) -> None:
+        proposals = parse_json_to_merge_proposals(self._payload([self._proposal(rationale="merged")]))
+        assert len(proposals) == 1
+        p = proposals[0]
+        assert p["family_name"] == "Anxiety"
+        assert p["name"] == "Panic"
+        assert p["definition"] == "a def"
+        assert p["inclusion"] == "when"
+        assert p["exclusion"] == "when not"
+        assert p["keywords"] == "kw"
+        assert p["example"] == "ex"
+        assert p["rationale"] == "merged"
+        assert p["sources"] == [{"codebook": 1, "family_name": "Anxiety", "name": "Panic"}]
+
+    def test_drops_entries_missing_name(self) -> None:
+        proposals = parse_json_to_merge_proposals(
+            self._payload([self._proposal(name=""), self._proposal(name="Kept")])
+        )
+        assert [p["name"] for p in proposals] == ["Kept"]
+
+    def test_missing_sources_becomes_empty_list(self) -> None:
+        entry = self._proposal()
+        del entry["sources"]
+        proposals = parse_json_to_merge_proposals(self._payload([entry]))
+        assert proposals[0]["sources"] == []
+
+    def test_non_list_sources_becomes_empty_list(self) -> None:
+        proposals = parse_json_to_merge_proposals(self._payload([self._proposal(sources="not-a-list")]))
+        assert proposals[0]["sources"] == []
+
+    def test_source_with_non_int_codebook_index_is_dropped(self) -> None:
+        proposals = parse_json_to_merge_proposals(
+            self._payload(
+                [
+                    self._proposal(
+                        sources=[
+                            {"codebook": "one", "family": "Anxiety", "name": "Panic"},
+                            {"codebook": 2, "family": "Anxiety", "name": "Panic"},
+                        ]
+                    )
+                ]
+            )
+        )
+        assert proposals[0]["sources"] == [{"codebook": 2, "family_name": "Anxiety", "name": "Panic"}]
+
+    def test_source_missing_name_is_dropped(self) -> None:
+        proposals = parse_json_to_merge_proposals(
+            self._payload([self._proposal(sources=[{"codebook": 1, "family": "Anxiety", "name": ""}])])
+        )
+        assert proposals[0]["sources"] == []
+
+    def test_not_json_raises(self) -> None:
+        with pytest.raises(ValueError):
+            parse_json_to_merge_proposals("not json")
+
+    def test_missing_codes_key_raises(self) -> None:
+        with pytest.raises(ValueError):
+            parse_json_to_merge_proposals('{"not_codes": []}')
 
 
 class TestParseMarkdownToCodes:

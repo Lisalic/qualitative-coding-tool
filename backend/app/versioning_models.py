@@ -266,3 +266,78 @@ class CodebookCode(Base):
         UniqueConstraint("version_id", "code_uid", name="uq_codebook_codes_version_id_code_uid"),
         Index("idx_codebook_codes_version_position", "version_id", "position"),
     )
+
+
+class ArtifactAssist(Base):
+    """One assistant *run* that contributed to one artifact version --
+    the C2 avenue in
+    ``documentation/research/qualitative-coding-landscape-and-expansion.md``,
+    closing GAP-4 (an artifact assembled with heavy AI help used to be
+    stored identically to a hand-built one).
+
+    This is deliberately a SIBLING channel to ``ArtifactVersion``, not a
+    change to it. ``origin``/``model``/``system_prompt``/
+    ``user_instructions``/``prompt_meta`` on ``ArtifactVersion`` mean "a
+    model generated this whole artifact" and every editor submit
+    correctly leaves them alone (``origin=ORIGIN_EDITED``, no model) --
+    an AI assist during editing is not that claim. Overloading those
+    columns to also mean "AI helped" would destroy their audit value.
+    This table exists so BOTH claims can be recorded truthfully at once:
+    the version says who authored the artifact, this table says what the
+    assistant proposed and what the human did with it.
+
+    One row per run, not one row per version with a running counter --
+    "how many assistant runs happened" is then a plain ``COUNT(*)``, and
+    TROUT-AI T15's "all prompts" is satisfied because every run keeps
+    its own ``system_prompt``/``user_instructions``/``prompt_meta``
+    rather than being overwritten by the next run in the same session.
+    ``file_id`` is denormalized off ``version_id`` on purpose: "every
+    assist this artifact has ever had" is the actual read pattern (C3's
+    methods appendix, C4's TROUT-AI disclosure) and should not need a
+    join through every version.
+
+    ``job_id`` points at the ``jobs`` row for the preview/recode run that
+    produced these proposals -- ``model``/``system_prompt``/
+    ``user_instructions``/``prompt_meta`` are always read from THAT job
+    (see ``services/assist_service.py::record_assist_runs``), never
+    trusted from the client, so a caller cannot claim a model or prompt
+    it didn't actually use. ``proposed_count``/``accepted_count``/
+    ``dismissed_count`` and ``accepted_refs`` (JSON -- a list of
+    ``code_uid`` strings for a codebook run, ``"<row_type>:<id>"`` keys for a filter run, item
+    ids for a coding recode) come from the editor's own accept/dismiss
+    bookkeeping (``filterEditorState.js``'s ``aiDecided``,
+    ``codebookEditorState.js``'s ``aiAccepted``/``dismissed``), which
+    used to be computed and then thrown away at submit.
+
+    ``prompt_meta`` is JSON, never queried into, same reasoning as
+    ``ArtifactVersion.prompt_meta`` -- see that column's docstring.
+    """
+
+    __tablename__ = "artifact_assists"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=False)
+    version_id = Column(Integer, ForeignKey("artifact_versions.id", ondelete="CASCADE"), nullable=False)
+    stage = Column(String, nullable=False)
+    job_id = Column(Integer, ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True)
+    model = Column(String, nullable=True)
+    system_prompt = Column(Text, nullable=True)
+    user_instructions = Column(Text, nullable=True)
+    prompt_meta = Column(JSON, nullable=True)
+    proposed_count = Column(Integer, nullable=False, server_default="0", default=0)
+    accepted_count = Column(Integer, nullable=False, server_default="0", default=0)
+    dismissed_count = Column(Integer, nullable=False, server_default="0", default=0)
+    accepted_refs = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_artifact_assists_file_id", "file_id"),
+        Index("idx_artifact_assists_version_id", "version_id"),
+    )
+
+
+# ArtifactAssist.stage values.
+ASSIST_STAGE_FILTER = "filter"
+ASSIST_STAGE_CODEBOOK = "codebook"
+ASSIST_STAGE_CODING = "coding"
+ASSIST_STAGE_INTEGRATE = "integrate"

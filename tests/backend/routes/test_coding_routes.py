@@ -70,6 +70,20 @@ async def _make_user(SessionLocal, email: str = "a@b.com"):
         return user
 
 
+async def _make_project(SessionLocal, user_id: int, name: str = "P"):
+    """Every artifact belongs to a project, so a creation request needs a
+    real one owned by the caller.
+    """
+    from backend.app.database import Project
+
+    async with SessionLocal() as session:
+        project = Project(user_id=user_id, projectname=name)
+        session.add(project)
+        await session.commit()
+        await session.refresh(project)
+        return project
+
+
 async def _make_file(
     SessionLocal,
     user_id: int,
@@ -279,7 +293,10 @@ class TestListCodingRows:
         assert body["total"] == 2
         by_item = {row["item_id"]: row for row in body["rows"]}
         assert by_item["t3_s1"]["codes"] == [
-            {"code": "A", "code_uid": "A-uid", "quote": "e", "start_offset": 0, "end_offset": 1, "notes": None}
+            {
+                "code": "A", "code_uid": "A-uid", "quote": "e", "start_offset": 0, "end_offset": 1,
+                "notes": None, "coder": "human", "coder_model": None,
+            }
         ]
         assert by_item["t3_s2"]["codes"] == []
 
@@ -520,7 +537,12 @@ class TestSaveCodingRevision:
             "/api/coding/proj_c/rows", headers=_auth_headers(make_token, sub=str(user.id))
         )
         codes = rows_resp.json()["rows"][0]["codes"]
-        assert codes == [{"code": "NEW", "code_uid": "new-uid", "quote": "e", "start_offset": 0, "end_offset": 1, "notes": None}]
+        assert codes == [
+            {
+                "code": "NEW", "code_uid": "new-uid", "quote": "e", "start_offset": 0, "end_offset": 1,
+                "notes": None, "coder": "human", "coder_model": None,
+            }
+        ]
 
     async def test_empty_entries_list_clears_a_rows_codes(
         self, client, route_backed_by_sqlite_jobs, make_token
@@ -722,7 +744,7 @@ class TestRecodeItemsKickoff:
         user = await _make_user(route_backed_by_sqlite_jobs)
         resp = client.post(
             "/api/coding/proj_missing/recode",
-            json={"api_key": "k", "item_ids": ["t3_1"]},
+            json={"api_key": "k", "item_ids": ["t3_1"], "model": "m"},
             headers=_auth_headers(make_token, sub=str(user.id)),
         )
         assert resp.status_code == 404
@@ -740,7 +762,7 @@ class TestRecodeItemsKickoff:
 
         resp = client.post(
             "/api/coding/proj_c/recode",
-            json={"api_key": "k", "item_ids": ["t3_s1"]},
+            json={"api_key": "k", "item_ids": ["t3_s1"], "model": "m"},
             headers=_auth_headers(make_token, sub=str(user.id)),
         )
         assert resp.status_code == 202
@@ -808,8 +830,8 @@ class TestCompareCodingsGuard:
     @pytest.mark.parametrize(
         "form",
         [
-            {"coding_a": "not_proj", "coding_b": "proj_b", "api_key": "k", "name": "n"},
-            {"coding_a": "proj_a", "coding_b": "not_proj", "api_key": "k", "name": "n"},
+            {"coding_a": "not_proj", "coding_b": "proj_b", "api_key": "k", "name": "n", "model": "m", "project_id": "1"},
+            {"coding_a": "proj_a", "coding_b": "not_proj", "api_key": "k", "name": "n", "model": "m", "project_id": "1"},
         ],
     )
     def test_non_proj_schema_returns_400(self, client, auth_cookies, form) -> None:
@@ -827,6 +849,8 @@ class TestCompareCodingsGuard:
                 "coding_b": "proj_missing_b",
                 "api_key": "k",
                 "name": "n",
+                "model": "m",
+                "project_id": "1",
             },
             headers=_auth_headers(make_token, sub=str(user.id)),
         )
@@ -836,6 +860,7 @@ class TestCompareCodingsGuard:
         self, client, route_backed_by_sqlite_jobs, make_token, monkeypatch
     ) -> None:
         user = await _make_user(route_backed_by_sqlite_jobs)
+        project = await _make_project(route_backed_by_sqlite_jobs, user.id)
         file_a = await _make_file(route_backed_by_sqlite_jobs, user.id, content="coding a text")
         file_b = await _make_file(route_backed_by_sqlite_jobs, user.id, content="coding b text")
         llm_mock = AsyncMock(return_value="mocked comparison result")
@@ -851,6 +876,8 @@ class TestCompareCodingsGuard:
                 "coding_b": file_b.schemaname,
                 "api_key": "k",
                 "name": "n",
+                "model": "m",
+                "project_id": str(project.id),
             },
             headers=_auth_headers(make_token, sub=str(user.id)),
         )
@@ -881,7 +908,7 @@ class TestSummarizeCodingGuard:
     def test_non_proj_schema_returns_400(self, client, make_token) -> None:
         resp = client.post(
             "/api/summarize-coding/",
-            data={"coding": "not_proj", "api_key": "k", "name": "n"},
+            data={"coding": "not_proj", "api_key": "k", "name": "n", "model": "m", "project_id": "1"},
             headers=_auth_headers(make_token),
         )
         assert resp.status_code == 400
@@ -898,6 +925,7 @@ class TestSummarizeCodingGuard:
         self, client, make_token, route_backed_by_sqlite_jobs, monkeypatch
     ) -> None:
         user = await _make_user(route_backed_by_sqlite_jobs)
+        project = await _make_project(route_backed_by_sqlite_jobs, user.id)
         source_file = await _make_file(route_backed_by_sqlite_jobs, user.id, content="coded rows")
         summarize_mock = AsyncMock(return_value="mocked summary")
         monkeypatch.setattr(
@@ -905,7 +933,13 @@ class TestSummarizeCodingGuard:
         )
         resp = client.post(
             "/api/summarize-coding/",
-            data={"coding": source_file.schemaname, "api_key": "k", "name": "n"},
+            data={
+                "coding": source_file.schemaname,
+                "api_key": "k",
+                "name": "n",
+                "model": "m",
+                "project_id": str(project.id),
+            },
             headers=_auth_headers(make_token, sub=str(user.id)),
         )
         assert resp.status_code == 202
@@ -958,7 +992,12 @@ class TestManualCodingRoute:
         user = await _make_user(SessionLocal)
         resp = client.post(
             "/api/coding/manual",
-            json={"database": "proj_missing", "codebook": "1", "report_name": "n"},
+            json={
+                "database": "proj_missing",
+                "codebook": "1",
+                "report_name": "n",
+                "project_id": 1,
+            },
             headers=_auth_headers(make_token, sub=str(user.id)),
         )
         assert resp.status_code == 404
@@ -968,6 +1007,7 @@ class TestManualCodingRoute:
     ) -> None:
         SessionLocal = route_backed_by_sqlite_jobs
         user = await _make_user(SessionLocal)
+        project = await _make_project(SessionLocal, user.id)
         source = await _make_file(SessionLocal, user.id, file_type="raw_data")
         await _add_submission(SessionLocal, source.id, sub_id="s1")
         codebook = await _make_file(
@@ -981,6 +1021,7 @@ class TestManualCodingRoute:
                 "codebook": codebook.schemaname,
                 "report_name": "by hand",
                 "description": "coded manually",
+                "project_id": project.id,
             },
             headers=_auth_headers(make_token, sub=str(user.id)),
         )

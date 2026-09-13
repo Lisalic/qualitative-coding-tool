@@ -38,6 +38,11 @@ from sqlalchemy import (
 
 from backend.app.database import Base
 
+# CodingEntry.coder values -- see the class docstring for the boundary
+# this maintains against ArtifactVersion.origin/model.
+CODER_HUMAN = "human"
+CODER_AI = "ai"
+
 
 class Submission(Base):
     """A row is a git-style *ref*'s owned copy of one Reddit submission.
@@ -134,6 +139,17 @@ class CodingEntry(Base):
     item's own body text -- there is no unverified free-text evidence
     column any more, and nothing here is a raw, unparsed AI response.
 
+    ``coder`` (:data:`CODER_HUMAN`/:data:`CODER_AI`) and ``coder_model``
+    record who produced THIS quote, separately from the artifact-level
+    ``ArtifactVersion.origin``/``model`` (which stay reserved for "a
+    model generated this whole artifact" -- see
+    ``versioning_models.ArtifactAssist`` for why that boundary is
+    deliberate). ``coder_model`` is the model id and is only ever set
+    alongside ``coder=CODER_AI``; a row mixing both coders (a hand-added
+    quote beside an accepted AI one) is not a state of this column -- it
+    is read by rolling up a row's live entries with
+    ``core/coder_rollup.py::roll_up``, never stored redundantly.
+
     ``row_type`` (``"submission"`` or ``"comment"``, see
     ``backend/app/core/item_types.py``) distinguishes a coded post from a
     coded comment -- ``post_id`` alone is not enough, since submission and
@@ -173,6 +189,8 @@ class CodingEntry(Base):
     start_offset = Column(Integer, nullable=False)
     end_offset = Column(Integer, nullable=False)
     notes = Column(Text)
+    coder = Column(String, nullable=False, server_default=CODER_HUMAN, default=CODER_HUMAN)
+    coder_model = Column(String, nullable=True)
     valid_from = Column(Integer, nullable=False, server_default="1", default=1)
     valid_to = Column(Integer, nullable=True)
 
@@ -181,6 +199,7 @@ class CodingEntry(Base):
         Index("idx_coding_entries_file_id_row", "file_id", "row_type", "post_id"),
         Index("idx_coding_entries_file_id_code_uid", "file_id", "code_uid"),
         Index("idx_coding_entries_live", "file_id", "valid_to"),
+        Index("idx_coding_entries_file_id_coder", "file_id", "coder"),
     )
 
 

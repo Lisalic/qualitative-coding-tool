@@ -78,7 +78,7 @@ class TestUploadZst:
         resp = client.post(
             "/api/upload-zst/",
             files={"file": ("data.txt", b"content", "text/plain")},
-            data={"data_type": "posts"},
+            data={"data_type": "posts", "project_id": "1"},
         )
         assert resp.status_code == 400
         assert ".zst" in resp.json()["detail"]
@@ -87,7 +87,7 @@ class TestUploadZst:
         resp = client.post(
             "/api/upload-zst/",
             files={"file": ("data.zst", b"x", "application/octet-stream")},
-            data={"data_type": "posts", "subreddits": "{not json"},
+            data={"data_type": "posts", "subreddits": "{not json", "project_id": "1"},
         )
         assert resp.status_code == 400
 
@@ -95,7 +95,7 @@ class TestUploadZst:
         resp = client.post(
             "/api/upload-zst/",
             files={"file": ("data.zst", b"x", "application/octet-stream")},
-            data={"data_type": "invalid"},
+            data={"data_type": "invalid", "project_id": "1"},
         )
         assert resp.status_code == 400
         assert "data_type" in resp.json()["detail"]
@@ -106,7 +106,7 @@ class TestUploadZst:
         resp = client.post(
             "/api/upload-zst/",
             files={"file": ("data.zst", b"x", "application/octet-stream")},
-            data={"data_type": "posts"},
+            data={"data_type": "posts", "project_id": "1"},
         )
         assert resp.status_code == 401
         assert resp.json()["detail"] == "Unauthenticated"

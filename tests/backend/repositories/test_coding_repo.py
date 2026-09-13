@@ -22,7 +22,11 @@ async def _make_file(session, user, schemaname: str = "coding_a") -> File:
     return f
 
 
-def _entry(post_id: str, code: str, quote: str = "q", *, row_type: str | None = None, notes: str | None = None) -> dict:
+def _entry(
+    post_id: str, code: str, quote: str = "q", *,
+    row_type: str | None = None, notes: str | None = None,
+    coder: str | None = None, coder_model: str | None = None,
+) -> dict:
     """A minimal, well-formed coding_entries insert dict -- one row per
     quote, offsets computed from the quote's own length since these tests
     don't exercise evidence_match (that's core/test_evidence_match.py's
@@ -36,6 +40,10 @@ def _entry(post_id: str, code: str, quote: str = "q", *, row_type: str | None = 
         entry["row_type"] = row_type
     if notes is not None:
         entry["notes"] = notes
+    if coder is not None:
+        entry["coder"] = coder
+    if coder_model is not None:
+        entry["coder_model"] = coder_model
     return entry
 
 
@@ -473,6 +481,35 @@ class TestCopyEntries:
             assert n == 0
             assert await get_coding_entries(session, target.id) == []
 
+    async def test_coder_attribution_is_preserved_across_the_fork(self, session_factory) -> None:
+        """B1: a fork (duplicate_coding) must not silently reset who
+        coded each quote -- ``copy_entries`` is generic over every column
+        of ``CodingEntry`` (see its docstring), so this pins that
+        ``coder``/``coder_model`` really do ride along.
+        """
+        async with session_factory() as session:
+            user = await make_user(session)
+            source = await _make_file(session, user, "coding_src_coder")
+            target = await _make_file(session, user, "coding_target_coder")
+            await bulk_insert_coding_entries(
+                session,
+                source.id,
+                [
+                    _entry("p1", "A", "e1", coder="ai", coder_model="anthropic/claude-x"),
+                    _entry("p2", "B", "e2", coder="human"),
+                ],
+            )
+            await session.commit()
+
+            await copy_entries(session, source_file_id=source.id, target_file_id=target.id)
+            await session.commit()
+
+            copied = await get_coding_entries(session, target.id)
+            assert {(e.post_id, e.coder, e.coder_model) for e in copied} == {
+                ("p1", "ai", "anthropic/claude-x"),
+                ("p2", "human", None),
+            }
+
 
 class TestSCD2Ranges:
     """``replace_entries_for_items``'s three-step algorithm --
@@ -591,7 +628,7 @@ class TestRenderCodingText:
             await session.commit()
 
             text = await render_coding_text(session, f.id)
-            assert text == "POST_ID: t3_s1\nCODE: A\nNOTES: my note\nEVIDENCE: quote"
+            assert text == "POST_ID: t3_s1\nCODE: A\nCODER: human\nNOTES: my note\nEVIDENCE: quote"
 
     async def test_omits_notes_line_when_absent(self, session_factory) -> None:
         async with session_factory() as session:
@@ -691,9 +728,14 @@ class TestListRowsWithCodesAndCountRows:
             assert {r["item_id"] for r in rows} == {"t3_s1", "t3_s2", "t1_c1"}
             by_item = {r["item_id"]: r for r in rows}
             assert by_item["t3_s1"]["codes"] == [
-                {"code": "A", "code_uid": "A-uid", "quote": "e", "start_offset": 0, "end_offset": 1, "notes": None}
+                {
+                    "code": "A", "code_uid": "A-uid", "quote": "e", "start_offset": 0, "end_offset": 1,
+                    "notes": None, "coder": "human", "coder_model": None,
+                }
             ]
+            assert by_item["t3_s1"]["coder"] == "human"
             assert by_item["t3_s2"]["codes"] == []
+            assert by_item["t3_s2"]["coder"] is None
             assert by_item["t1_c1"]["title"] is None
 
             total = await count_rows(session, f.id)

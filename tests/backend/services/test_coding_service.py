@@ -462,7 +462,10 @@ class TestListCodingRows:
         assert result["total"] == 2
         by_item = {row["item_id"]: row for row in result["rows"]}
         assert by_item["t3_s1"]["codes"] == [
-            {"code": "A", "code_uid": "A-uid", "quote": "e", "start_offset": 0, "end_offset": 1, "notes": None}
+            {
+                "code": "A", "code_uid": "A-uid", "quote": "e", "start_offset": 0, "end_offset": 1,
+                "notes": None, "coder": "human", "coder_model": None,
+            }
         ]
         assert by_item["t3_s2"]["codes"] == []
 
@@ -662,6 +665,167 @@ class TestSaveCodingRevisionRowsOnly:
         assert [c.code_uid for c in head_codes] == [uid]
         v2_codes = await version_service.read_codes(session, coding_file.id, version_no=2)
         assert [c.code_uid for c in v2_codes] == [uid]
+
+
+class TestSaveCodingRevisionCoderAttribution:
+    """B1: per-entry coder attribution threaded through
+    ``save_coding_revision``. See ``versioning_models.ArtifactAssist``
+    for why this is a channel separate from the version's own
+    ``origin``/``model`` -- these tests also guard that separation.
+    """
+
+    async def test_hand_edited_entry_defaults_to_human_with_no_model(self, session, user_id) -> None:
+        coding_file = await _make_file(session, user_id, schemaname="proj_coder_human", content="body")
+        codes = await version_service.read_codes(session, coding_file.id)
+        uid = codes[0].code_uid
+        session.add(Submission(file_id=coding_file.id, id="s1", title="t", selftext="b", word_count=1))
+        await session.commit()
+
+        await coding_service.save_coding_revision(
+            session, user_id, "proj_coder_human", codes=None,
+            rows=[{"item_id": "t3_s1", "entries": [{"code_uid": uid, "quote": "e", "start_offset": 0, "end_offset": 1}]}],
+        )
+
+        entry = (
+            await session.execute(select(CodingEntry).where(CodingEntry.file_id == coding_file.id, CodingEntry.valid_to.is_(None)))
+        ).scalar_one()
+        assert entry.coder == "human"
+        assert entry.coder_model is None
+
+    async def test_accepted_ai_entry_resolves_coder_model_from_the_job(self, session, user_id) -> None:
+        from backend.app.jobs.models import Job
+
+        coding_file = await _make_file(session, user_id, schemaname="proj_coder_ai", content="body")
+        codes = await version_service.read_codes(session, coding_file.id)
+        uid = codes[0].code_uid
+        session.add(Submission(file_id=coding_file.id, id="s1", title="t", selftext="b", word_count=1))
+        job = Job(
+            job_type="recode_items", user_id=user_id, status="succeeded",
+            payload={"coding_file_id": coding_file.id, "model": "anthropic/claude-x"},
+            result={},
+        )
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
+
+        await coding_service.save_coding_revision(
+            session, user_id, "proj_coder_ai", codes=None,
+            rows=[{
+                "item_id": "t3_s1",
+                "entries": [{
+                    "code_uid": uid, "quote": "e", "start_offset": 0, "end_offset": 1,
+                    "coder": "ai", "assist_job_id": job.id,
+                }],
+            }],
+        )
+
+        entry = (
+            await session.execute(select(CodingEntry).where(CodingEntry.file_id == coding_file.id, CodingEntry.valid_to.is_(None)))
+        ).scalar_one()
+        assert entry.coder == "ai"
+        assert entry.coder_model == "anthropic/claude-x"
+
+    async def test_ai_entry_with_a_nonexistent_job_is_rejected(self, session, user_id) -> None:
+        coding_file = await _make_file(session, user_id, schemaname="proj_coder_bad_job", content="body")
+        codes = await version_service.read_codes(session, coding_file.id)
+        uid = codes[0].code_uid
+        session.add(Submission(file_id=coding_file.id, id="s1", title="t", selftext="b", word_count=1))
+        await session.commit()
+
+        with pytest.raises(NotFoundError):
+            await coding_service.save_coding_revision(
+                session, user_id, "proj_coder_bad_job", codes=None,
+                rows=[{
+                    "item_id": "t3_s1",
+                    "entries": [{
+                        "code_uid": uid, "quote": "e", "start_offset": 0, "end_offset": 1,
+                        "coder": "ai", "assist_job_id": 999999,
+                    }],
+                }],
+            )
+
+    async def test_ai_entry_with_a_job_for_a_different_coding_file_is_rejected(self, session, user_id) -> None:
+        from backend.app.jobs.models import Job
+
+        coding_file = await _make_file(session, user_id, schemaname="proj_coder_wrong_file", content="body")
+        codes = await version_service.read_codes(session, coding_file.id)
+        uid = codes[0].code_uid
+        session.add(Submission(file_id=coding_file.id, id="s1", title="t", selftext="b", word_count=1))
+        job = Job(
+            job_type="recode_items", user_id=user_id, status="succeeded",
+            payload={"coding_file_id": 999999, "model": "m"}, result={},
+        )
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
+
+        with pytest.raises(ValidationAppError, match="coding artifact"):
+            await coding_service.save_coding_revision(
+                session, user_id, "proj_coder_wrong_file", codes=None,
+                rows=[{
+                    "item_id": "t3_s1",
+                    "entries": [{
+                        "code_uid": uid, "quote": "e", "start_offset": 0, "end_offset": 1,
+                        "coder": "ai", "assist_job_id": job.id,
+                    }],
+                }],
+            )
+
+    async def test_mixed_row_keeps_each_entrys_own_coder(self, session, user_id) -> None:
+        """One row, two quotes: a hand-added one and an accepted AI one
+        -- the concrete case a "Both" row badge derives from (see
+        core/coder_rollup.py).
+        """
+        from backend.app.jobs.models import Job
+
+        coding_file = await _make_file(session, user_id, schemaname="proj_coder_mixed", content="body")
+        codes = await version_service.read_codes(session, coding_file.id)
+        uid = codes[0].code_uid
+        session.add(Submission(file_id=coding_file.id, id="s1", title="t", selftext="both", word_count=1))
+        job = Job(
+            job_type="recode_items", user_id=user_id, status="succeeded",
+            payload={"coding_file_id": coding_file.id, "model": "m"}, result={},
+        )
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
+
+        await coding_service.save_coding_revision(
+            session, user_id, "proj_coder_mixed", codes=None,
+            rows=[{
+                "item_id": "t3_s1",
+                "entries": [
+                    {"code_uid": uid, "quote": "b", "start_offset": 0, "end_offset": 1, "coder": "ai", "assist_job_id": job.id},
+                    {"code_uid": uid, "quote": "o", "start_offset": 1, "end_offset": 2, "coder": "human"},
+                ],
+            }],
+        )
+
+        entries = (
+            await session.execute(select(CodingEntry).where(CodingEntry.file_id == coding_file.id, CodingEntry.valid_to.is_(None)))
+        ).scalars().all()
+        assert {(e.quote, e.coder, e.coder_model) for e in entries} == {("b", "ai", "m"), ("o", "human", None)}
+
+    async def test_row_save_no_longer_leaks_a_model_onto_the_version(self, session, user_id) -> None:
+        """Regression guard: an AI-recode-assisted save must not set
+        ArtifactVersion.model on this origin=edited version -- that field
+        is reserved for origin=generated. Per-entry coder_model and the
+        separate artifact_assists channel carry this instead.
+        """
+        coding_file = await _make_file(session, user_id, schemaname="proj_coder_no_leak", content="body")
+        codes = await version_service.read_codes(session, coding_file.id)
+        uid = codes[0].code_uid
+        session.add(Submission(file_id=coding_file.id, id="s1", title="t", selftext="b", word_count=1))
+        await session.commit()
+
+        await coding_service.save_coding_revision(
+            session, user_id, "proj_coder_no_leak", codes=None,
+            rows=[{"item_id": "t3_s1", "entries": [{"code_uid": uid, "quote": "e", "start_offset": 0, "end_offset": 1}]}],
+        )
+
+        head = await version_repo.head_version(session, coding_file.id)
+        assert head.model is None
+        assert head.origin == "edited"
 
 
 class TestSaveCodingRevisionCodesAndRowsTogether:

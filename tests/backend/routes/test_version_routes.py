@@ -309,3 +309,182 @@ class TestLineage:
         body = resp.json()
         assert body["parents"] == []
         assert body["children"] == []
+
+    async def test_parent_pinned_to_generated_version_reports_model_and_prompt(
+        self, client, session_factory, make_token
+    ) -> None:
+        from backend.app.versioning_models import RELATION_DERIVED_FROM, ROLE_SOURCE_DATA
+
+        user = await _make_user(session_factory)
+        source = await _make_file(session_factory, user.id, schemaname="proj_gen_src", file_type="summary")
+        derived = await _make_file(session_factory, user.id, schemaname="proj_gen_derived", file_type="summary")
+
+        async with session_factory() as session:
+            source_version = await version_service.commit_blob_version(
+                session,
+                file_id=source.id,
+                author_user_id=user.id,
+                origin="generated",
+                content="body",
+                model="openai/gpt-4o",
+                system_prompt="Summarize the coding.",
+                user_instructions="Focus on recurring themes.",
+                prompt_meta={"rendered_chars": 120, "batches": 1},
+            )
+            await session.commit()
+            await version_repo.add_edge(
+                session,
+                child_file_id=derived.id,
+                parent_file_id=source.id,
+                parent_version_id=source_version.id,
+                relation=RELATION_DERIVED_FROM,
+                role=ROLE_SOURCE_DATA,
+            )
+            await session.commit()
+
+        resp = client.get(
+            "/api/artifacts/proj_gen_derived/lineage", cookies={"access_token": make_token(sub=str(user.id))}
+        )
+        assert resp.status_code == 200
+        parent = resp.json()["parents"][0]
+        assert parent["parent_version_no"] == 1
+        assert parent["models"] == ["openai/gpt-4o"]
+        assert len(parent["prompts"]) == 1
+        run = parent["prompts"][0]
+        assert run["stage"] == "generated"
+        assert run["model"] == "openai/gpt-4o"
+        assert run["system_prompt"] == "Summarize the coding."
+        assert run["user_instructions"] == "Focus on recurring themes."
+
+    async def test_parent_pinned_to_ai_assisted_edit_reports_assist_model_and_prompt(
+        self, client, session_factory, make_token
+    ) -> None:
+        from backend.app.repositories import assist_repo
+        from backend.app.versioning_models import RELATION_DERIVED_FROM, ROLE_SOURCE_DATA
+
+        user = await _make_user(session_factory)
+        source = await _make_file(session_factory, user.id, schemaname="proj_assist_src")
+        derived = await _make_file(session_factory, user.id, schemaname="proj_assist_derived")
+
+        async with session_factory() as session:
+            source_version = await version_service.commit_codebook_version(
+                session, file_id=source.id, author_user_id=user.id, origin="edited", codes=_CODE_A,
+            )
+            await session.commit()
+            await assist_repo.insert_assist(
+                session,
+                file_id=source.id,
+                version_id=source_version.id,
+                stage="codebook",
+                job_id=None,
+                model="anthropic/claude-sonnet-5",
+                system_prompt="Propose codes for these excerpts.",
+                user_instructions="Group by sentiment.",
+                prompt_meta=None,
+                proposed_count=5,
+                accepted_count=3,
+                dismissed_count=2,
+                accepted_refs=None,
+            )
+            await session.commit()
+            await version_repo.add_edge(
+                session,
+                child_file_id=derived.id,
+                parent_file_id=source.id,
+                parent_version_id=source_version.id,
+                relation=RELATION_DERIVED_FROM,
+                role=ROLE_SOURCE_DATA,
+            )
+            await session.commit()
+
+        resp = client.get(
+            "/api/artifacts/proj_assist_derived/lineage", cookies={"access_token": make_token(sub=str(user.id))}
+        )
+        assert resp.status_code == 200
+        parent = resp.json()["parents"][0]
+        # origin="edited" carries no version-level model, so the only
+        # provenance is the assist run.
+        assert parent["models"] == ["anthropic/claude-sonnet-5"]
+        assert len(parent["prompts"]) == 1
+        run = parent["prompts"][0]
+        assert run["stage"] == "codebook"
+        assert run["model"] == "anthropic/claude-sonnet-5"
+        assert run["system_prompt"] == "Propose codes for these excerpts."
+        assert run["user_instructions"] == "Group by sentiment."
+
+
+class TestListArtifactAssists:
+    def test_requires_auth(self, client) -> None:
+        resp = client.get("/api/artifacts/proj_a/assists")
+        assert resp.status_code == 401
+
+    async def test_no_owned_file_returns_404(self, client, session_factory, make_token) -> None:
+        user = await _make_user(session_factory)
+        resp = client.get(
+            "/api/artifacts/proj_missing/assists", cookies={"access_token": make_token(sub=str(user.id))}
+        )
+        assert resp.status_code == 404
+
+    async def test_empty_when_nothing_recorded(self, client, session_factory, make_token) -> None:
+        user = await _make_user(session_factory)
+        file_rec = await _make_file(session_factory, user.id, schemaname="proj_no_assists")
+        async with session_factory() as session:
+            await version_service.commit_codebook_version(
+                session, file_id=file_rec.id, author_user_id=user.id, origin="edited", codes=_CODE_A,
+            )
+            await session.commit()
+
+        resp = client.get(
+            "/api/artifacts/proj_no_assists/assists", cookies={"access_token": make_token(sub=str(user.id))}
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {"assists": []}
+
+    async def test_lists_a_recorded_assist(self, client, session_factory, make_token) -> None:
+        from backend.app.jobs.models import Job
+        from backend.app.services import assist_service
+        from backend.app.versioning_models import ASSIST_STAGE_CODEBOOK
+
+        user = await _make_user(session_factory)
+        file_rec = await _make_file(session_factory, user.id, schemaname="proj_with_assists")
+        async with session_factory() as session:
+            version = await version_service.commit_codebook_version(
+                session, file_id=file_rec.id, author_user_id=user.id, origin="edited", codes=_CODE_A,
+            )
+            await session.commit()
+
+            job = Job(
+                job_type="codebook_preview", user_id=user.id, status="succeeded",
+                payload={"source_file_id": file_rec.id, "model": "m"}, result={"system_prompt": "sys"},
+            )
+            session.add(job)
+            await session.commit()
+            await session.refresh(job)
+
+            await assist_service.record_assist_runs(
+                session, user_id=user.id, file_id=file_rec.id, version_id=version.id,
+                stage=ASSIST_STAGE_CODEBOOK, source_file_id=file_rec.id,
+                runs=[{"job_id": job.id, "accepted_count": 1}],
+            )
+            await session.commit()
+
+        resp = client.get(
+            "/api/artifacts/proj_with_assists/assists", cookies={"access_token": make_token(sub=str(user.id))}
+        )
+        assert resp.status_code == 200
+        assists = resp.json()["assists"]
+        assert len(assists) == 1
+        assert assists[0]["model"] == "m"
+        assert assists[0]["accepted_count"] == 1
+        assert assists[0]["version_no"] == 1
+
+    async def test_cannot_read_another_users_assists(self, client, session_factory, make_token) -> None:
+        owner = await _make_user(session_factory, "owner2@b.com")
+        other = await _make_user(session_factory, "other2@b.com")
+        await _make_file(session_factory, owner.id, schemaname="proj_owned_assists")
+
+        resp = client.get(
+            "/api/artifacts/proj_owned_assists/assists", cookies={"access_token": make_token(sub=str(other.id))}
+        )
+        assert resp.status_code == 404
+

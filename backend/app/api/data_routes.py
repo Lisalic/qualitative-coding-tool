@@ -119,14 +119,17 @@ async def filter_preview(
     user_id: int = Depends(require_user_id),
     db: AsyncSession = Depends(get_async_db),
 ) -> JSONResponse:
-    """Kick off a background job that runs the AI filter and returns the
-    row ids it would keep, **without creating anything**.
+    """Kick off a background job that runs the AI triage and returns the
+    row ids it would include and the ones it would exclude, **without
+    creating anything**.
 
     The filter editor's AI-assist step: a suggestion the user can accept,
     reject or add to before submitting; the rows they have already ruled
-    on are passed in so a repeated run proposes new candidates instead of
-    re-litigating settled ones. A JSON body rather than ``as_form``
-    because it carries those id lists.
+    on (in either direction) are passed in so a repeated run proposes new
+    candidates instead of re-litigating settled ones. ``use_examples``
+    selects "Autofill with AI": the include/exclude prompts are ignored
+    and the already-decided rows are used as labelled examples instead.
+    A JSON body rather than ``as_form`` because it carries those id lists.
     """
     job = await data_service.start_filter_preview_job(
         db,
@@ -134,13 +137,17 @@ async def filter_preview(
         database=payload.database,
         api_key=payload.api_key,
         model=payload.model,
-        prompt=payload.prompt,
+        include_prompt=payload.include_prompt,
+        exclude_prompt=payload.exclude_prompt,
+        use_examples=payload.use_examples,
         min_words=payload.min_words,
         sample_percentage=payload.sample_percentage,
         filter_tags=payload.filter_tags,
         content_scope=payload.content_scope,
-        decided_post_ids=payload.decided_post_ids,
-        decided_comment_ids=payload.decided_comment_ids,
+        included_post_ids=payload.included_post_ids,
+        included_comment_ids=payload.included_comment_ids,
+        excluded_post_ids=payload.excluded_post_ids,
+        excluded_comment_ids=payload.excluded_comment_ids,
     )
     return JSONResponse({"job_id": job.id, "status": job.status}, status_code=202)
 
@@ -166,6 +173,7 @@ async def create_manual_filtered_data(
         project_id=payload.project_id,
         post_ids=payload.post_ids,
         comment_ids=payload.comment_ids,
+        assist_runs=[run.model_dump() for run in payload.assist_runs],
     )
     return JSONResponse(
         {

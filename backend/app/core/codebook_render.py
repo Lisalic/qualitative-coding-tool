@@ -6,6 +6,13 @@ codebook that now lives as ``codebook_codes`` rows.
 ``exclusion``/``keywords``/``example`` and reconstructing a labeled
 ``body`` so apply/compare still receive markdown.
 
+``parse_json_to_merge_proposals`` is the integrate-codebooks importer:
+the merge generator's ``{"codes": [...]}`` object -> proposal dicts
+(no identity minted -- a proposal isn't a row until a researcher accepts
+it), each carrying the raw ``sources`` the model claimed to have merged
+from. See its own docstring for why it's separate from
+``parse_json_to_codes``.
+
 ``parse_markdown_to_codes`` is the paste/upload importer: it wraps
 ``backend/scripts/display_codebook.py::parse_codebook_to_json`` --
 that module's parsing contract (the ``### Code Family:``/``#### Code
@@ -288,6 +295,82 @@ def parse_json_to_codes(raw: str, *, existing: Sequence[CodeRow] = ()) -> list[C
         )
         position += 1
     return rows
+
+
+def parse_json_to_merge_proposals(raw: str) -> list[dict]:
+    """Parse the integrate-codebooks generator's ``{"codes": [...]}`` JSON
+    into merge-proposal dicts, one per code, each carrying the raw
+    ``sources`` the model claimed.
+
+    Deliberately NOT an extension of ``parse_json_to_codes``: that
+    function mints ``CodeRow``s ready for storage (a ``code_uid``, a
+    ``position``), and a proposal isn't a row yet -- it belongs to nobody
+    until a researcher accepts it (see ``codebook_service.
+    create_integrated_codebook``, which mints a fresh identity on
+    accept rather than trusting anything from here). This function also
+    does no verification of ``sources`` against real codebook content --
+    it only shapes what the model said. Checking whether a claimed source
+    actually exists needs an index of the codebooks that were read, which
+    only the caller (``codebook_service._run_integrate_codebook_job``)
+    has; that caller runs ``_verify_proposal_sources`` over this
+    function's output.
+
+    A code missing ``name`` is dropped. A malformed, missing, or
+    non-list ``sources`` becomes ``[]`` rather than raising -- a
+    proposal with no verifiable provenance is still worth showing the
+    researcher (the tray renders it as "no matching source code"). A
+    source entry missing a name, or whose ``codebook`` index isn't an
+    int, is dropped from that proposal's ``sources`` rather than
+    discarding the whole proposal.
+    """
+    obj = parse_json_object(raw, error_cls=ValueError)
+    codes_raw = obj.get("codes")
+    if not isinstance(codes_raw, list):
+        raise ValueError("Response JSON must have a 'codes' array")
+
+    proposals: list[dict] = []
+    for item in codes_raw:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        family_name = str(item.get("family") or "").strip()
+
+        sources: list[dict] = []
+        raw_sources = item.get("sources")
+        if isinstance(raw_sources, list):
+            for entry in raw_sources:
+                if not isinstance(entry, dict):
+                    continue
+                codebook_index = entry.get("codebook")
+                if not isinstance(codebook_index, int) or isinstance(codebook_index, bool):
+                    continue
+                source_name = str(entry.get("name") or "").strip()
+                if not source_name:
+                    continue
+                sources.append(
+                    {
+                        "codebook": codebook_index,
+                        "family_name": str(entry.get("family") or "").strip(),
+                        "name": source_name,
+                    }
+                )
+
+        proposals.append(
+            {
+                "family_name": family_name,
+                "name": name,
+                "definition": _optional_text(item.get("definition")),
+                "inclusion": _optional_text(item.get("inclusion")),
+                "exclusion": _optional_text(item.get("exclusion")),
+                "keywords": _optional_text(item.get("keywords")),
+                "example": _optional_text(item.get("example")),
+                "rationale": _optional_text(item.get("rationale")),
+                "sources": sources,
+            }
+        )
+    return proposals
 
 
 def parse_markdown_to_codes(raw: str, *, existing: Sequence[CodeRow] = ()) -> list[CodeRow]:

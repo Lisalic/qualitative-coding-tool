@@ -1,18 +1,10 @@
 import json
 
-from backend.app.ai_models import model_slug_at
 from backend.app.external import context_window
 from backend.app.external.openrouter_client import chat_completion, json_chat_completion
 from backend.app.external.response_parsers import parse_json_object, strip_markdown_fences
 from backend.app.jobs.progress import ProgressTracker
 
-MODEL_1 = model_slug_at(0)
-MODEL_2 = model_slug_at(1)
-MODEL_3 = model_slug_at(2)
-MODEL_4 = model_slug_at(3)
-MODEL_5 = model_slug_at(4)
-MODEL_6 = model_slug_at(5)
-MODEL_7 = model_slug_at(6)
 MAX_RETRIES = 2
 
 # Flat -- one object per code, family name repeated -- rather than nested
@@ -68,10 +60,16 @@ async def get_client(system_prompt: str, user_prompt: str, api_key: str, MODEL: 
     return strip_markdown_fences(result)
 
 
-async def _json_client(system_prompt: str, user_prompt: str, api_key: str, MODEL: str) -> str:
+async def _json_client(
+    system_prompt: str, user_prompt: str, api_key: str, MODEL: str, *, json_schema: dict
+) -> str:
     # Same seam as codebook_apply.get_client: json_chat_completion + a
     # schema, so OpenRouter is asked for JSON three ways (strict schema,
     # json_object, prompt-only) rather than hoping a markdown prompt holds.
+    # json_schema is required (not defaulted to CODEBOOK_JSON_SCHEMA) so a
+    # caller can never silently ask for the generate/consolidate shape
+    # while thinking it asked for the integrate shape (or vice versa) --
+    # see INTEGRATE_JSON_SCHEMA below.
     if not api_key:
         raise ValueError("OpenRouter API key is required")
     return await json_chat_completion(
@@ -79,7 +77,7 @@ async def _json_client(system_prompt: str, user_prompt: str, api_key: str, MODEL
         user_prompt=user_prompt,
         api_key=api_key,
         model=MODEL,
-        json_schema=CODEBOOK_JSON_SCHEMA,
+        json_schema=json_schema,
         timeout=30.0,
         max_retries=MAX_RETRIES,
     )
@@ -195,14 +193,14 @@ async def generate_codebook(
     posts_content: str,
     api_key: str,
     custom_prompt: str = "",
-    MODEL: str = MODEL_1,
     *,
+    MODEL: str,
     existing_codes: str = "",
 ) -> tuple[str, str, str]:
     system_prompt = build_system_prompt(existing_codes)
     user_prompt = _build_generate_user_prompt(posts_content, custom_prompt)
 
-    result = await _json_client(system_prompt, user_prompt, api_key, MODEL)
+    result = await _json_client(system_prompt, user_prompt, api_key, MODEL, json_schema=CODEBOOK_JSON_SCHEMA)
     return result, system_prompt, user_prompt
 
 
@@ -210,8 +208,8 @@ async def generate_codebook_map_reduce(
     posts_content: str,
     api_key: str,
     custom_prompt: str = "",
-    MODEL: str = MODEL_1,
     *,
+    MODEL: str,
     progress: ProgressTracker | None = None,
     existing_codes: str = "",
 ) -> tuple[str, str, str, dict]:
@@ -277,7 +275,9 @@ async def generate_codebook_map_reduce(
 
     reduce_user_prompt = _build_consolidation_user_prompt(drafts, custom_prompt)
     try:
-        consolidated = await _json_client(_CONSOLIDATE_SYSTEM_PROMPT, reduce_user_prompt, api_key, MODEL)
+        consolidated = await _json_client(
+            _CONSOLIDATE_SYSTEM_PROMPT, reduce_user_prompt, api_key, MODEL, json_schema=CODEBOOK_JSON_SCHEMA
+        )
     except Exception as exc:
         if progress is not None:
             await progress.advance()
@@ -297,3 +297,151 @@ async def generate_codebook_map_reduce(
         "error": None,
     }
     return consolidated, _CONSOLIDATE_SYSTEM_PROMPT, reduce_user_prompt, coverage
+
+
+# ---------------------------------------------------------------------------
+# integrate_codebooks: merge several whole, researcher-authored codebooks
+# into one. Distinct from generate_codebook_map_reduce's consolidation step
+# above -- that step merges DRAFTS of the same dataset (no cross-references
+# needed); this merges independently-curated codebooks and must say, for
+# each merged code, exactly which source code(s) it came from, so a human
+# reviewer can trust (and correct) the merge rather than re-deriving it.
+# ---------------------------------------------------------------------------
+
+# Same flat shape as CODEBOOK_JSON_SCHEMA, plus per-code provenance: which
+# source codebook(s) (1-based index into the CODEBOOK blocks shown in the
+# prompt) and which source code within it. `codebook_generator.py`.
+INTEGRATE_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "codes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "family": {"type": "string"},
+                    "name": {"type": "string"},
+                    "definition": {"type": "string"},
+                    "inclusion": {"type": "string"},
+                    "exclusion": {"type": "string"},
+                    "keywords": {"type": "string"},
+                    "example": {"type": "string"},
+                    "sources": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "codebook": {"type": "integer"},
+                                "family": {"type": "string"},
+                                "name": {"type": "string"},
+                            },
+                            "required": ["codebook", "family", "name"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "rationale": {"type": "string"},
+                },
+                "required": [
+                    "family",
+                    "name",
+                    "definition",
+                    "inclusion",
+                    "exclusion",
+                    "keywords",
+                    "example",
+                    "sources",
+                    "rationale",
+                ],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["codes"],
+    "additionalProperties": False,
+}
+
+_INTEGRATE_JSON_SHAPE = (
+    '{"codes": [{"family": "<theme name>", "name": "<code name>", '
+    '"definition": "<concise definition>", "inclusion": "<when to use this code>", '
+    '"exclusion": "<when NOT to use this code>", '
+    '"keywords": "<words or phrases frequently found with this code>", '
+    '"example": "<quote from the data>", '
+    '"sources": [{"codebook": <1-based codebook number>, "family": "<its family name>", '
+    '"name": "<its code name>"}], '
+    '"rationale": "<one sentence -- required whenever a code has more than one source>"}]}'
+)
+
+_INTEGRATE_SYSTEM_PROMPT = (
+    "You are an expert qualitative researcher. You are given SEVERAL CODEBOOKS, each written "
+    "independently by a researcher (not drafts of one run -- each may use its own terminology "
+    "and organization). Merge them into ONE final, coherent codebook:\n"
+    "- Merge codes that describe the same underlying concept, even if named differently -- pick "
+    "the clearer name (or a better one) and combine their definitions, inclusion criteria, "
+    "exclusion criteria, and keywords.\n"
+    "- Keep codes that are genuinely distinct as separate codes.\n"
+    "- A code that appears in only one codebook is still a real code -- carry it through "
+    "unchanged rather than dropping it.\n"
+    "- Re-group the merged codes into a few broad families (don't just concatenate the input "
+    "families verbatim).\n"
+    "- Preserve at least one example excerpt per merged code (pick the clearest one if duplicated "
+    "across sources).\n"
+    "- For every code in your answer, list every source code it came from in \"sources\", using "
+    "the 1-based CODEBOOK number shown in the input and that source code's own family/name. A "
+    "code carried through from one codebook still needs exactly one entry in \"sources\".\n"
+    "- Set \"rationale\" to one sentence explaining the merge whenever a code has more than one "
+    "source; leave it an empty string for a single-source code.\n\n"
+    "Return a single JSON object of exactly this shape (no markdown, no code fences, no explanation "
+    "text -- the JSON object and nothing else):\n"
+    f"{_INTEGRATE_JSON_SHAPE}"
+)
+
+
+def build_integrate_system_prompt(existing_codes: str = "") -> str:
+    """The integrate-codebooks system prompt, optionally carrying the
+    researcher's current draft (a second/re-run pass) so the model
+    proposes only what's still missing -- same structure and same
+    ``_EXISTING_CODES_RULES`` text as ``build_system_prompt``, whose
+    wording ("propose only codes NOT already covered", "never restate or
+    lightly reword") reads correctly for a merge too.
+    """
+    existing_codes = (existing_codes or "").strip()
+    if not existing_codes:
+        return _INTEGRATE_SYSTEM_PROMPT
+    return _INTEGRATE_SYSTEM_PROMPT + _EXISTING_CODES_RULES + existing_codes
+
+
+def build_integrate_user_prompt(codebook_blocks: str, custom_prompt: str) -> str:
+    """Public (unlike ``_build_generate_user_prompt``/
+    ``_build_consolidation_user_prompt``) because
+    ``codebook_service._run_integrate_codebook_job`` needs the exact
+    rendered prompt ahead of the LLM call, to size it against the
+    model's context window (``context_window.prompt_fits``) before
+    spending a call on it.
+    """
+    return f"{codebook_blocks}\n\nAdditional instructions: {custom_prompt}"
+
+
+async def integrate_codebooks(
+    codebook_blocks: str,
+    api_key: str,
+    custom_prompt: str = "",
+    *,
+    MODEL: str,
+    existing_codes: str = "",
+) -> tuple[str, str, str]:
+    """Merge whole codebooks (already rendered into ``codebook_blocks``,
+    one ``--- CODEBOOK i: name ---`` section per source) into one, in a
+    single call -- no map-reduce. Unlike ``generate_codebook_map_reduce``,
+    a merge is inherently over ALL sources at once: batching would merge
+    subsets and then merge the merges, changing the result and destroying
+    the per-code ``sources`` provenance that is the point of this
+    function. Callers are expected to guard the prompt against the
+    model's context window themselves (``context_window.prompt_fits``)
+    and surface a clear error rather than silently truncating input.
+
+    Returns ``(result_json, system_prompt, user_prompt)``.
+    """
+    system_prompt = build_integrate_system_prompt(existing_codes)
+    user_prompt = build_integrate_user_prompt(codebook_blocks, custom_prompt)
+    result = await _json_client(system_prompt, user_prompt, api_key, MODEL, json_schema=INTEGRATE_JSON_SCHEMA)
+    return result, system_prompt, user_prompt

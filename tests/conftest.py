@@ -40,7 +40,7 @@ from sqlalchemy.orm import Session, sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
 from backend.app.auth import create_access_token  # noqa: E402
-from backend.app.database import Base, User, get_async_db, get_db  # noqa: E402
+from backend.app.database import Base, Project, User, get_async_db, get_db  # noqa: E402
 from backend.app.main import app as fastapi_app  # noqa: E402
 
 
@@ -153,6 +153,23 @@ async def default_user(async_sqlite_engine) -> int:
         session.add(user)
         await session.commit()
         return user.id
+
+
+@pytest.fixture()
+async def default_project(async_sqlite_engine, default_user) -> int:
+    """A ``Project`` owned by ``default_user``, for routes that create an
+    artifact.
+
+    Every file belongs to a project, so an artifact-creating request now
+    carries a ``project_id`` that must resolve to a project the caller
+    owns -- there is no "no project" path to fall back on.
+    """
+    SessionLocal = async_sessionmaker(async_sqlite_engine, expire_on_commit=False)
+    async with SessionLocal() as session:
+        project = Project(user_id=default_user, projectname="default-route-test-project")
+        session.add(project)
+        await session.commit()
+        return project.id
 
 
 @pytest.fixture()

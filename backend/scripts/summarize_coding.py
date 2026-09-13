@@ -1,6 +1,6 @@
 from backend.app.external import context_window
 from backend.app.jobs.progress import ProgressTracker
-from backend.scripts.codebook_generator import get_client, MODEL_3
+from backend.scripts.codebook_generator import get_client
 
 _SYSTEM_PROMPT = (
     "You are an expert qualitative researcher specializing in thematic analysis and coding techniques. "
@@ -93,7 +93,7 @@ async def summarize_coding(
     if not api_key:
         raise ValueError("API key is required")
 
-    chosen_model = model or MODEL_3
+    chosen_model = model
     trivial_coverage = {"batches_processed": 1, "batches_total": 1, "error": None}
 
     reserved_chars = len(_SYSTEM_PROMPT) + len(_build_user_prompt("", user_prompt)) + 1000

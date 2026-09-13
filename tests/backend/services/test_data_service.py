@@ -566,7 +566,8 @@ class TestStartFilterPreviewJob:
             with pytest.raises(ValidationAppError):
                 await data_service.start_filter_preview_job(
                     session, user.id, database="not-a-schema", api_key="sk", model="m",
-                    prompt="p", min_words=0, sample_percentage=100.0, filter_tags=None,
+                    include_prompt="p", exclude_prompt=None, use_examples=False,
+                    min_words=0, sample_percentage=100.0, filter_tags=None,
                 )
 
     async def test_rejects_a_missing_api_key(self, session_factory) -> None:
@@ -576,7 +577,8 @@ class TestStartFilterPreviewJob:
             with pytest.raises(ValidationAppError):
                 await data_service.start_filter_preview_job(
                     session, user.id, database="proj_src", api_key="", model="m",
-                    prompt="p", min_words=0, sample_percentage=100.0, filter_tags=None,
+                    include_prompt="p", exclude_prompt=None, use_examples=False,
+                    min_words=0, sample_percentage=100.0, filter_tags=None,
                 )
 
     async def test_rejects_another_users_file(self, session_factory) -> None:
@@ -587,7 +589,30 @@ class TestStartFilterPreviewJob:
             with pytest.raises(NotFoundError):
                 await data_service.start_filter_preview_job(
                     session, intruder.id, database="proj_src", api_key="sk", model="m",
-                    prompt="p", min_words=0, sample_percentage=100.0, filter_tags=None,
+                    include_prompt="p", exclude_prompt=None, use_examples=False,
+                    min_words=0, sample_percentage=100.0, filter_tags=None,
+                )
+
+    async def test_rejects_no_criteria_and_no_examples(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            await _make_file(session, user.id)
+            with pytest.raises(ValidationAppError):
+                await data_service.start_filter_preview_job(
+                    session, user.id, database="proj_src", api_key="sk", model="m",
+                    include_prompt=None, exclude_prompt=None, use_examples=False,
+                    min_words=0, sample_percentage=100.0, filter_tags=None,
+                )
+
+    async def test_rejects_autofill_with_nothing_decided_yet(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            await _make_file(session, user.id)
+            with pytest.raises(ValidationAppError):
+                await data_service.start_filter_preview_job(
+                    session, user.id, database="proj_src", api_key="sk", model="m",
+                    include_prompt=None, exclude_prompt=None, use_examples=True,
+                    min_words=0, sample_percentage=100.0, filter_tags=None,
                 )
 
     async def test_api_key_is_never_persisted_on_the_job_row(self, session_factory) -> None:
@@ -596,23 +621,24 @@ class TestStartFilterPreviewJob:
             await _make_file(session, user.id)
             job = await data_service.start_filter_preview_job(
                 session, user.id, database="proj_src", api_key="sk-secret", model="m",
-                prompt="p", min_words=0, sample_percentage=100.0, filter_tags=None,
-                decided_post_ids=["s1"],
+                include_prompt="p", exclude_prompt=None, use_examples=False,
+                min_words=0, sample_percentage=100.0, filter_tags=None,
+                included_post_ids=["s1"],
             )
             assert "api_key" not in job.payload
             assert "sk-secret" not in str(job.payload)
-            assert job.payload["decided_post_ids"] == ["s1"]
+            assert job.payload["include_post_ids"] == ["s1"]
 
 
 class TestFilterPreviewJobHandler:
     async def test_returns_ids_without_creating_anything(self, session_factory, monkeypatch) -> None:
         monkeypatch.setattr(
-            "backend.scripts.filter_db.filter_posts_with_ai",
-            AsyncMock(return_value=(["s2"], "sys", "user", {"batches_processed": 1, "batches_total": 1})),
+            "backend.scripts.filter_db.triage_posts_with_ai",
+            AsyncMock(return_value=(["s2"], ["s1"], "sys", "user", {"batches_processed": 1, "batches_total": 1})),
         )
         monkeypatch.setattr(
-            "backend.scripts.filter_db.filter_comments_with_ai",
-            AsyncMock(return_value=([], "", "", {"batches_processed": 1, "batches_total": 1})),
+            "backend.scripts.filter_db.triage_comments_with_ai",
+            AsyncMock(return_value=([], [], "", "", {"batches_processed": 1, "batches_total": 1})),
         )
 
         async with session_factory() as session:
@@ -623,13 +649,16 @@ class TestFilterPreviewJobHandler:
 
             job = await data_service.start_filter_preview_job(
                 session, user.id, database=file_rec.schemaname, api_key="sk", model="m",
-                prompt="keep the good ones", min_words=0, sample_percentage=100.0, filter_tags=None,
+                include_prompt="keep the good ones", exclude_prompt=None, use_examples=False,
+                min_words=0, sample_percentage=100.0, filter_tags=None,
             )
             finished = await _wait_for_terminal_status(session, job.id, user.id)
 
             assert finished.status == "succeeded", finished.error
-            assert finished.result["post_ids"] == ["s2"]
-            assert finished.result["comment_ids"] == []
+            assert finished.result["include_post_ids"] == ["s2"]
+            assert finished.result["exclude_post_ids"] == ["s1"]
+            assert finished.result["include_comment_ids"] == []
+            assert finished.result["exclude_comment_ids"] == []
             assert finished.result["partial"] is False
             assert "file" not in finished.result
 
@@ -638,12 +667,12 @@ class TestFilterPreviewJobHandler:
 
     async def test_decided_rows_are_withheld_from_the_model(self, session_factory, monkeypatch) -> None:
         posts_mock = AsyncMock(
-            return_value=([], "sys", "user", {"batches_processed": 1, "batches_total": 1})
+            return_value=([], [], "sys", "user", {"batches_processed": 1, "batches_total": 1})
         )
-        monkeypatch.setattr("backend.scripts.filter_db.filter_posts_with_ai", posts_mock)
+        monkeypatch.setattr("backend.scripts.filter_db.triage_posts_with_ai", posts_mock)
         monkeypatch.setattr(
-            "backend.scripts.filter_db.filter_comments_with_ai",
-            AsyncMock(return_value=([], "", "", {"batches_processed": 1, "batches_total": 1})),
+            "backend.scripts.filter_db.triage_comments_with_ai",
+            AsyncMock(return_value=([], [], "", "", {"batches_processed": 1, "batches_total": 1})),
         )
 
         async with session_factory() as session:
@@ -653,15 +682,76 @@ class TestFilterPreviewJobHandler:
 
             job = await data_service.start_filter_preview_job(
                 session, user.id, database=file_rec.schemaname, api_key="sk", model="m",
-                prompt="p", min_words=0, sample_percentage=100.0, filter_tags=None,
-                decided_post_ids=["s1", "s2"],
+                include_prompt="p", exclude_prompt=None, use_examples=False,
+                min_words=0, sample_percentage=100.0, filter_tags=None,
+                included_post_ids=["s1"], excluded_post_ids=["s2"],
             )
             finished = await _wait_for_terminal_status(session, job.id, user.id)
             assert finished.status == "succeeded", finished.error
 
-            sent_blob = posts_mock.await_args.args[1]
+            sent_blob = posts_mock.await_args.args[3]
             assert "[s3]" in sent_blob
             assert "[s1]" not in sent_blob and "[s2]" not in sent_blob
+
+    async def test_use_examples_builds_examples_block_and_drops_prompts(
+        self, session_factory, monkeypatch
+    ) -> None:
+        posts_mock = AsyncMock(
+            return_value=([], [], "sys", "user", {"batches_processed": 1, "batches_total": 1})
+        )
+        monkeypatch.setattr("backend.scripts.filter_db.triage_posts_with_ai", posts_mock)
+        monkeypatch.setattr(
+            "backend.scripts.filter_db.triage_comments_with_ai",
+            AsyncMock(return_value=([], [], "", "", {"batches_processed": 1, "batches_total": 1})),
+        )
+
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_rec = await _make_file(session, user.id)
+            await _seed_rows(session, file_rec.id, submissions=3)
+
+            job = await data_service.start_filter_preview_job(
+                session, user.id, database=file_rec.schemaname, api_key="sk", model="m",
+                include_prompt="should be ignored", exclude_prompt=None, use_examples=True,
+                min_words=0, sample_percentage=100.0, filter_tags=None,
+                included_post_ids=["s1"], excluded_post_ids=["s2"],
+            )
+            finished = await _wait_for_terminal_status(session, job.id, user.id)
+            assert finished.status == "succeeded", finished.error
+
+            # Called as (include_prompt, exclude_prompt, examples_block, content, ...)
+            call_args = posts_mock.await_args.args
+            assert call_args[0] == "" and call_args[1] == ""
+            examples_block = call_args[2]
+            assert "INCLUDED" in examples_block
+            assert "EXCLUDED" in examples_block
+            assert "should be ignored" not in finished.result["user_instructions"]
+
+    async def test_no_examples_when_use_examples_false(self, session_factory, monkeypatch) -> None:
+        posts_mock = AsyncMock(
+            return_value=(["s3"], [], "sys", "user", {"batches_processed": 1, "batches_total": 1})
+        )
+        monkeypatch.setattr("backend.scripts.filter_db.triage_posts_with_ai", posts_mock)
+        monkeypatch.setattr(
+            "backend.scripts.filter_db.triage_comments_with_ai",
+            AsyncMock(return_value=([], [], "", "", {"batches_processed": 1, "batches_total": 1})),
+        )
+
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_rec = await _make_file(session, user.id)
+            await _seed_rows(session, file_rec.id, submissions=3)
+
+            job = await data_service.start_filter_preview_job(
+                session, user.id, database=file_rec.schemaname, api_key="sk", model="m",
+                include_prompt="criteria", exclude_prompt=None, use_examples=False,
+                min_words=0, sample_percentage=100.0, filter_tags=None,
+                included_post_ids=["s1"], excluded_post_ids=["s2"],
+            )
+            await _wait_for_terminal_status(session, job.id, user.id)
+
+            examples_block = posts_mock.await_args.args[2]
+            assert examples_block == ""
 
     async def test_partial_coverage_from_a_batch_cap_surfaces_in_result(
         self, session_factory, monkeypatch
@@ -671,14 +761,14 @@ class TestFilterPreviewJobHandler:
         # result must say so instead of silently returning an incomplete
         # post/comment set as if it were complete.
         monkeypatch.setattr(
-            "backend.scripts.filter_db.filter_posts_with_ai",
+            "backend.scripts.filter_db.triage_posts_with_ai",
             AsyncMock(
-                return_value=(["s1"], "sys", "user", {"batches_processed": 3, "batches_total": 8})
+                return_value=(["s1"], [], "sys", "user", {"batches_processed": 3, "batches_total": 8})
             ),
         )
         monkeypatch.setattr(
-            "backend.scripts.filter_db.filter_comments_with_ai",
-            AsyncMock(return_value=([], "", "", {"batches_processed": 1, "batches_total": 1})),
+            "backend.scripts.filter_db.triage_comments_with_ai",
+            AsyncMock(return_value=([], [], "", "", {"batches_processed": 1, "batches_total": 1})),
         )
 
         async with session_factory() as session:
@@ -688,7 +778,8 @@ class TestFilterPreviewJobHandler:
 
             job = await data_service.start_filter_preview_job(
                 session, user.id, database=file_rec.schemaname, api_key="sk", model="m",
-                prompt="p", min_words=0, sample_percentage=100.0, filter_tags=None,
+                include_prompt="p", exclude_prompt=None, use_examples=False,
+                min_words=0, sample_percentage=100.0, filter_tags=None,
             )
             finished = await _wait_for_terminal_status(session, job.id, user.id)
 
@@ -701,11 +792,11 @@ class TestFilterPreviewJobHandler:
         self, session_factory, monkeypatch
     ) -> None:
         posts_mock = AsyncMock(
-            return_value=(["s1"], "sys", "user", {"batches_processed": 1, "batches_total": 1})
+            return_value=(["s1"], [], "sys", "user", {"batches_processed": 1, "batches_total": 1})
         )
-        comments_mock = AsyncMock(return_value=([], "", "", {}))
-        monkeypatch.setattr("backend.scripts.filter_db.filter_posts_with_ai", posts_mock)
-        monkeypatch.setattr("backend.scripts.filter_db.filter_comments_with_ai", comments_mock)
+        comments_mock = AsyncMock(return_value=([], [], "", "", {}))
+        monkeypatch.setattr("backend.scripts.filter_db.triage_posts_with_ai", posts_mock)
+        monkeypatch.setattr("backend.scripts.filter_db.triage_comments_with_ai", comments_mock)
 
         async with session_factory() as session:
             user = await _make_user(session)
@@ -714,14 +805,15 @@ class TestFilterPreviewJobHandler:
 
             job = await data_service.start_filter_preview_job(
                 session, user.id, database=file_rec.schemaname, api_key="sk", model="m",
-                prompt="p", min_words=0, sample_percentage=100.0, filter_tags=None,
+                include_prompt="p", exclude_prompt=None, use_examples=False,
+                min_words=0, sample_percentage=100.0, filter_tags=None,
                 content_scope="posts",
             )
             finished = await _wait_for_terminal_status(session, job.id, user.id)
 
             assert finished.status == "succeeded", finished.error
-            assert finished.result["post_ids"] == ["s1"]
-            assert finished.result["comment_ids"] == []
+            assert finished.result["include_post_ids"] == ["s1"]
+            assert finished.result["include_comment_ids"] == []
             assert not comments_mock.called
 
     async def test_surfaces_a_partial_runs_real_error(self, session_factory, monkeypatch) -> None:
@@ -730,17 +822,17 @@ class TestFilterPreviewJobHandler:
         cap even when an API error stopped it.
         """
         monkeypatch.setattr(
-            "backend.scripts.filter_db.filter_posts_with_ai",
+            "backend.scripts.filter_db.triage_posts_with_ai",
             AsyncMock(
                 return_value=(
-                    ["s1"], "sys", "user",
+                    ["s1"], [], "sys", "user",
                     {"batches_processed": 1, "batches_total": 3, "error": "upstream 429"},
                 )
             ),
         )
         monkeypatch.setattr(
-            "backend.scripts.filter_db.filter_comments_with_ai",
-            AsyncMock(return_value=([], "", "", {"batches_processed": 1, "batches_total": 1})),
+            "backend.scripts.filter_db.triage_comments_with_ai",
+            AsyncMock(return_value=([], [], "", "", {"batches_processed": 1, "batches_total": 1})),
         )
 
         async with session_factory() as session:
@@ -750,7 +842,8 @@ class TestFilterPreviewJobHandler:
 
             job = await data_service.start_filter_preview_job(
                 session, user.id, database=file_rec.schemaname, api_key="sk", model="m",
-                prompt="p", min_words=0, sample_percentage=100.0, filter_tags=None,
+                include_prompt="p", exclude_prompt=None, use_examples=False,
+                min_words=0, sample_percentage=100.0, filter_tags=None,
             )
             finished = await _wait_for_terminal_status(session, job.id, user.id)
 
@@ -886,3 +979,68 @@ class TestCreateManualFilteredData:
                     session, intruder.id, database=source.schemaname, name="x",
                     description=None, project_id=None, post_ids=["s1"], comment_ids=[],
                 )
+
+
+class TestCreateManualFilteredDataAssistProvenance:
+    """C2: assist_runs records what a filter_preview job contributed,
+    without changing the version's own origin/model -- the pairing this
+    guards is with
+    ``TestCreateManualFilteredData.test_records_an_edited_origin_with_no_llm_provenance``.
+    """
+
+    async def _setup(self, session):
+        user = await _make_user(session)
+        file_rec = await _make_file(session, user.id)
+        await _seed_rows(session, file_rec.id, submissions=3, comments=2)
+        return user, file_rec
+
+    async def _make_succeeded_job(self, session, *, user_id: int, source_file_id: int):
+        from backend.app.jobs.models import Job
+
+        job = Job(
+            job_type="filter_preview", user_id=user_id, status="succeeded",
+            payload={"source_file_id": source_file_id, "model": "anthropic/claude-x"},
+            result={"system_prompt": "sys", "user_instructions": "keep complaints", "prompt_meta": {"rendered_chars": 5}},
+        )
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
+        return job
+
+    async def test_records_an_assist_run_without_touching_version_provenance(self, session_factory) -> None:
+        async with session_factory() as session:
+            user, source = await self._setup(session)
+            job = await self._make_succeeded_job(session, user_id=user.id, source_file_id=source.id)
+
+            new_file, _ = await data_service.create_manual_filtered_data(
+                session, user.id, database=source.schemaname, name="hand picked",
+                description=None, project_id=None, post_ids=["s1"], comment_ids=[],
+                assist_runs=[{"job_id": job.id, "proposed_count": 4, "accepted_count": 1, "dismissed_count": 3}],
+            )
+
+            head = await version_repo.head_version(session, new_file.id)
+            assert head.origin == "edited"
+            assert head.model is None
+            assert head.system_prompt is None
+
+            from backend.app.services import assist_service
+            assists = await assist_service.list_assists(session, new_file.id)
+            assert len(assists) == 1
+            assert assists[0]["model"] == "anthropic/claude-x"
+            assert assists[0]["system_prompt"] == "sys"
+            assert assists[0]["accepted_count"] == 1
+            assert assists[0]["dismissed_count"] == 3
+
+    async def test_rejects_a_job_run_against_a_different_source(self, session_factory) -> None:
+        async with session_factory() as session:
+            user, source = await self._setup(session)
+            other_source = await _make_file(session, user.id, schemaname="proj_other")
+            job = await self._make_succeeded_job(session, user_id=user.id, source_file_id=other_source.id)
+
+            with pytest.raises(ValidationAppError):
+                await data_service.create_manual_filtered_data(
+                    session, user.id, database=source.schemaname, name="hand picked",
+                    description=None, project_id=None, post_ids=["s1"], comment_ids=[],
+                    assist_runs=[{"job_id": job.id}],
+                )
+

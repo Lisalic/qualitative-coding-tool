@@ -905,3 +905,449 @@ class TestCreateManualCodebook:
                     session, other.id, database=source.schemaname, name="x",
                     description=None, project_id=None, codes=list(self._CODES),
                 )
+
+
+class TestCreateManualCodebookAssistProvenance:
+    """C2: assist_runs records what a codebook_preview job contributed,
+    without changing the version's own origin/model -- pairs with
+    ``TestCreateManualCodebook.test_records_no_model_provenance``.
+    """
+
+    _CODES = TestCreateManualCodebook._CODES
+
+    async def _make_succeeded_job(self, session, *, user_id: int, source_file_id: int):
+        from backend.app.jobs.models import Job
+
+        job = Job(
+            job_type="codebook_preview", user_id=user_id, status="succeeded",
+            payload={"source_file_id": source_file_id, "model": "openai/gpt-x"},
+            result={"system_prompt": "sys", "user_instructions": "find codes", "prompt_meta": None},
+        )
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
+        return job
+
+    async def test_records_an_assist_run_without_touching_version_provenance(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            source = await _seed_source(session, user)
+            job = await self._make_succeeded_job(session, user_id=user.id, source_file_id=source.id)
+
+            file_rec = await codebook_service.create_manual_codebook(
+                session, user.id, database=source.schemaname, name="hand written",
+                description=None, project_id=None, codes=list(self._CODES),
+                assist_runs=[{"job_id": job.id, "proposed_count": 3, "accepted_count": 2, "dismissed_count": 1, "accepted_refs": ["u1", "u2"]}],
+            )
+
+            head = await version_repo.head_version(session, file_rec.id)
+            assert head.origin == "edited"
+            assert head.model is None
+
+            from backend.app.services import assist_service
+            assists = await assist_service.list_assists(session, file_rec.id)
+            assert len(assists) == 1
+            assert assists[0]["model"] == "openai/gpt-x"
+            assert assists[0]["accepted_refs"] == ["u1", "u2"]
+
+    async def test_rejects_a_job_from_a_different_source(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            source = await _seed_source(session, user)
+            other_source = await _seed_source(session, user)
+            job = await self._make_succeeded_job(session, user_id=user.id, source_file_id=other_source.id)
+
+            with pytest.raises(ValidationAppError):
+                await codebook_service.create_manual_codebook(
+                    session, user.id, database=source.schemaname, name="hand written",
+                    description=None, project_id=None, codes=list(self._CODES),
+                    assist_runs=[{"job_id": job.id}],
+                )
+
+
+
+# ---------------------------------------------------------------------------
+# integrate_codebooks -- the AI-assist preview + manual submit pair, one
+# level up from codebook_preview/create_manual_codebook: instead of
+# proposing codes from raw data, this proposes codes merged from two or
+# more existing codebooks. See tests/backend/services/test_assist_service.py
+# for the ASSIST_STAGE_INTEGRATE-specific provenance checks.
+# ---------------------------------------------------------------------------
+
+
+def _merge_proposal_json(*entries: tuple[str, list[dict]]) -> str:
+    """Build an integrate-preview JSON body. Each entry is
+    ``(name, sources)`` where ``sources`` is a list of
+    ``{"codebook": i, "family": f, "name": n}`` dicts."""
+    return json.dumps(
+        {
+            "codes": [
+                {
+                    "family": "F",
+                    "name": name,
+                    "definition": "a def",
+                    "inclusion": "when",
+                    "exclusion": "not when",
+                    "keywords": "kw",
+                    "example": "ex",
+                    "sources": sources,
+                    "rationale": "" if len(sources) < 2 else "merged from multiple sources",
+                }
+                for name, sources in entries
+            ]
+        }
+    )
+
+
+class TestStartIntegrateCodebookJobValidation:
+    async def test_non_proj_schema_raises(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            with pytest.raises(ValidationAppError, match="codebooks"):
+                await codebook_service.start_integrate_codebook_job(
+                    session, user.id, codebooks=["not_proj", "proj_b"], api_key="k", model=None, prompt="",
+                )
+
+    async def test_a_single_codebook_raises(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_a = await _make_file(session, user.id, file_type="codebook", schemaname="proj_a")
+            with pytest.raises(ValidationAppError, match="at least two"):
+                await codebook_service.start_integrate_codebook_job(
+                    session, user.id, codebooks=[file_a.schemaname], api_key="k", model=None, prompt="",
+                )
+
+    async def test_two_refs_deduping_to_one_raises(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_a = await _make_file(session, user.id, file_type="codebook", schemaname="proj_a")
+            with pytest.raises(ValidationAppError, match="at least two"):
+                await codebook_service.start_integrate_codebook_job(
+                    session,
+                    user.id,
+                    codebooks=[file_a.schemaname, file_a.schemaname],
+                    api_key="k",
+                    model=None,
+                    prompt="",
+                )
+
+    async def test_missing_api_key_raises(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_a = await _make_file(session, user.id, file_type="codebook", schemaname="proj_a")
+            file_b = await _make_file(session, user.id, file_type="codebook", schemaname="proj_b")
+            with pytest.raises(ValidationAppError, match="api_key"):
+                await codebook_service.start_integrate_codebook_job(
+                    session,
+                    user.id,
+                    codebooks=[file_a.schemaname, file_b.schemaname],
+                    api_key="",
+                    model=None,
+                    prompt="",
+                )
+
+    async def test_unowned_codebook_raises_not_found(self, session_factory) -> None:
+        async with session_factory() as session:
+            owner = await _make_user(session, "owner@x.com")
+            other = await _make_user(session, "other@x.com")
+            file_a = await _make_file(session, owner.id, file_type="codebook", schemaname="proj_a")
+            file_b = await _make_file(session, other.id, file_type="codebook", schemaname="proj_b")
+            with pytest.raises(NotFoundError):
+                await codebook_service.start_integrate_codebook_job(
+                    session,
+                    other.id,
+                    codebooks=[file_a.schemaname, file_b.schemaname],
+                    api_key="k",
+                    model=None,
+                    prompt="",
+                )
+
+    async def test_a_non_codebook_ref_raises_not_found(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_a = await _make_file(session, user.id, file_type="codebook", schemaname="proj_a")
+            raw = await _make_file(session, user.id, file_type="raw_data", schemaname="proj_raw")
+            with pytest.raises(NotFoundError):
+                await codebook_service.start_integrate_codebook_job(
+                    session,
+                    user.id,
+                    codebooks=[file_a.schemaname, raw.schemaname],
+                    api_key="k",
+                    model=None,
+                    prompt="",
+                )
+
+
+class TestStartIntegrateCodebookJobEnqueue:
+    async def test_enqueues_pending_job_without_persisting_api_key(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_a = await _make_file(session, user.id, file_type="codebook", schemaname="proj_a")
+            file_b = await _make_file(session, user.id, file_type="codebook", schemaname="proj_b")
+
+            job = await codebook_service.start_integrate_codebook_job(
+                session,
+                user.id,
+                codebooks=[file_a.schemaname, file_b.schemaname],
+                api_key="sk-secret",
+                model="some-model",
+                prompt="merge carefully",
+            )
+
+            assert job.status == "pending"
+            assert job.job_type == "integrate_codebook_preview"
+            assert job.payload["source_file_ids"] == [file_a.id, file_b.id]
+            assert "api_key" not in job.payload
+
+            await _wait_for_terminal_status(session, job.id, user.id)
+
+
+class TestIntegrateCodebookJobHandlerEndToEnd:
+    async def test_verifies_and_dedupes_proposals(self, session_factory, monkeypatch) -> None:
+        # Three proposals: one with two resolvable sources (a real merge),
+        # one claiming a source that doesn't exist (bogus codebook index),
+        # and one that duplicates a code already in the researcher's draft.
+        # _seed_codes seeds one code per file: family "F", name "C".
+        result_json = _merge_proposal_json(
+            ("Merged Code", [
+                {"codebook": 1, "family": "F", "name": "C"},
+                {"codebook": 2, "family": "F", "name": "C"},
+            ]),
+            ("Invented Code", [{"codebook": 99, "family": "F", "name": "Nope"}]),
+            ("Already Covered", [{"codebook": 1, "family": "F", "name": "C"}]),
+        )
+        integrate_mock = AsyncMock(return_value=(result_json, "sys", "user"))
+        monkeypatch.setattr(
+            "backend.app.services.codebook_service.codebook_generator_module.integrate_codebooks",
+            integrate_mock,
+        )
+
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_a = await _make_file(session, user.id, file_type="codebook", schemaname="proj_a")
+            file_b = await _make_file(session, user.id, file_type="codebook", schemaname="proj_b")
+            file_a_id, file_b_id = file_a.id, file_b.id
+            file_a_schema, file_b_schema = file_a.schemaname, file_b.schemaname
+            await _seed_codes(session, file_a_id, user.id, "codebook A text")
+            await _seed_codes(session, file_b_id, user.id, "codebook B text")
+            await session.commit()
+
+            files_before = len((await session.execute(select(File))).scalars().all())
+
+            job = await codebook_service.start_integrate_codebook_job(
+                session,
+                user.id,
+                codebooks=[file_a_schema, file_b_schema],
+                api_key="sk-secret",
+                model=None,
+                prompt="",
+                existing_codes=[{"family_name": "F", "name": "Already Covered"}],
+            )
+
+            finished = await _wait_for_terminal_status(session, job.id, user.id)
+            assert finished.status == "succeeded", finished.error
+
+            proposals = {p["name"]: p for p in finished.result["proposals"]}
+            assert set(proposals) == {"Merged Code", "Invented Code"}
+
+            merged = proposals["Merged Code"]
+            assert len(merged["sources"]) == 2
+            source_codebooks = {s["codebook"] for s in merged["sources"]}
+            assert source_codebooks == {file_a_schema, file_b_schema}
+
+            invented = proposals["Invented Code"]
+            assert invented["sources"] == []
+
+            assert finished.result["system_prompt"] == "sys"
+            assert finished.result["user_instructions"] == ""
+
+            # A proposal is not an artifact -- no new File is created by a
+            # preview run (file_a/file_b already have their seeded v1 from
+            # setup above, so this checks the file COUNT rather than
+            # "no file has a version").
+            session.expire_all()
+            files_after = (await session.execute(select(File))).scalars().all()
+            assert len(files_after) == files_before
+
+    async def test_raises_context_budget_error_when_codebooks_dont_fit(self, session_factory, monkeypatch) -> None:
+        integrate_mock = AsyncMock(return_value=("should not be called", "", ""))
+        monkeypatch.setattr(
+            "backend.app.services.codebook_service.codebook_generator_module.integrate_codebooks",
+            integrate_mock,
+        )
+        monkeypatch.setattr(
+            "backend.app.services.codebook_service.context_window.prompt_fits",
+            lambda model, **kwargs: False,
+        )
+
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_a = await _make_file(session, user.id, file_type="codebook", schemaname="proj_a")
+            file_b = await _make_file(session, user.id, file_type="codebook", schemaname="proj_b")
+            await _seed_codes(session, file_a.id, user.id, "codebook A text")
+            await _seed_codes(session, file_b.id, user.id, "codebook B text")
+            await session.commit()
+
+            job = await codebook_service.start_integrate_codebook_job(
+                session,
+                user.id,
+                codebooks=[file_a.schemaname, file_b.schemaname],
+                api_key="sk-secret",
+                model=None,
+                prompt="",
+            )
+
+            finished = await _wait_for_terminal_status(session, job.id, user.id)
+            assert finished.status == "failed"
+            assert "too large to integrate" in finished.error
+            assert not integrate_mock.called
+
+
+class TestCreateIntegratedCodebook:
+    _CODES = [
+        {
+            "code_uid": "u1", "family_uid": "f1", "family_name": "Harm", "name": "Bullying",
+            "is_new": True, "family_is_new": True, "definition": "a def", "position": 0,
+        },
+        {
+            "code_uid": "u2", "family_uid": "f1", "family_name": "Harm", "name": "Exclusion",
+            "is_new": True, "definition": "another def", "position": 1,
+        },
+    ]
+
+    async def test_creates_a_codebook_with_edited_provenance(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_a = await _make_file(session, user.id, file_type="codebook", schemaname="proj_a")
+            file_b = await _make_file(session, user.id, file_type="codebook", schemaname="proj_b")
+            await _seed_codes(session, file_a.id, user.id, "a")
+            await _seed_codes(session, file_b.id, user.id, "b")
+            await session.commit()
+
+            file_rec = await codebook_service.create_integrated_codebook(
+                session,
+                user.id,
+                codebooks=[file_a.schemaname, file_b.schemaname],
+                name="integrated",
+                description=None,
+                project_id=None,
+                codes=list(self._CODES),
+            )
+
+            assert file_rec.file_type == "codebook"
+            assert file_rec.schemaname.startswith("proj_")
+
+            head = await version_repo.head_version(session, file_rec.id)
+            assert head.origin == "edited"
+            assert head.version_no == 1
+            assert head.model is None
+            assert head.system_prompt is None
+            assert "Integrated from 2 codebooks" in head.message
+
+    async def test_links_n_merge_input_edges_in_order(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_a = await _make_file(session, user.id, file_type="codebook", schemaname="proj_a")
+            file_b = await _make_file(session, user.id, file_type="codebook", schemaname="proj_b")
+            file_c = await _make_file(session, user.id, file_type="codebook", schemaname="proj_c")
+            for f in (file_a, file_b, file_c):
+                await _seed_codes(session, f.id, user.id, f.schemaname)
+            await session.commit()
+
+            file_rec = await codebook_service.create_integrated_codebook(
+                session,
+                user.id,
+                codebooks=[file_a.schemaname, file_b.schemaname, file_c.schemaname],
+                name="integrated",
+                description=None,
+                project_id=None,
+                codes=list(self._CODES),
+            )
+
+            edges = await version_repo.list_parent_edges(session, file_rec.id)
+            assert [e.parent_file_id for e in edges] == [file_a.id, file_b.id, file_c.id]
+            assert all(e.relation == "merged_from" for e in edges)
+            assert all(e.role == "merge_input" for e in edges)
+            assert [e.position for e in edges] == [0, 1, 2]
+
+    async def test_rejects_a_code_with_no_identity(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_a = await _make_file(session, user.id, file_type="codebook", schemaname="proj_a")
+            file_b = await _make_file(session, user.id, file_type="codebook", schemaname="proj_b")
+            await _seed_codes(session, file_a.id, user.id, "a")
+            await _seed_codes(session, file_b.id, user.id, "b")
+            await session.commit()
+
+            with pytest.raises(ValidationAppError):
+                await codebook_service.create_integrated_codebook(
+                    session,
+                    user.id,
+                    codebooks=[file_a.schemaname, file_b.schemaname],
+                    name="x",
+                    description=None,
+                    project_id=None,
+                    codes=[{"family_name": "Harm", "name": "Bullying"}],
+                )
+
+    async def test_records_assist_provenance_with_integrate_stage(self, session_factory) -> None:
+        from backend.app.jobs.models import Job
+
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_a = await _make_file(session, user.id, file_type="codebook", schemaname="proj_a")
+            file_b = await _make_file(session, user.id, file_type="codebook", schemaname="proj_b")
+            await _seed_codes(session, file_a.id, user.id, "a")
+            await _seed_codes(session, file_b.id, user.id, "b")
+            await session.commit()
+
+            job = Job(
+                job_type="integrate_codebook_preview",
+                user_id=user.id,
+                status="succeeded",
+                payload={"source_file_ids": [file_a.id, file_b.id], "model": "openai/gpt-x"},
+                result={"system_prompt": "sys", "user_instructions": "merge", "prompt_meta": None},
+            )
+            session.add(job)
+            await session.commit()
+            await session.refresh(job)
+
+            file_rec = await codebook_service.create_integrated_codebook(
+                session,
+                user.id,
+                codebooks=[file_a.schemaname, file_b.schemaname],
+                name="integrated",
+                description=None,
+                project_id=None,
+                codes=list(self._CODES),
+                assist_runs=[
+                    {"job_id": job.id, "proposed_count": 3, "accepted_count": 2, "dismissed_count": 1, "accepted_refs": ["u1", "u2"]}
+                ],
+            )
+
+            from backend.app.services import assist_service
+            assists = await assist_service.list_assists(session, file_rec.id)
+            assert len(assists) == 1
+            assert assists[0]["stage"] == "integrate"
+            assert assists[0]["model"] == "openai/gpt-x"
+
+    async def test_source_must_be_owned_by_the_caller(self, session_factory) -> None:
+        async with session_factory() as session:
+            owner = await _make_user(session, "owner@x.com")
+            other = await _make_user(session, "other@x.com")
+            file_a = await _make_file(session, owner.id, file_type="codebook", schemaname="proj_a")
+            file_b = await _make_file(session, owner.id, file_type="codebook", schemaname="proj_b")
+            await _seed_codes(session, file_a.id, owner.id, "a")
+            await _seed_codes(session, file_b.id, owner.id, "b")
+            await session.commit()
+
+            with pytest.raises(NotFoundError):
+                await codebook_service.create_integrated_codebook(
+                    session,
+                    other.id,
+                    codebooks=[file_a.schemaname, file_b.schemaname],
+                    name="x",
+                    description=None,
+                    project_id=None,
+                    codes=list(self._CODES),
+                )

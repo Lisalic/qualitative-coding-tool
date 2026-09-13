@@ -12,6 +12,9 @@ from backend.app.api.content_routes import router as content_router
 from backend.app.api.models_routes import router as models_router
 from backend.app.api.version_routes import router as version_router
 from backend.app.jobs.routes import router as jobs_router
+from backend.app.api.export_routes import router as export_router
+from backend.app.api.comparison_routes import router as comparison_router
+from backend.app.api.coverage_routes import router as coverage_router
 
 router = APIRouter()
 
@@ -27,4 +30,6 @@ router.include_router(content_router, tags=["content"])
 router.include_router(models_router, tags=["models"])
 router.include_router(version_router, tags=["versions"])
 router.include_router(jobs_router, tags=["jobs"])
-
+router.include_router(export_router, tags=["export"])
+router.include_router(comparison_router, tags=["compare"])
+router.include_router(coverage_router, tags=["coverage"])

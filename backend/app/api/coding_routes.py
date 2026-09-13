@@ -130,7 +130,12 @@ async def save_coding_revision(
     codes = [c.model_dump() for c in payload.codes] if payload.codes else None
     rows = [row.model_dump() for row in payload.rows] if payload.rows else None
     file_rec = await coding_service.save_coding_revision(
-        db, user_id, ref, codes=codes, rows=rows, model=payload.model, job_id=payload.job_id
+        db,
+        user_id,
+        ref,
+        codes=codes,
+        rows=rows,
+        assist_runs=[run.model_dump() for run in payload.assist_runs],
     )
     return JSONResponse({"message": "Saved", "file": await _file_info(db, file_rec)})
 
@@ -258,10 +263,10 @@ async def compare_codings(
     coding_b: str = Form(...),
     api_key: str = Form(...),
     name: str = Form(...),
-    model: str = Form(None),
+    model: str = Form(...),
     prompt: str = Form(""),
     description: str = Form(None),
-    project_id: int = Form(None),
+    project_id: int = Form(...),
     user_id: int = Depends(require_user_id),
     db: AsyncSession = Depends(get_async_db),
 ):
@@ -289,10 +294,10 @@ async def summarize_coding(
     coding: str = Form(...),
     api_key: str = Form(...),
     name: str = Form(...),
-    model: str = Form(None),
+    model: str = Form(...),
     prompt: str = Form(""),
     description: str = Form(None),
-    project_id: int = Form(None),
+    project_id: int = Form(...),
     user_id: int = Depends(require_user_id),
     db: AsyncSession = Depends(get_async_db),
 ):

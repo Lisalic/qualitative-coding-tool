@@ -16,9 +16,13 @@ import pytest
 from backend.app.external.context_window import ITEM_SEPARATOR
 from backend.scripts.codebook_generator import (
     CODEBOOK_JSON_SCHEMA,
+    INTEGRATE_JSON_SCHEMA,
+    build_integrate_system_prompt,
+    build_integrate_user_prompt,
     generate_codebook,
     generate_codebook_map_reduce,
     get_client,
+    integrate_codebooks,
     merge_codebook_json_drafts,
 )
 
@@ -162,7 +166,7 @@ class TestGenerateCodebookMapReduce:
         progress.advance = AsyncMock()
         progress.add_total = AsyncMock()
 
-        await generate_codebook_map_reduce("short data", "sk-key", progress=progress)
+        await generate_codebook_map_reduce("short data", "sk-key", MODEL="model-y", progress=progress)
 
         progress.add_total.assert_not_called()
         progress.advance.assert_not_awaited()
@@ -185,7 +189,7 @@ class TestGenerateCodebookMapReduce:
         progress.add_total = AsyncMock()
 
         posts_content = ITEM_SEPARATOR.join(["x" * 40, "y" * 40, "z" * 40])
-        await generate_codebook_map_reduce(posts_content, "sk-key", progress=progress)
+        await generate_codebook_map_reduce(posts_content, "sk-key", MODEL="model-y", progress=progress)
 
         progress.add_total.assert_called_once_with(3)
         assert progress.advance.await_count == 3
@@ -206,7 +210,7 @@ class TestGenerateCodebookMapReduce:
         )
 
         posts_content = ITEM_SEPARATOR.join(["x" * 40, "y" * 40, "z" * 40])
-        result, _, _, coverage = await generate_codebook_map_reduce(posts_content, "sk-key")
+        result, _, _, coverage = await generate_codebook_map_reduce(posts_content, "sk-key", MODEL="model-y")
 
         assert json.loads(result)["codes"][0]["name"] == "One"
         assert coverage["batches_processed"] == 1
@@ -230,10 +234,62 @@ class TestGenerateCodebookMapReduce:
         )
 
         posts_content = ITEM_SEPARATOR.join(["x" * 40, "y" * 40, "z" * 40])
-        result, _, _, coverage = await generate_codebook_map_reduce(posts_content, "sk-key")
+        result, _, _, coverage = await generate_codebook_map_reduce(posts_content, "sk-key", MODEL="model-y")
 
         names = [c["name"] for c in json.loads(result)["codes"]]
         assert names == ["One", "Two"]
         assert coverage["batches_processed"] == 2
         assert coverage["batches_total"] == 3
         assert "Insufficient credits" in coverage["error"]
+
+
+class TestIntegrateJsonSchema:
+    def test_requires_sources_and_rationale_unlike_codebook_schema(self) -> None:
+        integrate_required = INTEGRATE_JSON_SCHEMA["properties"]["codes"]["items"]["required"]
+        codebook_required = CODEBOOK_JSON_SCHEMA["properties"]["codes"]["items"]["required"]
+        assert "sources" in integrate_required
+        assert "rationale" in integrate_required
+        assert "sources" not in codebook_required
+        assert "rationale" not in codebook_required
+
+
+class TestBuildIntegrateSystemPrompt:
+    def test_no_existing_codes_omits_the_block(self) -> None:
+        prompt = build_integrate_system_prompt("")
+        assert "EXISTING CODES" not in prompt
+        assert "SEVERAL CODEBOOKS" in prompt
+        assert "sources" in prompt
+
+    def test_existing_codes_are_appended_verbatim(self) -> None:
+        prompt = build_integrate_system_prompt("- F :: Bullying -- a definition")
+        assert "EXISTING CODES" in prompt
+        assert "- F :: Bullying -- a definition" in prompt
+
+
+class TestBuildIntegrateUserPrompt:
+    def test_includes_blocks_and_instructions(self) -> None:
+        prompt = build_integrate_user_prompt("--- CODEBOOK 1: A ---\ntext", "be thorough")
+        assert "--- CODEBOOK 1: A ---" in prompt
+        assert "be thorough" in prompt
+
+
+class TestIntegrateCodebooks:
+    async def test_passes_integrate_schema_and_returns_triple(self, monkeypatch) -> None:
+        raw = _json_response(
+            [_code(**{"sources": [{"codebook": 1, "family": "A", "name": "One"}], "rationale": ""})]
+        )
+        mock = AsyncMock(return_value=raw)
+        monkeypatch.setattr("backend.scripts.codebook_generator.json_chat_completion", mock)
+
+        result, system_prompt, user_prompt = await integrate_codebooks(
+            "--- CODEBOOK 1: A ---\ntext", "sk-key", custom_prompt="merge carefully", MODEL="model-y"
+        )
+
+        assert result == raw
+        assert "--- CODEBOOK 1: A ---" in user_prompt
+        assert "merge carefully" in user_prompt
+        assert "SEVERAL CODEBOOKS" in system_prompt
+        assert mock.call_args.kwargs["model"] == "model-y"
+        assert mock.call_args.kwargs["json_schema"] is INTEGRATE_JSON_SCHEMA
+        assert mock.call_args.kwargs["timeout"] == 30.0
+        assert mock.call_args.kwargs["max_retries"] == 2

@@ -35,25 +35,32 @@ whatever ``codebook_routes.engine`` (the name every other test in that file
 patches) currently is -- so it isn't a production correctness bug (both
 names denote the same object under normal operation), but it silently
 defeats the module's usual test-mockability convention, which is exactly
-what the pre-existing regression test's workaround comment documents. Both
-issues disappear structurally here: this module calls
-``codebook_generator_module.MODEL_3``/``codebook_generator_module.get_client``
-through the one already-module-level-imported reference, the same way
+what the pre-existing regression test's workaround comment documents. That
+issue disappears structurally here: this module calls
+``codebook_generator_module.get_client`` through the one
+already-module-level-imported reference, the same way
 ``_run_codebook_preview_job`` below calls
 ``codebook_generator_module.generate_codebook_map_reduce`` -- there is no
-second, locally-scoped binding of the same name to shadow.
+second, locally-scoped binding of the same name to shadow. (``MODEL_3``
+itself no longer exists: ``model`` is a required field on every request
+that reaches an LLM, so there is nothing left to fall back to.)
 """
 
 from __future__ import annotations
 
 import secrets
 import uuid
+from typing import Sequence
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from backend.app.core.codebook_render import parse_json_to_codes, parse_markdown_to_codes
+from backend.app.core.codebook_render import (
+    parse_json_to_codes,
+    parse_json_to_merge_proposals,
+    parse_markdown_to_codes,
+)
 from backend.app.core.exceptions import ContextBudgetError, NotFoundError, ValidationAppError
 from backend.app.core.schema_guard import require_valid_schema
 from backend.app.database import (
@@ -67,18 +74,23 @@ from backend.app.jobs.progress import ProgressTracker
 from backend.app.jobs.registry import register_handler
 from backend.app.jobs.service import enqueue_job
 from backend.app.repositories import file_repo, project_repo, raw_data_repo, version_repo
-from backend.app.services import version_service
+from backend.app.services import assist_service, version_service
 from backend.app.services.version_service import EdgeSpec
 from backend.app.versioning_models import (
+    ASSIST_STAGE_CODEBOOK,
+    ASSIST_STAGE_INTEGRATE,
     ORIGIN_EDITED,
     ORIGIN_FORKED,
     ORIGIN_GENERATED,
     ORIGIN_IMPORTED,
     RELATION_COMPARED,
     RELATION_DERIVED_FROM,
+    RELATION_MERGED_FROM,
+    ROLE_MERGE_INPUT,
     ROLE_SIDE_A,
     ROLE_SIDE_B,
     ROLE_SOURCE_DATA,
+    ArtifactVersion,
 )
 from backend.scripts import codebook_generator as codebook_generator_module
 
@@ -219,6 +231,7 @@ async def save_project_codebook(
     schema_name: str,
     codes: list[dict],
     display_name: str | None = None,
+    assist_runs: list[dict] | None = None,
 ) -> File:
     """Save a file's codebook content as structured code rows (owned by
     ``user_id``), and its display name if one is given. Raises
@@ -230,12 +243,19 @@ async def save_project_codebook(
     ``version_service.commit_codebook_version`` rather than overwriting
     in place -- this is what makes every save a recoverable point in
     history instead of a destructive blob overwrite.
+
+    ``assist_runs`` (see ``schemas.AssistRunIn``) is the Refine-mode
+    counterpart to ``create_manual_codebook``'s: Refine is an equally
+    AI-assisted path as New. There is no ``database`` field on this
+    save to say what the preview sampled from, so the expected source is
+    resolved from this codebook's own ``source_data`` edge instead of
+    being trusted from the request.
     """
     schema = (schema_name or "").strip()
     file_rec = await file_repo.get_owned_file(session, schema, user_id)
 
     rows = _resolve_code_rows(codes)
-    await version_service.commit_codebook_version(
+    version = await version_service.commit_codebook_version(
         session,
         file_id=file_rec.id,
         author_user_id=user_id,
@@ -245,6 +265,19 @@ async def save_project_codebook(
 
     if display_name:
         file_rec.filename = display_name
+
+    if assist_runs:
+        edges = await version_repo.list_parent_edges_for_files(session, [file_rec.id])
+        source_edge = next((e for e in edges if e.role == ROLE_SOURCE_DATA), None)
+        await assist_service.record_assist_runs(
+            session,
+            user_id=user_id,
+            file_id=file_rec.id,
+            version_id=version.id,
+            stage=ASSIST_STAGE_CODEBOOK,
+            source_file_id=source_edge.parent_file_id if source_edge else None,
+            runs=assist_runs,
+        )
 
     await session.commit()
     await session.refresh(file_rec)
@@ -411,20 +444,29 @@ async def _materialize_codebook(
     session: AsyncSession,
     *,
     user_id: int,
-    source_file_id: int,
+    parents: Sequence[EdgeSpec],
     name: str,
     description: str | None,
     project_id: int | None,
     code_rows: list[dict],
     message: str | None = None,
-) -> File:
+) -> tuple[File, ArtifactVersion]:
     """Create a new ``codebook`` File from ``code_rows`` and commit it as
-    that file's v1, linked back to the data it was built from.
+    that file's v1, linked back to whatever it was built from via
+    ``parents``. Returns the version alongside the file so a caller
+    (``create_manual_codebook``, ``create_integrated_codebook``) can
+    record assist-provenance against it.
 
-    The codebook editor's only way to create a new codebook. Always
-    ``origin=ORIGIN_EDITED`` with no LLM provenance, since the researcher's
-    accepted draft is what gets committed regardless of whether the AI
-    preview helped write it.
+    The codebook editors' only way to create a new codebook -- both the
+    by-hand editor (one ``derived_from``/``source_data`` parent) and the
+    integrate editor (N ``merged_from``/``merge_input`` parents, one per
+    source codebook) go through this same function, since the actual work
+    here (mint the ``proj_`` schema, create the File, commit v1, link the
+    project) doesn't depend on how many parents there are or what
+    relation they carry -- that's caller knowledge, expressed entirely
+    through ``parents``. Always ``origin=ORIGIN_EDITED`` with no LLM
+    provenance, since the researcher's accepted draft is what gets
+    committed regardless of whether an AI preview helped write it.
 
     Does not commit -- the caller owns the transaction boundary.
     """
@@ -443,21 +485,21 @@ async def _materialize_codebook(
     session.add(file_rec)
     await session.flush()
 
-    await version_service.commit_codebook_version(
+    version = await version_service.commit_codebook_version(
         session,
         file_id=file_rec.id,
         author_user_id=user_id,
         origin=ORIGIN_EDITED,
         codes=code_rows,
         message=message,
-        parents=[EdgeSpec(parent_file_id=source_file_id, relation=RELATION_DERIVED_FROM, role=ROLE_SOURCE_DATA)],
+        parents=parents,
     )
 
     if project_id is not None:
         project = await project_repo.get_owned_project(session, project_id, user_id)
         await async_link_file_to_project(session, file_rec.id, project.id)
 
-    return file_rec
+    return file_rec, version
 
 
 
@@ -559,7 +601,7 @@ async def _run_codebook_preview_job(job_id: int, payload: dict) -> dict:
     it on return.
     """
     source_file_id = payload["source_file_id"]
-    model = payload.get("model") or codebook_generator_module.MODEL_1
+    model = payload["model"]
     prompt = payload.get("prompt", "")
     api_key = payload["api_key"]
     sample_percentage = payload["sample_percentage"]
@@ -571,7 +613,7 @@ async def _run_codebook_preview_job(job_id: int, payload: dict) -> dict:
             session, source_file_id, sample_percentage, content_scope
         )
 
-    codebook_text, _system_prompt, _rendered_prompt, coverage = await codebook_generator_module.generate_codebook_map_reduce(
+    codebook_text, system_prompt, rendered_prompt, coverage = await codebook_generator_module.generate_codebook_map_reduce(
         assembled,
         api_key,
         prompt,
@@ -599,7 +641,16 @@ async def _run_codebook_preview_job(job_id: int, payload: dict) -> dict:
             }
         )
 
-    return {"proposals": proposals, **context_window.coverage_result_fields(coverage)}
+    return {
+        "proposals": proposals,
+        # Surfaced so `assist_service.record_assist_runs` can source a
+        # codebook editor's assist-provenance record from THIS job --
+        # never trusted from the client. See GAP-4/C2.
+        "system_prompt": system_prompt,
+        "user_instructions": prompt,
+        "prompt_meta": version_service.prompt_meta(rendered_prompt, batches=coverage.get("batches_total")),
+        **context_window.coverage_result_fields(coverage),
+    }
 
 
 async def create_manual_codebook(
@@ -611,6 +662,7 @@ async def create_manual_codebook(
     description: str | None,
     project_id: int | None,
     codes: list[dict],
+    assist_runs: list[dict] | None = None,
 ) -> File:
     """Create a codebook the researcher composed by hand in the codebook
     editor (with or without help from the preview assistant).
@@ -619,22 +671,35 @@ async def create_manual_codebook(
     is deliberate and matches ``data_service.create_manual_filtered_data``:
     an assist during editing is not the same claim as "a model produced
     this", and the version spine's provenance fields mean the stronger
-    claim.
+    claim. ``assist_runs`` (see ``schemas.AssistRunIn``) is the separate
+    C2 channel that DOES record which ``codebook_preview`` job(s)
+    contributed and how many proposals were accepted/dismissed -- see
+    ``services/assist_service.py``.
     """
     schema = require_valid_schema(database, field_name="database")
     source_file_id = await file_repo.resolve_file_id(session, schema, user_id)
 
     code_rows = _resolve_code_rows(codes)
-    file_rec = await _materialize_codebook(
+    file_rec, version = await _materialize_codebook(
         session,
         user_id=user_id,
-        source_file_id=source_file_id,
+        parents=[EdgeSpec(parent_file_id=source_file_id, relation=RELATION_DERIVED_FROM, role=ROLE_SOURCE_DATA)],
         name=name,
         description=description,
         project_id=project_id,
         code_rows=code_rows,
         message=f"Composed by hand from {len(code_rows)} codes",
     )
+    if assist_runs:
+        await assist_service.record_assist_runs(
+            session,
+            user_id=user_id,
+            file_id=file_rec.id,
+            version_id=version.id,
+            stage=ASSIST_STAGE_CODEBOOK,
+            source_file_id=source_file_id,
+            runs=assist_runs,
+        )
 
     await session.commit()
     await session.refresh(file_rec)
@@ -721,7 +786,7 @@ async def _run_compare_codebooks_job(job_id: int, payload: dict) -> dict:
     file_id_a = payload["file_id_a"]
     file_id_b = payload["file_id_b"]
     api_key = payload["api_key"]
-    model = payload.get("model") or codebook_generator_module.MODEL_3
+    model = payload["model"]
     prompt = payload.get("prompt", "")
     name = payload.get("name")
     description = payload.get("description")
@@ -818,3 +883,286 @@ async def _run_compare_codebooks_job(job_id: int, payload: dict) -> dict:
         "comparison": comparison,
         "file": {"id": str(file_id), "schema_name": schema_name, "filename": filename},
     }
+
+
+# ---------------------------------------------------------------------------
+# integrate_codebooks: an AI-assist preview (creates nothing) + a synchronous
+# manual submit that materializes the researcher's reviewed merge draft --
+# the same two-halves shape as codebook_preview/create_manual_codebook, one
+# level up: instead of proposing codes from raw data, this proposes codes
+# merged from two or more existing codebooks.
+# ---------------------------------------------------------------------------
+
+
+async def _resolve_source_codebooks(session: AsyncSession, user_id: int, codebooks: list[str]) -> list[int]:
+    """Resolve each ref in ``codebooks`` to a ``File.id`` owned by
+    ``user_id`` and typed ``codebook`` (a ``codebook_comparison`` or any
+    other artifact type is rejected, not silently accepted -- this is the
+    same guard ``codebook editor``'s Refine-mode picker applies
+    client-side, enforced here too since the client can't be trusted).
+    Deduplicates while preserving selection order, then requires at least
+    two distinct codebooks remain -- integrating one codebook with itself
+    is not a merge.
+    """
+    seen: set[int] = set()
+    ids: list[int] = []
+    for ref in codebooks:
+        schema = require_valid_schema(ref, field_name="codebooks")
+        file_id = await file_repo.resolve_file_id(session, schema, user_id, file_types=("codebook",))
+        if file_id in seen:
+            continue
+        seen.add(file_id)
+        ids.append(file_id)
+    if len(ids) < 2:
+        raise ValidationAppError("Select at least two distinct codebooks to integrate")
+    return ids
+
+
+def _render_source_codebooks(entries: list[tuple[str, str]]) -> str:
+    """Render each source codebook's markdown into one
+    ``--- CODEBOOK {i+1}: {filename} ---`` block, mirroring
+    ``codebook_generator._build_consolidation_user_prompt``'s
+    ``--- DRAFT CODEBOOK {i+1} ---`` idiom. The 1-based numbering here is
+    exactly what the model is asked to echo back in a proposal's
+    ``sources[].codebook``, and what ``_verify_proposal_sources`` below
+    expects to see.
+    """
+    blocks = [f"--- CODEBOOK {i + 1}: {name} ---\n{markdown}" for i, (name, markdown) in enumerate(entries)]
+    return "\n\n".join(blocks)
+
+
+def _verify_proposal_sources(raw_sources: list[dict], index: dict[tuple[int, str], str]) -> list[dict]:
+    """Keep only the ``sources`` entries that resolve against ``index``
+    (built from the codebooks this job actually read -- see
+    ``_run_integrate_codebook_job``), dropping the rest.
+
+    ``sources`` is model output, not a database read: the model can (and
+    occasionally will) invent a plausible-looking source, so this is
+    evidence, not assumption. A proposal whose sources all fail to
+    resolve still comes back from the job with ``sources: []`` rather
+    than being dropped entirely -- an unverifiable merge is still worth
+    the researcher's review, just without a provenance claim attached.
+    """
+    verified: list[dict] = []
+    for entry in raw_sources:
+        key = (entry.get("codebook"), _code_dedupe_key(entry.get("family_name"), entry.get("name")))
+        schema_name = index.get(key)
+        if schema_name is None:
+            continue
+        verified.append(
+            {
+                "codebook": schema_name,
+                "family_name": entry.get("family_name") or "",
+                "name": entry.get("name") or "",
+            }
+        )
+    return verified
+
+
+async def start_integrate_codebook_job(
+    session: AsyncSession,
+    user_id: int,
+    *,
+    codebooks: list[str],
+    api_key: str,
+    model: str | None,
+    prompt: str,
+    existing_codes: list[dict] | None = None,
+) -> Job:
+    """Validate and enqueue an ``integrate_codebook_preview`` background
+    job. Same guards as ``start_codebook_preview_job`` (api_key present,
+    every ref owned by ``user_id``), plus ``_resolve_source_codebooks``'s
+    "at least two distinct codebooks" and "must actually be codebooks"
+    checks. Takes no ``name``/``project_id`` because, like
+    ``codebook_preview``, this job creates no artifact -- only
+    ``create_integrated_codebook`` does that.
+    """
+    if not api_key:
+        raise ValidationAppError("api_key is required")
+
+    source_file_ids = await _resolve_source_codebooks(session, user_id, codebooks)
+
+    return await enqueue_job(
+        session,
+        user_id=user_id,
+        job_type="integrate_codebook_preview",
+        payload={
+            "user_id": user_id,
+            "source_file_ids": source_file_ids,
+            "model": model,
+            "prompt": (prompt or "").strip(),
+            "existing_codes": existing_codes or [],
+        },
+        runtime_extra={"api_key": api_key},
+    )
+
+
+@register_handler("integrate_codebook_preview")
+async def _run_integrate_codebook_job(job_id: int, payload: dict) -> dict:
+    """Handler for ``job_type="integrate_codebook_preview"``.
+
+    Reads every source codebook's content (after sealing each one's head
+    via ``version_service.pin_parent``, the same read-as-parent discipline
+    ``_run_compare_codebooks_job`` applies) and asks the model to merge
+    them into one set of proposed codes, each claiming which source
+    code(s) it came from.
+
+    No batching -- a merge is inherently over ALL sources at once (see
+    ``codebook_generator.integrate_codebooks``'s docstring), so an
+    over-budget prompt fails loudly via ``ContextBudgetError`` rather than
+    being silently split.
+
+    Deliberately creates no ``File``, no ``ArtifactVersion``, no
+    ``codebook_codes`` row and no ``artifact_edges`` row -- same contract
+    as ``_run_codebook_preview_job``: a proposal is not an artifact, and
+    nothing becomes one until the researcher accepts and submits.
+    """
+    source_file_ids: list[int] = payload["source_file_ids"]
+    model = payload["model"]
+    prompt = payload.get("prompt", "")
+    api_key = payload["api_key"]
+    existing_codes: list[dict] = payload.get("existing_codes") or []
+
+    async with AsyncSessionLocal() as session:
+        # Read-as-parent: seal each source codebook's head before reading
+        # its content, so the merge can (eventually, via artifact_edges)
+        # pin exactly which revision of each source it was built from.
+        entries: list[tuple[str, str]] = []
+        # (codebook_1based, dedupe_key) -> that source codebook's schemaname,
+        # built from the codes this job actually read -- the ground truth
+        # _verify_proposal_sources checks a claimed source against.
+        source_index: dict[tuple[int, str], str] = {}
+        for i, file_id in enumerate(source_file_ids):
+            await version_service.pin_parent(session, file_id)
+            markdown = await version_service.read_codebook_markdown(session, file_id)
+            codes = await version_service.read_codes(session, file_id)
+            file_rec = await session.get(File, file_id)
+            display_name = (file_rec.filename if file_rec else None) or f"Codebook {i + 1}"
+            entries.append((display_name, markdown))
+            for code in codes:
+                key = (i + 1, _code_dedupe_key(code.family_name, code.name))
+                source_index[key] = file_rec.schemaname if file_rec else ""
+        await session.commit()
+
+    if not any(markdown.strip() for _, markdown in entries):
+        raise ValidationAppError("No content found in any of the selected codebooks")
+
+    codebook_blocks = _render_source_codebooks(entries)
+    existing_codes_rendered = _render_existing_codes(existing_codes)
+
+    system_prompt = codebook_generator_module.build_integrate_system_prompt(existing_codes_rendered)
+    user_prompt = codebook_generator_module.build_integrate_user_prompt(codebook_blocks, prompt)
+
+    # A merge is inherently over every source codebook at once (see
+    # codebook_generator.integrate_codebooks's docstring) -- no batching,
+    # so an over-budget prompt fails loudly rather than being silently
+    # split into a merge-of-merges that would also destroy per-code
+    # sources provenance.
+    if not context_window.prompt_fits(
+        model,
+        prompt_chars=len(system_prompt) + len(user_prompt),
+        output_reserve_tokens=context_window.BOUNDED_OUTPUT_TOKENS,
+    ):
+        raise ContextBudgetError(
+            f"These {len(source_file_ids)} codebooks are too large to integrate with {model}. "
+            "Choose a larger-context model or integrate fewer at a time."
+        )
+
+    result, system_prompt, rendered_prompt = await codebook_generator_module.integrate_codebooks(
+        codebook_blocks,
+        api_key,
+        prompt,
+        MODEL=model,
+        existing_codes=existing_codes_rendered,
+    )
+
+    seen = {_code_dedupe_key(c.get("family_name"), c.get("name")) for c in existing_codes}
+    proposals: list[dict] = []
+    for raw_proposal in parse_json_to_merge_proposals(str(result or "")):
+        key = _code_dedupe_key(raw_proposal.get("family_name"), raw_proposal.get("name"))
+        if key in seen:
+            continue
+        seen.add(key)
+        raw_proposal["sources"] = _verify_proposal_sources(raw_proposal.get("sources") or [], source_index)
+        proposals.append(raw_proposal)
+
+    return {
+        "proposals": proposals,
+        # Surfaced so `assist_service.record_assist_runs` can source an
+        # integrate editor's assist-provenance record from THIS job --
+        # never trusted from the client. See GAP-4/C2.
+        "system_prompt": system_prompt,
+        "user_instructions": prompt,
+        "prompt_meta": version_service.prompt_meta(rendered_prompt),
+        **context_window.coverage_result_fields({"batches_processed": 1, "batches_total": 1, "error": None}),
+    }
+
+
+async def create_integrated_codebook(
+    session: AsyncSession,
+    user_id: int,
+    *,
+    codebooks: list[str],
+    name: str,
+    description: str | None,
+    project_id: int | None,
+    codes: list[dict],
+    assist_runs: list[dict] | None = None,
+) -> File:
+    """Create a codebook the researcher assembled by reviewing a merge of
+    two or more existing codebooks (with or without help from the
+    integrate preview assistant).
+
+    Every accepted/copied code in ``codes`` mints a FRESH ``code_uid``/
+    ``family_uid`` on the client (see ``lib/codebookEditorState.js``'s
+    ``acceptProposal``/``copySourceCode``) -- never a source codebook's
+    own uid. This is enforced upstream, not re-checked here, but is worth
+    restating: ``_resolve_code_rows`` *accepts* a bare carried-over
+    ``code_uid`` (it satisfies the uid-or-is_new rule), so nothing would
+    fail if a caller got this wrong -- it would just make
+    ``codebook_codes`` rows for a brand-new File collide in identity with
+    rows on one of its parents, and the lineage/diff views would then
+    misread a 3-way merge as "the same code as" one arbitrarily-
+    privileged source. Per-code provenance stays recoverable without any
+    new storage: an accepted code's ``code_uid`` lands in this run's
+    ``artifact_assists.accepted_refs``, whose ``job_id`` points back at
+    the ``integrate_codebook_preview`` job whose ``result.proposals[].sources``
+    names the real source codes.
+
+    ``origin=edited`` with null ``model``/``system_prompt``/``prompt_meta``,
+    same reasoning as ``create_manual_codebook``: an assist during editing
+    is not the claim "a model produced this artifact". Lineage instead
+    goes through N ``artifact_edges`` rows (``relation=merged_from``,
+    ``role=merge_input``, ``position`` = selection order) -- one per
+    source codebook, via ``_materialize_codebook``'s ``parents``.
+    """
+    source_file_ids = await _resolve_source_codebooks(session, user_id, codebooks)
+
+    code_rows = _resolve_code_rows(codes)
+    file_rec, version = await _materialize_codebook(
+        session,
+        user_id=user_id,
+        parents=[
+            EdgeSpec(parent_file_id=fid, relation=RELATION_MERGED_FROM, role=ROLE_MERGE_INPUT, position=i)
+            for i, fid in enumerate(source_file_ids)
+        ],
+        name=name,
+        description=description,
+        project_id=project_id,
+        code_rows=code_rows,
+        message=f"Integrated from {len(source_file_ids)} codebooks",
+    )
+    if assist_runs:
+        await assist_service.record_assist_runs(
+            session,
+            user_id=user_id,
+            file_id=file_rec.id,
+            version_id=version.id,
+            stage=ASSIST_STAGE_INTEGRATE,
+            source_file_ids=source_file_ids,
+            runs=assist_runs,
+        )
+
+    await session.commit()
+    await session.refresh(file_rec)
+    return file_rec

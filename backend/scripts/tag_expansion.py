@@ -13,7 +13,6 @@ from backend.app.external.openrouter_client import chat_completion, retry_async
 from backend.app.external.response_parsers import strip_markdown_fences as _strip_json_fences
 from backend.scripts.openrouter_http import openrouter_user_message
 
-DEFAULT_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
 MAX_RETRIES = 3
 MAX_EXPANDED_TERMS = 50
 MAX_TERM_CHARS = 80
@@ -136,7 +135,7 @@ async def expand_tags_via_openrouter(
     if not api_key or not api_key.strip():
         raise TagExpansionError("API key is required for tag expansion", code=401)
 
-    chosen = (model or "").strip() or DEFAULT_MODEL
+    chosen = model
     user_payload = json.dumps(
         {"seed_tags": user_tags},
         ensure_ascii=False,

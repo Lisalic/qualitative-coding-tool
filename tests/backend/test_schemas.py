@@ -13,13 +13,16 @@ import pytest
 from pydantic import ValidationError
 
 from backend.app.api.schemas import (
+    AssistRunIn,
     CodebookCodeIn,
     CodebookPreviewRequest,
+    CodingEntryIn,
     FilterPreviewRequest,
     ManualCodebookRequest,
     ManualCodingRequest,
     ManualFilterRequest,
     RecodeItemsRequest,
+    SaveCodingRevisionRequest,
 )
 
 
@@ -30,7 +33,7 @@ from backend.app.api.schemas import (
 
 class TestFilterPreviewRequest:
     def _minimal(self, **overrides):
-        base = dict(api_key="k", database="proj_abc", model="m")
+        base = dict(api_key="k", database="proj_abc", model="m", include_prompt="p")
         base.update(overrides)
         return base
 
@@ -38,8 +41,11 @@ class TestFilterPreviewRequest:
         req = FilterPreviewRequest(**self._minimal())
         assert req.min_words == 0
         assert req.sample_percentage == 100.0
-        assert req.decided_post_ids == []
-        assert req.decided_comment_ids == []
+        assert req.included_post_ids == []
+        assert req.excluded_post_ids == []
+        assert req.included_comment_ids == []
+        assert req.excluded_comment_ids == []
+        assert req.use_examples is False
 
     @pytest.mark.parametrize("field", ["api_key", "database", "model"])
     def test_missing_required_field_raises(self, field: str) -> None:
@@ -62,10 +68,47 @@ class TestFilterPreviewRequest:
 
     def test_decided_ids_are_carried_through(self) -> None:
         req = FilterPreviewRequest(
-            **self._minimal(decided_post_ids=["p1", "p2"], decided_comment_ids=["c1"])
+            **self._minimal(
+                included_post_ids=["p1", "p2"],
+                included_comment_ids=["c1"],
+                excluded_post_ids=["p3"],
+                excluded_comment_ids=["c2"],
+            )
         )
-        assert req.decided_post_ids == ["p1", "p2"]
-        assert req.decided_comment_ids == ["c1"]
+        assert req.included_post_ids == ["p1", "p2"]
+        assert req.included_comment_ids == ["c1"]
+        assert req.excluded_post_ids == ["p3"]
+        assert req.excluded_comment_ids == ["c2"]
+
+    def test_no_criteria_no_tags_no_examples_rejected(self) -> None:
+        payload = self._minimal()
+        del payload["include_prompt"]
+        with pytest.raises(ValidationError):
+            FilterPreviewRequest(**payload)
+
+    def test_exclude_prompt_alone_is_sufficient(self) -> None:
+        payload = self._minimal()
+        del payload["include_prompt"]
+        req = FilterPreviewRequest(**payload, exclude_prompt="drop spam")
+        assert req.exclude_prompt == "drop spam"
+
+    def test_filter_tags_alone_is_sufficient(self) -> None:
+        payload = self._minimal()
+        del payload["include_prompt"]
+        req = FilterPreviewRequest(**payload, filter_tags="anxiety")
+        assert req.filter_tags == "anxiety"
+
+    def test_use_examples_without_prompts_is_valid_when_decisions_exist(self) -> None:
+        payload = self._minimal()
+        del payload["include_prompt"]
+        req = FilterPreviewRequest(**payload, use_examples=True, included_post_ids=["p1"])
+        assert req.use_examples is True
+
+    def test_use_examples_without_any_decision_rejected(self) -> None:
+        payload = self._minimal()
+        del payload["include_prompt"]
+        with pytest.raises(ValidationError):
+            FilterPreviewRequest(**payload, use_examples=True)
 
 
 # ---------------------------------------------------------------------------
@@ -75,14 +118,21 @@ class TestFilterPreviewRequest:
 
 class TestManualFilterRequest:
     def _minimal(self, **overrides):
-        base = dict(database="proj_abc", name="n", post_ids=["p1"])
+        base = dict(database="proj_abc", name="n", post_ids=["p1"], project_id=1)
         base.update(overrides)
         return base
 
     def test_minimal_valid_payload(self) -> None:
         req = ManualFilterRequest(**self._minimal())
         assert req.comment_ids == []
-        assert req.project_id is None
+        assert req.project_id == 1
+
+    def test_project_is_required(self) -> None:
+        # Every artifact belongs to a project -- there is no "no project".
+        payload = self._minimal()
+        payload.pop("project_id")
+        with pytest.raises(ValidationError):
+            ManualFilterRequest(**payload)
 
     def test_carries_no_api_key_or_model(self) -> None:
         # Submitting a manual filter involves no LLM call, unlike the
@@ -93,15 +143,17 @@ class TestManualFilterRequest:
 
     def test_at_least_one_row_required(self) -> None:
         with pytest.raises(ValidationError):
-            ManualFilterRequest(database="proj_abc", name="n")
+            ManualFilterRequest(database="proj_abc", name="n", project_id=1)
 
     def test_comment_ids_alone_satisfy_the_at_least_one_row_rule(self) -> None:
-        req = ManualFilterRequest(database="proj_abc", name="n", comment_ids=["c1"])
+        req = ManualFilterRequest(
+            database="proj_abc", name="n", comment_ids=["c1"], project_id=1
+        )
         assert req.post_ids == []
 
     def test_missing_name_raises(self) -> None:
         with pytest.raises(ValidationError):
-            ManualFilterRequest(database="proj_abc", post_ids=["p1"])
+            ManualFilterRequest(database="proj_abc", post_ids=["p1"], project_id=1)
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +202,7 @@ class TestManualCodebookRequest:
         return base
 
     def _minimal(self, **overrides):
-        base = dict(database="proj_abc", name="n", codes=[self._code()])
+        base = dict(database="proj_abc", name="n", codes=[self._code()], project_id=1)
         base.update(overrides)
         return base
 
@@ -166,7 +218,13 @@ class TestManualCodebookRequest:
 
     def test_at_least_one_code_required(self) -> None:
         with pytest.raises(ValidationError):
-            ManualCodebookRequest(database="proj_abc", name="n", codes=[])
+            ManualCodebookRequest(database="proj_abc", name="n", codes=[], project_id=1)
+
+    def test_project_is_required(self) -> None:
+        payload = self._minimal()
+        payload.pop("project_id")
+        with pytest.raises(ValidationError):
+            ManualCodebookRequest(**payload)
 
     def test_database_pattern_still_enforced(self) -> None:
         with pytest.raises(ValidationError):
@@ -180,7 +238,7 @@ class TestManualCodebookRequest:
 
 class TestManualCodingRequest:
     def _minimal(self, **overrides):
-        base = dict(database="proj_abc", codebook="123", report_name="r")
+        base = dict(database="proj_abc", codebook="123", report_name="r", project_id=1)
         base.update(overrides)
         return base
 
@@ -189,6 +247,12 @@ class TestManualCodingRequest:
         assert req.post_ids == []
         assert req.comment_ids == []
         assert req.sample_percentage == 100.0
+
+    def test_project_is_required(self) -> None:
+        payload = self._minimal()
+        payload.pop("project_id")
+        with pytest.raises(ValidationError):
+            ManualCodingRequest(**payload)
 
     def test_carries_no_api_key_or_model(self) -> None:
         # The coding editor's only creation path -- no classifier runs,
@@ -228,14 +292,107 @@ class TestManualCodingRequest:
 
 class TestRecodeItemsRequest:
     def test_minimal_valid_payload(self) -> None:
-        req = RecodeItemsRequest(api_key="k", item_ids=["p_1", "c_2"])
-        assert req.model is None
+        req = RecodeItemsRequest(api_key="k", item_ids=["p_1", "c_2"], model="m")
+        assert req.model == "m"
         assert req.methodology is None
 
     def test_missing_api_key_raises(self) -> None:
         with pytest.raises(ValidationError):
-            RecodeItemsRequest(item_ids=["p_1"])
+            RecodeItemsRequest(item_ids=["p_1"], model="m")
 
     def test_at_least_one_item_id_required(self) -> None:
         with pytest.raises(ValidationError):
-            RecodeItemsRequest(api_key="k", item_ids=[])
+            RecodeItemsRequest(api_key="k", item_ids=[], model="m")
+
+    def test_missing_model_raises(self) -> None:
+        with pytest.raises(ValidationError):
+            RecodeItemsRequest(api_key="k", item_ids=["p_1"])
+
+
+# ---------------------------------------------------------------------------
+# CodingEntryIn -- B1 per-quote coder attribution
+# ---------------------------------------------------------------------------
+
+
+class TestCodingEntryIn:
+    def _minimal(self, **overrides):
+        base = dict(code_uid="u1", quote="e", start_offset=0, end_offset=1)
+        base.update(overrides)
+        return base
+
+    def test_defaults_to_human_with_no_job(self) -> None:
+        entry = CodingEntryIn(**self._minimal())
+        assert entry.coder == "human"
+        assert entry.assist_job_id is None
+
+    def test_ai_requires_assist_job_id(self) -> None:
+        with pytest.raises(ValidationError):
+            CodingEntryIn(**self._minimal(coder="ai"))
+
+    def test_ai_with_assist_job_id_is_valid(self) -> None:
+        entry = CodingEntryIn(**self._minimal(coder="ai", assist_job_id=7))
+        assert entry.coder == "ai"
+        assert entry.assist_job_id == 7
+
+    def test_human_cannot_carry_an_assist_job_id(self) -> None:
+        with pytest.raises(ValidationError):
+            CodingEntryIn(**self._minimal(coder="human", assist_job_id=7))
+
+    def test_unknown_coder_value_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            CodingEntryIn(**self._minimal(coder="robot", assist_job_id=1))
+
+
+# ---------------------------------------------------------------------------
+# AssistRunIn / SaveCodingRevisionRequest -- C2 provenance channel
+# ---------------------------------------------------------------------------
+
+
+class TestAssistRunIn:
+    def test_minimal_valid_payload(self) -> None:
+        run = AssistRunIn(job_id=1)
+        assert run.proposed_count == 0
+        assert run.accepted_count == 0
+        assert run.dismissed_count == 0
+        assert run.accepted_refs is None
+
+    def test_job_id_required(self) -> None:
+        with pytest.raises(ValidationError):
+            AssistRunIn()
+
+    def test_negative_counts_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            AssistRunIn(job_id=1, accepted_count=-1)
+
+    def test_carries_no_model_or_prompt_fields(self) -> None:
+        run = AssistRunIn(job_id=1)
+        assert not hasattr(run, "model")
+        assert not hasattr(run, "system_prompt")
+
+
+class TestSaveCodingRevisionRequest:
+    def test_carries_no_model_or_job_id(self) -> None:
+        """Regression guard for the removed leak -- see
+        versioning_models.ArtifactAssist's docstring for why model/job_id
+        no longer belong on this request.
+        """
+        req = SaveCodingRevisionRequest(codes=[{"is_new": True, "family_name": "F", "family_is_new": True, "name": "C"}])
+        assert not hasattr(req, "model")
+        assert not hasattr(req, "job_id")
+
+    def test_assist_runs_defaults_empty(self) -> None:
+        req = SaveCodingRevisionRequest(codes=[{"is_new": True, "family_name": "F", "family_is_new": True, "name": "C"}])
+        assert req.assist_runs == []
+
+    def test_assist_runs_accepted(self) -> None:
+        req = SaveCodingRevisionRequest(
+            codes=[{"is_new": True, "family_name": "F", "family_is_new": True, "name": "C"}],
+            assist_runs=[{"job_id": 5, "accepted_count": 2}],
+        )
+        assert len(req.assist_runs) == 1
+        assert req.assist_runs[0].job_id == 5
+
+    def test_at_least_one_of_codes_rows_still_required(self) -> None:
+        with pytest.raises(ValidationError):
+            SaveCodingRevisionRequest()
+

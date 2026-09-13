@@ -145,14 +145,19 @@ class _StrippingModel(BaseModel):
 class FilterPreviewRequest(_StrippingModel):
     """Payload for ``POST /api/filter-preview/``.
 
-    The AI-filter knobs (prompt, tags, model, ``min_words``, sampling,
-    content scope), plus the two lists that make
-    it a *preview*: ``decided_post_ids``/``decided_comment_ids`` are the
-    rows the user has already explicitly included or excluded in the
-    editor, and are removed from the candidate pool before sampling --
-    so re-running the tool never re-litigates a decision the human
+    The AI-triage knobs (separate ``include_prompt``/``exclude_prompt``,
+    tags, model, ``min_words``, sampling, content scope), plus the four
+    lists that make it a *preview*: ``included_*_ids``/``excluded_*_ids``
+    are the rows the user has already explicitly included or excluded in
+    the editor. They are removed from the candidate pool before sampling
+    -- so re-running the tool never re-litigates a decision the human
     already made, and each run only proposes rows that are still
     undecided.
+
+    ``use_examples`` selects "Autofill with AI": when true, the two
+    prompts are ignored and the already-decided rows are rendered as
+    labelled "similar examples" instead, so the model imitates the
+    researcher's own judgement rather than following new criteria.
 
     The frontend builder is ``buildFilterPreviewPayload`` in
     ``frontend/src/lib/apiContracts.js``.
@@ -161,18 +166,30 @@ class FilterPreviewRequest(_StrippingModel):
     api_key: str = Field(min_length=1, description="OpenRouter API key from the client")
     database: str = Field(pattern=_SCHEMA_PATTERN, description="Source schema (proj_<hex>)")
     model: str = Field(min_length=1, description="OpenRouter model slug")
-    prompt: Optional[str] = Field(default=None)
+    include_prompt: Optional[str] = Field(default=None)
+    exclude_prompt: Optional[str] = Field(default=None)
+    use_examples: bool = Field(
+        default=False, description="Autofill from prior decisions instead of the prompts above"
+    )
     filter_tags: Optional[str] = Field(default=None)
     min_words: int = Field(default=0, ge=0)
     sample_percentage: float = Field(default=100.0, ge=1.0, le=100.0)
     content_scope: ContentScope = _content_scope_field()
-    decided_post_ids: list[str] = Field(
+    included_post_ids: list[str] = Field(
         default_factory=list,
-        description="Submission ids the user already included or excluded",
+        description="Submission ids the user already included",
     )
-    decided_comment_ids: list[str] = Field(
+    included_comment_ids: list[str] = Field(
         default_factory=list,
-        description="Comment ids the user already included or excluded",
+        description="Comment ids the user already included",
+    )
+    excluded_post_ids: list[str] = Field(
+        default_factory=list,
+        description="Submission ids the user already excluded",
+    )
+    excluded_comment_ids: list[str] = Field(
+        default_factory=list,
+        description="Comment ids the user already excluded",
     )
 
     @field_validator("database", mode="before")
@@ -185,6 +202,26 @@ class FilterPreviewRequest(_StrippingModel):
             value = value[:-3]
         return value
 
+    @model_validator(mode="after")
+    def _has_criteria(self):
+        """Mirrors ``data_service.start_filter_preview_job``'s guard, so a
+        request with nothing to go on fails fast with a 422 instead of
+        reaching the job queue.
+        """
+        has_decisions = bool(
+            self.included_post_ids
+            or self.included_comment_ids
+            or self.excluded_post_ids
+            or self.excluded_comment_ids
+        )
+        if self.use_examples and not has_decisions:
+            raise ValueError("Autofill needs at least one row already included or excluded")
+        if not self.use_examples and not (self.include_prompt or "").strip() and not (
+            self.exclude_prompt or ""
+        ).strip() and not (self.filter_tags or "").strip():
+            raise ValueError("An include or exclude criterion is required")
+        return self
+
 
 class FilterPreviewResponse(BaseModel):
     """Result of a finished ``filter_preview`` job, read back from
@@ -193,12 +230,34 @@ class FilterPreviewResponse(BaseModel):
     Ids only -- no ``file``, because nothing was created.
     """
 
-    post_ids: list[str] = Field(default_factory=list)
-    comment_ids: list[str] = Field(default_factory=list)
+    include_post_ids: list[str] = Field(default_factory=list)
+    include_comment_ids: list[str] = Field(default_factory=list)
+    exclude_post_ids: list[str] = Field(default_factory=list)
+    exclude_comment_ids: list[str] = Field(default_factory=list)
     partial: bool = False
     partial_error: Optional[str] = None
     batches_processed: Optional[dict[str, int]] = None
     batches_total: Optional[dict[str, int]] = None
+
+
+class AssistRunIn(_StrippingModel):
+    """One assistant run's accept/dismiss bookkeeping, as recorded by an
+    editor -- the C2 provenance channel
+    (``services/assist_service.py``) that closes GAP-4 without touching
+    ``origin``/``model`` on the version itself.
+
+    Deliberately carries no ``model``/``system_prompt``/prompt text:
+    those are read server-side from the referenced ``job_id``'s own
+    payload/result, never trusted from the client (see
+    ``assist_service.record_assist_runs``) -- a request can name which
+    run happened, not what that run produced.
+    """
+
+    job_id: int
+    proposed_count: int = Field(default=0, ge=0)
+    accepted_count: int = Field(default=0, ge=0)
+    dismissed_count: int = Field(default=0, ge=0)
+    accepted_refs: Optional[list[str]] = None
 
 
 class ManualFilterRequest(_StrippingModel):
@@ -209,7 +268,9 @@ class ManualFilterRequest(_StrippingModel):
     produced it. There is no prompt or model here by design -- provenance
     for an AI assist during editing is not the same claim as "an LLM
     produced this artifact", so the resulting version is recorded as
-    ``origin="edited"`` with no ``system_prompt``.
+    ``origin="edited"`` with no ``system_prompt``. ``assist_runs`` is the
+    separate channel that DOES record the assist -- see
+    ``AssistRunIn``.
 
     The frontend builder is ``buildManualFilterPayload`` in
     ``frontend/src/lib/apiContracts.js``.
@@ -218,9 +279,10 @@ class ManualFilterRequest(_StrippingModel):
     database: str = Field(pattern=_SCHEMA_PATTERN, description="Source schema (proj_<hex>)")
     name: str = Field(min_length=1, description="Display name for the new filtered file")
     description: Optional[str] = Field(default=None)
-    project_id: Optional[int] = Field(default=None)
+    project_id: int = Field(description="Owning project -- every artifact belongs to one")
     post_ids: list[str] = Field(default_factory=list)
     comment_ids: list[str] = Field(default_factory=list)
+    assist_runs: list[AssistRunIn] = Field(default_factory=list)
 
     @field_validator("database", mode="before")
     @classmethod
@@ -326,7 +388,7 @@ class CodebookPreviewRequest(_StrippingModel):
     sample_percentage: float = Field(default=100.0, ge=1.0, le=100.0)
     content_scope: ContentScope = _content_scope_field()
     # Legitimately empty on a first pass, so not required -- same reasoning
-    # as FilterPreviewRequest.decided_post_ids.
+    # as FilterPreviewRequest.included_post_ids.
     existing_codes: list[ExistingCodeRef] = Field(default_factory=list)
 
     @field_validator("database", mode="before")
@@ -360,16 +422,141 @@ class CodebookPreviewResponse(BaseModel):
     batches_total: Optional[dict[str, int]] = None
 
 
+def _validate_codebook_schema_list(value: Any) -> Any:
+    """Normalize a list of source-codebook refs: strip each entry (via
+    ``_strip_db_suffix_value``) and drop exact duplicates while
+    preserving order. Shared by ``IntegrateCodebookPreviewRequest`` and
+    ``IntegrateCodebookRequest`` so both agree on what "the same
+    codebook selected twice" means.
+    """
+    if not isinstance(value, list):
+        return value
+    seen: set[str] = set()
+    normalized: list[Any] = []
+    for entry in value:
+        cleaned = _strip_db_suffix_value(entry)
+        if isinstance(cleaned, str):
+            if cleaned in seen:
+                continue
+            seen.add(cleaned)
+        normalized.append(cleaned)
+    return normalized
+
+
+class SourceCodeRef(BaseModel):
+    """One source code a merged proposal claims to come from, already
+    resolved server-side against the codebook the model actually read --
+    see ``codebook_service._verify_proposal_sources``. ``codebook`` is
+    that source codebook's ``schemaname``, so the client can key display
+    names and "already merged" coverage off the same ref it sent in the
+    request.
+    """
+
+    codebook: str
+    family_name: str = ""
+    name: str
+
+
+class MergedCodeProposal(BaseModel):
+    """One merged code the integrate-codebooks preview job proposes.
+    Same seven content fields as ``ProposedCode``, plus the provenance
+    that is the whole point of a merge review. Carries no ``code_uid``
+    for the same reason ``ProposedCode`` doesn't -- and accepting one
+    mints a FRESH identity rather than carrying any source's across (see
+    ``codebook_service.create_integrated_codebook``).
+    """
+
+    family_name: str = ""
+    name: str
+    definition: Optional[str] = None
+    inclusion: Optional[str] = None
+    exclusion: Optional[str] = None
+    keywords: Optional[str] = None
+    example: Optional[str] = None
+    sources: list[SourceCodeRef] = Field(default_factory=list)
+    rationale: Optional[str] = None
+
+
+class IntegrateCodebookPreviewRequest(_StrippingModel):
+    """Payload for ``POST /api/integrate-codebook-preview/`` -- ask the
+    model to merge two or more codebooks into a review tray of proposed
+    codes. Creates nothing; see
+    ``codebook_service._run_integrate_codebook_job``.
+    """
+
+    api_key: str = Field(min_length=1)
+    codebooks: list[str] = Field(min_length=2, description="Source codebook schema names to merge")
+    model: str = Field(min_length=1)
+    prompt: Optional[str] = None
+    existing_codes: list[ExistingCodeRef] = Field(default_factory=list)
+
+    @field_validator("codebooks", mode="before")
+    @classmethod
+    def _normalize_codebooks(cls, value: Any) -> Any:
+        return _validate_codebook_schema_list(value)
+
+    @field_validator("codebooks")
+    @classmethod
+    def _codebooks_are_proj_schemas(cls, value: list[str]) -> list[str]:
+        for ref in value:
+            if not re.match(_SCHEMA_PATTERN, ref or ""):
+                raise ValueError(f"Invalid codebook reference: {ref!r}")
+        return value
+
+
+class IntegrateCodebookPreviewResponse(BaseModel):
+    """Job result read back from ``GET /api/jobs/{id}``."""
+
+    proposals: list[MergedCodeProposal] = []
+    partial: bool = False
+    partial_error: Optional[str] = None
+    batches_processed: Optional[dict[str, int]] = None
+    batches_total: Optional[dict[str, int]] = None
+
+
+class IntegrateCodebookRequest(_StrippingModel):
+    """Payload for ``POST /api/codebook/integrate`` -- create a codebook
+    from the integrate editor's hand-reviewed merge draft. ``assist_runs``
+    (see ``AssistRunIn``) is the C2 provenance channel for any
+    AI-proposed merges that were accepted into ``codes``; it never
+    changes ``codes``' own ``origin=edited`` recording.
+    """
+
+    codebooks: list[str] = Field(min_length=2, description="Source codebook schema names being integrated")
+    name: str = Field(min_length=1)
+    description: Optional[str] = None
+    project_id: int = Field(description="Owning project -- every artifact belongs to one")
+    codes: list[CodebookCodeIn] = Field(min_length=1)
+    assist_runs: list[AssistRunIn] = Field(default_factory=list)
+
+    @field_validator("codebooks", mode="before")
+    @classmethod
+    def _normalize_codebooks(cls, value: Any) -> Any:
+        return _validate_codebook_schema_list(value)
+
+    @field_validator("codebooks")
+    @classmethod
+    def _codebooks_are_proj_schemas(cls, value: list[str]) -> list[str]:
+        for ref in value:
+            if not re.match(_SCHEMA_PATTERN, ref or ""):
+                raise ValueError(f"Invalid codebook reference: {ref!r}")
+        return value
+
+
 class ManualCodebookRequest(_StrippingModel):
     """Payload for ``POST /api/codebook/manual`` -- create a codebook from
-    the editor's hand-composed draft.
+    the editor's hand-composed draft. ``assist_runs`` (see
+    ``AssistRunIn``) is the C2 provenance channel for any AI-suggested
+    codes that were accepted into ``codes``; it never changes ``codes``'
+    own ``origin=edited`` recording.
     """
 
     database: str = Field(pattern=_SCHEMA_PATTERN)
     name: str = Field(min_length=1)
     description: Optional[str] = None
-    project_id: Optional[int] = None
+    project_id: int = Field(description="Owning project -- every artifact belongs to one")
     codes: list[CodebookCodeIn] = Field(min_length=1)
+    assist_runs: list[AssistRunIn] = Field(default_factory=list)
 
     @field_validator("database", mode="before")
     @classmethod
@@ -389,10 +576,10 @@ class CompareCodebooksRequest(_StrippingModel):
     codebook_b: str = Field(pattern=_SCHEMA_PATTERN)
     api_key: str = Field(min_length=1)
     name: str = Field(min_length=1, description="Display name for the comparison")
-    model: Optional[str] = Field(default=None)
+    model: str = Field(min_length=1, description="OpenRouter model slug")
     prompt: Optional[str] = Field(default=None)
     description: Optional[str] = Field(default=None)
-    project_id: Optional[int] = Field(default=None)
+    project_id: int = Field(description="Owning project -- every artifact belongs to one")
 
 
 # ---------------------------------------------------------------------------
@@ -446,8 +633,17 @@ class CodingEntryIn(_StrippingModel):
 
     ``code_uid`` (not a name string) identifies the code -- it must
     resolve against the coding artifact's own current codebook snapshot
-    (``coding_service.save_coding_rows`` rejects one that doesn't), so a
-    code rename never orphans a manually-entered quote.
+    (``coding_service.save_coding_revision`` rejects one that doesn't), so
+    a code rename never orphans a manually-entered quote.
+
+    ``coder``/``assist_job_id`` are B1's per-quote attribution (see
+    ``storage_models.CodingEntry``): a hand-added or hand-edited quote is
+    ``coder="human"`` with no job; an accepted-as-is AI recode proposal
+    is ``coder="ai"`` with the recode's ``job_id``, which
+    ``coding_service.save_coding_revision`` validates the same way
+    ``assist_service`` validates an ``AssistRunIn`` -- the client names
+    which job produced it, the server confirms that job actually ran
+    against this artifact before trusting the claim.
     """
 
     code_uid: str = Field(min_length=1)
@@ -455,6 +651,8 @@ class CodingEntryIn(_StrippingModel):
     start_offset: int = Field(ge=0)
     end_offset: int = Field(gt=0)
     notes: Optional[str] = None
+    coder: Literal["human", "ai"] = "human"
+    assist_job_id: Optional[int] = None
 
     @field_validator("end_offset")
     @classmethod
@@ -463,6 +661,14 @@ class CodingEntryIn(_StrippingModel):
         if start_offset is not None and end_offset <= start_offset:
             raise ValueError("end_offset must be greater than start_offset")
         return end_offset
+
+    @model_validator(mode="after")
+    def _ai_requires_job(self):
+        if self.coder == "ai" and not self.assist_job_id:
+            raise ValueError("coder='ai' requires assist_job_id")
+        if self.coder == "human" and self.assist_job_id is not None:
+            raise ValueError("assist_job_id is only valid with coder='ai'")
+        return self
 
 
 class CodingRowUpdate(_StrippingModel):
@@ -512,10 +718,13 @@ class CodebookCodeIn(_StrippingModel):
 
 
 class SaveCodebookRequest(_StrippingModel):
-    """Payload for ``PUT /api/codebook/{ref}``."""
+    """Payload for ``PUT /api/codebook/{ref}``. ``assist_runs`` is the
+    same C2 provenance channel as ``ManualCodebookRequest`` -- Refine
+    mode is an equally AI-assisted path as New."""
 
     codes: list[CodebookCodeIn] = Field(min_length=1)
     display_name: Optional[str] = None
+    assist_runs: list[AssistRunIn] = Field(default_factory=list)
 
 
 class ImportCodebookRequest(_StrippingModel):
@@ -532,9 +741,15 @@ class SaveCodingRevisionRequest(_StrippingModel):
     for a coding artifact's editing session: an updated codebook
     snapshot, updated row coding, or both together, committed as at most
     one new ``artifact_versions`` row (see
-    ``coding_service.save_coding_revision``). ``model``/``job_id`` are
-    optional AI provenance to attach to that version when the saved rows
-    include AI-recode proposals the user reviewed and kept.
+    ``coding_service.save_coding_revision``).
+
+    No ``model``/``job_id`` here any more -- that used to be the one
+    place an AI assist leaked onto an ``origin=edited`` version's
+    ``model`` field, which is exactly what the C2 design forbids (see
+    ``versioning_models.ArtifactAssist``). ``assist_runs`` (see
+    ``AssistRunIn``) is the replacement channel, and each accepted
+    entry's own attribution travels on it via
+    ``CodingEntryIn.coder``/``assist_job_id``.
 
     At least one of ``codes``/``rows`` must be given -- a request with
     neither has nothing to save.
@@ -542,8 +757,7 @@ class SaveCodingRevisionRequest(_StrippingModel):
 
     codes: Optional[list[CodebookCodeIn]] = None
     rows: Optional[list[CodingRowUpdate]] = None
-    model: Optional[str] = None
-    job_id: Optional[int] = None
+    assist_runs: list[AssistRunIn] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _at_least_one(self):
@@ -586,7 +800,7 @@ class RecodeItemsRequest(_StrippingModel):
 
     api_key: str = Field(min_length=1)
     item_ids: list[str] = Field(min_length=1)
-    model: Optional[str] = None
+    model: str = Field(min_length=1, description="OpenRouter model slug")
     methodology: Optional[str] = None
 
 
@@ -607,7 +821,7 @@ class ManualCodingRequest(_StrippingModel):
     )
     report_name: str = Field(min_length=1, description="Display name for the coding output")
     description: Optional[str] = None
-    project_id: Optional[int] = None
+    project_id: int = Field(description="Owning project -- every artifact belongs to one")
     sample_percentage: float = Field(default=100.0, ge=1.0, le=100.0)
     content_scope: ContentScope = _content_scope_field()
     # Explicit ids win when either list is non-empty; otherwise the rows

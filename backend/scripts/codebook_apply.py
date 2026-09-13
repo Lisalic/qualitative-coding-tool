@@ -1,13 +1,11 @@
 from pydantic import ValidationError
 
-from backend.app.ai_models import model_slug_at
 from backend.app.api.schemas import AICodingPayload
 from backend.app.external import context_window
 from backend.app.external.openrouter_client import json_chat_completion
 from backend.app.external.response_parsers import parse_json_object
 from backend.app.jobs.progress import ProgressTracker
 
-FREE_MODEL = model_slug_at(0)
 MAX_RETRIES = 2
 
 # JSON Schema for the strict-decoding tier of the compliance ladder (see
@@ -38,7 +36,7 @@ CODING_JSON_SCHEMA = {
 }
 
 
-async def get_client(system_prompt: str, user_prompt: str, api_key: str, model: str = FREE_MODEL) -> str:
+async def get_client(system_prompt: str, user_prompt: str, api_key: str, model: str = "") -> str:
     if not api_key:
         raise ValueError("OpenRouter API key is required")
 
@@ -165,7 +163,7 @@ async def classify_posts(
         "- Do not invent an item_id, a code, or a quote that doesn't genuinely appear in the input."
     )
 
-    chosen_model = model or FREE_MODEL
+    chosen_model = model
 
     # Reserve room for everything the prompt repeats in every batch (the
     # codebook and methodology can themselves be large) so only the
