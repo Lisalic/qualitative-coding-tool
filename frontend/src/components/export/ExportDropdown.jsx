@@ -23,10 +23,10 @@ export default function ExportDropdown({ fileId, artifactType, versionNo, label 
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const handleDownload = async (targetType, format) => {
+  const handleDownload = async (targetType, format, extraParams) => {
     setError(null);
     setOpen(false);
-    const path = buildExportPath(fileId, targetType, format, versionNo);
+    const path = buildExportPath(fileId, targetType, format, versionNo, extraParams);
 
     try {
       const res = await apiFetch(path);
@@ -88,7 +88,7 @@ export default function ExportDropdown({ fileId, artifactType, versionNo, label 
                 idx > 0 ? "border-t border-line" : ""
               }`}
               role="menuitem"
-              onClick={() => handleDownload(opt.target, opt.format)}
+              onClick={() => handleDownload(opt.target, opt.format, opt.extraParams)}
             >
               {opt.label}
             </button>

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from backend.app.core.exceptions import NotFoundError, ValidationAppError
 from backend.app.database import File, User
 from backend.app.services import export_service, version_service
-from backend.app.storage_models import CodingEntry, RowMemo
+from backend.app.storage_models import CodingEntry, RowMemo, Submission
 
 
 @pytest.fixture()
@@ -191,10 +191,10 @@ async def test_export_coding_with_entries(session, user_id):
         session, coding_file.id, user_id, export_format="csv"
     )
     assert media == "text/csv; charset=utf-8"
-    assert "entry_id,row_type,post_id,code_uid,code,quote" in csv_out
+    assert "file_id,version_no,entry_id,row_type,post_id,code_uid,code" in csv_out
     assert "A memorable quote" in csv_out
     assert "post_100" in csv_out
-    assert filename == "coded_data_v1_coding.csv"
+    assert filename == "coded_data_v1_segments_long.csv"
 
     json_out, media_j, filename_j = await export_service.export_coding(
         session, coding_file.id, user_id, export_format="json"
@@ -202,10 +202,11 @@ async def test_export_coding_with_entries(session, user_id):
     assert media_j == "application/json; charset=utf-8"
     data = json.loads(json_out)
     assert data["file_id"] == coding_file.id
+    assert data["layout"] == "long"
     assert len(data["entries"]) == 1
     assert data["entries"][0]["quote"] == "A memorable quote"
     assert data["entries"][0]["notes"] == "Important note"
-    assert filename_j == "coded_data_v1_coding.json"
+    assert filename_j == "coded_data_v1_segments_long.json"
 
 
 @pytest.mark.asyncio
@@ -277,9 +278,9 @@ async def test_export_summary(session, user_id):
         session, coding_file.id, user_id, export_format="csv"
     )
     lines = csv_out.strip().split("\r\n")
-    assert lines[0] == "code,frequency"
-    assert lines[1] == "Theme A,2"
-    assert lines[2] == "Theme B,1"
+    assert lines[0] == "code_uid,name,family_uid,family_name,frequency,document_count"
+    assert lines[1] == "a,Theme A,,,2,2"
+    assert lines[2] == "b,Theme B,,,1,1"
     assert filename == "coded_data_summary.csv"
 
     json_out, _, _ = await export_service.export_summary(
@@ -287,8 +288,8 @@ async def test_export_summary(session, user_id):
     )
     data = json.loads(json_out)
     assert data["summary"] == [
-        {"code": "Theme A", "frequency": 2},
-        {"code": "Theme B", "frequency": 1},
+        {"code_uid": "a", "name": "Theme A", "family_uid": "", "family_name": "", "frequency": 2, "document_count": 2},
+        {"code_uid": "b", "name": "Theme B", "family_uid": "", "family_name": "", "frequency": 1, "document_count": 1},
     ]
 
 
@@ -394,7 +395,9 @@ async def test_export_summary_with_historical_version(session, user_id):
     )
     data_v1 = json.loads(json_v1)
     assert data_v1["version_no"] == 1
-    assert data_v1["summary"] == [{"code": "Theme A", "frequency": 1}]
+    assert data_v1["summary"] == [
+        {"code_uid": "a", "name": "Theme A", "family_uid": "", "family_name": "", "frequency": 1, "document_count": 1}
+    ]
     assert fn_v1 == "hist_summary_v1_summary.json"
 
     # Historical summary for version 2
@@ -403,5 +406,185 @@ async def test_export_summary_with_historical_version(session, user_id):
     )
     data_v2 = json.loads(json_v2)
     assert data_v2["version_no"] == 2
-    assert data_v2["summary"] == [{"code": "Theme B", "frequency": 2}]
+    assert data_v2["summary"] == [
+        {"code_uid": "b", "name": "Theme B", "family_uid": "", "family_name": "", "frequency": 2, "document_count": 2}
+    ]
     assert fn_v2 == "hist_summary_v2_summary.json"
+
+
+@pytest.mark.asyncio
+async def test_export_codebook_unknown_version_no_is_404(session, user_id):
+    """A version_no that doesn't exist must 404, not silently export empty
+    content as if the request had succeeded."""
+    file_rec = await _make_file(session, user_id, "cb.csv", "codebook")
+    await version_service.commit_codebook_version(
+        session, file_id=file_rec.id, author_user_id=user_id, origin="manual", codes=[]
+    )
+    with pytest.raises(NotFoundError):
+        await export_service.export_codebook(session, file_rec.id, user_id, version_no=99, export_format="csv")
+
+
+@pytest.mark.asyncio
+async def test_export_coding_unknown_version_no_is_404(session, user_id):
+    coding_file = await _make_file(session, user_id, "coding.csv", "coding")
+    await version_service.commit_coding_version(
+        session, file_id=coding_file.id, author_user_id=user_id, origin="manual"
+    )
+    with pytest.raises(NotFoundError):
+        await export_service.export_coding(session, coding_file.id, user_id, version_no=99, export_format="csv")
+
+
+@pytest.mark.asyncio
+async def test_export_summary_unknown_version_no_is_404(session, user_id):
+    coding_file = await _make_file(session, user_id, "coding.csv", "coding")
+    await version_service.commit_coding_version(
+        session, file_id=coding_file.id, author_user_id=user_id, origin="manual"
+    )
+    with pytest.raises(NotFoundError):
+        await export_service.export_summary(session, coding_file.id, user_id, version_no=99, export_format="csv")
+
+
+@pytest.mark.asyncio
+async def test_export_coding_privacy_flags_default_off(session, user_id):
+    """source_text and author are opt-in, not opt-out."""
+    coding_file = await _make_file(session, user_id, "coded_data.csv", "coding")
+    await version_service.commit_coding_version(
+        session, file_id=coding_file.id, author_user_id=user_id, origin="manual"
+    )
+    session.add(Submission(file_id=coding_file.id, id="p1", title="t", selftext="secret body", author="alice", word_count=2))
+    session.add(
+        CodingEntry(
+            file_id=coding_file.id, row_type="submission", post_id="p1", code="A", code_uid="a",
+            quote="q", start_offset=0, end_offset=1, valid_from=1, valid_to=None,
+        )
+    )
+    await session.commit()
+
+    csv_out, _, _ = await export_service.export_coding(session, coding_file.id, user_id, export_format="csv")
+    assert "source_text" not in csv_out
+    assert "secret body" not in csv_out
+    assert "author" not in csv_out
+    assert "alice" not in csv_out
+
+    csv_opt_in, _, _ = await export_service.export_coding(
+        session, coding_file.id, user_id, export_format="csv", include_source_text=True, include_author=True
+    )
+    assert "secret body" in csv_opt_in
+    assert "alice" in csv_opt_in
+
+
+@pytest.mark.asyncio
+async def test_export_coding_wide_layout_includes_uncoded_rows(session, user_id):
+    coding_file = await _make_file(session, user_id, "coded_data.csv", "coding")
+    codes = [
+        _make_code_row("a", "Theme A", position=1),
+        _make_code_row("b", "Theme B", position=2),
+    ]
+    await version_service.commit_codebook_version(
+        session, file_id=coding_file.id, author_user_id=user_id, origin="manual", codes=codes
+    )
+    await version_service.commit_coding_version(
+        session, file_id=coding_file.id, author_user_id=user_id, origin="manual"
+    )
+    # p1 is coded with "a"; p2 has no coding_entries at all -- wide format
+    # must still surface it as an uncoded row (long format would omit it).
+    session.add(Submission(file_id=coding_file.id, id="p1", title="t1", selftext="b1", word_count=1))
+    session.add(Submission(file_id=coding_file.id, id="p2", title="t2", selftext="b2", word_count=1))
+    session.add(
+        CodingEntry(
+            file_id=coding_file.id, row_type="submission", post_id="p1", code="Theme A", code_uid="a",
+            quote="q", start_offset=0, end_offset=1, valid_from=1, valid_to=None,
+        )
+    )
+    await session.commit()
+
+    csv_out, _, filename = await export_service.export_coding(
+        session, coding_file.id, user_id, export_format="csv", layout="wide"
+    )
+    assert filename.endswith("_matrix_wide.csv")
+    lines = csv_out.strip().split("\r\n")
+    assert lines[0] == "row_type,post_id,is_coded,total_codes,code_a,code_b"
+    rows_by_post = {line.split(",")[1]: line for line in lines[1:]}
+    assert rows_by_post["p1"] == "submission,p1,1,1,1,0"
+    assert rows_by_post["p2"] == "submission,p2,0,0,0,0"
+
+    json_out, _, _ = await export_service.export_coding(
+        session, coding_file.id, user_id, export_format="json", layout="wide"
+    )
+    data = json.loads(json_out)
+    assert data["layout"] == "wide"
+    assert len(data["rows"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_export_project_bundle_is_deterministic_and_privacy_scoped(session, user_id):
+    from backend.app.database import Project, async_link_file_to_project
+
+    project = Project(user_id=user_id, projectname="My Project", description="desc")
+    session.add(project)
+    await session.commit()
+    await session.refresh(project)
+
+    cb_file = await _make_file(session, user_id, "cb.csv", "codebook")
+    await version_service.commit_codebook_version(
+        session, file_id=cb_file.id, author_user_id=user_id, origin="manual",
+        codes=[_make_code_row("a", "Theme A", position=1)],
+    )
+    coding_file = await _make_file(session, user_id, "coding.csv", "coding")
+    await version_service.commit_coding_version(
+        session, file_id=coding_file.id, author_user_id=user_id, origin="manual"
+    )
+    session.add(Submission(file_id=coding_file.id, id="p1", title="t", selftext="body", author="alice", word_count=1))
+    session.add(
+        CodingEntry(
+            file_id=coding_file.id, row_type="submission", post_id="p1", code="Theme A", code_uid="a",
+            quote="q", start_offset=0, end_offset=1, valid_from=1, valid_to=None,
+        )
+    )
+    await session.commit()
+
+    await async_link_file_to_project(session, cb_file.id, project.id)
+    await async_link_file_to_project(session, coding_file.id, project.id)
+    await session.commit()
+
+    bundle1, media, filename = await export_service.export_project_bundle(session, project.id, user_id)
+    assert media == "application/zip"
+    assert filename == "my_project_project_bundle.zip"
+
+    bundle2, _, _ = await export_service.export_project_bundle(session, project.id, user_id)
+    assert bundle1 == bundle2, "identical project state must produce byte-identical bundles"
+
+    import zipfile
+    import io as _io
+
+    with zipfile.ZipFile(_io.BytesIO(bundle1)) as zf:
+        names = zf.namelist()
+        assert "manifest.json" in names
+        assert "lineage/project_lineage.json" in names
+        assert any(n.endswith("_codebook.csv") for n in names)
+        assert any(n.endswith("_segments_long.csv") for n in names)
+        assert any(n.endswith("_matrix_wide.csv") for n in names)
+
+        manifest = json.loads(zf.read("manifest.json"))
+        assert manifest["privacy_flags"] == {"include_source_text": False, "include_author": False}
+        for entry in manifest["files"]:
+            content = zf.read(entry["path"])
+            assert len(content) == entry["bytes"]
+
+        long_csv = next(n for n in names if n.endswith("_segments_long.csv"))
+        assert "alice" not in zf.read(long_csv).decode("utf-8")
+        assert "body" not in zf.read(long_csv).decode("utf-8")
+
+
+@pytest.mark.asyncio
+async def test_export_project_bundle_unowned_project_raises(session, user_id, other_user_id):
+    from backend.app.core.exceptions import ForbiddenError
+    from backend.app.database import Project
+
+    project = Project(user_id=other_user_id, projectname="Not Mine")
+    session.add(project)
+    await session.commit()
+    await session.refresh(project)
+
+    with pytest.raises(ForbiddenError):
+        await export_service.export_project_bundle(session, project.id, user_id)

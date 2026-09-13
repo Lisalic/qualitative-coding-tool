@@ -2,13 +2,22 @@
  * Helpers for export url construction and artifact format options.
  */
 
-export function buildExportPath(fileId, targetType, format, versionNo = null) {
+export function buildExportPath(fileId, targetType, format, versionNo = null, extraParams = null) {
   const params = new URLSearchParams();
   params.set("format", format);
   if (versionNo) {
     params.set("version_no", String(versionNo));
   }
+  if (extraParams) {
+    for (const [key, value] of Object.entries(extraParams)) {
+      params.set(key, String(value));
+    }
+  }
   return `/api/export/${fileId}/${targetType}?${params.toString()}`;
+}
+
+export function buildProjectBundlePath(projectId) {
+  return `/api/export/projects/${projectId}/bundle`;
 }
 
 export function getExportOptions(artifactType) {
@@ -20,8 +29,10 @@ export function getExportOptions(artifactType) {
   }
   if (artifactType === "coding") {
     return [
-      { label: "Coding Entries (.csv)", target: "coding", format: "csv" },
-      { label: "Coding Entries (.json)", target: "coding", format: "json" },
+      { label: "Coding Segments, long (.csv)", target: "coding", format: "csv", extraParams: { layout: "long" } },
+      { label: "Coding Segments, long (.json)", target: "coding", format: "json", extraParams: { layout: "long" } },
+      { label: "Coding Matrix, wide (.csv)", target: "coding", format: "csv", extraParams: { layout: "wide" } },
+      { label: "Coding Matrix, wide (.json)", target: "coding", format: "json", extraParams: { layout: "wide" } },
       { label: "Row Memos (.csv)", target: "memos", format: "csv" },
       { label: "Row Memos (.json)", target: "memos", format: "json" },
     ];

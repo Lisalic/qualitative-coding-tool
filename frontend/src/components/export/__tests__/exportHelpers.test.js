@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildExportPath, getExportOptions } from "../exportHelpers";
+import { buildExportPath, buildProjectBundlePath, getExportOptions } from "../exportHelpers";
 
 describe("exportHelpers", () => {
   describe("buildExportPath", () => {
@@ -12,6 +12,17 @@ describe("exportHelpers", () => {
       const path = buildExportPath("schema_1", "coding", "json", 3);
       expect(path).toBe("/api/export/schema_1/coding?format=json&version_no=3");
     });
+
+    it("builds path with extraParams (layout/privacy flags)", () => {
+      const path = buildExportPath(42, "coding", "csv", null, { layout: "wide", include_author: true });
+      expect(path).toBe("/api/export/42/coding?format=csv&layout=wide&include_author=true");
+    });
+  });
+
+  describe("buildProjectBundlePath", () => {
+    it("builds the project bundle path", () => {
+      expect(buildProjectBundlePath(7)).toBe("/api/export/projects/7/bundle");
+    });
   });
 
   describe("getExportOptions", () => {
@@ -23,15 +34,19 @@ describe("exportHelpers", () => {
       ]);
     });
 
-    it("returns coding options including memos", () => {
+    it("returns coding options including long/wide layouts and memos", () => {
       const opts = getExportOptions("coding");
-      expect(opts).toHaveLength(4);
+      expect(opts).toHaveLength(6);
       expect(opts.map((o) => o.label)).toEqual([
-        "Coding Entries (.csv)",
-        "Coding Entries (.json)",
+        "Coding Segments, long (.csv)",
+        "Coding Segments, long (.json)",
+        "Coding Matrix, wide (.csv)",
+        "Coding Matrix, wide (.json)",
         "Row Memos (.csv)",
         "Row Memos (.json)",
       ]);
+      expect(opts[0].extraParams).toEqual({ layout: "long" });
+      expect(opts[2].extraParams).toEqual({ layout: "wide" });
     });
 
     it("returns summary options", () => {

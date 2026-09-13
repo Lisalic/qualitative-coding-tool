@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { apiFetch } from "../../api";
+import { buildProjectBundlePath } from "../export/exportHelpers";
 
 import Panel from "../shell/Panel";
 import { btn, input } from "../../lib/uiClasses";
@@ -12,6 +13,37 @@ export default function ProjectHeaderSection({ project, onRefreshProject }) {
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [saving, setSaving] = useState(false);
+  const [bundleError, setBundleError] = useState(null);
+  const [bundling, setBundling] = useState(false);
+
+  const downloadBundle = async () => {
+    if (!project) return;
+    setBundleError(null);
+    setBundling(true);
+    try {
+      const res = await apiFetch(buildProjectBundlePath(project.id));
+      if (!res.ok) throw new Error("Bundle export failed");
+
+      const disposition = res.headers.get("content-disposition");
+      let filename = `project_${project.id}_bundle.zip`;
+      const match = disposition?.match(/filename="?([^"]+)"?/);
+      if (match?.[1]) filename = match[1];
+
+      const blob = await res.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = downloadUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (err) {
+      setBundleError(err?.message || "Bundle export failed. Please try again.");
+    } finally {
+      setBundling(false);
+    }
+  };
 
   const startEdit = () => {
     setEditName(project?.projectname || "");
@@ -54,14 +86,24 @@ export default function ProjectHeaderSection({ project, onRefreshProject }) {
       scroll={false}
       actions={
         !editing ? (
-          <button type="button" className={tabBtn} onClick={startEdit}>
-            Edit
-          </button>
+          <div className="flex items-center gap-2">
+            <button type="button" className={tabBtn} onClick={downloadBundle} disabled={bundling}>
+              {bundling ? "Preparing bundle..." : "Download Bundle"}
+            </button>
+            <button type="button" className={tabBtn} onClick={startEdit}>
+              Edit
+            </button>
+          </div>
         ) : null
       }
     >
       {!editing ? (
         <>
+          {bundleError && (
+            <div role="alert" aria-live="assertive" className="mb-2 border border-error bg-error/10 px-3 py-2 text-sm text-error">
+              {bundleError}
+            </div>
+          )}
           {project.description && (
             <p className="mb-2 leading-relaxed text-paper/70">{project.description}</p>
           )}
