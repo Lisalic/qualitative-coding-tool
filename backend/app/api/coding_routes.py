@@ -256,39 +256,6 @@ async def get_coding_comparison(
     )
 
 
-
-@router.post("/compare-codings/")
-async def compare_codings(
-    coding_a: str = Form(...),
-    coding_b: str = Form(...),
-    api_key: str = Form(...),
-    name: str = Form(...),
-    model: str = Form(...),
-    prompt: str = Form(""),
-    description: str = Form(None),
-    project_id: int = Form(...),
-    user_id: int = Depends(require_user_id),
-    db: AsyncSession = Depends(get_async_db),
-):
-    """Kick off a background job that compares two coding outputs by
-    calling the LLM, and return immediately with a job id to poll (see
-    backend/app/jobs/).
-    """
-    job = await coding_service.start_compare_codings_job(
-        db,
-        user_id,
-        coding_a=coding_a,
-        coding_b=coding_b,
-        api_key=api_key,
-        model=model,
-        prompt=prompt,
-        name=name,
-        description=description,
-        project_id=project_id,
-    )
-    return JSONResponse({"job_id": job.id, "status": job.status}, status_code=202)
-
-
 @router.post("/summarize-coding/")
 async def summarize_coding(
     coding: str = Form(...),

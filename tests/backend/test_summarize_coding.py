@@ -1,8 +1,8 @@
 """Tests for backend/scripts/summarize_coding.py.
 
 ``summarize_coding`` goes through ``codebook_generator.get_client`` (the
-same seam ``generate_codebook``/``compare_codebooks``/``compare_codings``
-use) rather than importing ``chat_completion`` itself, so these tests mock
+same seam ``generate_codebook`` uses) rather than importing
+``chat_completion`` itself, so these tests mock
 it at ``backend.scripts.codebook_generator.chat_completion``, where
 ``get_client`` actually calls it.
 """

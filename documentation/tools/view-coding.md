@@ -10,7 +10,7 @@ Sidebar → View Coding (Views group), or `/coding-view` → `pages/ViewCoding.j
 
 ## Prerequisites
 
-At least one coding artifact (from [Apply Codebook](apply-codebook.md), or a saved [Compare Codings](compare-codings.md) result). No API key needed.
+At least one coding artifact (from [Apply Codebook](apply-codebook.md), or a `coding_comparison` saved before [Compare Codings](compare-codings.md)'s LLM synthesis was retired). No API key needed.
 
 ## Inputs
 

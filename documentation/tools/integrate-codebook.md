@@ -8,7 +8,7 @@ Merge two or more existing codebooks into one, with an AI assistant that propose
 
 Sidebar → Integrate Codebook (pipeline group, right after Compare Codebook), or `/integrate-codebook` → `pages/IntegrateCodebook.jsx` → `components/integrate-codebook/IntegrateCodebookEditor.jsx`. Also reachable from View Codebook's "Integrate" toolbar button, which preselects the codebook being viewed.
 
-Structurally this is a third mode of the same editor pattern as [Codebook](codebook.md) (a setup step, then a 3-pane workspace built on `EditorWorkspace`/`EditorSetupStep`), not a variant of [Compare Codebooks](compare-codebooks.md) — the AI here is an in-workspace assistant whose proposals land in a review tray, not a one-shot job that writes prose.
+Structurally this is a third mode of the same editor pattern as [Codebook](codebook.md) (a setup step, then a 3-pane workspace built on `EditorWorkspace`/`EditorSetupStep`), not a variant of [Compare Codebooks](compare-codebooks.md) — the AI here is an in-workspace assistant whose proposals land in a review tray, not a one-shot job. (Compare Codebooks has no AI step at all any more -- see that page.)
 
 ## Prerequisites
 

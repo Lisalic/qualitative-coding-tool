@@ -418,7 +418,7 @@ Why implemented this way:
 
 User-facing behavior:
 
-- Compare two codebooks or two coding outputs and save comparison artifacts.
+- Compare two codebooks or two coding outputs with a deterministic, no-LLM structural/classification diff.
 
 Frontend implementation:
 
@@ -427,14 +427,15 @@ Frontend implementation:
 
 Backend implementation:
 
-- `POST /api/compare-codebooks/`
-- `POST /api/compare-codings/`
-- `POST /api/save-comparison/`
+- `GET /api/comparison/codebooks`
+- `GET /api/comparison/codings`
 
 Why implemented this way:
 
 - single configurable compare UI avoids duplicate page logic,
-- saved comparison artifacts can be revisited and linked to projects like other outputs.
+- computed synchronously from each artifact's own stored codes/entries, so no API key, no background job, and no comparison artifact to manage — swapping A/B is a tested reversibility invariant.
+
+**Retired:** an earlier, LLM-generated one-shot comparison (`POST /api/compare-codebooks/`, `POST /api/compare-codings/`, plus `POST /api/save-comparison/` to persist the result as a `codebook_comparison`/`coding_comparison` artifact) has been removed. `save-comparison`/`save-summary` still exist as a generic "save this content as a comparison/summary artifact" endpoint, but nothing in this flow calls it any more; any comparison artifact created by the old flow before this change remains readable via View Codebook/View Coding.
 
 ## 7b) Integrate Codebook
 
@@ -575,6 +576,8 @@ Main backend endpoints by domain:
 - Project/file metadata: `/api/projects/`, `/api/create-project/`, `/api/update-project/`, `/api/rename-file/`, `/api/my-files/`
 - Filtering: `/api/filter-preview/`, `/api/filtered-data/manual`, `/api/word-count-ranges/`
 - Row memos: `/api/memos/` (GET, PUT)
-- Codebook: `/api/codebook-preview/`, `/api/codebook/manual`, `/api/codebook`, `/api/codebook/{ref}` (PUT), `/api/list-codebooks`, `/api/compare-codebooks/`, `/api/integrate-codebook-preview/`, `/api/codebook/integrate`
-- Coding and summarization: `/api/coding/manual`, `/api/coding/{ref}`, `/api/coding/{ref}/rows`, `/api/coding/{ref}/text`, `/api/coding/{ref}/revision` (PUT), `/api/coding/{ref}` (PATCH), `/api/coding/{ref}/duplicate`, `/api/coding/{ref}/recode`, `/api/coding-comparison`, `/api/compare-codings/`, `/api/summarize-coding/`, `/api/save-comparison/`, `/api/save-summary/`, `/api/summary/{summary_id}`
+- Codebook: `/api/codebook-preview/`, `/api/codebook/manual`, `/api/codebook`, `/api/codebook/{ref}` (PUT), `/api/list-codebooks`, `/api/integrate-codebook-preview/`, `/api/codebook/integrate`
+- Coding and summarization: `/api/coding/manual`, `/api/coding/{ref}`, `/api/coding/{ref}/rows`, `/api/coding/{ref}/text`, `/api/coding/{ref}/revision` (PUT), `/api/coding/{ref}` (PATCH), `/api/coding/{ref}/duplicate`, `/api/coding/{ref}/recode`, `/api/coding-comparison`, `/api/summarize-coding/`, `/api/save-comparison/`, `/api/save-summary/`, `/api/summary/{summary_id}`
+- Comparisons (deterministic, no LLM): `/api/comparison/codebooks`, `/api/comparison/codings`
+- Export: `/api/export/{file_id}/codebook`, `/api/export/{file_id}/coding`, `/api/export/{file_id}/summary`, `/api/export/{file_id}/memos`, `/api/export/projects/{project_id}/bundle`
 

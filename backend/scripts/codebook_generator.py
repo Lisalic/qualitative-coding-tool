@@ -55,8 +55,8 @@ async def get_client(system_prompt: str, user_prompt: str, api_key: str, MODEL: 
         timeout=30.0,
         max_retries=MAX_RETRIES,
     )
-    # compare_codebooks / compare_codings / summarize_coding treat this as
-    # free-form prose -- strip an occasional ``` fence wrapper here once.
+    # summarize_coding treats this as free-form prose -- strip an
+    # occasional ``` fence wrapper here once.
     return strip_markdown_fences(result)
 
 

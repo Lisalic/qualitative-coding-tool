@@ -1,8 +1,5 @@
 import CompareDualSelectPanel from "./CompareDualSelectPanel";
-import CompareModelPromptPanel from "./CompareModelPromptPanel";
 import PageShell from "../shell/PageShell";
-import { btnPrimary } from "../../lib/uiClasses";
-import CompareResultPanel from "./CompareResultPanel";
 import ComputedComparisonResults from "./ComputedComparisonResults";
 import useComparePageData from "./useComparePageData";
 
@@ -13,18 +10,7 @@ const CONFIG_BY_MODE = {
     labelA: "Codebook A",
     labelB: "Codebook B",
     placeholderOption: "Select a codebook",
-    examplePromptText:
-      "Please provide a detailed comparison focusing on:\n- Key differences in coding approaches\n- Overlapping themes and codes\n- Unique insights from each codebook\n- Recommendations for merging or refining the codebooks",
     fileType: "codebook",
-    compareEndpoint: "/api/compare-codebooks/",
-    fieldAName: "codebook_a",
-    fieldBName: "codebook_b",
-    validationMessage: "Select two codebooks to compare",
-    viewPath: "/codebook-comparison-view",
-    viewStateKey: "selected",
-    // Backend converted to the background-job pattern (Stage 7) -- see
-    // useComparePageData's usesJobPolling handling.
-    usesJobPolling: true,
   },
   coding: {
     title: "Compare Coding",
@@ -32,18 +18,7 @@ const CONFIG_BY_MODE = {
     labelA: "Coding A",
     labelB: "Coding B",
     placeholderOption: "Select a coding",
-    examplePromptText:
-      "Please provide a detailed comparison focusing on:\n- Differences in coding decisions and interpretations\n- Patterns of agreement and disagreement\n- Quality and consistency of coding applications\n- Recommendations for improving coding reliability",
     fileType: "coding",
-    compareEndpoint: "/api/compare-codings/",
-    fieldAName: "coding_a",
-    fieldBName: "coding_b",
-    validationMessage: "Select two codings to compare",
-    viewPath: "/coding-comparison-view",
-    viewStateKey: "selectedCodedData",
-    // Backend converted to the background-job pattern (Stage 8) -- see
-    // useComparePageData's usesJobPolling handling.
-    usesJobPolling: true,
   },
 };
 
@@ -59,32 +34,13 @@ export default function ComparePageContainer({
     b,
     setA,
     setB,
-    loading,
-    comparison,
-    createdFile,
-    error,
-    model,
-    setModel,
-    name,
-    setName,
-    additionalPrompt,
-    setAdditionalPrompt,
-    projects,
-    selectedProject,
-    setSelectedProject,
-    submitCompare,
     computedData,
     computedLoading,
     computedError,
     handleSwap,
   } = useComparePageData({
     fileType: config.fileType,
-    compareEndpoint: config.compareEndpoint,
-    fieldAName: config.fieldAName,
-    fieldBName: config.fieldBName,
     initialA,
-    validationMessage: config.validationMessage,
-    usesJobPolling: config.usesJobPolling,
   });
 
   return (
@@ -106,7 +62,7 @@ export default function ComparePageContainer({
           onChangeB={setB}
         />
 
-        {/* Deterministic split comparison results */}
+        {/* Computed deterministic comparison is the sole comparison path */}
         {(computedData || computedLoading || computedError) && (
           <ComputedComparisonResults
             mode={mode}
@@ -117,44 +73,6 @@ export default function ComparePageContainer({
           />
         )}
       </div>
-
-      {/* Optional AI narrative assist */}
-      <form onSubmit={submitCompare} className="mt-2 border-t border-line pt-4">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-paper/70">
-          Optional AI Synthesis Narrative
-        </div>
-        <CompareModelPromptPanel
-          model={model}
-          onModelChange={setModel}
-          name={name}
-          onNameChange={setName}
-          projects={projects}
-          selectedProject={selectedProject}
-          onProjectChange={setSelectedProject}
-          additionalPrompt={additionalPrompt}
-          onAdditionalPromptChange={setAdditionalPrompt}
-          examplePromptText={config.examplePromptText}
-        />
-
-        <div className="mt-3 flex justify-center">
-          <button className={btnPrimary} type="submit" disabled={loading}>
-            {loading ? "Generating AI Narrative..." : "Generate AI Synthesis"}
-          </button>
-        </div>
-      </form>
-
-      {error && (
-        <div className="border border-error bg-error/10 px-3 py-2 text-sm text-error">
-          {error}
-        </div>
-      )}
-
-      <CompareResultPanel
-        comparison={comparison}
-        createdFile={createdFile}
-        viewPath={config.viewPath}
-        viewStateKey={config.viewStateKey}
-      />
     </PageShell>
   );
 }

@@ -54,15 +54,17 @@ Slow, LLM-backed endpoints don't block the request. Instead they return `202 {"j
 |---|---|---|---|
 | `filter_preview` | `_run_filter_preview_job` | `services/data_service.py` | `POST /api/filter-preview/` |
 | `codebook_preview` | `_run_codebook_preview_job` | `services/codebook_service.py` | `POST /api/codebook-preview/` |
-| `compare_codebooks` | `_run_compare_codebooks_job` | `services/codebook_service.py` | `POST /api/compare-codebooks/` |
 | `integrate_codebook_preview` | `_run_integrate_codebook_job` | `services/codebook_service.py` | `POST /api/integrate-codebook-preview/` |
 | `recode_items` | `_run_recode_items_job` | `services/coding_service.py` | `POST /api/coding/{ref}/recode` |
-| `compare_codings` | `_run_compare_codings_job` | `services/coding_service.py` | `POST /api/compare-codings/` |
 | `summarize_coding` | `_run_summarize_coding_job` | `services/coding_service.py` | `POST /api/summarize-coding/` |
+
+`compare_codebooks`/`compare_codings` (LLM-generated, job-backed comparisons) have been retired in favor of the deterministic, synchronous `GET /api/comparison/codebooks`/`codings` (`comparison_routes.py` — not job-backed at all, see the API reference).
 
 **Durability trade-off, accepted deliberately:** since a job's API key only ever lives in the runner's in-memory closure, a job in flight is lost if the process restarts. `backend/app/jobs/service.py::reconcile_orphaned_jobs_on_startup` (called from `main.py`'s lifespan, after tables are created) marks any leftover `pending`/`running` row as `failed` with `"Worker restarted before this job finished. Please retry."`, so the frontend fails loudly instead of polling forever. This also means the job runner does not horizontally scale: a second worker process would fail the first worker's in-flight jobs on its own startup.
 
-`Job` model (`backend/app/jobs/models.py`): `id`, `job_type`, `user_id` (FK, cascade delete), `status` (`pending`/`running`/`succeeded`/`failed`), `payload` (JSON), `result` (JSON, nullable), `error`/`error_code` (nullable), `created_at`/`started_at`/`finished_at`.
+`Job` model (`backend/app/jobs/models.py`): `id`, `job_type`, `user_id` (FK, cascade delete), `status` (`pending`/`running`/`succeeded`/`partial`/`retryable_failure`/`failed`/`cancelled` — `succeeded` is the one and only success status; nothing produces `"completed"`), `payload` (JSON, never the caller's API key — that only ever lives in `runtime_extra`), `result`/`accounting`/`salvaged_output` (JSON, nullable), `error`/`error_code` (nullable; `error` is redacted against the job's own API key before being persisted or returned), `created_at`/`started_at`/`finished_at`.
+
+Token/cost accounting (`JobAccountingTracker`, `backend/app/jobs/progress.py`) preserves unknown provider usage or pricing as `None`, never coercing it to `0` — a call whose usage OpenRouter didn't report reads as "unknown" everywhere it's surfaced (`GET /api/jobs/{id}`'s `accounting`, the AI-assist panel), not as a misleadingly precise free run.
 
 ## The LLM call seam
 

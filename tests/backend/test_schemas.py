@@ -1,5 +1,4 @@
-"""Tests for backend/app/api/schemas.py -- Pydantic request/response models
-and the `as_form` adapter.
+"""Tests for backend/app/api/schemas.py -- Pydantic request/response models.
 
 Covers the editor request schemas for the three pipeline stages that have
 one entry point each (filter, codebook, coding): an AI-assist preview
