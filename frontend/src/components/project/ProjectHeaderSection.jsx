@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { apiFetch } from "../../api";
-import { buildProjectBundlePath } from "../export/exportHelpers";
+import { buildProjectBundlePath, slugify } from "../export/exportHelpers";
 
 import Panel from "../shell/Panel";
 import { btn, input } from "../../lib/uiClasses";
@@ -22,10 +22,10 @@ export default function ProjectHeaderSection({ project, onRefreshProject }) {
     setBundling(true);
     try {
       const res = await apiFetch(buildProjectBundlePath(project.id));
-      if (!res.ok) throw new Error("Bundle export failed");
+      if (!res.ok) throw new Error("Export failed");
 
       const disposition = res.headers.get("content-disposition");
-      let filename = `project_${project.id}_bundle.zip`;
+      let filename = `${slugify(project.projectname, `project_${project.id}`)}_project_bundle.zip`;
       const match = disposition?.match(/filename="?([^"]+)"?/);
       if (match?.[1]) filename = match[1];
 
@@ -39,7 +39,7 @@ export default function ProjectHeaderSection({ project, onRefreshProject }) {
       a.remove();
       window.URL.revokeObjectURL(downloadUrl);
     } catch (err) {
-      setBundleError(err?.message || "Bundle export failed. Please try again.");
+      setBundleError(err?.message || "Export failed. Please try again.");
     } finally {
       setBundling(false);
     }
@@ -88,7 +88,7 @@ export default function ProjectHeaderSection({ project, onRefreshProject }) {
         !editing ? (
           <div className="flex items-center gap-2">
             <button type="button" className={tabBtn} onClick={downloadBundle} disabled={bundling}>
-              {bundling ? "Preparing bundle..." : "Download Bundle"}
+              {bundling ? "Preparing export..." : "Export"}
             </button>
             <button type="button" className={tabBtn} onClick={startEdit}>
               Edit

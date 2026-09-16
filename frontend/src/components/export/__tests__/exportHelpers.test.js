@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildExportPath, buildProjectBundlePath, getExportOptions } from "../exportHelpers";
+import { buildExportPath, buildProjectBundlePath, getExportOptions, slugify } from "../exportHelpers";
 
 describe("exportHelpers", () => {
   describe("buildExportPath", () => {
@@ -28,25 +28,14 @@ describe("exportHelpers", () => {
   describe("getExportOptions", () => {
     it("returns codebook options", () => {
       const opts = getExportOptions("codebook");
-      expect(opts).toEqual([
-        { label: "Codebook (.csv)", target: "codebook", format: "csv" },
-        { label: "Codebook (.json)", target: "codebook", format: "json" },
-      ]);
+      expect(opts).toEqual([{ label: "Codebook (.csv)", target: "codebook", format: "csv" }]);
     });
 
-    it("returns coding options including long/wide layouts and memos", () => {
+    it("returns a single coding export option (segments, long, csv)", () => {
       const opts = getExportOptions("coding");
-      expect(opts).toHaveLength(6);
-      expect(opts.map((o) => o.label)).toEqual([
-        "Coding Segments, long (.csv)",
-        "Coding Segments, long (.json)",
-        "Coding Matrix, wide (.csv)",
-        "Coding Matrix, wide (.json)",
-        "Row Memos (.csv)",
-        "Row Memos (.json)",
+      expect(opts).toEqual([
+        { label: "Coding Segments, long (.csv)", target: "coding", format: "csv", extraParams: { layout: "long" } },
       ]);
-      expect(opts[0].extraParams).toEqual({ layout: "long" });
-      expect(opts[2].extraParams).toEqual({ layout: "wide" });
     });
 
     it("returns summary options", () => {
@@ -63,6 +52,17 @@ describe("exportHelpers", () => {
         { label: "CSV (.csv)", target: "custom", format: "csv" },
         { label: "JSON (.json)", target: "custom", format: "json" },
       ]);
+    });
+  });
+
+  describe("slugify", () => {
+    it("lowercases and underscores a project name", () => {
+      expect(slugify("My Project!", "fallback")).toBe("my_project");
+    });
+
+    it("falls back for an empty or all-punctuation name", () => {
+      expect(slugify("", "fallback")).toBe("fallback");
+      expect(slugify("!!!", "fallback")).toBe("fallback");
     });
   });
 });

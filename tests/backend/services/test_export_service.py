@@ -562,8 +562,11 @@ async def test_export_project_bundle_is_deterministic_and_privacy_scoped(session
         assert "manifest.json" in names
         assert "lineage/project_lineage.json" in names
         assert any(n.endswith("_codebook.csv") for n in names)
+        assert not any(n.endswith("_codebook.json") for n in names)
+        assert not any(n.endswith("_codebook.qdc") for n in names)
         assert any(n.endswith("_segments_long.csv") for n in names)
-        assert any(n.endswith("_matrix_wide.csv") for n in names)
+        assert not any(n.endswith("_matrix_wide.csv") for n in names)
+        assert not any(n.endswith("_segments_long.json") for n in names)
 
         manifest = json.loads(zf.read("manifest.json"))
         assert manifest["privacy_flags"] == {"include_source_text": False, "include_author": False}

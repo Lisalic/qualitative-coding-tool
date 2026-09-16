@@ -20,21 +20,24 @@ export function buildProjectBundlePath(projectId) {
   return `/api/export/projects/${projectId}/bundle`;
 }
 
+/** Mirrors the backend's `_slugify` (export_service.py) for the client-side filename fallback. */
+export function slugify(value, fallback) {
+  if (!value) return fallback;
+  const slug = value
+    .replace(/[^\w\s-]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[-\s]+/g, "_");
+  return slug || fallback;
+}
+
 export function getExportOptions(artifactType) {
   if (artifactType === "codebook") {
-    return [
-      { label: "Codebook (.csv)", target: "codebook", format: "csv" },
-      { label: "Codebook (.json)", target: "codebook", format: "json" },
-    ];
+    return [{ label: "Codebook (.csv)", target: "codebook", format: "csv" }];
   }
   if (artifactType === "coding") {
     return [
       { label: "Coding Segments, long (.csv)", target: "coding", format: "csv", extraParams: { layout: "long" } },
-      { label: "Coding Segments, long (.json)", target: "coding", format: "json", extraParams: { layout: "long" } },
-      { label: "Coding Matrix, wide (.csv)", target: "coding", format: "csv", extraParams: { layout: "wide" } },
-      { label: "Coding Matrix, wide (.json)", target: "coding", format: "json", extraParams: { layout: "wide" } },
-      { label: "Row Memos (.csv)", target: "memos", format: "csv" },
-      { label: "Row Memos (.json)", target: "memos", format: "json" },
     ];
   }
   if (artifactType === "summary") {

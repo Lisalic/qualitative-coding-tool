@@ -446,7 +446,8 @@ async def export_project_bundle(
 ) -> tuple[bytes, str, str]:
     """Deterministic ZIP bundle of every artifact in a project: a
     manifest with a SHA-256 per file, the project's lineage graph, and
-    every codebook/coding (long + wide + summary)/memos/comparison export.
+    every codebook (.csv)/coding (segments, long, .csv)/memos/comparison
+    export.
 
     Byte-deterministic: entries are written in sorted-path order with a
     fixed ``date_time`` (2026-01-01 00:00:00), so identical content always
@@ -467,26 +468,16 @@ async def export_project_bundle(
 
         if f.file_type == "codebook":
             cb_csv, _, _ = await export_codebook(session, f.id, user_id, export_format="csv")
-            cb_json, _, _ = await export_codebook(session, f.id, user_id, export_format="json")
             bundle_files[f"codebooks/{f.id}_{f_slug}_codebook.csv"] = cb_csv.encode("utf-8")
-            bundle_files[f"codebooks/{f.id}_{f_slug}_codebook.json"] = cb_json.encode("utf-8")
 
         elif f.file_type == "coding":
-            for layout in ("long", "wide"):
-                for fmt in ("csv", "json"):
-                    content, _, _ = await export_coding(
-                        session, f.id, user_id,
-                        export_format=fmt, layout=layout,
-                        include_source_text=include_source_text,
-                        include_author=include_author,
-                    )
-                    suffix = "segments_long" if layout == "long" else "matrix_wide"
-                    bundle_files[f"codings/{f.id}_{f_slug}_{suffix}.{fmt}"] = content.encode("utf-8")
-
-            sum_csv, _, _ = await export_summary(session, f.id, user_id, export_format="csv")
-            sum_json, _, _ = await export_summary(session, f.id, user_id, export_format="json")
-            bundle_files[f"codings/{f.id}_{f_slug}_summary.csv"] = sum_csv.encode("utf-8")
-            bundle_files[f"codings/{f.id}_{f_slug}_summary.json"] = sum_json.encode("utf-8")
+            content, _, _ = await export_coding(
+                session, f.id, user_id,
+                export_format="csv", layout="long",
+                include_source_text=include_source_text,
+                include_author=include_author,
+            )
+            bundle_files[f"codings/{f.id}_{f_slug}_segments_long.csv"] = content.encode("utf-8")
 
         elif f.file_type in ("codebook_comparison", "coding_comparison"):
             content = await version_service.read_blob(session, f.id)

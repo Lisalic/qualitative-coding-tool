@@ -43,7 +43,6 @@ describe("ExportDropdown", () => {
     const menu = container.querySelector('[role="menu"]');
     expect(menu).not.toBeNull();
     expect(menu.textContent).toContain("Codebook (.csv)");
-    expect(menu.textContent).toContain("Codebook (.json)");
   });
 
   it("displays accessible error state with role='alert' when export fails", async () => {
@@ -63,7 +62,7 @@ describe("ExportDropdown", () => {
       trigger.click();
     });
 
-    // Click the CSV export option
+    // Click the export option
     const csvOption = container.querySelectorAll('[role="menuitem"]')[0];
     await act(async () => {
       csvOption.click();
