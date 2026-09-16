@@ -6,6 +6,7 @@ import PageEmptyState from "../primitives/PageEmptyState";
 import PromptPanel from "../primitives/PromptPanel";
 import PageShell from "../shell/PageShell";
 import Panel from "../shell/Panel";
+import { getCodeColor } from "../../lib/codingUtils";
 import { hasPromptInfo } from "../../lib/promptInfo";
 import { btn, btnPrimary as btnPrimaryClasses, input } from "../../lib/uiClasses";
 
@@ -50,6 +51,7 @@ export default function CodebookWorkspaceSection({
   const promptInfo = { systemPrompt, instructions, promptMeta };
   const [nameDraft, setNameDraft] = useState(selectedCodebookName || "");
   const navigate = useNavigate();
+  const isSaving = saveState?.status === "saving";
 
   if (!selectedCodebook) {
     return (
@@ -112,16 +114,16 @@ export default function CodebookWorkspaceSection({
           <button
             type="button"
             className={btnPrimary}
-            onClick={onSaveEdit}
-            disabled={saveState === "saving"}
+            onClick={() => onSaveEdit(nameDraft.trim() || undefined)}
+            disabled={isSaving}
           >
-            {saveState === "saving" ? "Saving…" : "Save"}
+            {isSaving ? "Saving…" : "Save"}
           </button>
           <button
             type="button"
             className={btnClasses}
             onClick={onCancelEdit}
-            disabled={saveState === "saving"}
+            disabled={isSaving}
           >
             Cancel
           </button>
@@ -139,6 +141,11 @@ export default function CodebookWorkspaceSection({
     >
       {showPrompt && (
         <PromptPanel {...promptInfo} />
+      )}
+      {saveState?.status === "error" && saveState.message && (
+        <div className="border border-line bg-paper px-3 py-2 text-sm text-ink font-mono">
+          {saveState.message}
+        </div>
       )}
       {error && (
         <div className="border border-line bg-paper px-3 py-2 text-sm text-ink font-mono">
@@ -162,13 +169,25 @@ export default function CodebookWorkspaceSection({
               />
             </div>
             <CodeLegend
-              codes={codebookDraft}
-              isEditable={true}
-              onChange={setCodebookDraft}
+              codebookTree={codebookDraft}
+              isEditMode
+              draftTree={codebookDraft}
+              onDraftTreeChange={setCodebookDraft}
+              disabled={isSaving}
+              selectedFilterCodes={[]}
+              onCodeToggle={noop}
+              getCodeColor={getCodeColor}
+              showDetails
             />
           </div>
         ) : (
-          <CodeLegend codes={codebookTree} onCodeToggle={noop} />
+          <CodeLegend
+            codebookTree={codebookTree}
+            selectedFilterCodes={[]}
+            onCodeToggle={noop}
+            getCodeColor={getCodeColor}
+            showDetails
+          />
         )}
       </Panel>
     </PageShell>
