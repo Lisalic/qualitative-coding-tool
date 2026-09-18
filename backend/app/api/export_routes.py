@@ -1,5 +1,12 @@
 """API routes for exporting codebooks, codings (long/wide), summaries,
-memos, and deterministic project bundles as CSV/JSON/ZIP.
+memos, and deterministic project bundles.
+
+Each endpoint accepts only the two formats that suit its artifact, not a
+blanket CSV/JSON pair -- codebook ``qdc|csv``, coding ``csv|json``,
+memos ``md|csv``, and summary ``md`` alone. See
+``services/export_service.py``'s module docstring for why each pair was
+chosen; the ``format`` patterns below are the enforcement point, so a
+dropped format 422s rather than silently falling through to the default.
 """
 
 from fastapi import APIRouter, Depends, Query, Response
@@ -15,7 +22,7 @@ router = APIRouter(prefix="/export", tags=["export"])
 @router.get("/{file_id}/codebook")
 async def export_codebook(
     file_id: int,
-    format: str = Query("csv", pattern="^(csv|json)$"),
+    format: str = Query("qdc", pattern="^(qdc|csv)$"),
     version_no: int | None = Query(None, ge=1),
     user_id: int = Depends(require_user_id),
     db: AsyncSession = Depends(get_async_db),
@@ -55,7 +62,7 @@ async def export_coding(
 @router.get("/{file_id}/memos")
 async def export_memos(
     file_id: int,
-    format: str = Query("csv", pattern="^(csv|json)$"),
+    format: str = Query("md", pattern="^(md|csv)$"),
     user_id: int = Depends(require_user_id),
     db: AsyncSession = Depends(get_async_db),
 ):
@@ -69,7 +76,7 @@ async def export_memos(
 @router.get("/{file_id}/summary")
 async def export_summary(
     file_id: int,
-    format: str = Query("csv", pattern="^(csv|json)$"),
+    format: str = Query("md", pattern="^md$"),
     version_no: int | None = Query(None, ge=1),
     user_id: int = Depends(require_user_id),
     db: AsyncSession = Depends(get_async_db),

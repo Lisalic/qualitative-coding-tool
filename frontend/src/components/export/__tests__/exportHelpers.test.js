@@ -26,32 +26,47 @@ describe("exportHelpers", () => {
   });
 
   describe("getExportOptions", () => {
-    it("returns codebook options", () => {
-      const opts = getExportOptions("codebook");
-      expect(opts).toEqual([{ label: "Codebook (.csv)", target: "codebook", format: "csv" }]);
-    });
-
-    it("returns a single coding export option (segments, long, csv)", () => {
-      const opts = getExportOptions("coding");
-      expect(opts).toEqual([
-        { label: "Coding Segments, long (.csv)", target: "coding", format: "csv", extraParams: { layout: "long" } },
+    it("leads with REFI-QDA then csv for a codebook", () => {
+      expect(getExportOptions("codebook")).toEqual([
+        { label: ".qdc", target: "codebook", format: "qdc" },
+        { label: ".csv", target: "codebook", format: "csv" },
       ]);
     });
 
-    it("returns summary options", () => {
-      const opts = getExportOptions("summary");
-      expect(opts).toEqual([
-        { label: "Summary (.csv)", target: "summary", format: "csv" },
-        { label: "Summary (.json)", target: "summary", format: "json" },
+    it("offers csv then json for coding, both pinned to the long layout", () => {
+      expect(getExportOptions("coding")).toEqual([
+        { label: ".csv", target: "coding", format: "csv", extraParams: { layout: "long" } },
+        { label: ".json", target: "coding", format: "json", extraParams: { layout: "long" } },
+      ]);
+    });
+
+    it("offers markdown alone for a summary", () => {
+      expect(getExportOptions("summary")).toEqual([{ label: ".md", target: "summary", format: "md" }]);
+    });
+
+    it("offers md first for memos, since a memo body is prose", () => {
+      expect(getExportOptions("memos")).toEqual([
+        { label: ".md", target: "memos", format: "md" },
+        { label: ".csv", target: "memos", format: "csv" },
       ]);
     });
 
     it("returns fallback options for custom artifact types", () => {
-      const opts = getExportOptions("custom");
-      expect(opts).toEqual([
-        { label: "CSV (.csv)", target: "custom", format: "csv" },
-        { label: "JSON (.json)", target: "custom", format: "json" },
+      expect(getExportOptions("custom")).toEqual([
+        { label: ".csv", target: "custom", format: "csv" },
+        { label: ".json", target: "custom", format: "json" },
       ]);
+    });
+
+    it("labels every option with the bare extension and nothing else", () => {
+      for (const type of ["codebook", "coding", "summary", "memos", "custom"]) {
+        const opts = getExportOptions(type);
+        // Two formats everywhere but summary, which is markdown-only.
+        expect(opts).toHaveLength(type === "summary" ? 1 : 2);
+        for (const opt of opts) {
+          expect(opt.label).toMatch(/^\.[a-z]+$/);
+        }
+      }
     });
   });
 

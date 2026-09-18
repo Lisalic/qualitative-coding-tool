@@ -74,7 +74,7 @@ export default function ExportDropdown({ fileId, artifactType, versionNo, label 
 
       {open && (
         <div
-          className="absolute right-0 mt-1 w-48 border border-line bg-paper text-ink z-50 rounded-none shadow-none"
+          className="absolute right-0 mt-1 w-32 border border-line bg-paper text-ink z-50 rounded-none shadow-none"
           role="menu"
         >
           <div className="border-b border-line px-3 py-1.5 text-xs uppercase tracking-wider font-semibold text-paper/70 bg-ink">

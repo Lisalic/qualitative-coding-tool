@@ -76,15 +76,21 @@ Structural (no-LLM) diffing between two versions of the *same* codebook/coding a
 
 ## Export — `backend/app/api/export_routes.py`
 
-CSV/JSON/ZIP exports, owner-scoped, byte-deterministic for unchanged data. An explicit `version_no` that doesn't resolve to a real version 404s rather than silently returning an empty export.
+Owner-scoped, byte-deterministic for unchanged data. An explicit `version_no` that doesn't resolve to a real version 404s rather than silently returning an empty export.
+
+Each endpoint accepts only the formats that suit its artifact — not a blanket CSV/JSON pair — and a format outside that set 422s rather than falling through to the default:
 
 | Method | Path | Query | Response | Kind |
 |---|---|---|---|---|
-| GET | `/api/export/{file_id}/codebook` | `format` (csv\|json), `version_no?` | codebook codes file | direct |
-| GET | `/api/export/{file_id}/coding` | `format`, `layout` (long\|wide, default long), `version_no?`, `include_source_text` (default false), `include_author` (default false) | long: one row per coded segment; wide: one row per dataset item including uncoded ones, one column per code | direct |
-| GET | `/api/export/{file_id}/summary` | `format`, `version_no?` | code frequency, grouped by `code_uid` (stable across renames) | direct |
-| GET | `/api/export/{file_id}/memos` | `format` | row memos | direct |
-| GET | `/api/export/projects/{project_id}/bundle` | `include_source_text` (default false), `include_author` (default false) | deterministic ZIP: every project artifact's exports, a SHA-256 `manifest.json`, and `lineage/project_lineage.json` | direct |
+| GET | `/api/export/{file_id}/codebook` | `format` (qdc\|csv, default qdc), `version_no?` | qdc: [REFI-QDA Codebook](https://www.qdasoftware.org/refi-qda-codebook) XML, importable by NVivo/ATLAS.ti/MAXQDA (`backend/app/core/qdc.py`); csv: one row per code for a spreadsheet or R | direct |
+| GET | `/api/export/{file_id}/coding` | `format` (csv\|json, default csv), `layout` (long\|wide, default long), `version_no?`, `include_source_text` (default false), `include_author` (default false) | long: one row per coded segment; wide: one row per dataset item including uncoded ones, one column per code | direct |
+| GET | `/api/export/{file_id}/summary` | `format` (md only), `version_no?` | markdown frequency table, grouped by `code_uid` (stable across renames) | direct |
+| GET | `/api/export/{file_id}/memos` | `format` (md\|csv, default md) | row memos; md keeps a memo body's paragraph breaks, which a single CSV cell flattens | direct |
+| GET | `/api/export/projects/{project_id}/bundle` | `include_source_text` (default false), `include_author` (default false) | deterministic ZIP: exactly one export per project file in that artifact's best format (codebooks as `.qdc`), a SHA-256 `manifest.json`, and `lineage/project_lineage.json` | direct |
+
+Codebooks lead with `.qdc` because REFI-QDA is the one codebook interchange standard other QDA packages implement — every other format arrives there as an undifferentiated table. The serializer maps this app's `code_uid` (a bare `uuid4().hex`) onto the schema's hyphenated `GUIDType`, re-hyphenating rather than replacing it where the uid is already a UUID, so identity survives the round trip; a code family becomes a non-codable parent `Code` holding its codes. Conformance rules are pinned in `tests/backend/core/test_qdc.py`.
+
+Summary is markdown-only by design: a frequency table is a finished reading of a coding, not source data something downstream re-parses — anyone wanting the numbers exports the coding itself and counts. The project bundle writes **one file per project file**, never the same content in two formats; a file's row memos ride along as a single `.md` sidecar, which for a `raw_data`/`filtered_data` file is its only export.
 
 `include_source_text`/`include_author` default to `False` everywhere — an export is opt-in to carrying a quote's full source text or its author, not opt-out. Backed by `backend/app/services/export_service.py` and `backend/app/repositories/export_repo.py`.
 

@@ -42,7 +42,8 @@ describe("ExportDropdown", () => {
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     const menu = container.querySelector('[role="menu"]');
     expect(menu).not.toBeNull();
-    expect(menu.textContent).toContain("Codebook (.csv)");
+    const items = [...menu.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent);
+    expect(items).toEqual([".qdc", ".csv"]);
   });
 
   it("displays accessible error state with role='alert' when export fails", async () => {

@@ -88,14 +88,19 @@ async def test_export_codebook_empty(session, user_id):
     assert "code_uid,name,family_uid,family_name" in csv_out
     assert filename == "my_cb_v1_codebook.csv"
 
-    json_out, media_j, filename_j = await export_service.export_codebook(
-        session, file_rec.id, user_id, export_format="json"
+    qdc_out, media_q, filename_q = await export_service.export_codebook(
+        session, file_rec.id, user_id, export_format="qdc"
     )
-    assert media_j == "application/json; charset=utf-8"
-    data = json.loads(json_out)
-    assert data["file_id"] == file_rec.id
-    assert data["codes"] == []
-    assert filename_j == "my_cb_v1_codebook.json"
+    assert media_q == "application/xml; charset=utf-8"
+    assert filename_q == "my_cb_v1_codebook.qdc"
+    assert 'xmlns="urn:QDA-XML:codebook:1.0"' in qdc_out
+
+    # qdc is the default -- it is what the dropdown leads with and what
+    # the project bundle archives.
+    default_out, default_media, default_name = await export_service.export_codebook(
+        session, file_rec.id, user_id
+    )
+    assert (default_out, default_media, default_name) == (qdc_out, media_q, filename_q)
 
 
 @pytest.mark.asyncio
@@ -116,11 +121,19 @@ async def test_export_codebook_with_codes(session, user_id):
     assert lines[1].startswith("c1,Alpha")
     assert lines[2].startswith("c2,Beta")
 
-    json_out, _, _ = await export_service.export_codebook(session, file_rec.id, user_id, export_format="json")
-    data = json.loads(json_out)
-    assert len(data["codes"]) == 2
-    assert data["codes"][0]["code_uid"] == "c1"
-    assert data["codes"][1]["code_uid"] == "c2"
+    qdc_out, _, filename_q = await export_service.export_codebook(session, file_rec.id, user_id, export_format="qdc")
+    assert filename_q == "codes_v1_codebook.qdc"
+
+    # One non-codable family element holding both codes in position order.
+    import xml.etree.ElementTree as ET
+
+    ns = {"q": "urn:QDA-XML:codebook:1.0"}
+    root = ET.fromstring(qdc_out)
+    families = list(root.find("q:Codes", ns))
+    assert len(families) == 1
+    assert families[0].get("name") == "Fam"
+    assert families[0].get("isCodable") == "false"
+    assert [c.get("name") for c in families[0].findall("q:Code", ns)] == ["Alpha", "Beta"]
 
 
 @pytest.mark.asyncio
@@ -229,13 +242,46 @@ async def test_export_memos(session, user_id):
     assert "Analytic memo for post 100" in csv_out
     assert filename == "coded_data_memos.csv"
 
-    json_out, _, filename_j = await export_service.export_memos(
-        session, coding_file.id, user_id, export_format="json"
+    md_out, media_m, filename_m = await export_service.export_memos(
+        session, coding_file.id, user_id, export_format="md"
     )
-    data = json.loads(json_out)
-    assert len(data["memos"]) == 1
-    assert data["memos"][0]["body"] == "Analytic memo for post 100"
-    assert filename_j == "coded_data_memos.json"
+    assert media_m == "text/markdown; charset=utf-8"
+    assert filename_m == "coded_data_memos.md"
+    assert "# coded_data.csv -- memos" in md_out
+    assert "## submission post_100" in md_out
+    assert "Analytic memo for post 100" in md_out
+
+
+@pytest.mark.asyncio
+async def test_export_memos_markdown_is_the_default_and_keeps_paragraphs(session, user_id):
+    """A memo body is prose -- the markdown export must not flatten its
+    paragraph breaks the way a single CSV cell does.
+    """
+    coding_file = await _make_file(session, user_id, "prose.csv", "coding")
+    session.add(
+        RowMemo(
+            file_id=coding_file.id,
+            row_type="submission",
+            row_id="p1",
+            body="First paragraph.\n\nSecond paragraph.",
+            author_user_id=user_id,
+        )
+    )
+    await session.commit()
+
+    default_out, default_media, default_name = await export_service.export_memos(
+        session, coding_file.id, user_id
+    )
+    assert default_media == "text/markdown; charset=utf-8"
+    assert default_name.endswith(".md")
+    assert "First paragraph.\n\nSecond paragraph." in default_out
+
+
+@pytest.mark.asyncio
+async def test_export_memos_markdown_when_empty(session, user_id):
+    raw_file = await _make_file(session, user_id, "no_memos.csv", "raw_data")
+    md_out, _, _ = await export_service.export_memos(session, raw_file.id, user_id, export_format="md")
+    assert "_No memos._" in md_out
 
 
 @pytest.mark.asyncio
@@ -274,23 +320,48 @@ async def test_export_summary(session, user_id):
     session.add_all([e1, e2, e3])
     await session.commit()
 
-    csv_out, _, filename = await export_service.export_summary(
-        session, coding_file.id, user_id, export_format="csv"
-    )
-    lines = csv_out.strip().split("\r\n")
-    assert lines[0] == "code_uid,name,family_uid,family_name,frequency,document_count"
-    assert lines[1] == "a,Theme A,,,2,2"
-    assert lines[2] == "b,Theme B,,,1,1"
-    assert filename == "coded_data_summary.csv"
+    md_out, media, filename = await export_service.export_summary(session, coding_file.id, user_id)
+    assert media == "text/markdown; charset=utf-8"
+    assert filename == "coded_data_summary.md"
+    md_lines = md_out.strip().split("\n")
+    assert md_lines[0] == "# coded_data.csv -- code frequency"
+    assert md_lines[2] == "| Code | Family | Frequency | Documents | Code UID |"
+    # Descending frequency, then code_uid -- the repository's ordering.
+    assert md_lines[4] == "| Theme A |  | 2 | 2 | a |"
+    assert md_lines[5] == "| Theme B |  | 1 | 1 | b |"
 
-    json_out, _, _ = await export_service.export_summary(
-        session, coding_file.id, user_id, export_format="json"
-    )
-    data = json.loads(json_out)
-    assert data["summary"] == [
-        {"code_uid": "a", "name": "Theme A", "family_uid": "", "family_name": "", "frequency": 2, "document_count": 2},
-        {"code_uid": "b", "name": "Theme B", "family_uid": "", "family_name": "", "frequency": 1, "document_count": 1},
-    ]
+
+@pytest.mark.asyncio
+async def test_exports_reject_formats_the_artifact_does_not_offer(session, user_id):
+    """An unrecognised format must fail loudly rather than fall through to
+    whichever branch happens to be last -- asking a codebook for "md" used
+    to hand back CSV content under a .csv filename.
+    """
+    codebook_file = await _make_file(session, user_id, "cb.csv", "codebook")
+    coding_file = await _make_file(session, user_id, "coded_data.csv", "coding")
+
+    for bad in ("md", "json", "xlsx", ""):
+        with pytest.raises(ValidationAppError):
+            await export_service.export_codebook(session, codebook_file.id, user_id, export_format=bad)
+
+    for bad in ("md", "qdc", ""):
+        with pytest.raises(ValidationAppError):
+            await export_service.export_coding(session, coding_file.id, user_id, export_format=bad)
+
+    for bad in ("csv", "json", ""):
+        with pytest.raises(ValidationAppError):
+            await export_service.export_summary(session, coding_file.id, user_id, export_format=bad)
+
+    for bad in ("json", "qdc", ""):
+        with pytest.raises(ValidationAppError):
+            await export_service.export_memos(session, coding_file.id, user_id, export_format=bad)
+
+
+@pytest.mark.asyncio
+async def test_export_summary_markdown_when_no_codes_applied(session, user_id):
+    coding_file = await _make_file(session, user_id, "empty.csv", "coding")
+    md_out, _, _ = await export_service.export_summary(session, coding_file.id, user_id)
+    assert "_No codes applied._" in md_out
 
 
 @pytest.mark.asyncio
@@ -327,14 +398,14 @@ async def test_repeated_exports_are_byte_identical(session, user_id):
     c2, _, _ = await export_service.export_coding(session, coding_file.id, user_id, export_format="json")
     assert c1 == c2
 
-    # Repeated summary JSON exports
-    s1, _, _ = await export_service.export_summary(session, coding_file.id, user_id, export_format="json")
-    s2, _, _ = await export_service.export_summary(session, coding_file.id, user_id, export_format="json")
+    # Repeated summary markdown exports
+    s1, _, _ = await export_service.export_summary(session, coding_file.id, user_id, export_format="md")
+    s2, _, _ = await export_service.export_summary(session, coding_file.id, user_id, export_format="md")
     assert s1 == s2
 
-    # Repeated memo JSON exports
-    m1, _, _ = await export_service.export_memos(session, coding_file.id, user_id, export_format="json")
-    m2, _, _ = await export_service.export_memos(session, coding_file.id, user_id, export_format="json")
+    # Repeated memo markdown exports
+    m1, _, _ = await export_service.export_memos(session, coding_file.id, user_id, export_format="md")
+    m2, _, _ = await export_service.export_memos(session, coding_file.id, user_id, export_format="md")
     assert m1 == m2
 
 
@@ -390,26 +461,22 @@ async def test_export_summary_with_historical_version(session, user_id):
     )
 
     # Historical summary for version 1
-    json_v1, _, fn_v1 = await export_service.export_summary(
-        session, coding_file.id, user_id, version_no=1, export_format="json"
+    md_v1, _, fn_v1 = await export_service.export_summary(
+        session, coding_file.id, user_id, version_no=1
     )
-    data_v1 = json.loads(json_v1)
-    assert data_v1["version_no"] == 1
-    assert data_v1["summary"] == [
-        {"code_uid": "a", "name": "Theme A", "family_uid": "", "family_name": "", "frequency": 1, "document_count": 1}
-    ]
-    assert fn_v1 == "hist_summary_v1_summary.json"
+    assert md_v1.splitlines()[0] == "# hist_summary.csv -- code frequency (v1)"
+    assert "| Theme A |  | 1 | 1 | a |" in md_v1
+    assert "Theme B" not in md_v1
+    assert fn_v1 == "hist_summary_v1_summary.md"
 
     # Historical summary for version 2
-    json_v2, _, fn_v2 = await export_service.export_summary(
-        session, coding_file.id, user_id, version_no=2, export_format="json"
+    md_v2, _, fn_v2 = await export_service.export_summary(
+        session, coding_file.id, user_id, version_no=2
     )
-    data_v2 = json.loads(json_v2)
-    assert data_v2["version_no"] == 2
-    assert data_v2["summary"] == [
-        {"code_uid": "b", "name": "Theme B", "family_uid": "", "family_name": "", "frequency": 2, "document_count": 2}
-    ]
-    assert fn_v2 == "hist_summary_v2_summary.json"
+    assert md_v2.splitlines()[0] == "# hist_summary.csv -- code frequency (v2)"
+    assert "| Theme B |  | 2 | 2 | b |" in md_v2
+    assert "Theme A" not in md_v2
+    assert fn_v2 == "hist_summary_v2_summary.md"
 
 
 @pytest.mark.asyncio
@@ -441,7 +508,7 @@ async def test_export_summary_unknown_version_no_is_404(session, user_id):
         session, file_id=coding_file.id, author_user_id=user_id, origin="manual"
     )
     with pytest.raises(NotFoundError):
-        await export_service.export_summary(session, coding_file.id, user_id, version_no=99, export_format="csv")
+        await export_service.export_summary(session, coding_file.id, user_id, version_no=99)
 
 
 @pytest.mark.asyncio
@@ -561,9 +628,9 @@ async def test_export_project_bundle_is_deterministic_and_privacy_scoped(session
         names = zf.namelist()
         assert "manifest.json" in names
         assert "lineage/project_lineage.json" in names
-        assert any(n.endswith("_codebook.csv") for n in names)
+        assert any(n.endswith("_codebook.qdc") for n in names)
+        assert not any(n.endswith("_codebook.csv") for n in names)
         assert not any(n.endswith("_codebook.json") for n in names)
-        assert not any(n.endswith("_codebook.qdc") for n in names)
         assert any(n.endswith("_segments_long.csv") for n in names)
         assert not any(n.endswith("_matrix_wide.csv") for n in names)
         assert not any(n.endswith("_segments_long.json") for n in names)
@@ -577,6 +644,70 @@ async def test_export_project_bundle_is_deterministic_and_privacy_scoped(session
         long_csv = next(n for n in names if n.endswith("_segments_long.csv"))
         assert "alice" not in zf.read(long_csv).decode("utf-8")
         assert "body" not in zf.read(long_csv).decode("utf-8")
+
+
+@pytest.mark.asyncio
+async def test_export_project_bundle_writes_one_file_per_project_file(session, user_id):
+    """One file in, one file out: no artifact may appear twice in two
+    formats, and a file's memos ride along as a single ``.md`` sidecar.
+    """
+    from backend.app.database import Project, async_link_file_to_project
+
+    project = Project(user_id=user_id, projectname="One Each", description="")
+    session.add(project)
+    await session.commit()
+    await session.refresh(project)
+
+    cb_file = await _make_file(session, user_id, "cb.csv", "codebook")
+    await version_service.commit_codebook_version(
+        session, file_id=cb_file.id, author_user_id=user_id, origin="manual",
+        codes=[_make_code_row("a", "Theme A", position=1)],
+    )
+    coding_file = await _make_file(session, user_id, "coding.csv", "coding")
+    await version_service.commit_coding_version(
+        session, file_id=coding_file.id, author_user_id=user_id, origin="manual"
+    )
+    raw_file = await _make_file(session, user_id, "raw.csv", "raw_data")
+    session.add_all(
+        [
+            RowMemo(file_id=coding_file.id, row_type="submission", row_id="p1", body="On the coding"),
+            RowMemo(file_id=raw_file.id, row_type="submission", row_id="p1", body="On the raw data"),
+        ]
+    )
+    await session.commit()
+
+    for f in (cb_file, coding_file, raw_file):
+        await async_link_file_to_project(session, f.id, project.id)
+    await session.commit()
+
+    bundle, _, _ = await export_service.export_project_bundle(session, project.id, user_id)
+
+    import zipfile
+    import io as _io
+
+    with zipfile.ZipFile(_io.BytesIO(bundle)) as zf:
+        names = zf.namelist()
+
+    # No content is emitted in two formats.
+    assert not any(n.endswith("_memos.json") for n in names)
+    assert not any(n.endswith("_memos.csv") for n in names)
+    # `_slugify` drops the dot, so "coding.csv" slugs to "codingcsv".
+    assert sorted(n for n in names if n.startswith("memos/")) == [
+        f"memos/{coding_file.id}_codingcsv_memos.md",
+        f"memos/{raw_file.id}_rawcsv_memos.md",
+    ]
+
+    # Each artifact appears exactly once, in its best format.
+    assert [n for n in names if n.startswith("codebooks/")] == [f"codebooks/{cb_file.id}_cbcsv_codebook.qdc"]
+    assert [n for n in names if n.startswith("codings/")] == [
+        f"codings/{coding_file.id}_codingcsv_segments_long.csv"
+    ]
+
+    # Every artifact path is unique once its extension is stripped, so no
+    # file is duplicated across formats anywhere in the bundle.
+    artifact_paths = [n for n in names if n not in ("manifest.json", "lineage/project_lineage.json")]
+    stems = [n.rsplit(".", 1)[0] for n in artifact_paths]
+    assert len(stems) == len(set(stems))
 
 
 @pytest.mark.asyncio

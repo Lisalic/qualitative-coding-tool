@@ -22,7 +22,7 @@ export default function ProjectHeaderSection({ project, onRefreshProject }) {
     setBundling(true);
     try {
       const res = await apiFetch(buildProjectBundlePath(project.id));
-      if (!res.ok) throw new Error("Export failed");
+      if (!res.ok) throw new Error("Download failed");
 
       const disposition = res.headers.get("content-disposition");
       let filename = `${slugify(project.projectname, `project_${project.id}`)}_project_bundle.zip`;
@@ -39,7 +39,7 @@ export default function ProjectHeaderSection({ project, onRefreshProject }) {
       a.remove();
       window.URL.revokeObjectURL(downloadUrl);
     } catch (err) {
-      setBundleError(err?.message || "Export failed. Please try again.");
+      setBundleError(err?.message || "Download failed. Please try again.");
     } finally {
       setBundling(false);
     }
@@ -88,7 +88,7 @@ export default function ProjectHeaderSection({ project, onRefreshProject }) {
         !editing ? (
           <div className="flex items-center gap-2">
             <button type="button" className={tabBtn} onClick={downloadBundle} disabled={bundling}>
-              {bundling ? "Preparing export..." : "Export"}
+              {bundling ? "Preparing download..." : "Download"}
             </button>
             <button type="button" className={tabBtn} onClick={startEdit}>
               Edit

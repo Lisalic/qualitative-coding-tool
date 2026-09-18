@@ -121,7 +121,7 @@ async def test_export_memos_rejects_a_file_type_with_no_memos(client, session_fa
     assert resp.status_code == 400
 
 
-async def test_export_codebook_route_csv_and_json(client, session_factory, make_token):
+async def test_export_codebook_route_qdc_and_csv(client, session_factory, make_token):
     user = await _make_user(session_factory, "user_cb@example.com")
     file_rec = await _make_file(session_factory, user.id, "my_cb.csv", "codebook")
     code = {
@@ -148,16 +148,32 @@ async def test_export_codebook_route_csv_and_json(client, session_factory, make_
     assert 'attachment; filename="my_cb_v1_codebook.csv"' in resp_csv.headers["content-disposition"]
     assert "Theme Alpha" in resp_csv.text
 
-    # JSON
-    resp_json = client.get(
-        f"/api/export/{file_rec.id}/codebook?format=json",
+    # REFI-QDA -- the default, and what the dropdown leads with.
+    resp_qdc = client.get(
+        f"/api/export/{file_rec.id}/codebook?format=qdc",
         cookies={"access_token": make_token(sub=str(user.id))},
     )
-    assert resp_json.status_code == 200
-    assert "application/json" in resp_json.headers["content-type"]
-    assert 'attachment; filename="my_cb_v1_codebook.json"' in resp_json.headers["content-disposition"]
-    data = resp_json.json()
-    assert data["codes"][0]["name"] == "Theme Alpha"
+    assert resp_qdc.status_code == 200
+    assert "application/xml" in resp_qdc.headers["content-type"]
+    assert 'attachment; filename="my_cb_v1_codebook.qdc"' in resp_qdc.headers["content-disposition"]
+    assert 'xmlns="urn:QDA-XML:codebook:1.0"' in resp_qdc.text
+    assert 'name="Theme Alpha"' in resp_qdc.text
+
+    resp_default = client.get(
+        f"/api/export/{file_rec.id}/codebook",
+        cookies={"access_token": make_token(sub=str(user.id))},
+    )
+    assert resp_default.status_code == 200
+    assert resp_default.text == resp_qdc.text
+
+    # Formats this artifact no longer offers are rejected, not silently
+    # served as the default.
+    for bad in ("json", "md"):
+        resp_bad = client.get(
+            f"/api/export/{file_rec.id}/codebook?format={bad}",
+            cookies={"access_token": make_token(sub=str(user.id))},
+        )
+        assert resp_bad.status_code == 422
 
 
 async def test_export_coding_route_csv_and_json(client, session_factory, make_token):
@@ -237,23 +253,40 @@ async def test_export_memos_and_summary_routes(client, session_factory, make_tok
     assert resp_m.status_code == 200
     assert "Noteworthy post memo" in resp_m.text
 
-    # Summary
+    # Memos default to markdown when no format is given.
+    resp_m_default = client.get(
+        f"/api/export/{file_rec.id}/memos",
+        cookies={"access_token": make_token(sub=str(user.id))},
+    )
+    assert resp_m_default.status_code == 200
+    assert "text/markdown" in resp_m_default.headers["content-type"]
+    assert "Noteworthy post memo" in resp_m_default.text
+
+    # Summary -- markdown is the only format it offers.
     resp_s = client.get(
-        f"/api/export/{file_rec.id}/summary?format=json",
+        f"/api/export/{file_rec.id}/summary?format=md",
         cookies={"access_token": make_token(sub=str(user.id))},
     )
     assert resp_s.status_code == 200
-    assert resp_s.json()["summary"][0]["name"] == "Code1"
-    assert resp_s.json()["summary"][0]["code_uid"] == "u1"
+    assert "text/markdown" in resp_s.headers["content-type"]
+    assert "| Code1 |" in resp_s.text
+    assert "| u1 |" in resp_s.text
+
+    for bad in ("csv", "json"):
+        resp_bad = client.get(
+            f"/api/export/{file_rec.id}/summary?format={bad}",
+            cookies={"access_token": make_token(sub=str(user.id))},
+        )
+        assert resp_bad.status_code == 422
 
     # Summary with version_no
     resp_sv = client.get(
-        f"/api/export/{file_rec.id}/summary?format=json&version_no=1",
+        f"/api/export/{file_rec.id}/summary?version_no=1",
         cookies={"access_token": make_token(sub=str(user.id))},
     )
     assert resp_sv.status_code == 200
-    assert resp_sv.json()["version_no"] == 1
-    assert 'attachment; filename="my_data_v1_summary.json"' in resp_sv.headers["content-disposition"]
+    assert "(v1)" in resp_sv.text
+    assert 'attachment; filename="my_data_v1_summary.md"' in resp_sv.headers["content-disposition"]
 
 
 async def test_export_codebook_unknown_version_no_returns_404(client, session_factory, make_token):

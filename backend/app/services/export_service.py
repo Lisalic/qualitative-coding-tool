@@ -1,17 +1,38 @@
 """Export service for codebooks, coding entries, row memos, frequency
 summaries, and deterministic project bundles.
 
-Produces deterministic, ordered, valid UTF-8 CSV (RFC 4180) and JSON.
+Produces deterministic, ordered, valid UTF-8 output. Each artifact kind
+offers exactly two formats -- the one that best preserves it and the one
+that best travels -- rather than a uniform CSV/JSON pair:
+
+* codebook -- ``qdc`` (REFI-QDA Codebook, the interchange standard
+  NVivo/ATLAS.ti/MAXQDA implement -- see ``core/qdc.py``) and ``csv``
+  (one row per code, carrying ``code_uid``/``family_uid``, for Excel/R).
+  ``qdc`` is the default and what the project bundle archives: a codebook
+  is the artifact researchers most often need to carry into another QDA
+  package, and it is the only one of these exports a standard exists for.
+* coding -- ``csv`` and ``json``. Segments carry offsets, nested code
+  metadata and optionally full source text with arbitrary newlines, so
+  JSON stays the lossless archival form here.
+* summary -- ``md`` only. A frequency table is a finished reading of
+  a coding, not source data something re-parses; anyone wanting the
+  numbers exports the coding and counts.
+* memos -- ``md`` first and ``csv`` second: a memo is multi-paragraph
+  prose, which a single CSV cell is the wrong shape for.
+
 Coding exports come in two layouts: ``long`` (one row per coded segment)
 and ``wide`` (one row per dataset item, including uncoded ones, with a
 column per code) -- see ``export_coding``. The summary export groups by
 ``code_uid``, never by code name, so a rename doesn't fragment history --
 see ``export_summary``/``repositories/export_repo.py::get_code_frequencies_by_uid``.
-The project bundle (``export_project_bundle``) also carries any
-``codebook_comparison``/``coding_comparison`` artifact in the project as
-its raw markdown blob under ``comparisons/`` -- unlike codebook/coding, a
-comparison has no structured rows to serialize into CSV, so its content
-is exported as-is rather than reshaped.
+
+The project bundle (``export_project_bundle``) writes exactly one file
+per project file, always in that artifact's best format, so nothing is
+duplicated across formats; a file's row memos ride along as a single
+``.md`` sidecar. A ``codebook_comparison``/``coding_comparison`` is
+carried as its raw markdown blob -- unlike codebook/coding, a comparison
+has no structured rows to serialize, so its content is exported as-is
+rather than reshaped.
 
 Privacy: ``include_source_text``/``include_author`` on ``export_coding``
 and ``export_project_bundle`` both default to ``False`` -- an export is
@@ -32,6 +53,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.exceptions import NotFoundError, ValidationAppError
+from backend.app.core.qdc import serialize_codes_to_qdc
 from backend.app.repositories import export_repo, file_repo, project_repo, version_repo
 from backend.app.services import version_service
 from backend.app.versioning_models import CodebookCode
@@ -74,6 +96,49 @@ def _csv_serialize(rows: list[list[Any]], headers: list[str]) -> str:
     return output.getvalue()
 
 
+_MEDIA_TYPES = {
+    "csv": "text/csv; charset=utf-8",
+    "json": "application/json; charset=utf-8",
+    "md": "text/markdown; charset=utf-8",
+    # REFI-QDA has no registered IANA type; a .qdc is an XML document.
+    "qdc": "application/xml; charset=utf-8",
+}
+
+
+def _md_cell(val: Any) -> str:
+    """One markdown table cell: pipes escaped and newlines flattened, so a
+    multi-line definition can't break the row it sits in.
+    """
+    if val is None:
+        return ""
+    return str(val).replace("|", "\\|").replace("\r\n", " ").replace("\n", " ").strip()
+
+
+def _md_table(rows: list[list[Any]], headers: list[str]) -> str:
+    lines = [
+        "| " + " | ".join(headers) + " |",
+        "|" + "|".join(["---"] * len(headers)) + "|",
+    ]
+    lines.extend("| " + " | ".join(_md_cell(v) for v in row) + " |" for row in rows)
+    return "\n".join(lines)
+
+
+def _require_format(export_format: str, allowed: tuple[str, ...], artifact: str) -> None:
+    """Reject a format this artifact doesn't offer.
+
+    Each export below picks its format with an ``if``/fallthrough, so
+    without this an unrecognised value silently returns the *last*
+    branch's format -- asking a codebook for ``md`` used to hand back CSV
+    under a ``.csv`` filename rather than failing. The route patterns
+    already reject bad input at the API edge; this covers internal
+    callers, which is where a stale format string actually survives.
+    """
+    if export_format not in allowed:
+        raise ValidationAppError(
+            f"{artifact} exports are {' or '.join(allowed)} only (got {export_format!r})"
+        )
+
+
 def _slugify(val: str | None, default: str = "export") -> str:
     if not val:
         return default
@@ -107,9 +172,17 @@ async def export_codebook(
     user_id: int,
     *,
     version_no: int | None = None,
-    export_format: str = "csv",
+    export_format: str = "qdc",
 ) -> tuple[str, str, str]:
-    """Export codebook as (content, media_type, filename)."""
+    """Export codebook as (content, media_type, filename).
+
+    ``qdc`` (the default) is the REFI-QDA Codebook interchange standard,
+    and what the project bundle archives -- it is the only one of these
+    formats another QDA package can import as a codebook rather than as
+    an undifferentiated table. ``csv`` is one row per code for a
+    spreadsheet or R.
+    """
+    _require_format(export_format, ("qdc", "csv"), "Codebook")
     file_record = await file_repo.get_owned_file(session, str(file_id), user_id)
     if file_record.file_type != "codebook":
         raise ValidationAppError(f"File {file_id} is not a codebook (type={file_record.file_type})")
@@ -120,29 +193,13 @@ async def export_codebook(
     base_name = (file_record.filename or f"file_{file_id}").rsplit(".", 1)[0]
     ver_suffix = f"_v{resolved_version_no}" if resolved_version_no is not None else ""
 
-    if export_format == "json":
-        data = {
-            "file_id": file_id,
-            "name": file_record.filename,
-            "version_no": resolved_version_no,
-            "codes": [
-                {
-                    "code_uid": c.code_uid,
-                    "name": c.name,
-                    "family_uid": c.family_uid,
-                    "family_name": c.family_name,
-                    "definition": c.definition,
-                    "inclusion": c.inclusion,
-                    "exclusion": c.exclusion,
-                    "example": c.example,
-                    "keywords": c.keywords,
-                    "position": c.position,
-                }
-                for c in sorted_codes
-            ],
-        }
-        filename = f"{base_name}{ver_suffix}_codebook.json"
-        return json.dumps(data, indent=2, default=_json_serial), "application/json; charset=utf-8", filename
+    if export_format == "qdc":
+        # `sorted_codes` is already in (position, code_uid) order, which
+        # the serializer preserves -- families come out arranged the way
+        # the researcher arranged them, not alphabetically.
+        content = serialize_codes_to_qdc(sorted_codes)
+        filename = f"{base_name}{ver_suffix}_codebook.qdc"
+        return content, _MEDIA_TYPES["qdc"], filename
 
     headers = [
         "code_uid", "name", "family_uid", "family_name", "definition",
@@ -157,7 +214,7 @@ async def export_codebook(
         for c in sorted_codes
     ]
     filename = f"{base_name}{ver_suffix}_codebook.csv"
-    return _csv_serialize(rows, headers), "text/csv; charset=utf-8", filename
+    return _csv_serialize(rows, headers), _MEDIA_TYPES["csv"], filename
 
 
 async def export_coding(
@@ -175,6 +232,7 @@ async def export_coding(
     ``wide`` (one row per dataset item -- including uncoded ones -- with a
     0/1 or count column per code).
     """
+    _require_format(export_format, ("csv", "json"), "Coding")
     file_record = await file_repo.get_owned_file(session, str(file_id), user_id)
     if file_record.file_type != "coding":
         raise ValidationAppError(f"File {file_id} is not a coding artifact (type={file_record.file_type})")
@@ -234,7 +292,7 @@ async def export_coding(
                 "entries": json_entries,
             }
             filename = f"{base_name}{ver_suffix}_segments_long.json"
-            return json.dumps(data, indent=2, default=_json_serial), "application/json; charset=utf-8", filename
+            return json.dumps(data, indent=2, default=_json_serial), _MEDIA_TYPES["json"], filename
 
         headers = [
             "file_id", "version_no", "entry_id", "row_type", "post_id", "code_uid",
@@ -265,7 +323,7 @@ async def export_coding(
             rows.append(r)
 
         filename = f"{base_name}{ver_suffix}_segments_long.csv"
-        return _csv_serialize(rows, headers), "text/csv; charset=utf-8", filename
+        return _csv_serialize(rows, headers), _MEDIA_TYPES["csv"], filename
 
     if layout != "wide":
         raise ValidationAppError(f"Unknown coding export layout: {layout!r}")
@@ -312,7 +370,7 @@ async def export_coding(
             "rows": json_rows,
         }
         filename = f"{base_name}{ver_suffix}_matrix_wide.json"
-        return json.dumps(data, indent=2, default=_json_serial), "application/json; charset=utf-8", filename
+        return json.dumps(data, indent=2, default=_json_serial), _MEDIA_TYPES["json"], filename
 
     headers = ["row_type", "post_id", "is_coded", "total_codes"]
     if include_author:
@@ -334,7 +392,7 @@ async def export_coding(
         rows.append(r)
 
     filename = f"{base_name}{ver_suffix}_matrix_wide.csv"
-    return _csv_serialize(rows, headers), "text/csv; charset=utf-8", filename
+    return _csv_serialize(rows, headers), _MEDIA_TYPES["csv"], filename
 
 
 async def export_memos(
@@ -342,9 +400,15 @@ async def export_memos(
     file_id: int,
     user_id: int,
     *,
-    export_format: str = "csv",
+    export_format: str = "md",
 ) -> tuple[str, str, str]:
     """Export row memos as (content, media_type, filename).
+
+    ``md`` is the default and the form the project bundle archives: a
+    memo body is multi-paragraph prose, which a single CSV cell is the
+    wrong shape for -- it reads as one unwrapped line in a spreadsheet
+    and its blank lines fight the parser. ``csv`` stays available for
+    counting or joining memos against other exports.
 
     No ``version_no`` param: unlike codebook/coding/summary, row memos
     are deliberately not SCD-2 range-versioned (see the ``RowMemo``
@@ -352,6 +416,7 @@ async def export_memos(
     resolve, only the current live set, so there is nothing a version
     parameter could filter by.
     """
+    _require_format(export_format, ("md", "csv"), "Memo")
     file_record = await file_repo.get_owned_file(session, str(file_id), user_id)
     if file_record.file_type not in ("raw_data", "filtered_data", "coding"):
         raise ValidationAppError(
@@ -361,25 +426,28 @@ async def export_memos(
 
     base_name = (file_record.filename or f"file_{file_id}").rsplit(".", 1)[0]
 
-    if export_format == "json":
-        data = {
-            "file_id": file_id,
-            "name": file_record.filename,
-            "memos": [
-                {
-                    "memo_id": m.id,
-                    "row_type": m.row_type,
-                    "row_id": m.row_id,
-                    "body": m.body,
-                    "author_user_id": m.author_user_id,
-                    "created_at": m.created_at.isoformat() if m.created_at else None,
-                    "updated_at": m.updated_at.isoformat() if m.updated_at else None,
-                }
-                for m in memos
-            ],
-        }
-        filename = f"{base_name}_memos.json"
-        return json.dumps(data, indent=2, default=_json_serial), "application/json; charset=utf-8", filename
+    if export_format == "md":
+        lines = [f"# {file_record.filename or f'file_{file_id}'} -- memos", ""]
+        if not memos:
+            lines.append("_No memos._")
+        for m in memos:
+            lines.append(f"## {m.row_type} {m.row_id}")
+            lines.append("")
+            meta = [f"memo {m.id}"]
+            if m.author_user_id is not None:
+                meta.append(f"author {m.author_user_id}")
+            if m.created_at:
+                meta.append(f"created {m.created_at.isoformat()}")
+            if m.updated_at:
+                meta.append(f"updated {m.updated_at.isoformat()}")
+            lines.append(f"*{' - '.join(meta)}*")
+            lines.append("")
+            # Body verbatim: its paragraph breaks are the point of
+            # exporting memos as markdown at all.
+            lines.append((m.body or "").strip())
+            lines.append("")
+        filename = f"{base_name}_memos.md"
+        return "\n".join(lines).rstrip() + "\n", _MEDIA_TYPES["md"], filename
 
     headers = ["memo_id", "row_type", "row_id", "body", "author_user_id", "created_at", "updated_at"]
     rows = [
@@ -392,7 +460,7 @@ async def export_memos(
         for m in memos
     ]
     filename = f"{base_name}_memos.csv"
-    return _csv_serialize(rows, headers), "text/csv; charset=utf-8", filename
+    return _csv_serialize(rows, headers), _MEDIA_TYPES["csv"], filename
 
 
 async def export_summary(
@@ -401,9 +469,24 @@ async def export_summary(
     user_id: int,
     *,
     version_no: int | None = None,
-    export_format: str = "csv",
+    export_format: str = "md",
 ) -> tuple[str, str, str]:
-    """Export code frequency summary, grouped strictly by ``code_uid``."""
+    """Export code frequency summary as markdown, grouped strictly by
+    ``code_uid``.
+
+    Markdown is the only format offered here, unlike every other export.
+    A frequency summary is a finished read-only reading of a coding --
+    a handful of rows you paste into a write-up -- not source data
+    something downstream re-parses; anyone wanting the underlying numbers
+    exports the coding itself and counts. ``export_format`` is kept in
+    the signature so the route's ``format`` query parameter stays
+    uniform, but ``md`` is the only accepted value.
+
+    The frequency ordering (descending, then ``code_uid``) is the
+    repository's -- see ``export_repo.get_code_frequencies_by_uid`` -- so
+    a rename never reorders the table.
+    """
+    _require_format(export_format, ("md",), "Summary")
     file_record = await file_repo.get_owned_file(session, str(file_id), user_id)
     if file_record.file_type != "coding":
         raise ValidationAppError(f"File {file_id} is not a coding artifact")
@@ -417,23 +500,21 @@ async def export_summary(
     base_name = (file_record.filename or f"file_{file_id}").rsplit(".", 1)[0]
     ver_suffix = f"_v{resolved_version_no}" if resolved_version_no is not None else ""
 
-    if export_format == "json":
-        data = {
-            "file_id": file_id,
-            "name": file_record.filename,
-            "version_no": resolved_version_no,
-            "summary": summary_data,
-        }
-        filename = f"{base_name}{ver_suffix}_summary.json"
-        return json.dumps(data, indent=2, default=_json_serial), "application/json; charset=utf-8", filename
-
-    headers = ["code_uid", "name", "family_uid", "family_name", "frequency", "document_count"]
-    rows = [
-        [s["code_uid"], s["name"], s["family_uid"], s["family_name"], s["frequency"], s["document_count"]]
-        for s in summary_data
-    ]
-    filename = f"{base_name}{ver_suffix}_summary.csv"
-    return _csv_serialize(rows, headers), "text/csv; charset=utf-8", filename
+    heading = f"# {file_record.filename or f'file_{file_id}'} -- code frequency"
+    if resolved_version_no is not None:
+        heading += f" (v{resolved_version_no})"
+    if summary_data:
+        table = _md_table(
+            [
+                [s["name"], s["family_name"], s["frequency"], s["document_count"], s["code_uid"]]
+                for s in summary_data
+            ],
+            ["Code", "Family", "Frequency", "Documents", "Code UID"],
+        )
+    else:
+        table = "_No codes applied._"
+    filename = f"{base_name}{ver_suffix}_summary.md"
+    return f"{heading}\n\n{table}\n", _MEDIA_TYPES["md"], filename
 
 
 async def export_project_bundle(
@@ -446,8 +527,17 @@ async def export_project_bundle(
 ) -> tuple[bytes, str, str]:
     """Deterministic ZIP bundle of every artifact in a project: a
     manifest with a SHA-256 per file, the project's lineage graph, and
-    every codebook (.csv)/coding (segments, long, .csv)/memos/comparison
-    export.
+    exactly one export per project file.
+
+    One file in, one file out. Each artifact is written only in the
+    format that best preserves it -- codebook ``.qdc`` (REFI-QDA, the
+    codebook interchange standard), coding ``.csv`` (segments, long),
+    comparison ``.md`` (its raw blob) -- never the same content twice in
+    two formats. A file's row memos ride along as a single
+    ``.md`` sidecar, which for a ``raw_data``/``filtered_data`` file is
+    its only export; memos are kept out of the artifact file rather than
+    folded into it because they annotate rows, not codes, and merging
+    them would change the artifact's schema.
 
     Byte-deterministic: entries are written in sorted-path order with a
     fixed ``date_time`` (2026-01-01 00:00:00), so identical content always
@@ -467,8 +557,8 @@ async def export_project_bundle(
         f_slug = _slugify(f.filename, default=f"file_{f.id}")
 
         if f.file_type == "codebook":
-            cb_csv, _, _ = await export_codebook(session, f.id, user_id, export_format="csv")
-            bundle_files[f"codebooks/{f.id}_{f_slug}_codebook.csv"] = cb_csv.encode("utf-8")
+            cb_qdc, _, _ = await export_codebook(session, f.id, user_id, export_format="qdc")
+            bundle_files[f"codebooks/{f.id}_{f_slug}_codebook.qdc"] = cb_qdc.encode("utf-8")
 
         elif f.file_type == "coding":
             content, _, _ = await export_coding(
@@ -486,12 +576,8 @@ async def export_project_bundle(
 
         memos = await export_repo.get_row_memos(session, f.id)
         if memos:
-            m_csv, _, _ = await export_memos(session, f.id, user_id, export_format="csv")
-            m_json, _, _ = await export_memos(session, f.id, user_id, export_format="json")
-            bundle_files[f"memos/{f.id}_{f_slug}_memos.csv"] = m_csv.encode("utf-8")
-            bundle_files[f"memos/{f.id}_{f_slug}_memos.json"] = m_json.encode("utf-8")
-
-    _MEDIA_TYPES_BY_EXT = {"json": "application/json", "csv": "text/csv", "md": "text/markdown"}
+            m_md, _, _ = await export_memos(session, f.id, user_id, export_format="md")
+            bundle_files[f"memos/{f.id}_{f_slug}_memos.md"] = m_md.encode("utf-8")
 
     manifest_entries = []
     for path in sorted(bundle_files.keys()):
@@ -502,7 +588,7 @@ async def export_project_bundle(
                 "path": path,
                 "sha256": hashlib.sha256(content).hexdigest(),
                 "bytes": len(content),
-                "media_type": _MEDIA_TYPES_BY_EXT.get(ext, "text/csv"),
+                "media_type": _MEDIA_TYPES.get(ext, _MEDIA_TYPES["csv"]).split(";")[0],
             }
         )
 
