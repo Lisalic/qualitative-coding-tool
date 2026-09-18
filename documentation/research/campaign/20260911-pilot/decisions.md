@@ -1,11 +1,13 @@
 # Cross-Ticket Decisions
 
+> Historical decisions from the completed 2026-09-11/12 campaign. New campaigns must use their own run-specific artifact directory.
+
 **Last updated:** 2026-09-11
 
 ## Decision Log
 
 ### 2026-09-11: Campaign Inception & Baseline Establishment
-- **Context:** Commencing long-running multi-agent qualitative-coding implementation campaign per `gemini-antigravity-campaign-prompt.md`.
+- **Context:** Commencing the original long-running multi-agent campaign under the former Gemini/Antigravity prompt, which was removed after the campaign and replaced by `documentation/research/agent-worktree-orchestration-process.md`.
 - **Pre-existing Tree State:** 116 modified files and 20 untracked files are recognized as user-owned work-in-progress (implementing human-in-the-loop editor rewrites, B1/C2 provenance, etc.).
 - **Baseline Results:**
   - Backend pytest: 1,324 passed, 5 deselected.

@@ -1,5 +1,7 @@
 # Campaign Verification Log
 
+> Historical evidence from the completed 2026-09-11/12 campaign. Later product changes may supersede behaviors recorded here.
+
 **Last updated:** 2026-09-12 (Recovery remediation completed)
 
 ## Baseline Verification

@@ -1,5 +1,7 @@
 # Campaign Status
 
+> Historical record of the completed 2026-09-11/12 campaign. It is not the current product specification or a live dispatch queue.
+
 **Last updated:** 2026-09-12 (Recovery remediation completed)  
 **Current wave:** Pilot milestone (Passed after remediation)
 
