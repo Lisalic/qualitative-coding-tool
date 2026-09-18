@@ -1,22 +1,13 @@
 // Helpers for editing a coding artifact's rows in the View Coding
-// workspace.
-//
-// A row now comes from GET /api/coding/{ref}/rows already structured
-// ({ item_id, row_type, title, content, codes: [{code, code_uid, quote,
-// start_offset, end_offset, notes}] }), and edits are sent back the same
-// way as the `rows` field of PUT /api/coding/{ref}/revision -- there is
-// no POST_ID/CODE/EVIDENCE text blob to parse/format on the way in or
-// out (see lib/codingUtils.js's header comment). Tagging (manual or an
-// accepted AI recode proposal) is staged locally and flushed in one
-// batched save alongside any codebook edit (see useViewCodingPage.js's
-// pendingRowEdits/saveSession), so this validator normalizes every
-// pending row at once, not one at a time.
+// workspace. Row shape matches lib/codingUtils.js's header comment;
+// edits are sent back as the `rows` field of PUT /api/coding/{ref}/revision.
+// Tagging is staged locally and flushed in one batched save alongside any
+// codebook edit (see useViewCodingPage.js), so this validator normalizes
+// every pending row at once, not one at a time.
 //
 // Identity for the wire is `code_uid`, not the display name `code` --
-// the backend resolves the current name from the uid, so a code rename
-// never orphans an entry (see coding_service.save_coding_rows). `code`
-// may still be present on an entry read back from the server (for
-// display), but it's never required or sent on the way out.
+// the backend resolves the current name from the uid, so a rename never
+// orphans an entry (see coding_service.save_coding_rows).
 
 /**
  * Validate and trim a draft of edited rows before ``PUT

@@ -153,14 +153,9 @@ function DeltaCell({ delta }) {
 }
 
 /** How many times each code is applied in the older version vs the newer
- * one. This used to be a bare "Name  12 -> 15 (+3)" line per code, where
- * nothing on screen said which number was which version -- the arrow was
- * the only clue, and the header row is the whole point of the change.
- *
- * The last row totals every code application in the artifact, which is
- * where `from_total_entries`/`to_total_entries` now live (they were
- * previously a stat chip labelled "Codes applied", stacked among chips
- * that counted rows rather than applications).
+ * one, with a header row disambiguating which column is which version.
+ * The last row totals every code application in the artifact, where
+ * `from_total_entries`/`to_total_entries` live.
  */
 function CodeCountsTable({ coding, fromVersion, toVersion }) {
   const entries = coding.code_counts;

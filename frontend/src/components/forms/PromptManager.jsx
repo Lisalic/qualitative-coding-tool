@@ -150,7 +150,6 @@ export default function PromptManager({
     api
       .post(`/api/prompts/${id}/update`, form)
       .then((res) => {
-        // refresh list after update
         loadSavedPrompts();
         setEditingId(null);
         setEditName("");
@@ -176,7 +175,6 @@ export default function PromptManager({
     api
       .delete(`/api/prompts/${id}`)
       .then(() => {
-        // refresh list after delete
         loadSavedPrompts();
         showMessage("Prompt deleted successfully!");
       })

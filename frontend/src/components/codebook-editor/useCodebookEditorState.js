@@ -41,29 +41,21 @@ function writeDraft(storageKey, state) {
  * to `localStorage` under one caller-supplied `storageKey`.
  *
  * Parameterized on the key itself, not on `(sourceDatabase,
- * targetCodebook)`, because a second caller (the integrate editor) keys
- * its draft on a different, unordered thing -- a SET of source codebooks
- * (`lib/codebookEditorState.js::integrateDraftStorageKey`) -- and the
+ * targetCodebook)`, because the integrate editor keys its draft on a
+ * different, unordered thing -- a SET of source codebooks -- and the
  * hook's own job (read/write/clear/hydrate-on-change) doesn't care what
- * the key means, only that it changed. Create Codebook (the only other
- * caller) passes `draftStorageKey(sourceDatabase, targetCodebook)`
- * itself; this hook no longer builds that key internally.
+ * the key means, only that it changed.
  *
- * Persisted rather than held in memory for the same reason the filter
- * editor's draft is: writing a codebook is a long session spent reading
- * the corpus, and a multi-minute AI pass may run in the middle of it.
- * Losing that to a refresh would make the screen unusable, and the
- * alternative -- a server-side draft artifact -- is a table, routes and a
- * cleanup policy for state that only ever matters to one browser.
+ * Persisted rather than held in memory: writing a codebook is a long
+ * session, and a multi-minute AI pass may run in the middle of it, so
+ * losing it to a refresh would make the screen unusable.
  *
- * **Writes happen in the mutators, not in an effect.** A persist effect on
- * `[state]` races its own hydration: the load effect's `setState` doesn't
- * reach the persist effect until the next render, so that effect fires
- * once with the stale EMPTY state and overwrites the very draft that was
- * just read back -- a refresh silently discards the user's work. Writing
- * where the change actually happens has no such ordering hazard, and
- * hydration never writes at all. (See `useFilterEditorState`, which
- * learned this the same way.)
+ * **Writes happen in the mutators, not in an effect.** A persist effect
+ * on `[state]` races its own hydration: the load effect's `setState`
+ * doesn't reach the persist effect until the next render, so it fires
+ * once with the stale EMPTY state and overwrites the draft just read
+ * back -- a refresh silently discards the user's work. Writing where
+ * the change actually happens has no such ordering hazard.
  */
 export function useCodebookEditorState(storageKey) {
   const [state, setState] = useState(() => readDraft(storageKey));

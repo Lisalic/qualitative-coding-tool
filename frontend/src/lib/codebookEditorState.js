@@ -1,61 +1,33 @@
 /**
  * The codebook editor's draft + proposal state, as pure functions.
  *
- * Two separate things live here, and keeping them separate is the point:
+ * Two things live here, kept deliberately separate: `draft` is the
+ * researcher's codebook (a family->codes tree, see `lib/codingUtils.js`);
+ * `proposals` are AI suggestions in a review tray that belong to nobody
+ * until accepted. `acceptProposal` is the only door between the two --
+ * the assistant may add, never overwrite. Lives here rather than in the
+ * React hook because `frontend/src/lib/**` is the layer the Vitest suite
+ * covers; `useCodebookEditorState` is a thin stateful wrapper over these.
  *
- *   draft     -- the researcher's codebook, a family->codes tree exactly
- *                as `CodeLegend` renders and edits it (see
- *                `lib/codingUtils.js`), so the editor reuses the one code
- *                editor this app has rather than growing a second.
- *   proposals -- codes the AI suggested, held in a review tray and
- *                belonging to nobody until accepted.
+ * `assistRuns`/`acceptedKeyToUid` are the AI-assist provenance channel:
+ * `addProposals` records which keys a run added to the tray,
+ * `acceptProposal` remembers which `code_uid` an accepted key became, and
+ * `buildAssistRunsForSubmit` reduces both into `{job_id, proposed_count,
+ * accepted_count, dismissed_count, accepted_refs}` at submit time -- a
+ * key never accepted counts as dismissed. The server re-derives
+ * model/prompts from the job itself rather than trusting this.
  *
- * The filter editor merges an AI result straight into the selection
- * (`filterEditorState.applyAiResult`) because a suggestion there is one
- * bit: include this row. A code is not one bit -- it carries a
- * definition, inclusion and exclusion criteria, keywords and an example,
- * and adopting one is a claim about how the whole corpus will be read. So
- * proposals never touch the draft on their own; `acceptProposal` is the
- * only door between the two. What the two editors DO share is the rule
- * that matters: the assistant may add, never overwrite.
+ * `copySourceCode` extends the same state machine for the
+ * integrate-codebook editor rather than forking a second module -- only
+ * what a proposal carries and what a researcher can do outside the tray
+ * differ. A merge proposal's `sources` is display provenance only; it
+ * never reaches the draft tree or the server (the server's own record is
+ * `artifact_assists.accepted_refs`).
  *
- * Kept here rather than inside the React hook because `frontend/src/lib/**`
- * is the layer the Vitest suite covers (see CLAUDE.md);
- * `useCodebookEditorState` is a thin stateful wrapper over these.
- *
- * `assistRuns`/`acceptedKeyToUid` are the C2 AI-assist provenance channel
- * (closes GAP-4): `addProposals` records which keys a run genuinely added
- * to the tray, `acceptProposal` remembers which `code_uid` an accepted
- * key became, and `buildAssistRunsForSubmit` reduces both into
- * `{job_id, proposed_count, accepted_count, dismissed_count,
- * accepted_refs}` at submit time -- a key never accepted (still in the
- * tray, or explicitly dismissed) counts as dismissed. The server
- * re-derives model/prompts from the job itself
- * (`services/assist_service.py`) rather than trusting this.
- *
- * `copySourceCode` extends this same state machine for the
- * integrate-codebook editor (a third caller, alongside Create Codebook's
- * new/refine modes) rather than forking a second module: the
- * tray-to-draft flow, identity minting, dismissal memory and assist-run
- * bookkeeping are identical, and only what a proposal carries (which
- * source codes it merged) and what a researcher can do outside the tray
- * (copy a source code by hand) differ. A merge proposal's `sources` is
- * display provenance ONLY, shown on the tray card while a merge is
- * pending review -- it never reaches the draft tree (`cloneCodebookTree`
- * would silently drop it as an unknown field anyway) and never reaches
- * the server; the server's own merge-provenance record is
- * `artifact_assists.accepted_refs` pointing at the
- * `integrate_codebook_preview` job that produced it.
- *
- * There used to be a persistent "this source is covered" flag, set once
- * on accept/copy and never cleared. It was removed: once a code is in
- * the draft, the researcher is expected to rename it, merge it further,
- * or delete it outright, and a flag that only ever turns on can't track
- * any of that -- it would keep calling a source "covered" after the code
- * it produced was deleted, which is actively misleading for exactly the
- * editing work this tool exists to support. `copySourceCode` below does
- * a live, un-stored duplicate check instead (see its docstring), which
- * can't go stale because there is nothing to go stale.
+ * (There used to be a persistent "this source is covered" flag on
+ * accept/copy. Removed: it could only ever turn on, so it kept calling a
+ * source covered after the code it produced was deleted. `copySourceCode`
+ * does a live duplicate check instead, which can't go stale.)
  */
 
 import { cloneCodebookTree, mintClientCodeUid } from "./codingUtils";
@@ -214,20 +186,15 @@ export function addProposals(state, incoming = [], jobId = undefined) {
  * Move one proposal into the draft, minting its identity.
  *
  * Family identity is reused when the draft already has a family of that
- * name, and minted with `family_is_new` otherwise. That reuse is
- * load-bearing rather than cosmetic: `_resolve_code_rows` rejects a code
- * carrying neither a `family_uid` nor `family_is_new`, and two codes the
- * user sees under one family heading must share one `family_uid` or the
- * backend stores them as two same-named families (grouping is by uid,
- * never by name -- see `core/codebook_render.py`).
+ * name (minted with `family_is_new` otherwise) -- `_resolve_code_rows`
+ * requires one or the other, and two codes under one family heading must
+ * share a `family_uid` or the backend stores them as separate families
+ * (grouping is by uid, never by name).
  *
- * The AI badge is tracked as a set of `code_uid`s beside the tree, not as
- * a field on the code, because `cloneCodebookTree` whitelists the fields
- * it copies -- an extra marker on the node would be silently dropped the
- * first time the draft was cloned. It is display provenance only and never
- * reaches the server: the artifact's real provenance is `origin=edited` on
- * its version, since an assist during editing is not the claim that a
- * model produced the codebook.
+ * The AI badge lives as a set of `code_uid`s beside the tree, not a field
+ * on the code, because `cloneCodebookTree` would silently drop an unknown
+ * field on clone. It's display provenance only -- the server's real
+ * provenance is `origin=edited` on the version.
  */
 export function acceptProposal(state, key) {
   return withState(state, (next) => {
@@ -302,29 +269,20 @@ export function isAiAccepted(state, codeUid) {
 }
 
 /**
- * Copy one source code into the draft by hand, bypassing the AI tray
- * entirely -- the rescue path for a code the assistant dropped, merged
- * into something the researcher disagrees with, or never got the chance
- * to consider. `sourceCode` is `{family_name, name, definition,
- * inclusion, exclusion, keywords, example}` -- the left pane's own row
- * shape.
+ * Copy one source code into the draft by hand, bypassing the AI tray --
+ * the rescue path for a code the assistant dropped, merged into something
+ * the researcher disagrees with, or never considered. `sourceCode` is
+ * `{family_name, name, definition, inclusion, exclusion, keywords,
+ * example}`, the left pane's own row shape.
  *
- * Mints a fresh identity exactly like `acceptProposal` (never the
- * source's own `code_uid`/`family_uid` -- see this module's docstring
- * and `codebook_service.create_integrated_codebook`), and reuses an
- * existing same-named family the same way. Deliberately does NOT touch
- * `aiAccepted`/`acceptedKeyToUid` -- copying is a human act, and an AI
- * badge on it would be a lie.
+ * Mints a fresh identity like `acceptProposal` (never the source's own
+ * uid) and reuses an existing same-named family. Deliberately does NOT
+ * touch `aiAccepted`/`acceptedKeyToUid` -- copying is a human act.
  *
- * Guards against adding an exact duplicate of something already in the
- * draft (by `codeKey`), checked fresh against the CURRENT draft on every
- * call rather than a stored flag -- a stored "already added" marker is
- * exactly the thing this module used to keep as `coveredSources` and
- * removed: it can't track a code that was since renamed, merged further,
- * or deleted, so it drifts from the truth the moment the researcher
- * starts editing. A live check can't drift, because there's nothing to
- * remember between calls. Returns `state` unchanged (same reference) on
- * a no-op, so a caller can tell whether anything actually happened.
+ * Guards against an exact duplicate (by `codeKey`), checked live against
+ * the current draft rather than a stored flag (see module docstring on
+ * why). Returns `state` unchanged (same reference) on a no-op, so a
+ * caller can tell whether anything actually happened.
  */
 export function copySourceCode(state, sourceCode) {
   const key = codeKey(sourceCode.family_name, sourceCode.name);

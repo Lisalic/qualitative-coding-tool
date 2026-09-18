@@ -34,7 +34,6 @@ function extraFieldsFrom(entry) {
   };
 }
 
-// Component for the filterable code legend (read-only) and editable codebook (table edit mode)
 const CodeLegend = ({
   codebookTree,
   selectedFilterCodes,

@@ -2,6 +2,10 @@
 
 Developer-facing reference for how the app is wired end to end. Tool pages under [tools/](tools/README.md) link back here instead of repeating this material.
 
+## Code comments
+
+A `/**...*/` block above an exported component/hook/function states its purpose in one line, plus — only if genuinely non-obvious — a short note on an invariant, a past bug it prevents, or a cross-file contract it must stay in sync with (e.g. a backend schema). Skip comments that just restate the next line. This codebase has no PropTypes/TypeScript, so these blocks are the de facto contract documentation for a component's props and a function's arguments — keep them accurate, not exhaustive.
+
 ## Frontend layering
 
 - Routing is centralized in `frontend/src/App.jsx`; most feature pages are lazy-loaded (`React.lazy`) and wrapped in `ProtectedRoute` so anonymous sessions can't reach tool pages.

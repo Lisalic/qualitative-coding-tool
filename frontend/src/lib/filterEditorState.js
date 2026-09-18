@@ -1,38 +1,27 @@
 /**
  * The filter editor's tri-state row selection, as pure functions.
  *
- * A row in the editor is in exactly one of three states:
+ * A row is `included`, `excluded`, or `undecided` -- the only rows the AI
+ * filter tool may propose. The third state is the whole point: "not
+ * checked" and "rejected" look the same in a plain checkbox list, which
+ * would leave the AI tool no way to tell them apart, so a second run
+ * would keep re-proposing rows the user already dismissed. Lives here
+ * rather than in the React hook because `frontend/src/lib/**` is the
+ * layer the Vitest suite covers; `useFilterEditorState` is a thin
+ * stateful wrapper over these.
  *
- *   included  -- the user checked it; it goes into the filtered database
- *   excluded  -- the user explicitly ruled it out
- *   undecided -- neither; the only rows the AI filter tool may propose
+ * Keys are `"<rowType>:<id>"`, matching `useDataTableActions.js`'s
+ * convention. Ids may themselves contain colons, so `parseKey` splits on
+ * the FIRST colon only.
  *
- * That third state is the whole point. "Not checked" and "rejected" look
- * the same in a plain checkbox list, which would leave the AI tool no way
- * to tell "I haven't looked at this yet" from "I already said no" -- so a
- * second run would keep re-proposing rows the user just dismissed.
- *
- * Kept here rather than inside the React hook because `frontend/src/lib/**`
- * is the layer the Vitest suite covers (see CLAUDE.md); `useFilterEditorState`
- * is a thin stateful wrapper over these.
- *
- * Keys are `"<rowType>:<id>"`, matching the convention `keyFor` already
- * uses in `components/data/useDataTableActions.js`, so a selection can move
- * between the two surfaces unchanged. Ids may themselves contain colons,
- * so `parseKey` splits on the FIRST colon only.
- *
- * `assistRuns` is the C2 AI-assist provenance channel (closes GAP-4 in
- * `documentation/research/qualitative-coding-landscape-and-expansion.md`):
- * one record per `applyAiResult` call that carried a `jobId`, remembering
- * which keys THAT run proposed and in which direction (`{key, decision}`,
- * `decision` one of `"include"`/`"exclude"`). `buildAssistRunsForSubmit`
- * turns those into `{job_id, proposed_count, accepted_count,
- * dismissed_count, accepted_refs}` at submit time by re-checking each
- * run's proposed keys against the CURRENT selection -- so a proposal is
- * "accepted" iff the row still sits in the direction the AI proposed
- * (whether that's `included` or `excluded`), without a separate write
- * path to keep in sync. The server re-derives model/prompts from the job
- * itself (`services/assist_service.py`) rather than trusting this.
+ * `assistRuns` is the AI-assist provenance channel: one record per
+ * `applyAiResult` call that carried a `jobId`, remembering which keys
+ * that run proposed and in which direction. `buildAssistRunsForSubmit`
+ * reduces those into the submit payload at submit time by re-checking
+ * each run's proposed keys against the CURRENT selection -- a proposal
+ * counts as "accepted" iff the row still sits in the direction the AI
+ * proposed, with no separate write path to keep in sync. The server
+ * re-derives model/prompts from the job itself rather than trusting this.
  */
 
 export const DRAFT_STORAGE_PREFIX = "filterEditorDraft:";

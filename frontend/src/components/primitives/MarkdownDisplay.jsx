@@ -5,31 +5,19 @@ import { btnSm } from "../../lib/uiClasses";
 
 /**
  * Markdown preview for an artifact's body — summaries, and codebook/coding
- * comparisons.
+ * comparisons. Three things this adds over a bare `<ReactMarkdown>`:
+ * `remark-gfm` (pipe tables are the most common structure in this
+ * content, and not CommonMark); element styling from the app's own
+ * tokens (Tailwind's preflight strips heading/list/table styling, and
+ * there's deliberately no `@tailwindcss/typography` plugin); and a
+ * document-scale type sizing, since this is read end to end, not
+ * skimmed as UI.
  *
- * Three things this has to do that a bare `<ReactMarkdown>` does not:
- *
- * 1. `remark-gfm`. The compare prompt literally asks the model to "return
- *    the full comparison in a markdown format" and the summarize prompt asks
- *    for code frequencies and distributions, so pipe tables are the single
- *    most common structure in this content — and they are not CommonMark.
- * 2. Element styling. Tailwind's preflight strips heading sizes, list
- *    markers and table borders, and this project deliberately has no
- *    `@tailwindcss/typography` plugin, so every tag is styled here from the
- *    app's own tokens.
- * 3. Read as a document, not as UI. This used to size body copy at
- *    `text-sm` with `text-xl` h1s — dense-UI sizing for text a researcher
- *    actually reads end to end. The scale below is a document scale.
- *
- * Prose keeps a ~75ch measure per block; tables are deliberately exempt and
- * scroll inside their own box, because a six-column comparison squeezed into
- * a reading measure was the original complaint. Code blocks and tables carry
- * a copy button — lifting a comparison table into a paper or a spreadsheet
- * is the actual workflow these pages exist for.
- *
- * No syntax highlighter: colour in this app is reserved for error, success
- * and per-code identity (documentation/style-guide.md), and this content is
- * research prose, not code.
+ * Prose keeps a ~75ch measure; tables are exempt and scroll in their own
+ * box instead. Code blocks and tables carry a copy button — lifting a
+ * comparison table into a paper or spreadsheet is the actual workflow
+ * here. No syntax highlighter: colour is reserved for error, success
+ * and per-code identity (documentation/style-guide.md).
  */
 const PROSE = "max-w-[75ch]";
 

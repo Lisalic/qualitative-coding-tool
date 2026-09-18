@@ -12,53 +12,32 @@ const SEARCH_DEBOUNCE_MS = 400;
  * Backs the 3-pane View Coding workspace (document list / reader pane /
  * codebook sidebar) -- see CodingWorkspaceSection.jsx.
  *
- * Editing is ONE session, not three: manual tagging (select text, click
- * a code / remove a code / edit a note), codebook changes (rename/add/
- * remove a code or family), and accepted AI recode proposals all
- * accumulate as staged, local changes and nothing reaches the server
+ * Editing is ONE session, not three: manual tagging, codebook changes
+ * (rename/add/remove a code or family), and accepted AI recode proposals
+ * all accumulate as staged, local changes and nothing reaches the server
  * until `saveSession` flushes everything in one
- * `PUT /api/coding/{ref}/revision` call. That call commits at most one
- * new version server-side (see `coding_service.save_coding_revision`),
- * however many of the three kinds of change it contains -- there is no
- * separate save step per concern any more, and no version minted for a
- * mid-session action.
+ * `PUT /api/coding/{ref}/revision` call -- at most one new version
+ * server-side however many of the three kinds of change it contains.
  *
- * State for the two staged pieces:
- * - `pendingRowEdits` (`Map<item_id, entries[]>`): a row's full desired
- *   codes, touched by manual tag/untag/note edits AND by an accepted AI
- *   recode proposal (see `handleRecodeSelected`) -- both replace a row's
- *   codes wholesale, so they share one staging map. Each entry carries
- *   its own `coder`/`assist_job_id` (B1 attribution -- see
- *   `storage_models.CodingEntry`); `aiProposedPendingCount`
- *   (`rollUpCoder` over the pending entries) is purely the "N by AI"
- *   badge in the UI and does not affect what gets saved.
- * - `codebookDraft`: the codebook tree, edited in place by
- *   `CodeLegend`/`CodingCodebookSidebar` regardless of whether the
- *   sidebar's Edit/Done toggle is currently showing the editor -- the
- *   toggle only switches presentation (see CodingCodebookSidebar.jsx),
- *   it is not a save boundary. `isCodebookDirty` tracks whether the
- *   draft differs from the last-saved `codebookTree`.
+ * The two staged pieces: `pendingRowEdits` (`Map<item_id, entries[]>`) is
+ * a row's full desired codes, touched by manual edits and by an accepted
+ * recode proposal alike, since both replace a row's codes wholesale.
+ * Each entry carries its own `coder`/`assist_job_id` for attribution.
+ * `codebookDraft` is the codebook tree, edited in place regardless of
+ * whether the sidebar's Edit/Done toggle is showing the editor -- that
+ * toggle only switches presentation, it is not a save boundary;
+ * `isCodebookDirty` tracks whether it differs from the last-saved tree.
+ * `discardSession` throws both away and refetches; `saveSession` sends
+ * whichever of `codes`/`rows` actually changed.
  *
- * `discardSession` throws both away and refetches from the server;
- * `saveSession` sends whichever of `codes`/`rows` actually changed.
- *
- * Two surfaces drive this one hook, which is why it takes a `pinned` mode:
- *
- * - **View Coding** passes nothing. The hook fetches the user's coding
- *   files and the picker chooses among them.
- * - **Apply Codebook** passes `pinned`, plus the artifact it just
- *   created. There is nothing to pick -- the workspace opens on that one
- *   file -- so the artifact-list and project fetches never run.
- *
- * `pinned` is its own flag rather than being inferred from `pinnedRef`
- * being set, because Apply Codebook's setup step has no artifact yet: a
- * null ref there means "not created yet", not "fall back to the picker",
- * and inferring would fire two list fetches for a picker that screen
- * never shows.
- *
- * Everything past that point (fetching the artifact and its rows, the
- * editing session, recode, save) is identical, which is the whole reason
- * the two pages can share a workspace instead of growing two of them.
+ * Two surfaces drive this one hook via its `pinned` mode: View Coding
+ * passes nothing and lets the user pick a file; Apply Codebook passes
+ * `pinned` plus the artifact it just created, skipping the picker
+ * entirely. `pinned` is its own flag rather than inferred from
+ * `pinnedRef` because Apply Codebook's setup step has no artifact yet --
+ * a null ref there means "not created", not "fall back to the picker".
+ * Everything past that point is identical, which is why the two pages
+ * share a workspace instead of growing two of them.
  */
 export default function useViewCodingPage({
   pinned = false,

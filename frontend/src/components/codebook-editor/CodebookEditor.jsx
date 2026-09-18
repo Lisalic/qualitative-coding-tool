@@ -29,38 +29,28 @@ import { useCodebookEditorState } from "./useCodebookEditorState";
 /**
  * Write a codebook by hand, with the data in front of you.
  *
- * Two steps, matching the filter and coding editors: a setup step picks
- * the source database (and, in Refine mode, the codebook to refine) and
+ * Two steps, matching the filter and coding editors: setup picks the
+ * source database (and, in Refine mode, the codebook to refine) and
  * names the output, then the workspace opens. Unlike Filter and Apply
- * Codebook, the thing being built here isn't decided per row in the
- * center pane -- it's the code tree itself, so the workspace runs
- * `EditorWorkspace` with `emphasis="builder"`: a compact source row list
- * on the left, the draft codebook (`CodebookBuilderPane`) as the wide
- * center pane, and the active row's full text plus the AI generator in a
- * reference rail on the right (`CodebookReferenceRail`). The AI
- * generator's codes arrive in a review tray (`CodebookProposalTray`)
- * above the draft rather than in the codebook directly. Nothing is
- * created or saved until an explicit submit.
+ * Codebook, what's being built isn't decided per row -- it's the code
+ * tree itself, so the workspace runs `EditorWorkspace` with
+ * `emphasis="builder"`: source rows on the left, the draft codebook
+ * (`CodebookBuilderPane`) as the wide center pane, and the active row's
+ * text plus the AI generator in a reference rail on the right. The AI
+ * generator's codes arrive in a review tray above the draft, not
+ * directly in it. Nothing is created or saved until an explicit submit.
  *
- * Two modes, because a codebook is rarely right on the first pass:
- *   New    -- create a fresh codebook (`POST /api/codebook/manual`).
- *   Refine -- open an existing one and do another data-anchored pass over
- *             it (`PUT /api/codebook/{ref}`, the same endpoint the
- *             ViewCodebook editor saves through, so a refinement is an
- *             ordinary new version rather than a special kind of write).
- *             Refine asks only for the codebook: its source database comes
- *             from its own lineage (`GET /api/artifacts/{ref}/lineage`),
- *             with `Use another database` to override for the rarer case
- *             of refining against different data.
+ * Two modes: **New** creates a fresh codebook (`POST /api/codebook/manual`).
+ * **Refine** opens an existing one for another data-anchored pass
+ * (`PUT /api/codebook/{ref}`, the same endpoint ViewCodebook saves
+ * through) and asks only for the codebook -- its source database comes
+ * from its own lineage, with `Use another database` to override.
  *
- * The code editor itself is `CodeLegend` -- the same component ViewCodebook
- * and the coding workspace use. There is one code editor in this app, not
- * three, and identity (`code_uid`/`family_uid`) flows through it untouched
- * so a rename stays a rename in the version diff.
- *
+ * The code editor itself is `CodeLegend`, the same component ViewCodebook
+ * and the coding workspace use -- one code editor in this app, not three.
  * Drafts live in `localStorage` per (source, target) pair
- * (`useCodebookEditorState`); memos written from a row here go straight to
- * the source database, since the rows on screen ARE source rows.
+ * (`useCodebookEditorState`); memos written from a row go straight to the
+ * source database, since the rows on screen ARE source rows.
  */
 export default function CodebookEditor() {
   const location = useLocation();

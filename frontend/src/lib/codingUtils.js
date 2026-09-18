@@ -1,27 +1,18 @@
 // Utility functions for coding operations.
 //
-// A coding artifact's rows and their codes now come from the backend
-// already structured (GET /api/coding/{ref}/rows -- see
-// coding-table/workspace/useViewCodingPage.js), each row shaped as
-// { item_id, row_type, title, content, codes: [{code, code_uid, quote,
-// start_offset, end_offset, notes}] } -- one entry per quote
-// (coding_entries is one row per quote, see storage_models.CodingEntry),
-// each already resolved to exact character offsets into `content`
-// server-side. There is no POST_ID/CODE/EVIDENCE text blob to parse on
-// the way in or format on the way out, and no client-side snippet-
-// splitting either -- HighlightedContent renders straight from
-// `start_offset`/`end_offset`, see its own module comment.
+// Coding rows (GET /api/coding/{ref}/rows) arrive pre-structured, each
+// row's codes already resolved to exact character offsets into
+// `content` -- no text blob to parse or format, and no client-side
+// snippet-splitting (HighlightedContent renders straight from
+// `start_offset`/`end_offset`).
 //
-// A codebook's own codes (GET /api/coding/{ref}, GET /api/codebook) come
-// as a FLAT list -- one entry per code, each carrying a stable `code_uid`
-// (identity that survives a rename) and `family_uid` (identity for the
-// family it belongs to). `groupCodesByFamily`/`flattenTreeToCodes` are
-// the adapter pair between that flat wire shape and the nested
-// family->codes tree the editor UI (CodeLegend, CodingCodebookSidebar)
+// A codebook's codes arrive as a FLAT list, each carrying a stable
+// `code_uid`/`family_uid` (identity that survives a rename).
+// `groupCodesByFamily`/`flattenTreeToCodes` are the adapter pair between
+// that flat wire shape and the nested family->codes tree the editor UI
 // renders -- grouping is a pure display-time transform, matching how
 // `backend/app/core/codebook_render.py` groups server-side: by
-// `family_uid` (never by name -- two families can share a name, see that
-// module's docstring), in `position` order.
+// `family_uid` (never by name), in `position` order.
 
 /** Group a flat `codes` list (as returned by the backend) into a nested
  * family->codes tree for display, preserving `code_uid`/`family_uid` on

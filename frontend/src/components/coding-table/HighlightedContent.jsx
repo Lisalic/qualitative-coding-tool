@@ -54,14 +54,10 @@ const addIntervalToSegment = (segment, interval) => {
 };
 
 /**
- * `codeEvidence` is one entry per quote (`{code, code_uid, quote,
- * start_offset, end_offset, notes}`, straight from `GET
- * /api/coding/{ref}/rows` -- see `coding_repo.list_rows_with_codes`),
- * already resolved to exact character offsets into `content`
- * server-side (either by `core/evidence_match.py` for an AI coding, or
- * by the real DOM selection range for a manual one -- see
- * `HighlightedContent`'s own selection handling below). There is nothing
- * left to search for at render time: an interval is just
+ * `codeEvidence` is one entry per quote, already resolved to exact
+ * character offsets into `content` server-side (by `evidence_match.py`
+ * for an AI coding, or the real DOM selection range for a manual one).
+ * Nothing left to search for at render time: an interval is just
  * `content.slice(start_offset, end_offset)`.
  */
 const buildEvidenceIntervals = (content, codeEvidence) =>
@@ -116,15 +112,12 @@ const mergeIntervalsToSegments = (intervals) => {
 
 /**
  * Character offset of `(node, offset)` within `root`'s rendered plain
- * text, counting every character of every text node from the start of
- * `root` up to that point. `root`'s text nodes render `content` verbatim
- * (just wrapped in `<span>`s for coded segments -- see `textAreaChildren`
- * below), so this offset lands in the same coordinate system as
- * `content` itself, and thus the same one `start_offset`/`end_offset`
- * from the server already use. This is what lets a manual "select text,
- * click a code" tag store an exact offset pair instead of re-searching
- * for the selected string later (the DOM selection *is* the ground
- * truth -- there is nothing to hallucinate here).
+ * text, counting every character from the start of `root`. `root`'s text
+ * nodes render `content` verbatim (just wrapped in `<span>`s for coded
+ * segments), so this lands in the same coordinate system as
+ * `start_offset`/`end_offset` from the server -- letting a manual
+ * "select text, click a code" tag store an exact offset pair directly,
+ * with nothing to re-search for later.
  */
 function getTextOffsetInRoot(root, node, offset) {
   const preRange = document.createRange();
@@ -150,7 +143,6 @@ const MARGIN_STRIPE_STEP_PX = 4;
 const MARGIN_STRIPE_WIDTH_PX = 2;
 const MAX_CODING_MARGIN_WIDTH_PX = 32;
 
-// Component for highlighted content with margin brackets
 const HighlightedContent = ({
   content,
   codeEvidence,

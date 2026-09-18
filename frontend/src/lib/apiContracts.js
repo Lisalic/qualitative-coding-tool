@@ -139,19 +139,15 @@ export function buildRecodeItemsPayload({ apiKey, itemIds, model, methodology })
  * Build the JSON body for POST /api/filter-preview/.
  * Mirrors `FilterPreviewRequest` in `backend/app/api/schemas.py`.
  *
- * `includedPostIds`/`includedCommentIds`/`excludedPostIds`/
- * `excludedCommentIds` are the rows the user has already included or
- * excluded in the filter editor. They are always sent so the server can
- * drop them from the candidate pool before sampling -- which is what
- * makes re-running the tool propose new rows rather than the same ones
- * -- and, when `useExamples` is set ("Autofill with AI"), doubles as the
- * "similar example" source the model imitates instead of following
- * `includePrompt`/`excludePrompt`.
+ * The `included*`/`excluded*` id lists are always sent so the server can
+ * drop already-decided rows from the candidate pool -- which is what
+ * makes re-running the tool propose new rows -- and double as the
+ * "similar example" source when `useExamples` is set.
  *
  * When `useExamples` is false, at least one of `includePrompt`,
  * `excludePrompt`, or `filterTags` is required (mirrors the server's
- * `_has_criteria` guard) so a run with nothing to go on fails here with
- * a clear message instead of a 422.
+ * `_has_criteria` guard), so a run with nothing to go on fails here
+ * with a clear message instead of a 422.
  */
 export function buildFilterPreviewPayload({
   apiKey,
