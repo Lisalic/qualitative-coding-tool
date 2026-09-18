@@ -72,3 +72,7 @@ CLAUDE.md
 AGENTS.md
 .agents/
 .claude/
+
+# Planning/process notes (roadmap audits, ticket status, campaign
+# verification) — working notes, not product docs; keep them local
+documentation/research/
