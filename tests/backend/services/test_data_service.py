@@ -619,7 +619,21 @@ class TestStartFilterPreviewJob:
                     min_words=0, sample_percentage=100.0, filter_tags=None,
                 )
 
-    async def test_api_key_is_never_persisted_on_the_job_row(self, session_factory) -> None:
+    async def test_api_key_is_never_persisted_on_the_job_row(self, session_factory, monkeypatch) -> None:
+        # Mock the AI calls and wait for the background job to finish so its
+        # fire-and-forget task (backend/app/jobs/service.py::enqueue_job)
+        # doesn't outlive the test -- left unmocked/unawaited, it would try a
+        # real OpenRouter call with this fake key on the shared in-memory
+        # SQLite engine, racing the `async_sqlite_engine` fixture's teardown
+        # dispose() once the test function returned.
+        monkeypatch.setattr(
+            "backend.scripts.filter_db.triage_posts_with_ai",
+            AsyncMock(return_value=([], [], "sys", "user", {"batches_processed": 1, "batches_total": 1})),
+        )
+        monkeypatch.setattr(
+            "backend.scripts.filter_db.triage_comments_with_ai",
+            AsyncMock(return_value=([], [], "", "", {"batches_processed": 1, "batches_total": 1})),
+        )
         async with session_factory() as session:
             user = await _make_user(session)
             await _make_file(session, user.id)
@@ -632,6 +646,7 @@ class TestStartFilterPreviewJob:
             assert "api_key" not in job.payload
             assert "sk-secret" not in str(job.payload)
             assert job.payload["include_post_ids"] == ["s1"]
+            await _wait_for_terminal_status(session, job.id, user.id)
 
 
 class TestFilterPreviewJobHandler:
