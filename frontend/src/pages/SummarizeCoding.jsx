@@ -1,8 +1,9 @@
 import React from "react";
 import ErrorDisplay from "../components/feedback/ErrorDisplay";
+import ProgressBar from "../components/feedback/ProgressBar";
 import SummarizeRequestSection from "../components/summarize/SummarizeRequestSection";
 import SummaryOutputSection from "../components/summarize/SummaryOutputSection";
-import PageHeading from "../components/primitives/PageHeading";
+import PageShell from "../components/shell/PageShell";
 import useSummarizeCodingPage from "../components/summarize/useSummarizeCodingPage";
 
 export default function SummarizeCoding() {
@@ -13,6 +14,8 @@ export default function SummarizeCoding() {
     additionalPrompt,
     setAdditionalPrompt,
     loading,
+    progress,
+    partialWarning,
     summary,
     createdFile,
     error,
@@ -27,8 +30,7 @@ export default function SummarizeCoding() {
   } = useSummarizeCodingPage();
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 py-10">
-      <PageHeading title="Summarize Coding" className="mb-6 text-center text-2xl font-bold" />
+    <PageShell title="Summarize Coding" width="wide" bodyClassName="flex flex-col gap-3">
       <SummarizeRequestSection
         codings={codings}
         selectedCoding={selectedCoding}
@@ -45,10 +47,16 @@ export default function SummarizeCoding() {
         loading={loading}
         onSubmit={submitSummarize}
       />
-      <div className="mt-4">
-        <ErrorDisplay message={error} variant="message" />
-      </div>
+      <ErrorDisplay message={error} variant="message" />
+      {loading && progress && (
+        <ProgressBar current={progress.current} total={progress.total} label={progress.label} />
+      )}
+      {partialWarning && (
+        <div className="border border-paper bg-surface-raised px-3 py-2 text-center text-sm text-paper">
+          {partialWarning}
+        </div>
+      )}
       <SummaryOutputSection summary={summary} createdFile={createdFile} />
-    </div>
+    </PageShell>
   );
 }

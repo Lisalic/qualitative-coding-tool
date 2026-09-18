@@ -2,62 +2,94 @@
 
 ## Purpose
 
-Classify each post/comment in a dataset against an existing codebook, producing a `coding` artifact with per-item code assignments and supporting evidence.
+Start a `coding` artifact against a chosen codebook, then code it in an
+iterative 3-pane workspace — the same workspace [View Coding](view-coding.md)
+opens on an existing artifact.
 
 ## Where to find it
 
-Sidebar → Apply Codebook (pipeline group), or `/codebook-apply` → `pages/ApplyCodebook.jsx` → `components/tool-panels/ApplyCodebookPanel.jsx`.
+Sidebar → Apply Codebook, the project page's **Add Coding** button, or
+`/codebook-apply` → `pages/ApplyCodebook.jsx` →
+`components/coding-editor/CodingEditor.jsx`.
+
+## Two steps on one route
+
+**Setup** (`components/coding-editor/CodingSetupPanel.jsx`) chooses the
+source database, the codebook, the content scope, and how much to sample,
+then creates the artifact — always **uncoded**: rows copied in, codebook
+snapshotted, zero `coding_entries`. There is no "code everything now"
+option; a one-shot classifier pass that coded the whole artifact up front
+(`POST /api/apply-codebook/`) was retired once the workspace's AI recode
+covered the same ground with a review step in front of it.
+
+**Workspace** — on success, the same screen swaps in the View Coding
+3-pane reader on the artifact just created (`CodingWorkspaceSection.jsx`):
+a document list on the left, the active document's full text and applied
+codes in the center, and the codebook on the right. See
+[View Coding](view-coding.md) for the workspace itself — reading,
+tagging, keyboard shortcuts (`1`-`9` to apply a code, `j`/`k` to move
+between documents), AI recode, and Save Changes all work identically
+whether the artifact came from here or from the picker there.
 
 ## Prerequisites
 
-At least one dataset and one codebook. An OpenRouter API key in the navbar. The panel blocks submission entirely if no codebooks exist for the user.
+At least one dataset and one codebook. The setup step blocks entirely if
+no codebooks exist for the user. No API key is needed to create the
+artifact — only the workspace's AI recode needs one.
 
-## Inputs
+## Setup inputs
 
 | Field | Required | Default | Constraints | Notes |
 |---|---|---|---|---|
 | Database Type | — | `unfiltered` | `unfiltered` \| `filtered` | |
 | Select Database | yes | — | must resolve to `proj_<id>` | |
-| Select Project | no | — | | pre-selected via `state.projectId` when arriving from a project page's "Add" button (`useInitialProjectId`) |
+| Select Project | yes | — | must be a project the caller owns | pre-selected via `state.projectId` when arriving from a project page's "Add" button; every artifact belongs to a project |
 | Select Codebook | yes | first available | numeric File id **or** `proj_<hex>` schema | auto-defaults to the first codebook in the list |
-| Prompt (methodology) | no | — | | optional instructions steering the classifier; example available, saveable to the [Prompt Manager](prompt-manager.md) library (`promptType="apply"`) |
-| AI Model | no | — | | |
-| Sample Size | no | `100` | slider 1–100 | |
+| Content to Sample | — | `both` | Posts + Comments \| Posts Only \| Comments Only | auto-narrows to whichever type actually has rows |
 | Report Name | yes | — | non-blank | |
 | Description | no | — | | |
 
 ## What happens on submit
 
-Job-backed (`job_type="apply_codebook"`): `postFormAndPoll` → `POST /api/apply-codebook/` → `202 {job_id, status}` → poll.
-
-Server-side (`backend/app/services/coding_service.py::_run_apply_codebook_job`): reads the codebook's content, samples submissions/comments from the source, assembles them as `POST_ID: <id>  Title: <title>  <selftext>` / `POST_ID: <id>  <body>` blocks, then calls `backend/scripts/codebook_apply.py::classify_posts(codebook_text, assembled, methodology, api_key, model)`.
-
-The system prompt requires the model to reply using **only** this DSL, one or more times per post that has an applicable code, omitting posts with none:
-```
-POST_ID: <exact_post_id_from_input>
-CODE: <exact_code_name_from_codebook>
-EVIDENCE: "<exact_snippet>"§"<exact_snippet>"
-```
-Code names must match the codebook exactly (without the family name); evidence must be exact contiguous substrings from the input, quoted, with `§` only separating multiple snippets for the same code; no markdown, bullets, or explanation. The response is normalized (smart quotes, markdown artifacts stripped) and checked against this shape — if it doesn't validate, the **raw** (or normalized) text is returned anyway rather than raising, so downstream storage always gets something, even if it doesn't parse.
-
-The classification output is persisted to `artifact_content` **and** parsed into structured `coding_entries` rows (one per post/code pair). `FileDependency` rows are recorded back to both the source data file and the codebook file; the new coding file is linked to the source's own projects, but only when the source itself is `raw_data` (not `filtered_data`) — a narrowing carried over unchanged from the pre-refactor handler.
+`requestJson` → `POST /api/coding/manual` →
+`coding_service.create_manual_coding`, synchronous (no LLM call). Copies
+every row in the chosen content scope (the request still carries
+`sample_percentage`, always `100` from this panel — there is no sampling
+control) and their memos in,
+snapshots the applied codebook's codes, records `derived_from` edges back
+to both the source data and the codebook, and commits v1 with
+`origin="edited"` and no `model`/`system_prompt`/`prompt_meta` — `_materialize_coding_artifact`
+is the coding editor's only path to creating an artifact.
 
 ## Output
 
-Job result: `{classification_output: <text>, file: {id, schema_name, filename, description}}`. Success banner links to [View Coding](view-coding.md) with the new file's schema name passed as `state.selectedCodedData`.
+`{message, file: {id, schema_name, filename}, counts}`. The panel hands
+the new artifact straight to the workspace rather than showing a success
+banner — coding is iterative, so a finished setup step is a starting
+point, not a result.
 
 ## Troubleshooting
 
 | Symptom | Cause |
 |---|---|
-| "Error: API key not set..." | No `localStorage.apiKey` |
+| Submit disabled, "No codebooks available" | No codebook artifacts exist yet for this user — go create one via [Codebook](codebook.md) |
 | `MissingFieldsError` mentioning "codebook (must be numeric File id or proj_<id> schema)" | The codebook reference is neither a valid `proj_<hex>` string nor parseable as an integer |
-| Submit disabled, "No codebooks available" | No codebook artifacts exist yet for this user — go create one via [Generate Codebook](generate-codebook.md) |
-| Output looks messy / codes don't match the codebook cleanly | The classifier didn't follow the DSL and `validate_coding_output` failed — the raw text is still stored, but structured `coding_entries` for that run may be incomplete |
+| "No records were sampled from the selected database" | Sample size or content scope excluded every row — widen either |
 
 ## Developer reference
 
-- Frontend: `pages/ApplyCodebook.jsx`, `components/tool-panels/ApplyCodebookPanel.jsx`, `frontend/src/lib/apiContracts.js::buildApplyCodebookForm`.
-- Backend: `backend/app/api/coding_routes.py::POST /apply-codebook/` → `backend/app/services/coding_service.py::start_apply_codebook_job` / `_run_apply_codebook_job` (`job_type="apply_codebook"`) → `backend/scripts/codebook_apply.py::classify_posts` (+ `_extract_structured_records`, `_format_evidence_segments`) → `backend/app/repositories/coding_repo.py::bulk_insert_coding_entries`, `artifact_content_repo.write_content`.
-- Storage written: new `files` row (`coding`, with `systemprompt`/`userprompt`), two `file_dependencies` rows (source + codebook), `artifact_content`, `coding_entries`.
-- Endpoint: `POST /api/apply-codebook/` — see [api-reference.md](../api-reference.md#coding--backendappapicoding_routespy).
+- Frontend: `pages/ApplyCodebook.jsx`, `components/coding-editor/`
+  (`CodingEditor.jsx`, `CodingSetupPanel.jsx`),
+  `lib/apiContracts.js::buildManualCodingPayload`. Workspace files are the
+  same ones [View Coding](view-coding.md) documents.
+- Backend: `backend/app/api/coding_routes.py::POST /coding/manual` →
+  `backend/app/services/coding_service.py::create_manual_coding` →
+  `_read_codebook_as_parent`, `_sample_rows_for_coding`,
+  `_materialize_coding_artifact` → `backend/app/repositories/raw_data_repo.py`,
+  `memo_repo.py`, `coding_repo.py::bulk_insert_coding_entries` (a no-op
+  here, since nothing is coded yet).
+- Storage written: new `files` row (`coding`), two `artifact_edges` rows
+  (source data + codebook), `codebook_codes` snapshot rows, `submissions`/
+  `comments` rows copied under the new `file_id`, zero `coding_entries`.
+- Endpoint: `POST /api/coding/manual` — see
+  [api-reference.md](../api-reference.md#coding--backendappapicoding_routespy).

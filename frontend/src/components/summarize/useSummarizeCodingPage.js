@@ -6,6 +6,8 @@ export default function useSummarizeCodingPage() {
   const [selectedCoding, setSelectedCoding] = useState("");
   const [additionalPrompt, setAdditionalPrompt] = useState("");
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState(null);
+  const [partialWarning, setPartialWarning] = useState("");
   const [summary, setSummary] = useState("");
   const [createdFile, setCreatedFile] = useState(null);
   const [error, setError] = useState("");
@@ -52,9 +54,11 @@ export default function useSummarizeCodingPage() {
     setSummary("");
     setCreatedFile(null);
     setError("");
+    setPartialWarning("");
     if (!selectedCoding) return setError("Select a coding to summarize");
     if (!name.trim()) return setError("Enter a name for the summary");
     if (!selectedProject) return setError("Select a project");
+    if (!model) return setError("Select an AI model");
     const apiKey = localStorage.getItem("apiKey");
     if (!apiKey) return setError("Set your API key in the navbar first");
 
@@ -62,21 +66,32 @@ export default function useSummarizeCodingPage() {
     form.append("coding", selectedCoding);
     form.append("api_key", apiKey);
     form.append("name", name.trim());
-    if (model) form.append("model", model);
+    form.append("model", model);
     if (additionalPrompt.trim()) form.append("prompt", additionalPrompt.trim());
     form.append("project_id", selectedProject);
 
     try {
       setLoading(true);
+      setProgress(null);
       // The job also persists the summary as a File artifact directly
       // (see `name` above), so `data.file` is the created artifact -- no
       // separate save step needed.
-      const { ok, data, error: pollError } = await postFormAndPoll("/api/summarize-coding/", form);
+      const { ok, data, error: pollError } = await postFormAndPoll("/api/summarize-coding/", form, {
+        onProgress: setProgress,
+      });
       if (!ok) {
         setError(pollError || "Failed to generate summary");
       } else {
         setSummary((data && data.summary) || "");
         setCreatedFile((data && data.file) || null);
+        if (data?.partial) {
+          const reason = data.partial_error
+            ? `Stopped early after an error: ${data.partial_error}`
+            : "This is likely due to a free model's batch limit -- use a paid model or reduce the input size for complete coverage.";
+          setPartialWarning(
+            `Warning: only ${data.batches_processed}/${data.batches_total} batches completed. ${reason}`,
+          );
+        }
       }
     } catch (submitError) {
       setError(String(submitError));
@@ -92,6 +107,8 @@ export default function useSummarizeCodingPage() {
     additionalPrompt,
     setAdditionalPrompt,
     loading,
+    progress,
+    partialWarning,
     summary,
     createdFile,
     error,

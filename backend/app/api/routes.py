@@ -6,10 +6,14 @@ from backend.app.api.prompt_routes import router as prompt_router
 from backend.app.api.codebook_routes import router as codebook_router
 from backend.app.api.coding_routes import router as coding_router
 from backend.app.api.data_routes import router as data_router
+from backend.app.api.memo_routes import router as memo_router
 from backend.app.api.project_routes import router as project_router
 from backend.app.api.content_routes import router as content_router
 from backend.app.api.models_routes import router as models_router
+from backend.app.api.version_routes import router as version_router
 from backend.app.jobs.routes import router as jobs_router
+from backend.app.api.export_routes import router as export_router
+from backend.app.api.coverage_routes import router as coverage_router
 
 router = APIRouter()
 
@@ -19,8 +23,11 @@ router.include_router(prompt_router, tags=["prompts"])
 router.include_router(codebook_router, tags=["codebooks"])
 router.include_router(coding_router, tags=["coding"])
 router.include_router(data_router, tags=["data"])
+router.include_router(memo_router, tags=["memos"])
 router.include_router(project_router, tags=["projects"])
 router.include_router(content_router, tags=["content"])
 router.include_router(models_router, tags=["models"])
+router.include_router(version_router, tags=["versions"])
 router.include_router(jobs_router, tags=["jobs"])
-
+router.include_router(export_router, tags=["export"])
+router.include_router(coverage_router, tags=["coverage"])

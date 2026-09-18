@@ -66,6 +66,25 @@ def route_backed_by_sqlite_jobs(async_sqlite_engine, monkeypatch):
         fastapi_app.dependency_overrides.pop(get_async_db, None)
 
 
+async def _ensure_user(SessionLocal, user_id: int) -> None:
+    """Insert the ``users`` row a fabricated ``user_id`` stands for, if
+    it isn't there yet. The fixtures enforce foreign keys (see
+    ``tests/conftest.py::_enable_sqlite_foreign_keys``), so a ``File``
+    owned by a user id with no ``users`` row is rejected here exactly as
+    it would be by Postgres.
+    """
+    from sqlalchemy import select
+
+    from backend.app.database import User
+
+    async with SessionLocal() as session:
+        existing = await session.execute(select(User.id).where(User.id == user_id))
+        if existing.scalars().first() is not None:
+            return
+        session.add(User(id=user_id, email=f"user{user_id}@example.com", password="hash"))
+        await session.commit()
+
+
 async def _make_file(SessionLocal, user_id: int, *, file_type: str = "raw_data", submissions=None, comments=None):
     """Insert a ``File`` (plus optional ``Submission``/``Comment`` rows)
     directly via the ORM, owned by ``user_id`` -- no real upload pipeline
@@ -76,6 +95,7 @@ async def _make_file(SessionLocal, user_id: int, *, file_type: str = "raw_data",
     from backend.app.database import File
     from backend.app.storage_models import Comment, Submission
 
+    await _ensure_user(SessionLocal, user_id)
     async with SessionLocal() as session:
         file_rec = File(
             user_id=user_id,
@@ -215,20 +235,23 @@ class TestPostContentsGuard:
         resp = client.post("/api/post-contents/", json={"schema": "proj_a", "post_ids": ["1"]})
         assert resp.status_code == 401
 
-    def test_missing_schema_returns_400(self, client, override_async_db, auth_cookies) -> None:
+    def test_missing_schema_returns_422(self, client, override_async_db, auth_cookies) -> None:
+        # PostContentsRequest is a real Pydantic model now (was a bare
+        # `dict` body) -- a missing required field is FastAPI's own
+        # request-validation 422, matching every other schema-backed route.
         resp = client.post("/api/post-contents/", json={"post_ids": ["1"]}, cookies=auth_cookies)
-        assert resp.status_code == 400
+        assert resp.status_code == 422
 
-    def test_missing_post_ids_returns_400(self, client, override_async_db, auth_cookies) -> None:
+    def test_missing_post_ids_returns_422(self, client, override_async_db, auth_cookies) -> None:
         resp = client.post("/api/post-contents/", json={"schema": "proj_a"}, cookies=auth_cookies)
-        assert resp.status_code == 400
+        assert resp.status_code == 422
 
-    def test_empty_post_ids_list_returns_400(self, client, override_async_db, auth_cookies) -> None:
-        # `not post_ids` is True for an empty list too.
+    def test_empty_post_ids_list_returns_422(self, client, override_async_db, auth_cookies) -> None:
+        # `post_ids` has `min_length=1` on PostContentsRequest.
         resp = client.post(
             "/api/post-contents/", json={"schema": "proj_a", "post_ids": []}, cookies=auth_cookies
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 422
 
     @pytest.mark.parametrize(
         "schema", ["1abc", "proj a", "proj-a", 'proj_a"; DROP TABLE x; --', "not_proj_prefixed"]
@@ -283,66 +306,61 @@ class TestPostContentsGuard:
         )
         assert resp.status_code == 200
         contents = resp.json()["contents"]
-        assert contents == {"s1": {"title": "Title 1", "content": "Body 1"}}
+        assert contents == {
+            "s1": {
+                "type": "submission",
+                "title": "Title 1",
+                "content": "Body 1",
+                "parent_id": None,
+                "parent_title": None,
+            }
+        }
 
 
-class TestFilterDataValidation:
+class TestFilterPreviewGuards:
+    """``/api/filter-preview/`` is the filter editor's AI-assist run: a
+    JSON body (it carries id lists) and a job whose result is ids rather
+    than an artifact -- nothing is created.
+    """
+
     def test_requires_auth(self, client) -> None:
         resp = client.post(
-            "/api/filter-data/",
-            data={"api_key": "k", "database": "proj_a", "name": "n", "model": "m"},
+            "/api/filter-preview/",
+            json={"api_key": "k", "database": "proj_a", "model": "m"},
         )
         assert resp.status_code == 401
 
-    def test_missing_required_fields_returns_422(self, client, auth_cookies) -> None:
-        # With every Form(...) field absent, FastAPI's own missing-field
-        # checks are collected passively (not raised immediately) while
-        # `require_user_id` raises eagerly -- so this needs valid auth to
-        # actually exercise the missing-fields guard rather than 401 first.
-        resp = client.post("/api/filter-data/", data={}, cookies=auth_cookies)
-        assert resp.status_code == 422
-
-    def test_non_proj_database_returns_422(self, client) -> None:
+    def test_non_proj_database_returns_422(self, client, auth_cookies) -> None:
         resp = client.post(
-            "/api/filter-data/",
-            data={"api_key": "k", "database": "not_proj", "name": "n", "model": "m"},
+            "/api/filter-preview/",
+            json={"api_key": "k", "database": "not_proj", "model": "m", "include_prompt": "p"},
+            cookies=auth_cookies,
         )
         assert resp.status_code == 422
 
-    def test_sample_percentage_out_of_range_returns_422(self, client) -> None:
+    def test_missing_model_returns_422(self, client, auth_cookies) -> None:
         resp = client.post(
-            "/api/filter-data/",
-            data={
-                "api_key": "k",
-                "database": "proj_a",
-                "name": "n",
-                "model": "m",
-                "sample_percentage": "0",
-            },
+            "/api/filter-preview/",
+            json={"api_key": "k", "database": "proj_a", "include_prompt": "p"},
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 422
+
+    def test_no_criteria_returns_422(self, client, auth_cookies) -> None:
+        resp = client.post(
+            "/api/filter-preview/",
+            json={"api_key": "k", "database": "proj_a", "model": "m"},
+            cookies=auth_cookies,
         )
         assert resp.status_code == 422
 
     def test_unowned_database_returns_404(self, client, override_async_db, auth_cookies) -> None:
         resp = client.post(
-            "/api/filter-data/",
-            data={"api_key": "k", "database": "proj_missing", "name": "n", "model": "m"},
+            "/api/filter-preview/",
+            json={"api_key": "k", "database": "proj_missing", "model": "m", "include_prompt": "p"},
             cookies=auth_cookies,
         )
         assert resp.status_code == 404
-
-
-class TestFilterDataKickoff:
-    """``filter-data`` now kicks off a background job (Stage 6, same
-    pattern as ``summarize-coding`` in Stage 4) instead of running the
-    tag-expansion/AI-filtering/materialization pipeline inline -- the
-    schema/api_key/ownership guard clauses still reject synchronously
-    (``data_service.start_filter_data_job`` raises before touching the job
-    table), but a valid request now returns
-    ``202 {"job_id", "status": "pending"}`` instead of a blocking
-    ``200`` with the filtered counts. See
-    ``tests/backend/services/test_data_service.py`` for the job handler's
-    own behavior (sampling, tag/AI filtering, materialization).
-    """
 
     async def test_valid_kickoff_returns_202_with_job_id(
         self, client, route_backed_by_sqlite_jobs, make_token
@@ -353,12 +371,13 @@ class TestFilterDataKickoff:
             submissions=[{"id": "s1", "title": "t", "selftext": "x", "word_count": 1}],
         )
         resp = client.post(
-            "/api/filter-data/",
-            data={
+            "/api/filter-preview/",
+            json={
                 "api_key": "k",
                 "database": file_rec.schemaname,
-                "name": "n",
                 "model": "m",
+                "include_prompt": "keep the good ones",
+                "excluded_post_ids": ["s1"],
             },
             cookies={"access_token": make_token(sub="1")},
         )
@@ -366,6 +385,73 @@ class TestFilterDataKickoff:
         body = resp.json()
         assert body["status"] == "pending"
         assert isinstance(body["job_id"], int)
+
+
+class TestManualFilterRoute:
+    """``POST /api/filtered-data/manual`` -- the filter editor's submit.
+    Synchronous, since composing the artifact involves no LLM call.
+    """
+
+    def test_requires_auth(self, client) -> None:
+        resp = client.post(
+            "/api/filtered-data/manual",
+            json={"database": "proj_a", "name": "n", "post_ids": ["s1"]},
+        )
+        assert resp.status_code == 401
+
+    def test_empty_selection_returns_422(self, client, auth_cookies) -> None:
+        resp = client.post(
+            "/api/filtered-data/manual",
+            json={"database": "proj_a", "name": "n", "post_ids": [], "comment_ids": []},
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 422
+
+    def test_missing_name_returns_422(self, client, auth_cookies) -> None:
+        resp = client.post(
+            "/api/filtered-data/manual",
+            json={"database": "proj_a", "post_ids": ["s1"]},
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 422
+
+    def test_unowned_database_returns_404(self, client, override_async_db, auth_cookies) -> None:
+        resp = client.post(
+            "/api/filtered-data/manual",
+            json={"database": "proj_missing", "name": "n", "post_ids": ["s1"], "project_id": 1},
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 404
+
+    async def test_creates_the_file_and_returns_it(
+        self, client, route_backed_by_sqlite_jobs, default_project, make_token
+    ) -> None:
+        file_rec = await _make_file(
+            route_backed_by_sqlite_jobs,
+            user_id=1,
+            submissions=[
+                {"id": "s1", "title": "t1", "selftext": "x", "word_count": 1},
+                {"id": "s2", "title": "t2", "selftext": "x", "word_count": 1},
+            ],
+        )
+        resp = client.post(
+            "/api/filtered-data/manual",
+            json={
+                "database": file_rec.schemaname,
+                "name": "hand picked",
+                "description": "chosen by hand",
+                "post_ids": ["s1"],
+                "project_id": default_project,
+            },
+            cookies={"access_token": make_token(sub="1")},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["message"] == "Filtered database created"
+        assert body["file"]["filename"] == "hand picked"
+        assert body["file"]["file_type"] == "filtered_data"
+        assert body["file"]["systemprompt"] is None
+        assert body["counts"]["submissions"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -415,6 +501,7 @@ async def _make_codebook_file(SessionLocal, user_id: int, *, file_type: str = "r
 
     from backend.app.database import File
 
+    await _ensure_user(SessionLocal, user_id)
     async with SessionLocal() as session:
         file_rec = File(
             user_id=user_id,
@@ -428,70 +515,18 @@ async def _make_codebook_file(SessionLocal, user_id: int, *, file_type: str = "r
         return file_rec
 
 
-class TestGenerateCodebookValidation:
-    def test_missing_required_fields_returns_422(self, client, auth_cookies) -> None:
-        # With every Form(...) field absent, FastAPI's own missing-field
-        # checks are collected passively (not raised immediately) while
-        # `require_user_id` raises eagerly -- so this needs valid auth to
-        # actually exercise the missing-fields guard rather than 401 first
-        # (same ordering documented on TestFilterDataValidation above).
-        resp = client.post("/api/generate-codebook/", data={}, cookies=auth_cookies)
-        assert resp.status_code == 422
-
-    def test_requires_auth(self, client) -> None:
-        # Regression test: the old route checked auth only after already
-        # doing the raw-SQL sample and the LLM call. `require_user_id` now
-        # runs as a route dependency, before the job is even enqueued.
-        resp = client.post(
-            "/api/generate-codebook/",
-            data={"api_key": "k", "database": "proj_a", "name": "n"},
-        )
-        assert resp.status_code == 401
-
-    def test_non_proj_database_returns_422(self, client) -> None:
-        resp = client.post(
-            "/api/generate-codebook/",
-            data={"api_key": "k", "database": "not_proj", "name": "n"},
-        )
-        assert resp.status_code == 422
-
-    def test_unowned_database_returns_404(self, client, override_async_db, auth_cookies) -> None:
-        resp = client.post(
-            "/api/generate-codebook/",
-            data={"api_key": "k", "database": "proj_missing", "name": "n"},
-            cookies=auth_cookies,
-        )
-        assert resp.status_code == 404
-
-
-class TestGenerateCodebookKickoff:
-    async def test_valid_kickoff_returns_202_with_job_id(
-        self, client, codebook_route_backed_by_sqlite_jobs, make_token
-    ) -> None:
-        file_rec = await _make_codebook_file(codebook_route_backed_by_sqlite_jobs, user_id=1)
-        resp = client.post(
-            "/api/generate-codebook/",
-            data={"api_key": "k", "database": file_rec.schemaname, "name": "n"},
-            cookies={"access_token": make_token(sub="1")},
-        )
-        assert resp.status_code == 202
-        body = resp.json()
-        assert body["status"] == "pending"
-        assert isinstance(body["job_id"], int)
-
-
 class TestCompareCodebooksValidation:
     @pytest.mark.parametrize(
         "form",
         [
-            {"codebook_a": "not_proj", "codebook_b": "proj_b", "api_key": "k", "name": "n"},
-            {"codebook_a": "proj_a", "codebook_b": "not_proj", "api_key": "k", "name": "n"},
+            {"codebook_a": "not_proj", "codebook_b": "proj_b", "api_key": "k", "name": "n", "model": "m", "project_id": 1},
+            {"codebook_a": "proj_a", "codebook_b": "not_proj", "api_key": "k", "name": "n", "model": "m", "project_id": 1},
         ],
     )
     def test_non_proj_schema_returns_422(self, client, form) -> None:
-        # Now a Pydantic field-pattern check (like generate-codebook's
+        # A Pydantic field-pattern check (like generate-codebook's
         # `database` field), so it fails at request-parsing time -- 422,
-        # not the old route's hand-rolled 400.
+        # not a hand-rolled 400.
         resp = client.post("/api/compare-codebooks/", data=form)
         assert resp.status_code == 422
 
@@ -513,6 +548,8 @@ class TestCompareCodebooksValidation:
                 "codebook_b": "proj_missing_b",
                 "api_key": "k",
                 "name": "n",
+                "model": "m",
+                "project_id": 1,
             },
             cookies=auth_cookies,
         )
@@ -521,7 +558,7 @@ class TestCompareCodebooksValidation:
 
 class TestCompareCodebooksKickoff:
     async def test_valid_kickoff_returns_202_with_job_id(
-        self, client, codebook_route_backed_by_sqlite_jobs, make_token
+        self, client, codebook_route_backed_by_sqlite_jobs, default_project, make_token
     ) -> None:
         file_a = await _make_codebook_file(codebook_route_backed_by_sqlite_jobs, user_id=1, file_type="codebook")
         file_b = await _make_codebook_file(codebook_route_backed_by_sqlite_jobs, user_id=1, file_type="codebook")
@@ -532,6 +569,8 @@ class TestCompareCodebooksKickoff:
                 "codebook_b": file_b.schemaname,
                 "api_key": "k",
                 "name": "n",
+                "model": "m",
+                "project_id": default_project,
             },
             cookies={"access_token": make_token(sub="1")},
         )
@@ -539,6 +578,169 @@ class TestCompareCodebooksKickoff:
         body = resp.json()
         assert body["status"] == "pending"
         assert isinstance(body["job_id"], int)
+
+
+# ---------------------------------------------------------------------------
+# codebook_routes.py -- integrate-codebook-preview / codebook/integrate
+#
+# Same two-halves shape as codebook-preview/codebook-manual above, one
+# level up: a JSON body carrying a LIST of source codebook refs instead
+# of a single database. Handler-level (LLM call, persistence, merge
+# verification) behavior is covered in
+# tests/backend/services/test_codebook_service.py, not here.
+# ---------------------------------------------------------------------------
+
+
+class TestIntegrateCodebookPreviewGuards:
+    def test_requires_auth(self, client) -> None:
+        resp = client.post(
+            "/api/integrate-codebook-preview/",
+            json={"api_key": "k", "codebooks": ["proj_a", "proj_b"], "model": "m"},
+        )
+        assert resp.status_code == 401
+
+    def test_non_proj_codebook_returns_422(self, client, auth_cookies) -> None:
+        resp = client.post(
+            "/api/integrate-codebook-preview/",
+            json={"api_key": "k", "codebooks": ["proj_a", "not_proj"], "model": "m"},
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 422
+
+    def test_a_single_codebook_returns_422(self, client, auth_cookies) -> None:
+        resp = client.post(
+            "/api/integrate-codebook-preview/",
+            json={"api_key": "k", "codebooks": ["proj_a"], "model": "m"},
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 422
+
+    def test_missing_model_returns_422(self, client, auth_cookies) -> None:
+        resp = client.post(
+            "/api/integrate-codebook-preview/",
+            json={"api_key": "k", "codebooks": ["proj_a", "proj_b"]},
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 422
+
+    def test_unowned_codebook_returns_404(self, client, override_async_db, auth_cookies) -> None:
+        resp = client.post(
+            "/api/integrate-codebook-preview/",
+            json={"api_key": "k", "codebooks": ["proj_missing_a", "proj_missing_b"], "model": "m"},
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 404
+
+    async def test_valid_kickoff_returns_202_with_job_id(
+        self, client, route_backed_by_sqlite_jobs, make_token
+    ) -> None:
+        file_a = await _make_codebook_file(route_backed_by_sqlite_jobs, user_id=1, file_type="codebook")
+        file_b = await _make_codebook_file(route_backed_by_sqlite_jobs, user_id=1, file_type="codebook")
+        resp = client.post(
+            "/api/integrate-codebook-preview/",
+            json={
+                "api_key": "k",
+                "codebooks": [file_a.schemaname, file_b.schemaname],
+                "model": "m",
+                "existing_codes": [{"family_name": "F", "name": "Alpha"}],
+            },
+            cookies={"access_token": make_token(sub="1")},
+        )
+        assert resp.status_code == 202
+        body = resp.json()
+        assert body["status"] == "pending"
+        assert isinstance(body["job_id"], int)
+
+
+class TestIntegrateCodebookRoute:
+    """``POST /api/codebook/integrate`` -- the integrate editor's submit.
+    Synchronous, since composing the codebook from the reviewed draft
+    involves no LLM call.
+    """
+
+    _CODE = {
+        "code_uid": "u1", "family_uid": "f1", "family_name": "Harm", "name": "Bullying",
+        "is_new": True, "family_is_new": True,
+    }
+
+    def test_requires_auth(self, client) -> None:
+        resp = client.post(
+            "/api/codebook/integrate",
+            json={"codebooks": ["proj_a", "proj_b"], "name": "n", "codes": [self._CODE]},
+        )
+        assert resp.status_code == 401
+
+    def test_a_single_codebook_returns_422(self, client, auth_cookies) -> None:
+        resp = client.post(
+            "/api/codebook/integrate",
+            json={"codebooks": ["proj_a"], "name": "n", "codes": [self._CODE], "project_id": 1},
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 422
+
+    def test_empty_codes_returns_422(self, client, auth_cookies) -> None:
+        resp = client.post(
+            "/api/codebook/integrate",
+            json={"codebooks": ["proj_a", "proj_b"], "name": "n", "codes": [], "project_id": 1},
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 422
+
+    def test_missing_name_returns_422(self, client, auth_cookies) -> None:
+        resp = client.post(
+            "/api/codebook/integrate",
+            json={"codebooks": ["proj_a", "proj_b"], "codes": [self._CODE], "project_id": 1},
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 422
+
+    def test_unowned_codebook_returns_404(self, client, override_async_db, auth_cookies) -> None:
+        resp = client.post(
+            "/api/codebook/integrate",
+            json={
+                "codebooks": ["proj_missing_a", "proj_missing_b"],
+                "name": "n",
+                "codes": [self._CODE],
+                "project_id": 1,
+            },
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 404
+
+    async def test_creates_the_codebook_and_returns_it(
+        self, client, route_backed_by_sqlite_jobs, default_project, make_token
+    ) -> None:
+        file_a = await _make_codebook_file(route_backed_by_sqlite_jobs, user_id=1, file_type="codebook")
+        file_b = await _make_codebook_file(route_backed_by_sqlite_jobs, user_id=1, file_type="codebook")
+        async with route_backed_by_sqlite_jobs() as session:
+            from backend.app.services import version_service
+
+            await version_service.commit_codebook_version(
+                session, file_id=file_a.id, author_user_id=1, origin="generated",
+                codes=[{"code_uid": "s1", "family_uid": "sf1", "family_name": "F", "name": "C", "body": "b", "position": 0}],
+            )
+            await version_service.commit_codebook_version(
+                session, file_id=file_b.id, author_user_id=1, origin="generated",
+                codes=[{"code_uid": "s2", "family_uid": "sf2", "family_name": "F", "name": "C", "body": "b", "position": 0}],
+            )
+            await session.commit()
+
+        resp = client.post(
+            "/api/codebook/integrate",
+            json={
+                "codebooks": [file_a.schemaname, file_b.schemaname],
+                "name": "integrated",
+                "description": "merged by hand",
+                "codes": [self._CODE],
+                "project_id": default_project,
+            },
+            cookies={"access_token": make_token(sub="1")},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["file"]["filename"] == "integrated"
+        assert body["file"]["schema_name"].startswith("proj_")
+        assert body["file"]["version_no"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -586,14 +788,14 @@ class TestGetSummaryFile:
         assert resp.status_code == 404
 
     def test_cannot_read_another_users_summary(
-        self, client, override_async_db, make_token
+        self, client, override_async_db, default_project, make_token
     ) -> None:
         # Save a summary as user 1, then confirm user 2 can't fetch it by
         # schemaname -- proves get_summary_file is ownership-scoped, not
         # just authenticated.
         save_resp = client.post(
             "/api/save-summary/",
-            data={"content": "secret", "name": "owner-only"},
+            data={"content": "secret", "name": "owner-only", "project_id": str(default_project)},
             cookies={"access_token": make_token(sub="1")},
         )
         assert save_resp.status_code == 200
@@ -604,10 +806,12 @@ class TestGetSummaryFile:
         )
         assert resp.status_code == 404
 
-    def test_owner_can_read_own_summary(self, client, override_async_db, make_token) -> None:
+    def test_owner_can_read_own_summary(
+        self, client, override_async_db, default_project, make_token
+    ) -> None:
         save_resp = client.post(
             "/api/save-summary/",
-            data={"content": "my content", "name": "mine"},
+            data={"content": "my content", "name": "mine", "project_id": str(default_project)},
             cookies={"access_token": make_token(sub="1")},
         )
         assert save_resp.status_code == 200
@@ -619,3 +823,131 @@ class TestGetSummaryFile:
         assert resp.status_code == 200
         assert resp.json()["summary"]["content"] == "my content"
         assert resp.json()["summary"]["display_name"] == "mine"
+
+
+class TestCodebookPreviewGuards:
+    """``/api/codebook-preview/`` is the codebook editor's assistive AI
+    run: a JSON body (it carries the draft), and a job whose result is
+    proposed codes rather than an artifact.
+    """
+
+    def test_requires_auth(self, client) -> None:
+        resp = client.post(
+            "/api/codebook-preview/",
+            json={"api_key": "k", "database": "proj_a", "model": "m"},
+        )
+        assert resp.status_code == 401
+
+    def test_non_proj_database_returns_422(self, client, auth_cookies) -> None:
+        resp = client.post(
+            "/api/codebook-preview/",
+            json={"api_key": "k", "database": "not_proj", "model": "m"},
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 422
+
+    def test_missing_model_returns_422(self, client, auth_cookies) -> None:
+        resp = client.post(
+            "/api/codebook-preview/",
+            json={"api_key": "k", "database": "proj_a"},
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 422
+
+    def test_unowned_database_returns_404(self, client, override_async_db, auth_cookies) -> None:
+        resp = client.post(
+            "/api/codebook-preview/",
+            json={"api_key": "k", "database": "proj_missing", "model": "m"},
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 404
+
+    async def test_valid_kickoff_returns_202_with_job_id(
+        self, client, route_backed_by_sqlite_jobs, make_token
+    ) -> None:
+        file_rec = await _make_file(
+            route_backed_by_sqlite_jobs,
+            user_id=1,
+            submissions=[{"id": "s1", "title": "t", "selftext": "x", "word_count": 1}],
+        )
+        resp = client.post(
+            "/api/codebook-preview/",
+            json={
+                "api_key": "k",
+                "database": file_rec.schemaname,
+                "model": "m",
+                "existing_codes": [{"family_name": "F", "name": "Alpha"}],
+            },
+            cookies={"access_token": make_token(sub="1")},
+        )
+        assert resp.status_code == 202
+        body = resp.json()
+        assert body["status"] == "pending"
+        assert isinstance(body["job_id"], int)
+
+
+class TestManualCodebookRoute:
+    """``POST /api/codebook/manual`` -- the codebook editor's submit.
+    Synchronous, since composing the codebook involves no LLM call.
+    """
+
+    _CODE = {
+        "code_uid": "u1", "family_uid": "f1", "family_name": "Harm", "name": "Bullying",
+        "is_new": True, "family_is_new": True,
+    }
+
+    def test_requires_auth(self, client) -> None:
+        resp = client.post(
+            "/api/codebook/manual",
+            json={"database": "proj_a", "name": "n", "codes": [self._CODE]},
+        )
+        assert resp.status_code == 401
+
+    def test_empty_draft_returns_422(self, client, auth_cookies) -> None:
+        resp = client.post(
+            "/api/codebook/manual",
+            json={"database": "proj_a", "name": "n", "codes": []},
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 422
+
+    def test_missing_name_returns_422(self, client, auth_cookies) -> None:
+        resp = client.post(
+            "/api/codebook/manual",
+            json={"database": "proj_a", "codes": [self._CODE]},
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 422
+
+    def test_unowned_database_returns_404(self, client, override_async_db, auth_cookies) -> None:
+        resp = client.post(
+            "/api/codebook/manual",
+            json={"database": "proj_missing", "name": "n", "codes": [self._CODE], "project_id": 1},
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 404
+
+    async def test_creates_the_codebook_and_returns_it(
+        self, client, route_backed_by_sqlite_jobs, default_project, make_token
+    ) -> None:
+        file_rec = await _make_file(
+            route_backed_by_sqlite_jobs,
+            user_id=1,
+            submissions=[{"id": "s1", "title": "t", "selftext": "x", "word_count": 1}],
+        )
+        resp = client.post(
+            "/api/codebook/manual",
+            json={
+                "database": file_rec.schemaname,
+                "name": "hand written",
+                "description": "written while reading",
+                "codes": [self._CODE],
+                "project_id": default_project,
+            },
+            cookies={"access_token": make_token(sub="1")},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["file"]["filename"] == "hand written"
+        assert body["file"]["schema_name"].startswith("proj_")
+        assert body["file"]["version_no"] == 1

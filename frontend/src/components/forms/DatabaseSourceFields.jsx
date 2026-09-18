@@ -1,6 +1,11 @@
-const inputClasses =
-  "border border-paper bg-white/5 px-3 py-2.5 text-paper focus:outline-none focus:ring-2 focus:ring-paper disabled:opacity-50";
+import Dropdown from "../primitives/Dropdown";
+import { select } from "../../lib/uiClasses";
 
+/**
+ * Database type + database picker, shared by whichever editor's setup
+ * step needs to choose a source. Project association is a separate
+ * concern -- see `EditorOutputFields` -- so it isn't duplicated here.
+ */
 export default function DatabaseSourceFields({
   databaseType,
   onDatabaseTypeChange,
@@ -8,9 +13,6 @@ export default function DatabaseSourceFields({
   onDatabaseChange,
   databaseOptions,
   databasePlaceholder = "Select a database",
-  selectedProject,
-  onProjectChange,
-  projectOptions,
   disabled,
   radioName = "databaseType",
 }) {
@@ -49,48 +51,18 @@ export default function DatabaseSourceFields({
         <label htmlFor="database" className="text-sm">
           Select Database
         </label>
-        <select
+        <Dropdown
           id="database"
           value={database}
-          onChange={(e) => onDatabaseChange(e.target.value)}
-          className={inputClasses}
+          options={databaseOptions}
+          onChange={onDatabaseChange}
+          placeholder={databasePlaceholder}
           disabled={disabled}
-        >
-          {!database && (
-            <option value="" disabled>
-              {databasePlaceholder}
-            </option>
-          )}
-          {databaseOptions.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="project_id" className="text-sm">
-          Select Project
-        </label>
-        <select
-          id="project_id"
-          value={selectedProject}
-          onChange={(e) => onProjectChange(e.target.value)}
-          className={inputClasses}
-          disabled={disabled}
-        >
-          {!selectedProject && (
-            <option value="" disabled>
-              Select a project
-            </option>
-          )}
-          {projectOptions.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
+          triggerClassName={`w-full ${select}`}
+          listLabel="Database"
+          searchPlaceholder="Search databases…"
+          emptyMessage="No databases match that search."
+        />
       </div>
     </>
   );

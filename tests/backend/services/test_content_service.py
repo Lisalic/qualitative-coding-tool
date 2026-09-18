@@ -11,9 +11,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from backend.app.core.exceptions import ForbiddenError, NotFoundError
-from backend.app.database import File, FileDependency, User
-from backend.app.repositories import artifact_content_repo
-from backend.app.services import content_service
+from backend.app.database import File, User
+from backend.app.repositories import version_repo
+from backend.app.services import content_service, version_service
 
 
 @pytest.fixture()
@@ -49,7 +49,7 @@ class TestSaveComparison:
             assert file_rec.schemaname.startswith("cmp_")
             assert file_rec.description == "a desc"
 
-            content = await artifact_content_repo.read_content(session, file_rec.id)
+            content = await version_service.read_blob(session, file_rec.id)
             assert content == "comparison text"
 
     async def test_default_file_type_and_title(self, session_factory) -> None:
@@ -86,11 +86,10 @@ class TestSaveComparison:
                 parent_file_ids=[parent.id],
             )
 
-            result = await session.execute(
-                select(FileDependency).where(FileDependency.child_file_id == file_rec.id)
-            )
-            deps = result.scalars().all()
-            assert [d.parent_file_id for d in deps] == [parent.id]
+            edges = await version_repo.list_parent_edges(session, file_rec.id)
+            assert [e.parent_file_id for e in edges] == [parent.id]
+            assert edges[0].relation == "derived_from"
+            assert edges[0].role == "source_data"
 
     async def test_links_owned_project(self, session_factory) -> None:
         from backend.app.database import Project
@@ -171,7 +170,7 @@ class TestSaveSummary:
             assert file_rec.schemaname.startswith("sum_")
             assert file_rec.description == "a desc"
 
-            content = await artifact_content_repo.read_content(session, file_rec.id)
+            content = await version_service.read_blob(session, file_rec.id)
             assert content == "summary text"
 
     async def test_blank_description_normalizes_to_none(self, session_factory) -> None:

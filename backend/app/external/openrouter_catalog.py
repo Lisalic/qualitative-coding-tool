@@ -46,6 +46,9 @@ def _map_model(raw: dict[str, Any]) -> dict[str, Any] | None:
         "label": raw.get("name") or slug,
         "paid": paid,
     }
+    context_length = raw.get("context_length")
+    if isinstance(context_length, int) and context_length > 0:
+        model["context_length"] = context_length
     if paid:
         model["pricing"] = {
             "inputUsdPerMillion": round(prompt_price * 1_000_000, 6),

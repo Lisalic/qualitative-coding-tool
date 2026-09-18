@@ -1,10 +1,12 @@
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from backend.app.database import File
 from backend.app.repositories.raw_data_repo import (
     bulk_insert_comments,
     bulk_insert_submissions,
+    copy_all_rows,
     copy_rows_by_id,
+    row_ids_as_of,
     sample_comments,
     sample_submissions,
 )
@@ -209,3 +211,146 @@ class TestCopyRowsById:
                 comment_ids=[],
             )
             assert counts == {"submissions": 0, "comments": 0}
+
+
+class TestLivenessFiltering:
+    """``sample_submissions``/``sample_comments`` and ``copy_rows_by_id``/
+    ``copy_all_rows``'s source-side counts must only see LIVE rows --
+    see ``storage_models.py``'s SCD-2 docstrings.
+    """
+
+    async def test_sample_submissions_excludes_closed_rows(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await make_user(session)
+            f = await _make_file(session, user, "proj_a")
+            rows = [
+                {"id": f"s{i}", "subreddit": "r", "title": "t", "selftext": "x", "author": "a", "created_utc": i, "score": 0, "num_comments": 0}
+                for i in range(4)
+            ]
+            await bulk_insert_submissions(session, f.id, rows)
+            await session.commit()
+
+            # Close two of the four rows (as if delete_rows had run).
+            await session.execute(
+                update(Submission).where(Submission.file_id == f.id, Submission.id.in_(["s0", "s1"])).values(valid_to=1)
+            )
+            await session.commit()
+
+            sampled = await sample_submissions(session, f.id, 100)
+            assert {s.id for s in sampled} == {"s2", "s3"}
+
+    async def test_copy_rows_by_id_ignores_closed_source_rows_by_default(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await make_user(session)
+            source = await _make_file(session, user, "proj_source")
+            target = await _make_file(session, user, "proj_target", file_type="filtered_data")
+
+            await bulk_insert_submissions(
+                session, source.id,
+                [{"id": "s1", "subreddit": "r", "title": "t", "selftext": "x", "author": "a", "created_utc": 1, "score": 0, "num_comments": 0}],
+            )
+            await session.commit()
+            await session.execute(
+                update(Submission).where(Submission.file_id == source.id, Submission.id == "s1").values(valid_to=1)
+            )
+            await session.commit()
+
+            counts = await copy_rows_by_id(
+                session, source_file_id=source.id, target_file_id=target.id, submission_ids=["s1"],
+            )
+            assert counts == {"submissions": 0, "comments": 0}
+
+    async def test_copy_rows_by_id_as_of_earlier_version_sees_the_closed_row(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await make_user(session)
+            source = await _make_file(session, user, "proj_source")
+            target = await _make_file(session, user, "proj_target", file_type="filtered_data")
+
+            await bulk_insert_submissions(
+                session, source.id,
+                [{"id": "s1", "subreddit": "r", "title": "t", "selftext": "x", "author": "a", "created_utc": 1, "score": 0, "num_comments": 0}],
+            )
+            await session.commit()
+            await session.execute(
+                update(Submission).where(Submission.file_id == source.id, Submission.id == "s1").values(valid_to=1)
+            )
+            await session.commit()
+
+            counts = await copy_rows_by_id(
+                session, source_file_id=source.id, target_file_id=target.id,
+                submission_ids=["s1"], source_version_no=1,
+            )
+            assert counts == {"submissions": 1, "comments": 0}
+
+    async def test_copy_rows_by_id_restamps_target_version(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await make_user(session)
+            source = await _make_file(session, user, "proj_source")
+            target = await _make_file(session, user, "proj_target", file_type="filtered_data")
+
+            await bulk_insert_submissions(
+                session, source.id,
+                [{"id": "s1", "subreddit": "r", "title": "t", "selftext": "x", "author": "a", "created_utc": 1, "score": 0, "num_comments": 0}],
+            )
+            await session.commit()
+
+            await copy_rows_by_id(
+                session, source_file_id=source.id, target_file_id=target.id,
+                submission_ids=["s1"], target_version_no=3,
+            )
+            await session.commit()
+
+            copied = (
+                await session.execute(select(Submission).where(Submission.file_id == target.id))
+            ).scalar_one()
+            assert copied.valid_from == 3
+            assert copied.valid_to is None
+
+    async def test_copy_all_rows_excludes_closed_rows_by_default(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await make_user(session)
+            source = await _make_file(session, user, "proj_source")
+            target = await _make_file(session, user, "proj_target", file_type="coding")
+
+            await bulk_insert_submissions(
+                session, source.id,
+                [
+                    {"id": "s1", "subreddit": "r", "title": "t", "selftext": "x", "author": "a", "created_utc": 1, "score": 0, "num_comments": 0},
+                    {"id": "s2", "subreddit": "r", "title": "t", "selftext": "x", "author": "a", "created_utc": 2, "score": 0, "num_comments": 0},
+                ],
+            )
+            await session.commit()
+            await session.execute(
+                update(Submission).where(Submission.file_id == source.id, Submission.id == "s1").values(valid_to=1)
+            )
+            await session.commit()
+
+            counts = await copy_all_rows(session, source_file_id=source.id, target_file_id=target.id)
+            assert counts["submissions"] == 1
+
+            copied = (
+                await session.execute(select(Submission).where(Submission.file_id == target.id))
+            ).scalars().all()
+            assert [c.id for c in copied] == ["s2"]
+
+
+class TestRowIdsAsOf:
+    async def test_returns_ids_live_as_of_the_given_version(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await make_user(session)
+            f = await _make_file(session, user, "proj_a")
+            await bulk_insert_submissions(
+                session, f.id,
+                [
+                    {"id": "s1", "subreddit": "r", "title": "t", "selftext": "x", "author": "a", "created_utc": 1, "score": 0, "num_comments": 0},
+                    {"id": "s2", "subreddit": "r", "title": "t", "selftext": "x", "author": "a", "created_utc": 2, "score": 0, "num_comments": 0},
+                ],
+            )
+            await session.commit()
+            await session.execute(
+                update(Submission).where(Submission.file_id == f.id, Submission.id == "s1").values(valid_to=1)
+            )
+            await session.commit()
+
+            assert await row_ids_as_of(session, f.id, version_no=1, table="submissions") == {"s1", "s2"}
+            assert await row_ids_as_of(session, f.id, version_no=2, table="submissions") == {"s2"}

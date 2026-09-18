@@ -65,6 +65,22 @@ class TestMapModel:
         assert mapped["paid"] is False
         assert "pricing" not in mapped
 
+    def test_forwards_context_length_when_present(self) -> None:
+        raw = {"id": "a/b", "context_length": 131072, "pricing": {}, "architecture": {}}
+        assert _map_model(raw)["context_length"] == 131072
+
+    def test_missing_context_length_is_omitted(self) -> None:
+        raw = {"id": "a/b", "pricing": {}, "architecture": {}}
+        assert "context_length" not in _map_model(raw)
+
+    def test_non_positive_context_length_is_omitted(self) -> None:
+        raw = {"id": "a/b", "context_length": 0, "pricing": {}, "architecture": {}}
+        assert "context_length" not in _map_model(raw)
+
+    def test_non_int_context_length_is_omitted(self) -> None:
+        raw = {"id": "a/b", "context_length": "131072", "pricing": {}, "architecture": {}}
+        assert "context_length" not in _map_model(raw)
+
 
 class TestFetchOpenrouterCatalog:
     async def test_maps_and_filters_response_data(self, monkeypatch) -> None:

@@ -6,6 +6,7 @@ export default function FileRowActions({
   onView,
   onRename,
   onDelete,
+  onHistory,
   disabled = false,
 }) {
   return (
@@ -13,6 +14,11 @@ export default function FileRowActions({
       <button type="button" className={tabBtn} onClick={() => onView?.(file)} disabled={disabled}>
         View
       </button>
+      {onHistory && (
+        <button type="button" className={tabBtn} onClick={() => onHistory(file)} disabled={disabled}>
+          History
+        </button>
+      )}
       <button type="button" className={tabBtn} onClick={() => onRename?.(file)} disabled={disabled}>
         Edit
       </button>

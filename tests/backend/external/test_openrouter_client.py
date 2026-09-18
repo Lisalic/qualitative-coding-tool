@@ -6,6 +6,7 @@ from backend.app.external.errors import ExternalServiceError
 from backend.app.external.openrouter_client import (
     chat_completion,
     get_openrouter_client,
+    json_chat_completion,
     retry_async,
 )
 
@@ -185,3 +186,117 @@ class TestChatCompletion:
             await chat_completion(
                 system_prompt="s", user_prompt="u", api_key="", model="m"
             )
+
+    async def test_permanent_error_skips_remaining_retries(self, monkeypatch) -> None:
+        # A 402 (insufficient credits) will never succeed by resending the
+        # same request -- it must fail on the first attempt, not burn
+        # through every retry first.
+        client = _fake_client(side_effect=Exception("Error code: 402 - insufficient credits"))
+        monkeypatch.setattr(
+            "backend.app.external.openrouter_client.get_openrouter_client",
+            lambda api_key: client,
+        )
+        sleep_mock = AsyncMock()
+        monkeypatch.setattr("backend.app.external.openrouter_client.asyncio.sleep", sleep_mock)
+
+        with pytest.raises(ExternalServiceError) as exc_info:
+            await chat_completion(
+                system_prompt="s", user_prompt="u", api_key="k", model="m", max_retries=3
+            )
+
+        assert exc_info.value.code == 402
+        assert client.chat.completions.create.await_count == 1
+        sleep_mock.assert_not_called()
+
+    async def test_default_timeout_and_max_retries_are_consistent_and_tight(self, monkeypatch) -> None:
+        # See the docstring on chat_completion: 30s / 2 attempts bounds a
+        # single batch's worst case to roughly a minute instead of the old
+        # 300s x 3 = ~15 minutes.
+        client = _fake_client("x")
+        monkeypatch.setattr(
+            "backend.app.external.openrouter_client.get_openrouter_client",
+            lambda api_key: client,
+        )
+        await chat_completion(system_prompt="s", user_prompt="u", api_key="k", model="m")
+
+        kwargs = client.chat.completions.create.call_args.kwargs
+        assert kwargs["timeout"] == 30.0
+
+
+class TestJsonChatCompletion:
+    """The 3-tier compliance ladder: strict json_schema (if given) ->
+    json_object -> no response_format, tried within one call, mirroring
+    the existing 2-tier precedent in
+    ``backend/scripts/tag_expansion.py::_fetch_expansion_json``.
+    """
+
+    async def test_first_tier_succeeds_uses_strict_json_schema(self, monkeypatch) -> None:
+        mock = AsyncMock(return_value="the response")
+        monkeypatch.setattr("backend.app.external.openrouter_client.chat_completion", mock)
+
+        result = await json_chat_completion(
+            system_prompt="s", user_prompt="u", api_key="k", model="m", json_schema={"type": "object"}
+        )
+
+        assert result == "the response"
+        mock.assert_awaited_once()
+        response_format = mock.call_args.kwargs["response_format"]
+        assert response_format["type"] == "json_schema"
+        assert response_format["json_schema"]["strict"] is True
+        assert response_format["json_schema"]["schema"] == {"type": "object"}
+
+    async def test_no_json_schema_given_starts_at_json_object_tier(self, monkeypatch) -> None:
+        mock = AsyncMock(return_value="ok")
+        monkeypatch.setattr("backend.app.external.openrouter_client.chat_completion", mock)
+
+        await json_chat_completion(system_prompt="s", user_prompt="u", api_key="k", model="m")
+
+        assert mock.call_args.kwargs["response_format"] == {"type": "json_object"}
+        assert mock.await_count == 1
+
+    async def test_falls_back_to_json_object_when_schema_tier_fails(self, monkeypatch) -> None:
+        mock = AsyncMock(side_effect=[Exception("schema rejected"), "ok"])
+        monkeypatch.setattr("backend.app.external.openrouter_client.chat_completion", mock)
+
+        result = await json_chat_completion(
+            system_prompt="s", user_prompt="u", api_key="k", model="m", json_schema={"type": "object"}
+        )
+
+        assert result == "ok"
+        assert mock.await_count == 2
+        assert mock.call_args_list[1].kwargs["response_format"] == {"type": "json_object"}
+
+    async def test_falls_back_to_no_response_format_when_both_earlier_tiers_fail(self, monkeypatch) -> None:
+        mock = AsyncMock(side_effect=[Exception("schema rejected"), Exception("json mode rejected"), "ok"])
+        monkeypatch.setattr("backend.app.external.openrouter_client.chat_completion", mock)
+
+        result = await json_chat_completion(
+            system_prompt="s", user_prompt="u", api_key="k", model="m", json_schema={"type": "object"}
+        )
+
+        assert result == "ok"
+        assert mock.await_count == 3
+        assert mock.call_args_list[2].kwargs["response_format"] is None
+
+    async def test_all_tiers_failing_raises_the_last_error(self, monkeypatch) -> None:
+        mock = AsyncMock(side_effect=[Exception("a"), Exception("b"), Exception("final")])
+        monkeypatch.setattr("backend.app.external.openrouter_client.chat_completion", mock)
+
+        with pytest.raises(Exception, match="final"):
+            await json_chat_completion(
+                system_prompt="s", user_prompt="u", api_key="k", model="m", json_schema={"type": "object"}
+            )
+        assert mock.await_count == 3
+
+    async def test_forwards_model_timeout_and_max_retries(self, monkeypatch) -> None:
+        mock = AsyncMock(return_value="ok")
+        monkeypatch.setattr("backend.app.external.openrouter_client.chat_completion", mock)
+
+        await json_chat_completion(
+            system_prompt="s", user_prompt="u", api_key="k", model="model-x", timeout=15.0, max_retries=1
+        )
+
+        kwargs = mock.call_args.kwargs
+        assert kwargs["model"] == "model-x"
+        assert kwargs["timeout"] == 15.0
+        assert kwargs["max_retries"] == 1

@@ -1,5 +1,7 @@
 import CompareDualSelectPanel from "./CompareDualSelectPanel";
 import CompareModelPromptPanel from "./CompareModelPromptPanel";
+import PageShell from "../shell/PageShell";
+import { btnPrimary } from "../../lib/uiClasses";
 import CompareResultPanel from "./CompareResultPanel";
 import useComparePageData from "./useComparePageData";
 
@@ -19,8 +21,6 @@ const CONFIG_BY_MODE = {
     validationMessage: "Select two codebooks to compare",
     viewPath: "/codebook-comparison-view",
     viewStateKey: "selected",
-    // Backend converted to the background-job pattern (Stage 7) -- see
-    // useComparePageData's usesJobPolling handling.
     usesJobPolling: true,
   },
   coding: {
@@ -38,13 +38,15 @@ const CONFIG_BY_MODE = {
     validationMessage: "Select two codings to compare",
     viewPath: "/coding-comparison-view",
     viewStateKey: "selectedCodedData",
-    // Backend converted to the background-job pattern (Stage 8) -- see
-    // useComparePageData's usesJobPolling handling.
     usesJobPolling: true,
   },
 };
 
-export default function ComparePageContainer({ mode = "codebook", initialA = "", showTitle = true }) {
+export default function ComparePageContainer({
+  mode = "codebook",
+  initialA = "",
+  showTitle = true,
+}) {
   const config = CONFIG_BY_MODE[mode] || CONFIG_BY_MODE.codebook;
   const {
     items,
@@ -77,52 +79,51 @@ export default function ComparePageContainer({ mode = "codebook", initialA = "",
   });
 
   return (
-    <div className="w-full">
-      {showTitle ? (
-        <h1 className="mb-6 text-center text-2xl font-bold">{config.title}</h1>
-      ) : null}
+    <PageShell
+      title={showTitle ? config.title : undefined}
+      width="wide"
+      bodyClassName="flex flex-col gap-3"
+    >
+      <div className="flex flex-col gap-3">
+        <CompareDualSelectPanel
+          panelTitle={config.panelTitle}
+          labelA={config.labelA}
+          labelB={config.labelB}
+          placeholderOption={config.placeholderOption}
+          options={items}
+          valueA={a}
+          valueB={b}
+          onChangeA={setA}
+          onChangeB={setB}
+        />
+      </div>
 
-      <form onSubmit={submitCompare}>
-        <div className="flex flex-col gap-6 lg:flex-row">
-          <CompareDualSelectPanel
-            panelTitle={config.panelTitle}
-            labelA={config.labelA}
-            labelB={config.labelB}
-            placeholderOption={config.placeholderOption}
-            options={items}
-            valueA={a}
-            valueB={b}
-            onChangeA={setA}
-            onChangeB={setB}
-          />
-
-          <CompareModelPromptPanel
-            model={model}
-            onModelChange={setModel}
-            name={name}
-            onNameChange={setName}
-            projects={projects}
-            selectedProject={selectedProject}
-            onProjectChange={setSelectedProject}
-            additionalPrompt={additionalPrompt}
-            onAdditionalPromptChange={setAdditionalPrompt}
-            examplePromptText={config.examplePromptText}
-          />
+      <form onSubmit={submitCompare} className="mt-2 border-t border-line pt-4">
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-paper/70">
+          AI Synthesis Narrative
         </div>
+        <CompareModelPromptPanel
+          model={model}
+          onModelChange={setModel}
+          name={name}
+          onNameChange={setName}
+          projects={projects}
+          selectedProject={selectedProject}
+          onProjectChange={setSelectedProject}
+          additionalPrompt={additionalPrompt}
+          onAdditionalPromptChange={setAdditionalPrompt}
+          examplePromptText={config.examplePromptText}
+        />
 
-        <div className="mt-4 flex justify-center">
-          <button
-            className="border-2 border-paper px-7 py-2.5 text-base font-semibold transition-colors hover:bg-paper hover:text-ink disabled:opacity-50"
-            type="submit"
-            disabled={loading}
-          >
-            {loading ? "Comparing..." : "Compare"}
+        <div className="mt-3 flex justify-center">
+          <button className={btnPrimary} type="submit" disabled={loading}>
+            {loading ? "Generating AI Comparison..." : "Generate AI Comparison"}
           </button>
         </div>
       </form>
 
       {error && (
-        <div className="mt-4 border border-error bg-error/10 px-4 py-3 text-sm text-error">
+        <div className="border border-error bg-error/10 px-3 py-2 text-sm text-error">
           {error}
         </div>
       )}
@@ -133,6 +134,6 @@ export default function ComparePageContainer({ mode = "codebook", initialA = "",
         viewPath={config.viewPath}
         viewStateKey={config.viewStateKey}
       />
-    </div>
+    </PageShell>
   );
 }

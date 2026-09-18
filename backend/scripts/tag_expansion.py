@@ -13,7 +13,6 @@ from backend.app.external.openrouter_client import chat_completion, retry_async
 from backend.app.external.response_parsers import strip_markdown_fences as _strip_json_fences
 from backend.scripts.openrouter_http import openrouter_user_message
 
-DEFAULT_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
 MAX_RETRIES = 3
 MAX_EXPANDED_TERMS = 50
 MAX_TERM_CHARS = 80
@@ -101,7 +100,6 @@ async def _fetch_expansion_json(system_prompt: str, user_message: str, api_key: 
             temperature=0.2,
             timeout=120.0,
             response_format={"type": "json_object"},
-            use_middle_out=True,
             max_retries=1,
         )
     except Exception:
@@ -113,7 +111,6 @@ async def _fetch_expansion_json(system_prompt: str, user_message: str, api_key: 
             temperature=0.2,
             timeout=120.0,
             response_format=None,
-            use_middle_out=True,
             max_retries=1,
         )
     return _parse_expansion_json(content)
@@ -138,7 +135,7 @@ async def expand_tags_via_openrouter(
     if not api_key or not api_key.strip():
         raise TagExpansionError("API key is required for tag expansion", code=401)
 
-    chosen = (model or "").strip() or DEFAULT_MODEL
+    chosen = model
     user_payload = json.dumps(
         {"seed_tags": user_tags},
         ensure_ascii=False,

@@ -67,6 +67,12 @@ export default function useComparePageData({
     };
   }, []);
 
+  const handleSwap = () => {
+    const tempA = a;
+    setA(b);
+    setB(tempA);
+  };
+
   const submitCompare = async (event) => {
     event.preventDefault();
     setComparison("");
@@ -88,6 +94,11 @@ export default function useComparePageData({
       return;
     }
 
+    if (!model) {
+      setError("Select an AI model");
+      return;
+    }
+
     const apiKey = localStorage.getItem("apiKey");
     if (!apiKey) {
       setError("Set your API key in the navbar first");
@@ -99,7 +110,7 @@ export default function useComparePageData({
     form.append(fieldBName, b);
     form.append("api_key", apiKey);
     form.append("name", name.trim());
-    if (model) form.append("model", model);
+    form.append("model", model);
     if (additionalPrompt.trim()) form.append("prompt", additionalPrompt.trim());
     form.append("project_id", selectedProject);
 
@@ -107,42 +118,29 @@ export default function useComparePageData({
       setLoading(true);
 
       if (usesJobPolling) {
-        // Endpoint has been converted to the background-job pattern
-        // (kicks off a job and returns 202 {job_id, status}) -- poll
-        // /api/jobs/{id} until it resolves rather than blocking on the
-        // initial request. The job also persists the comparison as a
-        // File artifact directly (see `name` above), so `data.file` is
-        // the created artifact -- no separate save step needed.
-        const { ok, data, error: pollError } = await postFormAndPoll(
-          compareEndpoint,
-          form,
-        );
+        const { ok, data, error: pollError } = await postFormAndPoll(compareEndpoint, form);
         if (!ok) {
-          setError(pollError || "Failed to compare");
+          setError(pollError || "Comparison failed");
         } else {
-          setComparison(data?.comparison || "");
-          setCreatedFile(data?.file || null);
+          setComparison((data && data.comparison) || "");
+          setCreatedFile((data && data.file) || null);
         }
-        return;
-      }
-
-      const response = await apiFetch(compareEndpoint, {
-        method: "POST",
-        body: form,
-      });
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      const data = await response.json();
-      if (data.error) {
-        setError(data.error);
       } else {
-        setComparison(data.comparison || "");
-        setCreatedFile(data?.file || null);
+        const response = await apiFetch(compareEndpoint, {
+          method: "POST",
+          body: form,
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || errorData.detail || "Comparison failed");
+        }
+
+        const data = await response.json();
+        setComparison(data.comparison);
       }
-    } catch (submitError) {
-      setError(String(submitError));
+    } catch (err) {
+      setError(err.message);
     } finally {
       setLoading(false);
     }
@@ -168,5 +166,6 @@ export default function useComparePageData({
     selectedProject,
     setSelectedProject,
     submitCompare,
+    handleSwap,
   };
 }

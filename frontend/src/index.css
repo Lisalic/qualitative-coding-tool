@@ -8,6 +8,18 @@
 
   --font-sans: system-ui, -apple-system, sans-serif;
 
+  /* Border hierarchy. Derived from white opacity, never a literal gray --
+     see documentation/style-guide.md. `line` is the default region border,
+     `line-soft` separates rows inside a region, `line-strong` is reserved
+     for modals and other genuinely emphasized edges. */
+  --color-line: rgba(255, 255, 255, 0.28);
+  --color-line-soft: rgba(255, 255, 255, 0.14);
+  --color-line-strong: #ffffff;
+
+  /* Surfaces. Same rule: white-alpha, not gray. */
+  --color-surface: rgba(255, 255, 255, 0.02);
+  --color-surface-raised: rgba(255, 255, 255, 0.05);
+
   /* This app is deliberately square-cornered everywhere; zero out the
      default radius scale so no utility can accidentally introduce
      roundness. */
@@ -27,15 +39,27 @@
     line-height: 1.5;
   }
 
+  /* The shell in App.jsx is a fixed-height flex column that owns every
+     scroll region itself, so the document must never scroll. `dvh` rather
+     than `vh` because mobile browsers shrink the visual viewport as their
+     toolbars collapse, and 100vh overflows by exactly that much. */
+  html,
+  body {
+    overflow: hidden;
+  }
+
+  /* No min-width floor: the document can't scroll, so anything wider than
+     the viewport would be clipped with no way to reach it. The shell always
+     fits, and content too wide to shrink scrolls inside its own region
+     instead (see PageShell). */
   body {
     @apply bg-ink text-paper;
-    min-width: 320px;
-    min-height: 100vh;
+    height: 100dvh;
   }
 
   #root {
     width: 100%;
-    min-height: 100vh;
+    height: 100dvh;
   }
 
   a {
@@ -46,22 +70,15 @@
     @apply text-paper/70;
   }
 
-  /* Toggled on <body> during coding-table column-resize drags
-     (frontend/src/components/coding-table/useColumnResize.js) so the
-     col-resize cursor stays correct even when the pointer leaves the
-     resize handle mid-drag. */
-  body.column-resize-active {
-    cursor: col-resize;
-  }
+  /* Backstop for the plain-text `<pre>` blocks scattered across the app
+     (prompt panels, the coding text view, raw job results): browsers render
+     <pre> with white-space: pre and no wrapping, which lets a single long
+     line spill straight through its container's border. Force it to wrap
+     and stay inside its box.
 
-  /* react-markdown output (MarkdownDisplay, MarkdownView, CodebookTree) is
-     rendered from LLM text that occasionally comes back wrapped in a
-     ``` fenced code block -- browsers render <pre> with white-space: pre
-     and no wrapping by default, which otherwise lets a single long line
-     spill straight through its container's border instead of wrapping or
-     scrolling. Force it to wrap and stay inside its box everywhere a
-     comparison/codebook/summary/coding artifact gets rendered as
-     markdown, regardless of which view page hosts it. */
+     MarkdownDisplay's own fenced code blocks deliberately opt back out of
+     this with `[white-space:pre]`, since a code block should scroll rather
+     than reflow. */
   pre {
     overflow-x: auto;
     white-space: pre-wrap;

@@ -1,3 +1,4 @@
+import { btnPrimary } from "../../lib/uiClasses";
 const inputClasses =
   "border border-paper bg-white/5 px-3 py-2.5 text-paper placeholder:text-paper/40 focus:outline-none focus:ring-2 focus:ring-paper";
 
@@ -17,7 +18,7 @@ export default function CreateProjectSection({
       <div className="mt-6 flex justify-center">
         <button
           type="button"
-          className="border-2 border-paper px-6 py-3 text-base font-semibold transition-colors hover:bg-paper hover:text-ink"
+          className={btnPrimary}
           onClick={onCreateClick}
           aria-label="Create New Project"
         >
@@ -30,8 +31,8 @@ export default function CreateProjectSection({
   const isError = message.toLowerCase().includes("error");
 
   return (
-    <div className="mt-6 border-2 border-paper p-6">
-      <h2 className="mb-4 text-xl font-semibold">Create New Project</h2>
+    <div className="border border-line bg-surface p-3">
+      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide">Create New Project</h2>
       <form onSubmit={onSubmit} className="flex flex-col gap-4">
         <div className="flex flex-col gap-1.5">
           <label className="text-sm">Project Name *</label>
@@ -54,7 +55,7 @@ export default function CreateProjectSection({
         <div className="flex items-center gap-3">
           <button
             type="submit"
-            className="border-2 border-paper px-6 py-3 text-base font-semibold transition-colors hover:bg-paper hover:text-ink"
+            className={btnPrimary}
           >
             Create Project
           </button>

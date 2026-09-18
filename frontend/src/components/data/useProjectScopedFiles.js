@@ -43,11 +43,16 @@ export default function useProjectScopedFiles(fileType) {
   }, []);
 
   useEffect(() => {
+    // Without this, a fast fileType change (or an unmount) could let an
+    // older, slower request's response land after a newer one's and
+    // overwrite it with stale data -- or update state after unmount.
+    const controller = new AbortController();
+
     const fetchDatabases = async () => {
       try {
-        const meResp = await apiFetch("/api/me/");
+        const meResp = await apiFetch("/api/me/", { signal: controller.signal });
         if (meResp.ok) {
-          const projResp = await apiFetch(`/api/my-files/?file_type=${fileType}`);
+          const projResp = await apiFetch(`/api/my-files/?file_type=${fileType}`, { signal: controller.signal });
           if (!projResp.ok) throw new Error("Failed to fetch user projects");
           const projData = await projResp.json();
           const projects = projData.projects || [];
@@ -56,18 +61,21 @@ export default function useProjectScopedFiles(fileType) {
           return;
         }
 
-        const fallbackResp = await apiFetch(`/api/my-files/?file_type=${fileType}`);
+        const fallbackResp = await apiFetch(`/api/my-files/?file_type=${fileType}`, { signal: controller.signal });
         if (!fallbackResp.ok) return;
         const fallbackData = await fallbackResp.json();
         const projects = fallbackData.projects || [];
         setUserProjects(projects);
         setDatabases(normalizeDatabaseProjects(projects));
       } catch (error) {
+        if (error?.name === "AbortError") return;
         console.error("Error fetching scoped files:", error);
       }
     };
 
     fetchDatabases();
+
+    return () => controller.abort();
   }, [fileType]);
 
   const projectSource = useMemo(

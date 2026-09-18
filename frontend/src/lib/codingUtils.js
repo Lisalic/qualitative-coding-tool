@@ -1,155 +1,183 @@
-// Utility functions for coding operations
+// Utility functions for coding operations.
+//
+// A coding artifact's rows and their codes now come from the backend
+// already structured (GET /api/coding/{ref}/rows -- see
+// coding-table/workspace/useViewCodingPage.js), each row shaped as
+// { item_id, row_type, title, content, codes: [{code, code_uid, quote,
+// start_offset, end_offset, notes}] } -- one entry per quote
+// (coding_entries is one row per quote, see storage_models.CodingEntry),
+// each already resolved to exact character offsets into `content`
+// server-side. There is no POST_ID/CODE/EVIDENCE text blob to parse on
+// the way in or format on the way out, and no client-side snippet-
+// splitting either -- HighlightedContent renders straight from
+// `start_offset`/`end_offset`, see its own module comment.
+//
+// A codebook's own codes (GET /api/coding/{ref}, GET /api/codebook) come
+// as a FLAT list -- one entry per code, each carrying a stable `code_uid`
+// (identity that survives a rename) and `family_uid` (identity for the
+// family it belongs to). `groupCodesByFamily`/`flattenTreeToCodes` are
+// the adapter pair between that flat wire shape and the nested
+// family->codes tree the editor UI (CodeLegend, CodingCodebookSidebar)
+// renders -- grouping is a pure display-time transform, matching how
+// `backend/app/core/codebook_render.py` groups server-side: by
+// `family_uid` (never by name -- two families can share a name, see that
+// module's docstring), in `position` order.
 
-const POST_ID_LINE_RE = /^(?:POST[\s_-]*ID)\s*:\s*(.+)$/i;
-const POST_ID_CODE_EVIDENCE_LINE_RE =
-  /^(?:POST[\s_-]*ID)\s*:\s*(.+?)\s*(?:-|–|—)?\s*CODE\s*:\s*(.+?)\s*(?:-|–|—)\s*EVIDENCE\s*:\s*(.+?)(?:\s*(?:-|–|—)\s*NOTES\s*:\s*(.+))?$/i;
-const CODE_EVIDENCE_LINE_RE =
-  /^CODE\s*:\s*(.+?)\s*(?:-|–|—)\s*EVIDENCE\s*:\s*(.+?)(?:\s*(?:-|–|—)\s*NOTES\s*:\s*(.+))?$/i;
-const CODE_LINE_RE = /^CODE\s*:\s*(.+)$/i;
-const EVIDENCE_LINE_RE = /^EVIDENCE\s*:\s*(.+)$/i;
-const NOTES_LINE_RE = /^NOTES\s*:\s*(.+)$/i;
-const QUOTED_EVIDENCE_RE = /"([^"\n]+)"/g;
-
-const cleanInlineText = (value) => {
-  if (!value) return "";
-  return String(value)
-    .replace(/\u201c|\u201d/g, '"')
-    .replace(/\u2018|\u2019/g, "'")
-    .replace(/\*\*/g, "")
-    .replace(/__/g, "")
-    .replace(/`/g, "")
-    .replace(/\[(.*?)\]\((.*?)\)/g, "$1")
-    .replace(/^\s*[-*+]\s*/, "")
-    .replace(/\s+/g, " ")
-    .trim();
+/** Group a flat `codes` list (as returned by the backend) into a nested
+ * family->codes tree for display, preserving `code_uid`/`family_uid` on
+ * every node -- the identity that makes a rename a rename instead of a
+ * delete+add. Families appear in the order their first code was seen
+ * (matching `position` order from the backend).
+ */
+export const groupCodesByFamily = (codes) => {
+  if (!Array.isArray(codes)) return [];
+  const byFamily = new Map();
+  const order = [];
+  for (const code of codes) {
+    const familyUid = String(code?.family_uid ?? "");
+    if (!byFamily.has(familyUid)) {
+      byFamily.set(familyUid, {
+        family_uid: familyUid,
+        family_name: String(code?.family_name ?? ""),
+        codes: [],
+      });
+      order.push(familyUid);
+    }
+    byFamily.get(familyUid).codes.push({
+      code_uid: String(code?.code_uid ?? ""),
+      family_uid: familyUid,
+      family_name: String(code?.family_name ?? ""),
+      name: String(code?.name ?? ""),
+      body: typeof code?.body === "string" ? code.body : "",
+      definition: code?.definition ?? null,
+      inclusion: code?.inclusion ?? null,
+      exclusion: code?.exclusion ?? null,
+      keywords: code?.keywords ?? null,
+      example: code?.example ?? null,
+    });
+  }
+  return order.map((familyUid) => byFamily.get(familyUid));
 };
 
-export const normalizeEvidenceText = (value) =>
-  cleanInlineText(value)
-    .replace(/^['"]|['"]$/g, "")
-    .trim();
+/** A fresh 32-hex-char id in the same shape `uuid.uuid4().hex` mints
+ * server-side (see `codebook_service._resolve_code_rows`) -- used to
+ * give a code/family created client-side (`CodeLegend`'s "add" actions)
+ * a real, stable `code_uid`/`family_uid` the moment it's created, rather
+ * than leaving it identity-less until the next save. A code carrying one
+ * of these is still marked `is_new: true` alongside it (see
+ * `flattenTreeToCodes`) -- the client-minted id is what the server ends
+ * up storing (`code_uid or uuid.uuid4().hex`), `is_new` is what tells
+ * the server this is a creation, not an edit.
+ */
+export const mintClientCodeUid = () =>
+  (typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID().replace(/-/g, "")
+    : `${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`.padEnd(32, "0").slice(0, 32));
 
-/** Deep clone codebook tree (family_name, content, codes[].code_name, codes[].content). */
+/** Deep clone a family->codes tree, preserving `code_uid`/`family_uid`
+ * and every code field -- unlike the old whitelist this replaces, which
+ * silently stripped any field it didn't know about (including
+ * `code_uid` itself, the exact bug that made every save mint fresh
+ * identities and rename every code -- see this module's history).
+ * `is_new`/`family_is_new` are preserved too, so cloning a draft that
+ * already has a client-minted code/family (see `mintClientCodeUid`)
+ * doesn't lose the "this is a creation" flag.
+ */
 export const cloneCodebookTree = (tree) => {
   if (!Array.isArray(tree)) return [];
   return tree.map((family) => ({
-    family_name:
-      typeof family?.family_name === "string" ? family.family_name : "",
-    content: typeof family?.content === "string" ? family.content : "",
+    family_uid: typeof family?.family_uid === "string" ? family.family_uid : "",
+    family_name: typeof family?.family_name === "string" ? family.family_name : "",
+    ...(family?.family_is_new ? { family_is_new: true } : {}),
     codes: (Array.isArray(family?.codes) ? family.codes : []).map((code) => ({
-      code_name: typeof code?.code_name === "string" ? code.code_name : "",
-      content: typeof code?.content === "string" ? code.content : "",
+      code_uid: typeof code?.code_uid === "string" ? code.code_uid : "",
+      family_uid: typeof code?.family_uid === "string" ? code.family_uid : "",
+      family_name: typeof code?.family_name === "string" ? code.family_name : "",
+      name: typeof code?.name === "string" ? code.name : "",
+      body: typeof code?.body === "string" ? code.body : "",
+      definition: code?.definition ?? null,
+      inclusion: code?.inclusion ?? null,
+      exclusion: code?.exclusion ?? null,
+      keywords: code?.keywords ?? null,
+      example: code?.example ?? null,
+      ...(code?.is_new ? { is_new: true } : {}),
     })),
   }));
 };
 
-/**
- * Serialize tree to markdown matching backend/scripts/display_codebook.py parse_codebook_to_json input.
+/** Flatten a family->codes tree back into the flat `codes` list the
+ * structured save endpoint (`PUT /api/coding/{ref}/revision`'s `codes`,
+ * or `PUT /api/codebook/{ref}`) expects, assigning `position` from
+ * traversal order. Identity is explicit: a code/family created via
+ * `CodeLegend`'s "add" actions already carries a client-minted
+ * `code_uid`/`family_uid` (see `mintClientCodeUid`) plus
+ * `is_new`/`family_is_new: true`, and both are forwarded together --
+ * the backend uses the supplied uid as-is (`code_uid or
+ * uuid.uuid4().hex`) rather than minting its own, while `is_new` is what
+ * tells it this is a creation, not an edit. A code with no `code_uid` at
+ * all (defensive fallback, shouldn't happen once every "add" mints one)
+ * still falls back to `is_new: true` with no uid, which the backend
+ * mints one for -- it refuses a code with neither (see
+ * `codebook_service._resolve_code_rows`).
  */
-export const serializeCodebookTreeToText = (tree) => {
-  if (!Array.isArray(tree) || tree.length === 0) return "";
-
-  const lines = [];
+export const flattenTreeToCodes = (tree) => {
+  if (!Array.isArray(tree)) return [];
+  const codes = [];
+  let position = 0;
   for (const family of tree) {
-    const fname = String(family?.family_name ?? "").trim() || "Unnamed family";
-    lines.push(`### Code Family: ${fname}`);
-
-    const fc = String(family?.content ?? "").trimEnd();
-    if (fc) {
-      for (const part of fc.split("\n")) {
-        lines.push(part);
-      }
+    const familyUid = family?.family_uid || null;
+    const familyIsNew = Boolean(family?.family_is_new) || !familyUid;
+    const familyName = String(family?.family_name ?? "").trim() || "Untitled family";
+    const familyCodes = Array.isArray(family?.codes) ? family.codes : [];
+    for (const code of familyCodes) {
+      const codeUid = code?.code_uid || null;
+      const codeIsNew = Boolean(code?.is_new) || !codeUid;
+      codes.push({
+        ...(codeUid ? { code_uid: codeUid } : {}),
+        ...(codeIsNew ? { is_new: true } : {}),
+        ...(familyUid ? { family_uid: familyUid } : {}),
+        ...(familyIsNew ? { family_is_new: true } : {}),
+        family_name: familyName,
+        name: String(code?.name ?? "").trim(),
+        body: typeof code?.body === "string" ? code.body : "",
+        definition: code?.definition ?? null,
+        inclusion: code?.inclusion ?? null,
+        exclusion: code?.exclusion ?? null,
+        keywords: code?.keywords ?? null,
+        example: code?.example ?? null,
+        position: position++,
+      });
     }
-
-    const codes = Array.isArray(family?.codes) ? family.codes : [];
-    for (const code of codes) {
-      const cname = String(code?.code_name ?? "").trim();
-      lines.push(`#### Code Name: ${cname}`);
-      const cc = String(code?.content ?? "").trimEnd();
-      if (cc) {
-        for (const part of cc.split("\n")) {
-          lines.push(part);
-        }
-      }
-    }
-
-    lines.push("");
   }
-
-  return lines.join("\n").trim();
+  return codes;
 };
 
-const preprocessCodingLines = (content) => {
-  if (typeof content !== "string") return [];
-
-  return content
-    .replace(/\r\n?/g, "\n")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .filter((line) => !/^```/.test(line))
-    .filter((line) => !/^(?:-{3,}|\*{3,}|_{3,})$/.test(line))
-    .map((line) => line.replace(/^#{1,6}\s*/, ""))
-    .map((line) =>
-      line.replace(
-        /^\s*[-*+]\s*(?=(?:POST[\s_-]*ID|CODE|EVIDENCE|NOTES)\s*:)/i,
-        "",
-      ),
-    )
-    .map(cleanInlineText)
-    .filter(Boolean)
-    .filter((line) => /^(?:POST[\s_-]*ID|CODE|EVIDENCE|NOTES)\s*:/i.test(line));
-};
-
-const splitEvidenceSnippets = (evidenceText) => {
-  const raw = String(evidenceText || "");
-  const quotedMatches = Array.from(raw.matchAll(QUOTED_EVIDENCE_RE)).map((m) =>
-    normalizeEvidenceText(m[1]),
-  );
-
-  if (quotedMatches.length > 0) {
-    return quotedMatches.filter(Boolean);
-  }
-
-  return raw
-    .split("§")
-    .map((snippet) => normalizeEvidenceText(snippet))
-    .filter(Boolean);
-};
-
-const appendCodeEvidenceEntries = (
-  targetCodeEvidence,
-  codeValue,
-  evidenceValue,
-  notesValue = "",
-) => {
-  const code = cleanInlineText(codeValue);
-  const evidenceSnippets = splitEvidenceSnippets(evidenceValue);
-  const notes = cleanInlineText(notesValue);
-
-  if (!code || evidenceSnippets.length === 0) return;
-
-  evidenceSnippets.forEach((evidence) => {
-    targetCodeEvidence.push(
-      notes ? { code, evidence, notes } : { code, evidence },
-    );
+/** Every `{code_uid, name}` defined in a codebook tree, deduped by
+ * `code_uid` and sorted by name -- used to populate the "pick a code"
+ * list for tagging a text selection (see HighlightedContent's selection
+ * popover and CodingCodebookSidebar). Identity is the uid; `name` is
+ * only ever the display label.
+ */
+export const flattenCodebookCodes = (tree) => {
+  if (!Array.isArray(tree)) return [];
+  const byUid = new Map();
+  tree.forEach((family) => {
+    (Array.isArray(family?.codes) ? family.codes : []).forEach((entry) => {
+      const uid = typeof entry?.code_uid === "string" ? entry.code_uid : "";
+      const name = typeof entry?.name === "string" ? entry.name.trim() : "";
+      if (uid && name && !byUid.has(uid)) byUid.set(uid, { code_uid: uid, name });
+    });
   });
+  return Array.from(byUid.values()).sort((a, b) => a.name.localeCompare(b.name));
 };
 
-const formatEvidenceBlock = (value) => {
-  const segments = splitEvidenceSnippets(value)
-    .map((segment) => segment.replace(/"/g, "'"))
-    .filter(Boolean);
-
-  return segments.map((segment) => `"${segment}"`).join("§");
-};
-
-// Color assignment for codes
-export const getCodeColor = (code) => {
-  // Simple hash function for consistent colors
+// Color assignment for codes -- hashes `code_uid` (stable identity), not
+// the display name, so a rename never changes a code's color.
+export const getCodeColor = (codeUid) => {
+  const key = String(codeUid ?? "");
   let hash = 0;
-  for (let i = 0; i < code.length; i++) {
-    hash = code.charCodeAt(i) + ((hash << 5) - hash);
+  for (let i = 0; i < key.length; i++) {
+    hash = key.charCodeAt(i) + ((hash << 5) - hash);
   }
   const hue = Math.abs(hash) % 360;
   // Use higher saturation and varied lightness for better distinction
@@ -158,185 +186,28 @@ export const getCodeColor = (code) => {
   return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
 };
 
-// Get all unique codes for legend
-export const getUniqueCodes = (parsedCoding) => {
-  if (!Array.isArray(parsedCoding)) return [];
-  const codes = new Set();
-  parsedCoding.forEach((post) => {
-    (post.codeEvidence || []).forEach(({ code }) => {
-      if (code) codes.add(code);
-    });
-  });
-  return Array.from(codes).sort();
-};
-
-// Get filtered coding data based on selected filter codes
-export const getFilteredCoding = (parsedCoding, selectedFilterCodes) => {
-  if (!Array.isArray(parsedCoding)) return [];
-  if (!selectedFilterCodes || selectedFilterCodes.length === 0) {
-    return parsedCoding;
+/**
+ * Reduce a row's coded entries to one AI/Human/Both label -- the client
+ * mirror of `backend/app/core/coder_rollup.py::roll_up`. Computed
+ * client-side (never trusted from a server-fetched `row.coder` field)
+ * so the badge stays correct for a row with LOCALLY staged, unsaved
+ * edits too (see `useViewCodingPage.js`'s `pendingRowEdits`) -- a row
+ * the researcher just hand-edited or accepted a recode for hasn't been
+ * re-fetched yet, but its `codes` array already reflects the edit.
+ *
+ * Returns `null` for an uncoded row, `"ai"` / `"human"` / `"both"`
+ * otherwise -- see `CodingDocumentList.jsx`/`CodingReaderPane.jsx` for
+ * where this becomes a visible mark.
+ */
+export const rollUpCoder = (codes) => {
+  let seenHuman = false;
+  let seenAi = false;
+  for (const entry of Array.isArray(codes) ? codes : []) {
+    if (entry?.coder === "ai") seenAi = true;
+    else seenHuman = true; // "human", missing, or anything else defaults to human server-side
+    if (seenHuman && seenAi) return "both";
   }
-  const filterSet = new Set(selectedFilterCodes);
-  return parsedCoding.filter((post) =>
-    (post.codeEvidence || []).some((ev) => filterSet.has(ev.code)),
-  );
-};
-
-// Case-insensitive lookup helper for post contents mapped by id
-export const getPostDataById = (postContents, postId) => {
-  if (!postContents || !postId) return null;
-  const postIdLower = String(postId).toLowerCase();
-  const matchingKey = Object.keys(postContents).find(
-    (key) => key.toLowerCase() === postIdLower,
-  );
-  return matchingKey ? postContents[matchingKey] : null;
-};
-
-// Parse coding data from raw text content
-export const parseCodingData = (content) => {
-  const lines = preprocessCodingLines(content);
-  if (lines.length === 0) return [];
-
-  const parsed = [];
-  let currentPost = null;
-  let pendingCode = "";
-  let pendingNotes = "";
-
-  const flushCurrentPost = () => {
-    if (
-      currentPost &&
-      currentPost.postId &&
-      currentPost.codeEvidence.length > 0
-    ) {
-      parsed.push(currentPost);
-    }
-    currentPost = null;
-    pendingCode = "";
-    pendingNotes = "";
-  };
-
-  for (const line of lines) {
-    const inlinePostCodeEvidenceMatch = line.match(
-      POST_ID_CODE_EVIDENCE_LINE_RE,
-    );
-    if (inlinePostCodeEvidenceMatch) {
-      flushCurrentPost();
-
-      const postId = cleanInlineText(inlinePostCodeEvidenceMatch[1]);
-
-      if (!postId) continue;
-
-      currentPost = {
-        postId,
-        codeEvidence: [],
-      };
-
-      appendCodeEvidenceEntries(
-        currentPost.codeEvidence,
-        inlinePostCodeEvidenceMatch[2],
-        inlinePostCodeEvidenceMatch[3],
-        inlinePostCodeEvidenceMatch[4],
-      );
-
-      pendingCode = "";
-      pendingNotes = "";
-      continue;
-    }
-
-    const postMatch = line.match(POST_ID_LINE_RE);
-    if (postMatch) {
-      flushCurrentPost();
-
-      const postId = cleanInlineText(postMatch[1]);
-      if (!postId) continue;
-
-      currentPost = {
-        postId,
-        codeEvidence: [],
-      };
-      continue;
-    }
-
-    if (!currentPost) continue;
-
-    const codeEvidenceMatch = line.match(CODE_EVIDENCE_LINE_RE);
-    if (codeEvidenceMatch) {
-      appendCodeEvidenceEntries(
-        currentPost.codeEvidence,
-        codeEvidenceMatch[1],
-        codeEvidenceMatch[2],
-        codeEvidenceMatch[3],
-      );
-      pendingCode = "";
-      pendingNotes = "";
-      continue;
-    }
-
-    const codeOnlyMatch = line.match(CODE_LINE_RE);
-    if (codeOnlyMatch) {
-      pendingCode = cleanInlineText(codeOnlyMatch[1]);
-      pendingNotes = "";
-      continue;
-    }
-
-    const notesOnlyMatch = line.match(NOTES_LINE_RE);
-    if (notesOnlyMatch && pendingCode) {
-      pendingNotes = cleanInlineText(notesOnlyMatch[1]);
-      continue;
-    }
-
-    const evidenceOnlyMatch = line.match(EVIDENCE_LINE_RE);
-    if (evidenceOnlyMatch && pendingCode) {
-      appendCodeEvidenceEntries(
-        currentPost.codeEvidence,
-        pendingCode,
-        evidenceOnlyMatch[1],
-        pendingNotes,
-      );
-      pendingCode = "";
-      pendingNotes = "";
-    }
-  }
-
-  flushCurrentPost();
-
-  return parsed;
-};
-
-// Serialize parsed coding rows back into canonical text format
-export const formatCodingData = (parsedCoding) => {
-  if (!Array.isArray(parsedCoding)) return "";
-
-  const outLines = [];
-
-  parsedCoding.forEach((post) => {
-    const postId = cleanInlineText(post?.postId);
-    const codeEvidence = Array.isArray(post?.codeEvidence)
-      ? post.codeEvidence
-      : [];
-
-    const formattedEntries = codeEvidence
-      .map((entry) => {
-        const code = cleanInlineText(entry?.code);
-        const evidence = formatEvidenceBlock(entry?.evidence);
-        const notes = cleanInlineText(entry?.notes);
-        if (!code || !evidence) return null;
-        return { code, evidence, notes };
-      })
-      .filter(Boolean);
-
-    if (!postId || formattedEntries.length === 0) return;
-
-    outLines.push(`POST_ID: ${postId}`);
-    formattedEntries.forEach(({ code, evidence, notes }) => {
-      outLines.push(`CODE: ${code}`);
-      if (notes) {
-        outLines.push(`NOTES: ${notes}`);
-      }
-      outLines.push(`EVIDENCE: ${evidence}`);
-    });
-    outLines.push("");
-  });
-
-  return outLines.join("\n").trim();
+  if (seenAi) return "ai";
+  if (seenHuman) return "human";
+  return null;
 };

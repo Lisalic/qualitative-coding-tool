@@ -8,7 +8,7 @@ const AuthGate = () => {
 
   if (status === "loading") {
     return (
-      <div className="flex min-h-[40vh] items-center justify-center text-paper/70">
+      <div className="flex min-h-0 flex-1 items-center justify-center text-paper/70">
         <span>Loading...</span>
       </div>
     );

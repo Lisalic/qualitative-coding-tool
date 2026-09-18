@@ -36,3 +36,14 @@ class UpstreamServiceError(AppError):
     """Wraps a failure from an external service call (e.g. OpenRouter)."""
 
     status_code = 502
+
+
+class ContextBudgetError(AppError):
+    """The prompt can't fit the target model's context window even before
+    reserving room for its completion (and, for the compare paths, even
+    after compacting the input) -- the caller should pick a
+    larger-context model or send less. Surfaced instead of silently
+    truncating the middle of an oversized prompt.
+    """
+
+    status_code = 413

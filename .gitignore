@@ -69,3 +69,6 @@ backend/scripts/update_database.py
 
 # Local agent notes
 CLAUDE.md
+AGENTS.md
+.agents/
+.claude/

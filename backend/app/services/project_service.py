@@ -3,17 +3,22 @@ backend/app/api/project_routes.py.
 
 Async, ORM-only. ``list_files_for_user`` and ``list_projects_with_files``
 replace the two N+1-shaped handlers in the old router (``my_projects`` did
-one ``FileTable`` query + one ``FileDependency`` query *per file*;
-``list_projects`` did one dependency query per file per project) with a
-constant number of queries regardless of file count, via
-``repositories/file_repo.py::list_files_with_tables_and_deps`` plus a
-single bulk lookup for any referenced parent files not already in that
-result set.
+one ``FileTable`` query + one lineage query *per file*; ``list_projects``
+did one lineage query per file per project) with a constant number of
+queries regardless of file count, via
+``repositories/file_repo.py::list_files_with_tables`` plus
+``repositories/version_repo.py::list_parent_edges_for_files`` and a single
+bulk ownership-scoped lookup for any referenced parent files not already
+in that result set.
+
+Both listings now emit the SAME ``parent_files`` entry shape
+(``{id, name, schema_name, type}``) -- the old code had two different
+shapes for the same concept (``list_files_for_user`` included
+``schema_name``, ``list_projects_with_files`` didn't), documented as
+deliberate at the time but really just drift.
 """
 
 from __future__ import annotations
-
-from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,28 +26,51 @@ from sqlalchemy.orm import selectinload
 
 from backend.app.core.exceptions import ValidationAppError
 from backend.app.database import File, Project
-from backend.app.repositories import file_repo, project_repo
+from backend.app.repositories import file_repo, project_repo, version_repo
 
 
-async def _resolve_parent_files(session: AsyncSession, files: list[File]) -> dict[int, File]:
-    """Build an ``id -> File`` map covering every file in ``files`` plus
-    every ``parent_file_id`` referenced by their ``child_dependencies`` --
-    at most one extra query beyond ``files`` itself (only issued when a
-    referenced parent isn't already among ``files``), so this stays
-    constant regardless of file/dependency count.
+async def _build_parent_files_map(session: AsyncSession, files: list[File], user_id: int) -> dict[int, list[dict]]:
+    """``child_file_id -> [{id, name, schema_name, type}, ...]`` for every
+    parent edge among ``files``, scoped to parents ``user_id`` actually
+    owns -- at most two extra queries (edges, then any parent ``File``
+    rows not already in ``files``) regardless of file/edge count.
+
+    Ownership-scoping this lookup (via ``file_repo.filter_owned_ids``)
+    closes a pre-existing gap: the old ``_resolve_parent_files`` did an
+    unscoped ``File.id.in_(missing_ids)`` lookup, so a parent belonging
+    to another user could be resolved and serialized here.
     """
-    by_id: dict[int, File] = {f.id: f for f in files}
-    missing_ids = {
-        dep.parent_file_id
-        for f in files
-        for dep in f.child_dependencies
-        if dep.parent_file_id not in by_id
-    }
+    file_ids = [f.id for f in files]
+    edges = await version_repo.list_parent_edges_for_files(session, file_ids)
+    if not edges:
+        return {}
+
+    parent_ids = {e.parent_file_id for e in edges}
+    owned_parent_ids = await file_repo.filter_owned_ids(session, parent_ids, user_id)
+
+    by_id: dict[int, File] = {f.id: f for f in files if f.id in owned_parent_ids}
+    missing_ids = owned_parent_ids - set(by_id.keys())
     if missing_ids:
         result = await session.execute(select(File).where(File.id.in_(missing_ids)))
         for parent in result.scalars().all():
             by_id[parent.id] = parent
-    return by_id
+
+    parents_by_child: dict[int, list[dict]] = {}
+    for edge in edges:
+        if edge.parent_file_id not in owned_parent_ids:
+            continue
+        parent = by_id.get(edge.parent_file_id)
+        if parent is None:
+            continue
+        parents_by_child.setdefault(edge.child_file_id, []).append(
+            {
+                "id": str(parent.id),
+                "name": parent.filename,
+                "schema_name": parent.schemaname,
+                "type": parent.file_type,
+            }
+        )
+    return parents_by_child
 
 
 def _file_type_filter(file_type: str) -> tuple[str, ...]:
@@ -63,25 +91,13 @@ async def list_files_for_user(
     handler's per-file entries.
     """
     types = _file_type_filter(file_type)
-    all_files = await file_repo.list_files_with_tables_and_deps(session, user_id)
+    all_files = await file_repo.list_files_with_tables(session, user_id)
     matched = [f for f in all_files if f.file_type in types]
-    parent_lookup = await _resolve_parent_files(session, all_files)
+    parents_by_child = await _build_parent_files_map(session, all_files, user_id)
 
     result = []
     for p in matched:
         tables = [{"table_name": t.tablename, "row_count": t.row_count} for t in p.tables]
-        parent_files = []
-        for dep in p.child_dependencies:
-            parent = parent_lookup.get(dep.parent_file_id)
-            if parent:
-                parent_files.append(
-                    {
-                        "id": str(parent.id),
-                        "name": parent.filename,
-                        "schema_name": parent.schemaname,
-                        "type": parent.file_type,
-                    }
-                )
         result.append(
             {
                 "id": str(p.id),
@@ -91,7 +107,7 @@ async def list_files_for_user(
                 "file_type": p.file_type,
                 "created_at": p.created_at.isoformat() if p.created_at else None,
                 "tables": tables,
-                "parent_files": parent_files,
+                "parent_files": parents_by_child.get(p.id, []),
             }
         )
     return result
@@ -136,20 +152,20 @@ async def update_project(
 
 async def list_projects_with_files(session: AsyncSession, user_id: int) -> list[dict]:
     """Replaces ``list_projects``. Returns dicts shaped exactly like the
-    old handler's per-project entries (note: each file's ``parent_files``
-    entries here carry ``id``/``name``/``type`` only -- no ``schema_name``
-    -- distinct from ``list_files_for_user``'s shape above).
+    old handler's per-project entries, except each file's ``parent_files``
+    entries now carry the SAME ``{id, name, schema_name, type}`` shape
+    ``list_files_for_user`` uses (see this module's docstring).
 
-    Loads every one of the user's files (with tables/dependencies eagerly
-    loaded) first via ``file_repo.list_files_with_tables_and_deps`` so
-    those fully-populated ``File`` instances are already in the session's
-    identity map; the subsequent ``Project`` query with
+    Loads every one of the user's files (with tables eagerly loaded)
+    first via ``file_repo.list_files_with_tables`` so those fully-
+    populated ``File`` instances are already in the session's identity
+    map; the subsequent ``Project`` query with
     ``selectinload(Project.files)`` then reuses those same instances
     instead of re-querying their relationships -- keeping the total query
     count constant regardless of file/project count.
     """
-    all_files = await file_repo.list_files_with_tables_and_deps(session, user_id)
-    parent_lookup = await _resolve_parent_files(session, all_files)
+    all_files = await file_repo.list_files_with_tables(session, user_id)
+    parents_by_child = await _build_parent_files_map(session, all_files, user_id)
 
     result_p = await session.execute(
         select(Project).where(Project.user_id == user_id).options(selectinload(Project.files))
@@ -160,13 +176,6 @@ async def list_projects_with_files(session: AsyncSession, user_id: int) -> list[
     for proj in projects:
         files = []
         for f in proj.files:
-            parent_files = []
-            for dep in f.child_dependencies:
-                parent = parent_lookup.get(dep.parent_file_id)
-                if parent:
-                    parent_files.append(
-                        {"id": str(parent.id), "name": parent.filename, "type": parent.file_type}
-                    )
             files.append(
                 {
                     "id": str(f.id),
@@ -175,7 +184,7 @@ async def list_projects_with_files(session: AsyncSession, user_id: int) -> list[
                     "file_type": f.file_type,
                     "description": f.description,
                     "created_at": f.created_at.isoformat() if f.created_at else None,
-                    "parent_files": parent_files,
+                    "parent_files": parents_by_child.get(f.id, []),
                 }
             )
         result.append(

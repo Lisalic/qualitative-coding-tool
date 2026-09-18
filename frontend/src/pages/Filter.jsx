@@ -1,16 +1,5 @@
-import { useState } from "react";
-import FilterDataPanel from "../components/tool-panels/FilterDataPanel";
-import ToolPage from "../components/shell/ToolPage";
+import FilterEditorPanel from "../components/filter-editor/FilterEditor";
 
 export default function Filter() {
-  const [filterPrompt, setFilterPrompt] = useState("");
-
-  return (
-    <ToolPage>
-      <FilterDataPanel
-        filterPrompt={filterPrompt}
-        onFilterPromptChange={setFilterPrompt}
-      />
-    </ToolPage>
-  );
+  return <FilterEditorPanel />;
 }

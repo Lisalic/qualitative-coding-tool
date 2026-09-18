@@ -3,6 +3,7 @@ import { apiFetch, api } from "../../api";
 import ToastService from "../feedback/ToastService";
 import { useAuth } from "../auth/useAuth";
 import { useApiKey } from "./useApiKey";
+import BackButton from "./BackButton";
 
 const iconBtn =
   "border border-paper px-2.5 py-1.5 text-sm hover:bg-paper hover:text-ink transition-colors";
@@ -41,6 +42,7 @@ function Navbar() {
           >
             ☰
           </button>
+          <BackButton />
           <button
             type="button"
             onClick={() => navigate("/")}

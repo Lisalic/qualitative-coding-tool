@@ -13,6 +13,7 @@ from backend.app.database import async_engine, Base
 from backend.app.jobs.service import reconcile_orphaned_jobs_on_startup
 # Imported so their tables register on Base.metadata before create_all runs below.
 from backend.app import storage_models  # noqa: F401
+from backend.app import versioning_models  # noqa: F401
 from backend.app.jobs import models as job_models  # noqa: F401
 
 logger = get_logger(__name__)

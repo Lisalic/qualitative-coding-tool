@@ -1,63 +1,85 @@
-import json
-
-from fastapi import APIRouter, Depends, Form
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.schemas import (
+    CodebookPreviewRequest,
     CompareCodebooksRequest,
-    GenerateCodebookRequest,
+    DuplicateCodebookRequest,
+    ImportCodebookRequest,
+    IntegrateCodebookPreviewRequest,
+    IntegrateCodebookRequest,
+    ManualCodebookRequest,
+    SaveCodebookRequest,
     as_form,
 )
 from backend.app.core.auth_dependency import require_user_id
 from backend.app.database import get_async_db
-from backend.app.repositories import artifact_content_repo
-from backend.app.services import codebook_service
-from backend.scripts.display_codebook import parse_codebook_to_json
+from backend.app.repositories import version_repo
+from backend.app.services import codebook_service, version_service
 
 router = APIRouter()
+
+
+def _code_out(code) -> dict:
+    return {
+        "code_uid": code.code_uid,
+        "family_uid": code.family_uid,
+        "family_name": code.family_name,
+        "name": code.name,
+        "body": code.body,
+        "definition": code.definition,
+        "inclusion": code.inclusion,
+        "exclusion": code.exclusion,
+        "keywords": code.keywords,
+        "example": code.example,
+        "position": code.position,
+    }
 
 
 @router.get("/codebook")
 async def get_codebook(
     codebook_id: str = None,
+    version_no: int | None = Query(None, description="Read the codebook AS OF this version instead of head"),
     user_id: int = Depends(require_user_id),
     db: AsyncSession = Depends(get_async_db),
 ) -> JSONResponse:
-    """Return a codebook (or codebook comparison) file's content, owned by
-    the authenticated user.
+    """Return a codebook's structured code rows, or a codebook
+    comparison's markdown content, owned by the authenticated user.
+    ``version_no`` reads the file AS OF that version instead of head --
+    backs "view a previous version" in the version-history UI.
     """
     file_rec = await codebook_service.get_codebook(db, user_id, codebook_id)
-    content = await artifact_content_repo.read_content(db, file_rec.id)
-    if content is None:
-        return JSONResponse({"error": "Codebook content not found in file"}, status_code=404)
+    version = (
+        await version_repo.get_version_by_no(db, file_rec.id, version_no)
+        if version_no is not None
+        else await version_repo.head_version(db, file_rec.id)
+    )
+    if version is None:
+        message = f"No version {version_no} for this codebook" if version_no is not None else "Codebook content not found in file"
+        return JSONResponse({"error": message}, status_code=404)
 
+    if file_rec.file_type == "codebook_comparison":
+        return JSONResponse(
+            {
+                "codebook_comparison": version.content or "",
+                "systemprompt": version.system_prompt,
+                "instructions": version.user_instructions,
+                "prompt_meta": version.prompt_meta,
+                "version_no": version.version_no,
+            }
+        )
+
+    codes = await version_service.read_codes(db, file_rec.id, version_no=version.version_no)
     return JSONResponse(
         {
-            "codebook": content,
-            "systemprompt": file_rec.systemprompt,
-            "userprompt": file_rec.userprompt,
+            "codes": [_code_out(c) for c in codes],
+            "systemprompt": version.system_prompt,
+            "instructions": version.user_instructions,
+            "prompt_meta": version.prompt_meta,
+            "version_no": version.version_no,
         }
     )
-
-
-@router.get("/parse-codebook")
-async def parse_codebook(
-    codebook_id: str = None,
-    user_id: int = Depends(require_user_id),
-    db: AsyncSession = Depends(get_async_db),
-) -> JSONResponse:
-    """Return a parsed JSON structure for a codebook file using the
-    display_codebook helper. The response will be { "parsed": [ ... ] }
-    where parsed is an array of families with codes.
-    """
-    _file_rec, raw = await codebook_service.parse_codebook(db, user_id, codebook_id)
-    try:
-        parsed_text = parse_codebook_to_json(raw)
-        parsed_obj = json.loads(parsed_text)
-        return JSONResponse({"parsed": parsed_obj})
-    except Exception as e:
-        return JSONResponse({"error": f"Failed to parse codebook: {e}", "raw": raw}, status_code=500)
 
 
 @router.get("/list-codebooks")
@@ -87,51 +109,198 @@ async def list_codebooks(
     return JSONResponse({"codebooks": codebooks})
 
 
-@router.post("/save-file-codebook/")
+@router.put("/codebook/{ref}")
 async def save_project_codebook(
-    schema_name: str = Form(...),
-    content: str = Form(...),
-    display_name: str = Form(None),
+    ref: str,
+    payload: SaveCodebookRequest,
     user_id: int = Depends(require_user_id),
     db: AsyncSession = Depends(get_async_db),
 ) -> JSONResponse:
-    """Save codebook content to a file owned by the authenticated user."""
+    """Save a codebook file's structured code rows, owned by the
+    authenticated user. Opens (or extends) a human-edit draft version --
+    see ``version_service.py``'s sealing rules.
+    """
     file_rec = await codebook_service.save_project_codebook(
         db,
         user_id,
-        schema_name=schema_name,
-        content=content,
-        display_name=display_name,
+        schema_name=ref,
+        codes=[c.model_dump() for c in payload.codes],
+        display_name=payload.display_name,
+        assist_runs=[run.model_dump() for run in payload.assist_runs],
     )
     return JSONResponse(
-        {"message": "File codebook saved", "id": str(file_rec.id), "display_name": file_rec.filename}
+        {"message": "Codebook saved", "id": str(file_rec.id), "display_name": file_rec.filename}
     )
 
 
-@router.post("/generate-codebook/")
-async def generate_codebook(
-    payload: GenerateCodebookRequest = Depends(as_form(GenerateCodebookRequest)),
+@router.post("/codebook/manual")
+async def create_manual_codebook(
+    payload: ManualCodebookRequest,
     user_id: int = Depends(require_user_id),
     db: AsyncSession = Depends(get_async_db),
 ) -> JSONResponse:
-    """Kick off a background job that samples a raw-data file, asks the LLM
-    to build a codebook, and persists it as a new ``codebook`` file -- and
-    return immediately with a job id to poll instead of blocking the
-    request. See backend/app/jobs/.
+    """Create a codebook from the codebook editor's hand-composed draft.
+
+    Synchronous (no LLM call, so no job to poll) -- the same asymmetry the
+    filter pair has between ``POST /api/filter-preview/`` and
+    ``POST /api/filtered-data/manual``.
     """
-    job = await codebook_service.start_generate_codebook_job(
+    file_rec = await codebook_service.create_manual_codebook(
+        db,
+        user_id,
+        database=payload.database,
+        name=payload.name,
+        description=payload.description,
+        project_id=payload.project_id,
+        codes=[c.model_dump() for c in payload.codes],
+        assist_runs=[run.model_dump() for run in payload.assist_runs],
+    )
+    head = await version_repo.head_version(db, file_rec.id)
+    return JSONResponse(
+        {
+            "message": "Codebook created",
+            "file": {
+                "id": str(file_rec.id),
+                "schema_name": file_rec.schemaname,
+                "filename": file_rec.filename,
+                "description": file_rec.description,
+                "version_no": head.version_no if head else None,
+            },
+        }
+    )
+
+
+@router.post("/codebook/integrate")
+async def create_integrated_codebook(
+    payload: IntegrateCodebookRequest,
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
+) -> JSONResponse:
+    """Create a codebook from the integrate editor's hand-reviewed merge
+    of two or more existing codebooks.
+
+    Synchronous (no LLM call, so no job to poll) -- same asymmetry as
+    ``POST /api/codebook/manual`` versus ``POST /api/codebook-preview/``.
+    """
+    file_rec = await codebook_service.create_integrated_codebook(
+        db,
+        user_id,
+        codebooks=payload.codebooks,
+        name=payload.name,
+        description=payload.description,
+        project_id=payload.project_id,
+        codes=[c.model_dump() for c in payload.codes],
+        assist_runs=[run.model_dump() for run in payload.assist_runs],
+    )
+    head = await version_repo.head_version(db, file_rec.id)
+    return JSONResponse(
+        {
+            "message": "Codebook created",
+            "file": {
+                "id": str(file_rec.id),
+                "schema_name": file_rec.schemaname,
+                "filename": file_rec.filename,
+                "description": file_rec.description,
+                "version_no": head.version_no if head else None,
+            },
+        }
+    )
+
+
+@router.post("/codebook-preview/")
+async def codebook_preview(
+    payload: CodebookPreviewRequest,
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
+) -> JSONResponse:
+    """Kick off a background job that samples the source data and proposes
+    codes to ADD to the editor's current draft, and return immediately
+    with a job id to poll.
+
+    The assistant half of the codebook editor: it creates no artifact and
+    writes nothing -- the researcher reviews each proposal and only an
+    explicit submit persists anything (see
+    ``codebook_service._run_codebook_preview_job``).
+    """
+    job = await codebook_service.start_codebook_preview_job(
         db,
         user_id,
         database=payload.database,
         api_key=payload.api_key,
-        prompt=payload.prompt or "",
-        name=payload.name,
-        description=payload.description,
-        project_id=payload.project_id,
         model=payload.model,
+        prompt=payload.prompt or "",
         sample_percentage=payload.sample_percentage,
+        content_scope=payload.content_scope,
+        existing_codes=[c.model_dump() for c in payload.existing_codes],
     )
     return JSONResponse({"job_id": job.id, "status": job.status}, status_code=202)
+
+
+@router.post("/integrate-codebook-preview/")
+async def integrate_codebook_preview(
+    payload: IntegrateCodebookPreviewRequest,
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
+) -> JSONResponse:
+    """Kick off a background job that asks the LLM to merge two or more
+    codebooks into a review tray of proposed codes, and return
+    immediately with a job id to poll.
+
+    The assistant half of the integrate editor: it creates no artifact
+    and writes nothing -- the researcher reviews each proposal and only
+    an explicit submit (``POST /api/codebook/integrate``) persists
+    anything (see ``codebook_service._run_integrate_codebook_job``).
+    """
+    job = await codebook_service.start_integrate_codebook_job(
+        db,
+        user_id,
+        codebooks=payload.codebooks,
+        api_key=payload.api_key,
+        model=payload.model,
+        prompt=payload.prompt or "",
+        existing_codes=[c.model_dump() for c in payload.existing_codes],
+    )
+    return JSONResponse({"job_id": job.id, "status": job.status}, status_code=202)
+
+
+@router.post("/codebook/{ref}/import")
+async def import_codebook_markdown(
+    ref: str,
+    payload: ImportCodebookRequest,
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
+) -> JSONResponse:
+    """Parse pasted/uploaded codebook markdown into structured rows and
+    commit them as a new version -- the recovery path now that markdown
+    is a wire format, not the storage format.
+    """
+    file_rec = await codebook_service.import_codebook_markdown(db, user_id, ref, markdown=payload.markdown)
+    return JSONResponse({"message": "Codebook imported", "id": str(file_rec.id)})
+
+
+@router.post("/codebook/{ref}/duplicate")
+async def duplicate_codebook(
+    ref: str,
+    payload: DuplicateCodebookRequest,
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
+) -> JSONResponse:
+    """Fork a whole codebook into a brand-new file -- from head by
+    default, or from ``from_version_no`` if given (see
+    ``codebook_service.duplicate_codebook``'s docstring; this is the
+    non-destructive replacement for the old revert).
+    """
+    file_rec = await codebook_service.duplicate_codebook(
+        db, user_id, ref, display_name=payload.display_name, from_version_no=payload.from_version_no
+    )
+    return JSONResponse(
+        {
+            "message": "Duplicated",
+            "id": str(file_rec.id),
+            "schema_name": file_rec.schemaname,
+            "display_name": file_rec.filename,
+        }
+    )
 
 
 @router.post("/compare-codebooks/")

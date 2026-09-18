@@ -29,9 +29,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from backend.app.core.exceptions import ForbiddenError, NotFoundError
-from backend.app.database import File, FileDependency, FileTable, User
-from backend.app.services import file_service
-from backend.app.storage_models import ArtifactContent, Comment, CodingEntry, Submission
+from backend.app.database import File, FileTable, User
+from backend.app.repositories import version_repo
+from backend.app.services import file_service, version_service
+from backend.app.storage_models import Comment, CodingEntry, Submission
+from backend.app.versioning_models import ArtifactEdge, ArtifactVersion, CodebookCode
 
 
 @pytest.fixture()
@@ -85,10 +87,33 @@ class TestDeleteDatabase:
 
             session.add(_submission(f.id, "s1"))
             session.add(_comment(f.id, "c1"))
-            session.add(ArtifactContent(file_id=f.id, content="x"))
-            session.add(CodingEntry(file_id=f.id, post_id="p1", code="code1", evidence="e"))
+            f_version = await version_service.commit_blob_version(
+                session, file_id=f.id, author_user_id=user.id, origin="edited", content="x",
+            )
+            session.add(
+                CodebookCode(
+                    version_id=f_version.id, code_uid="cu1", family_uid="fu1",
+                    family_name="Fam", name="Code", body="b", position=0,
+                )
+            )
+            session.add(
+                CodingEntry(
+                    file_id=f.id, post_id="p1", code="code1", code_uid="u1",
+                    quote="e", start_offset=0, end_offset=1,
+                )
+            )
             session.add(FileTable(file_id=f.id, tablename="submissions", row_count=1))
-            session.add(FileDependency(child_file_id=f.id, parent_file_id=other.id))
+            await version_repo.add_edge(
+                session, child_file_id=f.id, parent_file_id=other.id, parent_version_id=None,
+                relation="derived_from", role="source_data",
+            )
+            # A FORK of `f`: its v1 points cross-file at f_version -- the
+            # case null_parent_version_pointers_into_file exists for.
+            fork = await _make_file(session, user.id, "proj_fork")
+            await version_repo.create_version(
+                session, file_id=fork.id, version_no=1, parent_version_id=f_version.id,
+                author_user_id=user.id, origin="forked",
+            )
             await session.commit()
 
             filename = await file_service.delete_database(session, user.id, "proj_a")
@@ -98,15 +123,28 @@ class TestDeleteDatabase:
             assert (await session.execute(select(Submission).where(Submission.file_id == f.id))).scalars().all() == []
             assert (await session.execute(select(Comment).where(Comment.file_id == f.id))).scalars().all() == []
             assert (
-                await session.execute(select(ArtifactContent).where(ArtifactContent.file_id == f.id))
+                await session.execute(select(ArtifactVersion).where(ArtifactVersion.file_id == f.id))
+            ).scalars().all() == []
+            assert (
+                await session.execute(select(CodebookCode).where(CodebookCode.version_id == f_version.id))
             ).scalars().all() == []
             assert (await session.execute(select(CodingEntry).where(CodingEntry.file_id == f.id))).scalars().all() == []
             assert (await session.execute(select(FileTable).where(FileTable.file_id == f.id))).scalars().all() == []
             assert (
-                await session.execute(select(FileDependency).where(FileDependency.child_file_id == f.id))
+                await session.execute(
+                    select(ArtifactEdge).where(
+                        (ArtifactEdge.child_file_id == f.id) | (ArtifactEdge.parent_file_id == f.id)
+                    )
+                )
             ).scalars().all() == []
             # The unrelated file this one depended on must survive.
             assert (await session.execute(select(File).where(File.id == other.id))).scalar_one_or_none() is not None
+            # The fork's v1 must survive too, with its cross-file pointer
+            # nulled out rather than the delete raising an FK violation.
+            fork_version = (
+                await session.execute(select(ArtifactVersion).where(ArtifactVersion.file_id == fork.id))
+            ).scalar_one()
+            assert fork_version.parent_version_id is None
 
     async def test_missing_file_raises_not_found(self, session_factory) -> None:
         async with session_factory() as session:
@@ -129,23 +167,32 @@ class TestDeleteDatabase:
 # ---------------------------------------------------------------------------
 
 
-class TestDeleteRow:
-    async def test_deletes_matching_row_and_updates_row_count(self, session_factory) -> None:
+class TestDeleteRows:
+    async def test_closes_matching_rows_and_updates_row_count(self, session_factory) -> None:
+        """A "delete" closes the row's SCD-2 range (``valid_to``) rather
+        than hard-deleting it -- see ``delete_rows``'s docstring.
+        """
         async with session_factory() as session:
             user = await _make_user(session)
             f = await _make_file(session, user.id, "proj_a")
             session.add_all([_submission(f.id, "s1"), _submission(f.id, "s2")])
             await session.commit()
 
-            deleted = await file_service.delete_row(
-                session, user.id, schemaname="proj_a", table="submissions", row_id="s1"
+            deleted = await file_service.delete_rows(
+                session, user.id, schemaname="proj_a", table="submissions", row_ids=["s1"]
             )
             assert deleted == 1
 
-            remaining = (
+            live = (
+                await session.execute(
+                    select(Submission).where(Submission.file_id == f.id, Submission.valid_to.is_(None))
+                )
+            ).scalars().all()
+            assert [r.id for r in live] == ["s2"]
+            all_rows = (
                 await session.execute(select(Submission).where(Submission.file_id == f.id))
             ).scalars().all()
-            assert [r.id for r in remaining] == ["s2"]
+            assert len(all_rows) == 2, "the closed row stays in the table"
 
             ft = (
                 await session.execute(
@@ -154,22 +201,51 @@ class TestDeleteRow:
             ).scalar_one()
             assert ft.row_count == 1
 
-    async def test_deletes_zero_for_missing_row(self, session_factory) -> None:
+            versions = (
+                await session.execute(select(ArtifactVersion).where(ArtifactVersion.file_id == f.id))
+            ).scalars().all()
+            assert len(versions) == 1
+            assert versions[0].origin == "edited"
+            assert versions[0].message == "Deleted 1 submissions"
+
+    async def test_one_call_deleting_multiple_rows_mints_exactly_one_version(self, session_factory) -> None:
         async with session_factory() as session:
             user = await _make_user(session)
-            await _make_file(session, user.id, "proj_a")
+            f = await _make_file(session, user.id, "proj_a")
+            session.add_all([_submission(f.id, "s1"), _submission(f.id, "s2"), _submission(f.id, "s3")])
+            await session.commit()
 
-            deleted = await file_service.delete_row(
-                session, user.id, schemaname="proj_a", table="submissions", row_id="nonexistent"
+            deleted = await file_service.delete_rows(
+                session, user.id, schemaname="proj_a", table="submissions", row_ids=["s1", "s2"]
+            )
+            assert deleted == 2
+
+            versions = (
+                await session.execute(select(ArtifactVersion).where(ArtifactVersion.file_id == f.id))
+            ).scalars().all()
+            assert len(versions) == 1
+
+    async def test_deletes_zero_for_missing_row_and_mints_no_version(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            f = await _make_file(session, user.id, "proj_a")
+
+            deleted = await file_service.delete_rows(
+                session, user.id, schemaname="proj_a", table="submissions", row_ids=["nonexistent"]
             )
             assert deleted == 0
+
+            versions = (
+                await session.execute(select(ArtifactVersion).where(ArtifactVersion.file_id == f.id))
+            ).scalars().all()
+            assert versions == []
 
     async def test_not_owned_raises_forbidden(self, session_factory) -> None:
         async with session_factory() as session:
             user = await _make_user(session)
             with pytest.raises(ForbiddenError):
-                await file_service.delete_row(
-                    session, user.id, schemaname="proj_missing", table="submissions", row_id="s1"
+                await file_service.delete_rows(
+                    session, user.id, schemaname="proj_missing", table="submissions", row_ids=["s1"]
                 )
 
     async def test_db_suffix_stripped(self, session_factory) -> None:
@@ -179,8 +255,8 @@ class TestDeleteRow:
             session.add(_submission(f.id, "s1"))
             await session.commit()
 
-            deleted = await file_service.delete_row(
-                session, user.id, schemaname="proj_a.db", table="submissions", row_id="s1"
+            deleted = await file_service.delete_rows(
+                session, user.id, schemaname="proj_a.db", table="submissions", row_ids=["s1"]
             )
             assert deleted == 1
 
@@ -191,7 +267,46 @@ class TestDeleteRow:
 
 
 class TestMoveRows:
+    async def test_memos_follow_the_moved_rows(self, session_factory) -> None:
+        """A memo belongs to an artifact's copy of a row, so moving the
+        row carries the note with it. The source keeps its copy, matching
+        the row itself: the moved-out row is soft-closed, not deleted, so
+        both stay readable in that file's history.
+        """
+        from backend.app.repositories import memo_repo
+
+        async with session_factory() as session:
+            user = await _make_user(session)
+            src = await _make_file(session, user.id, "proj_src")
+            tgt = await _make_file(session, user.id, "proj_tgt")
+            session.add_all([
+                _submission(src.id, "keep", selftext="stays"),
+                _submission(src.id, "move", selftext="moves"),
+            ])
+            await session.commit()
+            for row_id in ("keep", "move"):
+                await memo_repo.upsert_memo(
+                    session, file_id=src.id, row_type="submission", row_id=row_id,
+                    body=f"note on {row_id}", author_user_id=user.id,
+                )
+            await session.commit()
+
+            await file_service.move_rows(
+                session, user.id,
+                source_schema="proj_src", target_schema="proj_tgt",
+                table="submissions", row_ids=["move"],
+            )
+
+            assert [(m.row_id, m.body) for m in await memo_repo.list_memos(session, tgt.id)] == [
+                ("move", "note on move")
+            ]
+            assert {m.row_id for m in await memo_repo.list_memos(session, src.id)} == {"keep", "move"}
+
     async def test_moves_rows_between_owned_files(self, session_factory) -> None:
+        """A "move" closes the source's copy (SCD-2) instead of hard-
+        deleting it, and mints one version on each side -- see
+        ``move_rows``'s docstring.
+        """
         async with session_factory() as session:
             user = await _make_user(session)
             src = await _make_file(session, user.id, "proj_src")
@@ -209,8 +324,14 @@ class TestMoveRows:
             )
             assert moved == 1
 
-            src_rows = (await session.execute(select(Submission).where(Submission.file_id == src.id))).scalars().all()
-            assert [r.id for r in src_rows] == ["keep"]
+            src_live = (
+                await session.execute(
+                    select(Submission).where(Submission.file_id == src.id, Submission.valid_to.is_(None))
+                )
+            ).scalars().all()
+            assert [r.id for r in src_live] == ["keep"]
+            src_all = (await session.execute(select(Submission).where(Submission.file_id == src.id))).scalars().all()
+            assert len(src_all) == 2, "the moved-out row stays in the source table, closed"
 
             tgt_rows = (await session.execute(select(Submission).where(Submission.file_id == tgt.id))).scalars().all()
             assert len(tgt_rows) == 1
@@ -229,6 +350,15 @@ class TestMoveRows:
             ).scalar_one()
             assert src_ft.row_count == 1
             assert tgt_ft.row_count == 1
+
+            src_versions = (
+                await session.execute(select(ArtifactVersion).where(ArtifactVersion.file_id == src.id))
+            ).scalars().all()
+            tgt_versions = (
+                await session.execute(select(ArtifactVersion).where(ArtifactVersion.file_id == tgt.id))
+            ).scalars().all()
+            assert len(src_versions) == 1
+            assert len(tgt_versions) == 1
 
     async def test_moves_comments(self, session_factory) -> None:
         async with session_factory() as session:
@@ -434,11 +564,12 @@ class TestMergeDatabases:
             # The surviving "1" row keeps proj_a's content (first writer wins).
             assert next(r for r in rows if r.id == "1").title == "t1"
 
-            deps = (
-                await session.execute(select(FileDependency).where(FileDependency.child_file_id == file_rec.id))
-            ).scalars().all()
+            edges = await version_repo.list_parent_edges(session, file_rec.id)
             # Both sources have an owned File row, so both are linked as parents.
-            assert {d.parent_file_id for d in deps} == {parent_a.id, parent_b.id}
+            assert {e.parent_file_id for e in edges} == {parent_a.id, parent_b.id}
+            assert {e.relation for e in edges} == {"merged_from"}
+            assert {e.role for e in edges} == {"merge_input"}
+            assert sorted(e.position for e in edges) == [0, 1]
 
     async def test_no_rows_returns_not_migrated_without_creating_file(self, session_factory) -> None:
         async with session_factory() as session:

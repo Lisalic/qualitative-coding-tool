@@ -6,9 +6,11 @@ export default function ViewCodingComparisons() {
       title="View Coding Comparisons"
       fileType="coding_comparison"
       preselectStateKey="selectedCodedData"
-      contentUrl={(id) => `/api/coded-data?coded_id=${encodeURIComponent(id)}`}
-      contentField="coded_data"
+      contentUrl={(id) => `/api/coding-comparison?coding_id=${encodeURIComponent(id)}`}
+      contentField="coding_comparison"
       emptyMessage="No coding comparisons available"
+      placeholderMessage="Select a coding comparison to view"
+      pickerPlaceholder="Select coding comparison…"
     />
   );
 }

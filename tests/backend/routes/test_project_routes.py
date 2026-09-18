@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from backend.app.database import File, Project, User, project_files_table
 
-pytestmark = pytest.mark.usefixtures("override_async_db")
+pytestmark = pytest.mark.usefixtures("override_async_db", "default_user")
 
 
 def _auth_headers(make_token, sub="1"):

@@ -1,10 +1,11 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import PageHeading from "../components/primitives/PageHeading";
+import { btnPrimary } from "../lib/uiClasses";
 
 const Landing = () => {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-6 py-12 text-center">
+    <div className="flex h-full flex-col items-center justify-center overflow-y-auto gap-6 px-6 py-12 text-center">
       <PageHeading
         title="Qualitative Coding Tool"
         className="text-4xl font-bold sm:text-5xl"
@@ -15,7 +16,7 @@ const Landing = () => {
       <section className="flex gap-4">
         <Link
           to="/login"
-          className="border-2 border-paper px-6 py-3 font-semibold transition-colors hover:bg-paper hover:text-ink"
+          className={btnPrimary}
         >
           Login
         </Link>

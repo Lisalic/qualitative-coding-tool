@@ -1,16 +1,5 @@
-import { useState } from "react";
-import ApplyCodebookPanel from "../components/tool-panels/ApplyCodebookPanel";
-import ToolPage from "../components/shell/ToolPage";
+import CodingEditor from "../components/coding-editor/CodingEditor";
 
 export default function ApplyCodebook() {
-  const [methodology, setMethodology] = useState("");
-
-  return (
-    <ToolPage>
-      <ApplyCodebookPanel
-        methodology={methodology}
-        onMethodologyChange={setMethodology}
-      />
-    </ToolPage>
-  );
+  return <CodingEditor />;
 }

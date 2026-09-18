@@ -1,9 +1,11 @@
+import { btnPrimary } from "../../lib/uiClasses";
+
 export default function ProjectCard({ project, onViewProject }) {
   return (
-    <div className="border border-paper p-6">
+    <div className="border border-line bg-surface p-4">
       <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 flex-1">
-          <h3 className="text-xl font-semibold">{project.projectname}</h3>
+          <h3 className="text-lg font-semibold">{project.projectname}</h3>
           {project.description && (
             <div className="mt-1 text-paper/70">{project.description}</div>
           )}
@@ -20,7 +22,7 @@ export default function ProjectCard({ project, onViewProject }) {
         </div>
         <button
           type="button"
-          className="shrink-0 border-2 border-paper px-5 py-2.5 text-sm font-semibold transition-colors hover:bg-paper hover:text-ink"
+          className={`shrink-0 ${btnPrimary}`}
           onClick={() => onViewProject(project.id)}
           aria-label={`View project ${project.projectname}`}
         >

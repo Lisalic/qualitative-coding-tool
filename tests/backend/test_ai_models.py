@@ -114,6 +114,40 @@ class TestIsPaidModel:
         assert ai_models.is_paid_model("new/model") is False
 
 
+class TestContextLengthFor:
+    def test_known_slug_returns_catalog_value(self, monkeypatch) -> None:
+        monkeypatch.setattr(
+            ai_models, "_MODEL_META_BY_SLUG", {"x/y": {"value": "x/y", "context_length": 131072}}
+        )
+        assert ai_models.context_length_for("x/y") == 131072
+
+    def test_unknown_slug_returns_default(self) -> None:
+        assert ai_models.context_length_for("not/a/real-model") == 32_000
+
+    def test_custom_default_is_honored(self) -> None:
+        assert ai_models.context_length_for("not/a/real-model", default=50_000) == 50_000
+
+    def test_missing_context_length_field_falls_back_to_default(self, monkeypatch) -> None:
+        monkeypatch.setattr(ai_models, "_MODEL_META_BY_SLUG", {"x/y": {"value": "x/y"}})
+        assert ai_models.context_length_for("x/y") == 32_000
+
+    def test_non_positive_context_length_falls_back_to_default(self, monkeypatch) -> None:
+        monkeypatch.setattr(
+            ai_models, "_MODEL_META_BY_SLUG", {"x/y": {"value": "x/y", "context_length": 0}}
+        )
+        assert ai_models.context_length_for("x/y") == 32_000
+
+    def test_non_int_context_length_falls_back_to_default(self, monkeypatch) -> None:
+        monkeypatch.setattr(
+            ai_models, "_MODEL_META_BY_SLUG", {"x/y": {"value": "x/y", "context_length": "131072"}}
+        )
+        assert ai_models.context_length_for("x/y") == 32_000
+
+    def test_blank_slug_returns_default(self) -> None:
+        assert ai_models.context_length_for("") == 32_000
+        assert ai_models.context_length_for(None) == 32_000
+
+
 class TestSetCatalog:
     def test_replaces_both_ai_models_and_meta_index(self, monkeypatch) -> None:
         monkeypatch.setattr(ai_models, "AI_MODELS", [])

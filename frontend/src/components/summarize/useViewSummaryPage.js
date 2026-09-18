@@ -82,9 +82,12 @@ export default function useViewSummaryPage() {
   }, [preselect, projectsList, selectedProject]);
 
   useEffect(() => {
-    fetchAvailableSummaries();
     fetchProjects();
-  }, [fetchAvailableSummaries, fetchProjects]);
+  }, [fetchProjects]);
+
+  useEffect(() => {
+    fetchAvailableSummaries();
+  }, [fetchAvailableSummaries]);
 
   useEffect(() => {
     let mounted = true;
@@ -105,7 +108,11 @@ export default function useViewSummaryPage() {
       .then((data) => {
         if (!mounted || !data) return;
         const summary = data.summary || data || {};
-        setContent(summary.content || summary.summary || JSON.stringify(summary, null, 2));
+        // The JSON fallback is fenced rather than handed to the markdown
+        // renderer raw: its 4-space indentation would otherwise be parsed as
+        // a chain of indented code blocks and rendered as garbage.
+        const fallback = ["```json", JSON.stringify(summary, null, 2), "```"].join("\n");
+        setContent(summary.content || summary.summary || fallback);
         setSelectedName(summary.display_name || summary.name || selected);
       })
       .catch((fetchError) => {

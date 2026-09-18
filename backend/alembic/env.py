@@ -10,6 +10,7 @@ from alembic import context
 # same reasoning as the storage_models import in backend/app/main.py.
 from backend.app.database import Base, DATABASE_URL  # noqa: E402
 from backend.app import storage_models  # noqa: E402,F401
+from backend.app import versioning_models  # noqa: E402,F401
 from backend.app.jobs import models as jobs_models  # noqa: E402,F401
 
 # this is the Alembic Config object, which provides
