@@ -258,3 +258,41 @@ class RowMemo(Base):
         UniqueConstraint("file_id", "row_type", "row_id", name="uq_row_memos_file_row"),
         Index("idx_row_memos_file_row", "file_id", "row_type", "row_id"),
     )
+
+
+class StarredQuote(Base):
+    """Evidence shortlist: one user's star on one coded quote.
+
+    Owner-scoped (``user_id``): a researcher stars quotes for their own
+    write-up without mutating the shared artifact content or another
+    collaborator's shortlist.
+
+    Keyed on the quote's stable identity -- ``(file_id, row_type,
+    post_id, code_uid, start_offset, end_offset)`` -- rather than on a
+    ``coding_entries.id``. Every coding save re-inserts the touched
+    items' entries under SCD-2 (see ``coding_repo.replace_entries_for_items``),
+    minting new ids, so an id-keyed star would silently fall off the live
+    quote bank on any re-save. Keyed this way a star follows its quote
+    across versions for as long as the same code covers the same span,
+    and shows on historical reads of that quote too.
+    """
+
+    __tablename__ = "starred_quotes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=False)
+    row_type = Column(String, nullable=False)
+    post_id = Column(String, nullable=False)
+    code_uid = Column(String, nullable=False)
+    start_offset = Column(Integer, nullable=False)
+    end_offset = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "file_id", "row_type", "post_id", "code_uid", "start_offset", "end_offset",
+            name="uq_starred_quotes_user_quote",
+        ),
+        Index("idx_starred_quotes_user_file", "user_id", "file_id"),
+    )

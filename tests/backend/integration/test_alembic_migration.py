@@ -179,28 +179,25 @@ class TestDowngradeUpgradeRoundTrip:
         when run all the way to base, not as a single step.
         """
         command.upgrade(alembic_config, "head")
-        # Head is e8a2b3c4d5f6 (add jobs.accounting and jobs.salvaged_output).
-        # Downgrading 1 step must drop those columns.
+        # Head is f4c8b2a1e0d3 (add starred_quotes). Downgrading 1 step
+        # must drop that table.
         command.downgrade(alembic_config, "-1")
 
         engine = create_engine(alembic_db_url)
         try:
-            inspector = inspect(engine)
-            columns_after_downgrade = {c["name"] for c in inspector.get_columns("jobs")}
+            tables_after_downgrade = set(inspect(engine).get_table_names())
         finally:
             engine.dispose()
-        assert "accounting" not in columns_after_downgrade
-        assert "salvaged_output" not in columns_after_downgrade
+        assert "starred_quotes" not in tables_after_downgrade
 
         command.upgrade(alembic_config, "head")
 
         engine = create_engine(alembic_db_url)
         try:
-            inspector = inspect(engine)
-            columns_after_upgrade = {c["name"] for c in inspector.get_columns("jobs")}
+            tables_after_upgrade = set(inspect(engine).get_table_names())
         finally:
             engine.dispose()
-        assert {"accounting", "salvaged_output"} <= columns_after_upgrade
+        assert "starred_quotes" in tables_after_upgrade
 
 
 class TestSchemaMatchesOrmMetadata:
@@ -328,4 +325,4 @@ class TestExistingDatabaseNoOp:
                 current = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
         finally:
             engine.dispose()
-        assert current == "e8a2b3c4d5f6", "expected upgrade head to stay at stamped head"
+        assert current == "f4c8b2a1e0d3", "expected upgrade head to stay at stamped head"

@@ -61,7 +61,10 @@ See [tools/codebook.md](tools/codebook.md), [tools/view-codebook.md](tools/view-
 |---|---|---|---|---|
 | POST | `/api/coding/manual` | JSON `{database, codebook, report_name, description?, project_id?, sample_percentage?, content_scope?, post_ids?, comment_ids?}` | `{message, file, counts}` — the Apply Codebook editor's only create path, always uncoded | direct |
 | GET | `/api/coding/{ref}` | — | codebook snapshot + parsed tree + row/coded counts + code frequency | direct |
-| GET | `/api/coding/{ref}/rows` | query `limit`/`offset`/`only`/`code`/`q` | one page of the artifact's own rows, each with its codes | direct |
+| GET | `/api/coding/{ref}/rows` | query `limit`/`offset`/`only` (`all`\|`coded`\|`uncoded`\|`ai`\|`human`)/`code`/`q` | one page of the artifact's own rows, each with its codes; `ai` = rows with any AI-coded entry, `human` = coded rows with none | direct |
+| GET | `/api/coding/{ref}/quotes` | query `limit`/`offset`/`code` (name or `code_uid`)/`coder`/`q`/`starred_only`/`version_no` | `{quotes, total}` — one row per coded quote with source context and the caller's star | direct |
+| PUT | `/api/coding/{ref}/quotes/{entry_id}/star` | JSON `{starred}` | `{entry_id, starred}` — star is keyed on the quote's identity (row + code + span), so it survives re-saves | direct |
+| PATCH | `/api/coding/{ref}/quotes/{entry_id}/notes` | JSON `{notes}` | `{entry_id, notes}` — saved as a new coding version, so `entry_id` is the quote's **new** id; only live quotes can be annotated | direct |
 | PUT | `/api/coding/{ref}/revision` | JSON (codebook edits and/or row edits) | saves the whole editing session as at most one new version | direct |
 | POST | `/api/coding/{ref}/recode` | JSON `{api_key, item_ids, model?, methodology?}` | `202 {job_id, status}` → result `{proposals, ...}` — stages proposals, writes nothing | **job** |
 | POST | `/api/coding/{ref}/duplicate` | `{display_name, from_version_no?}` | forks the whole artifact | direct |

@@ -27,13 +27,16 @@ from __future__ import annotations
 from typing import Literal
 
 from sqlalchemy import and_, delete, exists, func, insert, literal, null, or_, select, union_all, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.coder_rollup import roll_up
+from backend.app.core.exceptions import NotFoundError
 from backend.app.core.item_types import COMMENT, SUBMISSION, qualify_item_id
-from backend.app.storage_models import CODER_HUMAN, Comment, CodingEntry, Submission
+from backend.app.repositories.raw_data_repo import _liveness_condition
+from backend.app.storage_models import CODER_AI, CODER_HUMAN, Comment, CodingEntry, StarredQuote, Submission
 
-RowFilter = Literal["all", "coded", "uncoded"]
+RowFilter = Literal["all", "coded", "uncoded", "ai", "human"]
 
 
 def _live(query):
@@ -378,10 +381,22 @@ def _apply_row_filters(
             CodingEntry.post_id == rows.c.item_id,
         )
     )
+    has_ai_coding = exists().where(
+        and_(
+            entry_scope,
+            CodingEntry.row_type == rows.c.row_type,
+            CodingEntry.post_id == rows.c.item_id,
+            CodingEntry.coder == CODER_AI,
+        )
+    )
     if only == "coded":
         query = query.where(has_coding)
     elif only == "uncoded":
         query = query.where(~has_coding)
+    elif only == "ai":
+        query = query.where(has_ai_coding)
+    elif only == "human":
+        query = query.where(has_coding, ~has_ai_coding)
 
     if code:
         query = query.where(
@@ -443,9 +458,10 @@ async def list_rows_with_codes(
     -- ``"ai"``/``"human"``/``"both"``/``None`` for uncoded) so the
     document list can badge a row without re-deriving it client-side.
 
-    ``only`` narrows to ``"coded"``/``"uncoded"`` rows; ``code`` narrows to
-    rows carrying that exact code; ``q`` is a case-insensitive substring
-    match against title/body. Ordered by ``(row_type, item_id)`` for a
+    ``only`` narrows to ``"coded"``/``"uncoded"`` rows, ``"ai"`` (at least
+    one AI-coded entry -- the review queue) or ``"human"`` (coded, with no
+    AI entry); ``code`` narrows to rows carrying that exact code; ``q`` is
+    a case-insensitive substring match against title/body. Ordered by ``(row_type, item_id)`` for a
     stable, deterministic page boundary. ``version_no`` applies the SCD-2
     validity range to both filtering and returned code evidence.
     """
@@ -569,3 +585,226 @@ async def render_coding_text(session: AsyncSession, file_id: int, *, version_no:
         out_lines.append("")
 
     return "\n".join(out_lines).strip()
+
+
+# ---------------------------------------------------------------------------
+# Quote Bank & Shortlist repository methods (QC-008)
+# ---------------------------------------------------------------------------
+
+
+def _source_context_subquery(file_id: int, version_no: int | None):
+    """Source rows (submission or comment) with title, content (selftext/body),
+    author, subreddit, created_utc for quote bank inspection -- live, or
+    live as of ``version_no`` so a historical read keeps a quote whose
+    source row was later removed.
+    """
+    submissions_select = select(
+        literal(SUBMISSION).label("row_type"),
+        Submission.id.label("item_id"),
+        Submission.title.label("title"),
+        Submission.selftext.label("selftext"),
+        Submission.author.label("author"),
+        Submission.subreddit.label("subreddit"),
+        Submission.created_utc.label("created_utc"),
+    ).where(Submission.file_id == file_id, _liveness_condition(Submission, version_no=version_no))
+
+    comments_select = select(
+        literal(COMMENT).label("row_type"),
+        Comment.id.label("item_id"),
+        null().label("title"),
+        Comment.body.label("selftext"),
+        Comment.author.label("author"),
+        Comment.subreddit.label("subreddit"),
+        Comment.created_utc.label("created_utc"),
+    ).where(Comment.file_id == file_id, _liveness_condition(Comment, version_no=version_no))
+
+    return union_all(submissions_select, comments_select).subquery("source_context")
+
+
+def _star_matches_entry(user_id: int):
+    """Join condition from ``CodingEntry`` to this user's ``StarredQuote``
+    on the quote's stable identity (see the ``StarredQuote`` docstring).
+    """
+    return and_(
+        StarredQuote.user_id == user_id,
+        StarredQuote.file_id == CodingEntry.file_id,
+        StarredQuote.row_type == CodingEntry.row_type,
+        StarredQuote.post_id == CodingEntry.post_id,
+        StarredQuote.code_uid == CodingEntry.code_uid,
+        StarredQuote.start_offset == CodingEntry.start_offset,
+        StarredQuote.end_offset == CodingEntry.end_offset,
+    )
+
+
+async def list_quote_bank(
+    session: AsyncSession,
+    file_id: int,
+    user_id: int,
+    *,
+    code: str | None = None,
+    coder: str | None = None,
+    q: str | None = None,
+    starred_only: bool = False,
+    limit: int = 50,
+    offset: int = 0,
+    version_no: int | None = None,
+) -> tuple[list[dict], int]:
+    """Paginated list of quotes for the Quote Bank view with metadata,
+    source context, and user-scoped starring status.
+
+    Filters:
+    - ``code``: narrows to code display name or code_uid
+    - ``coder``: narrows to 'human' or 'ai' (or all)
+    - ``q``: substring search across quote text, notes, or source document text/title
+    - ``starred_only``: returns only quotes shortlisted/starred by this user
+    - ``version_no``: pins SCD-2 validity to the requested version
+    """
+    source_rows = _source_context_subquery(file_id, version_no)
+    entry_cond = _entry_version_condition(file_id, version_no)
+
+    stmt = (
+        select(
+            CodingEntry,
+            source_rows.c.title,
+            source_rows.c.selftext.label("content"),
+            source_rows.c.author,
+            source_rows.c.subreddit,
+            source_rows.c.created_utc,
+            StarredQuote.id.label("starred_id"),
+        )
+        .select_from(CodingEntry)
+        .join(
+            source_rows,
+            and_(
+                CodingEntry.row_type == source_rows.c.row_type,
+                CodingEntry.post_id == source_rows.c.item_id,
+            ),
+        )
+        .outerjoin(StarredQuote, _star_matches_entry(user_id))
+        .where(entry_cond)
+    )
+
+    if starred_only:
+        stmt = stmt.where(StarredQuote.id.is_not(None))
+
+    if code:
+        stmt = stmt.where(or_(CodingEntry.code == code, CodingEntry.code_uid == code))
+
+    if coder and coder in ("human", "ai"):
+        stmt = stmt.where(CodingEntry.coder == coder)
+
+    if q:
+        pattern = f"%{q}%"
+        stmt = stmt.where(
+            or_(
+                CodingEntry.quote.ilike(pattern),
+                CodingEntry.notes.ilike(pattern),
+                source_rows.c.selftext.ilike(pattern),
+                source_rows.c.title.ilike(pattern),
+            )
+        )
+
+    count_stmt = select(func.count()).select_from(stmt.order_by(None).subquery())
+    total_count = (await session.execute(count_stmt)).scalar() or 0
+
+    paginated_stmt = stmt.order_by(
+        CodingEntry.row_type,
+        CodingEntry.post_id,
+        CodingEntry.start_offset,
+        CodingEntry.id,
+    ).limit(limit).offset(offset)
+
+    rows = (await session.execute(paginated_stmt)).all()
+    items = []
+    for r in rows:
+        entry = r[0]
+        items.append(
+            {
+                "id": entry.id,
+                "file_id": entry.file_id,
+                "row_type": entry.row_type,
+                "post_id": entry.post_id,
+                "item_id": qualify_item_id(entry.row_type, entry.post_id),
+                "code": entry.code,
+                "code_uid": entry.code_uid,
+                "quote": entry.quote,
+                "start_offset": entry.start_offset,
+                "end_offset": entry.end_offset,
+                "notes": entry.notes,
+                "coder": entry.coder,
+                "coder_model": entry.coder_model,
+                "starred": r.starred_id is not None,
+                "title": r.title,
+                "content": r.content,
+                "author": r.author,
+                "subreddit": r.subreddit,
+                "created_utc": r.created_utc,
+            }
+        )
+
+    return items, total_count
+
+
+async def get_entry_for_file(session: AsyncSession, file_id: int, entry_id: int) -> CodingEntry:
+    """``entry_id`` if it belongs to ``file_id``, else ``NotFoundError``."""
+    entry = await session.get(CodingEntry, entry_id)
+    if not entry or entry.file_id != file_id:
+        raise NotFoundError(f"Coding entry {entry_id} not found for file {file_id}")
+    return entry
+
+
+async def set_quote_star(
+    session: AsyncSession,
+    user_id: int,
+    file_id: int,
+    entry_id: int,
+    starred: bool,
+) -> bool:
+    """Star or unstar the quote ``entry_id`` for ``user_id``. Idempotent
+    either way, including under a concurrent duplicate star (the unique
+    constraint wins; the losing insert is rolled back to its savepoint).
+    """
+    entry = await get_entry_for_file(session, file_id, entry_id)
+    identity = {
+        "user_id": user_id,
+        "file_id": file_id,
+        "row_type": entry.row_type,
+        "post_id": entry.post_id,
+        "code_uid": entry.code_uid,
+        "start_offset": entry.start_offset,
+        "end_offset": entry.end_offset,
+    }
+
+    if not starred:
+        await session.execute(
+            delete(StarredQuote).where(*[getattr(StarredQuote, k) == v for k, v in identity.items()])
+        )
+        return False
+
+    existing = await session.execute(
+        select(StarredQuote.id).where(*[getattr(StarredQuote, k) == v for k, v in identity.items()])
+    )
+    if existing.scalar_one_or_none() is None:
+        try:
+            async with session.begin_nested():
+                session.add(StarredQuote(**identity))
+        except IntegrityError:
+            pass
+    return True
+
+
+async def live_entries_for_item(
+    session: AsyncSession, file_id: int, row_type: str, post_id: str
+) -> list[CodingEntry]:
+    """Every live entry on one item, in stable order."""
+    result = await session.execute(
+        select(CodingEntry)
+        .where(
+            CodingEntry.file_id == file_id,
+            CodingEntry.row_type == row_type,
+            CodingEntry.post_id == post_id,
+            CodingEntry.valid_to.is_(None),
+        )
+        .order_by(CodingEntry.start_offset, CodingEntry.id)
+    )
+    return list(result.scalars().all())

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import ExportDropdown from "../../export/ExportDropdown";
 import CodingDuplicateControl from "./CodingDuplicateControl";
 import CodingTextView from "./CodingTextView";
+import CodingQuoteBank from "./CodingQuoteBank";
 import CodingDocumentList from "./CodingDocumentList";
 import CodingReaderPane from "./CodingReaderPane";
 import CodingCodebookSidebar from "./CodingCodebookSidebar";
@@ -122,6 +123,7 @@ export default function CodingWorkspaceSection({
         modes={[
           { value: "reader", label: "Reader", activeClassName: `${btn} ${btnActive}`, inactiveClassName: btn },
           { value: "text", label: "Text View", activeClassName: `${btn} ${btnActive}`, inactiveClassName: btn },
+          { value: "quotes", label: "Quote Bank", activeClassName: `${btn} ${btnActive}`, inactiveClassName: btn },
         ]}
         activeMode={viewMode}
         onChange={page.setViewMode}
@@ -172,6 +174,14 @@ export default function CodingWorkspaceSection({
       {viewMode === "text" ? (
         <div className="min-h-0 flex-1">
           <CodingTextView schema={page.selectedCodingSchema} refreshKey={page.refreshKey} />
+        </div>
+      ) : viewMode === "quotes" ? (
+        <div className="min-h-0 flex-1">
+          <CodingQuoteBank
+            schema={page.selectedCodingSchema}
+            availableCodes={availableCodes}
+            refreshKey={page.refreshKey}
+          />
         </div>
       ) : (
         <div className={EDITOR_GRID_CLASSES}>

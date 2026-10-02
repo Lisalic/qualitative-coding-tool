@@ -577,7 +577,7 @@ Main backend endpoints by domain:
 - Filtering: `/api/filter-preview/`, `/api/filtered-data/manual`, `/api/word-count-ranges/`
 - Row memos: `/api/memos/` (GET, PUT)
 - Codebook: `/api/codebook-preview/`, `/api/codebook/manual`, `/api/codebook`, `/api/codebook/{ref}` (PUT), `/api/list-codebooks`, `/api/compare-codebooks/`, `/api/integrate-codebook-preview/`, `/api/codebook/integrate`
-- Coding and summarization: `/api/coding/manual`, `/api/coding/{ref}`, `/api/coding/{ref}/rows`, `/api/coding/{ref}/text`, `/api/coding/{ref}/revision` (PUT), `/api/coding/{ref}` (PATCH), `/api/coding/{ref}/duplicate`, `/api/coding/{ref}/recode`, `/api/coding-comparison`, `/api/compare-codings/`, `/api/summarize-coding/`, `/api/save-comparison/`, `/api/save-summary/`, `/api/summary/{summary_id}`
+- Coding and summarization: `/api/coding/manual`, `/api/coding/{ref}`, `/api/coding/{ref}/rows`, `/api/coding/{ref}/text`, `/api/coding/{ref}/revision` (PUT), `/api/coding/{ref}` (PATCH), `/api/coding/{ref}/duplicate`, `/api/coding/{ref}/recode`, `/api/coding-comparison`, `/api/compare-codings/`, `/api/summarize-coding/`, `/api/save-summary/`, `/api/summary/{summary_id}`
 - Versioning (deterministic, no LLM): `/api/artifacts/{ref}/versions`, `/api/artifacts/{ref}/diff`, `/api/artifacts/{ref}/lineage`, `/api/artifacts/{ref}/assists`
 - Export: `/api/export/{file_id}/codebook`, `/api/export/{file_id}/coding`, `/api/export/{file_id}/summary`, `/api/export/{file_id}/memos`, `/api/export/projects/{project_id}/bundle`
 

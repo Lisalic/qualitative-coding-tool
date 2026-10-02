@@ -7,7 +7,9 @@ from backend.app.api.schemas import (
     ManualCodingRequest,
     RecodeItemsRequest,
     SaveCodingRevisionRequest,
+    StarQuoteRequest,
     UpdateCodingMetadataRequest,
+    UpdateQuoteNotesRequest,
 )
 from backend.app.core.auth_dependency import require_user_id
 from backend.app.database import get_async_db
@@ -78,7 +80,7 @@ async def list_coding_rows(
     ref: str,
     limit: int = 50,
     offset: int = 0,
-    only: str = "all",
+    only: str = Query("all", pattern="^(all|coded|uncoded|ai|human)$"),
     code: str = None,
     q: str = None,
     version_no: int | None = Query(None, description="Read coding entries AS OF this version"),
@@ -87,7 +89,8 @@ async def list_coding_rows(
 ) -> JSONResponse:
     """One page of a coding file's own rows -- every submission/comment it
     owns, coded or not -- each with its codes. ``only`` narrows to
-    ``coded``/``uncoded``; ``code`` narrows to rows carrying that exact
+    ``coded``/``uncoded``/``ai`` (any AI-coded entry)/``human`` (coded,
+    no AI entry); ``code`` narrows to rows carrying that exact
     code (by display name); ``q`` is a case-insensitive substring search
     over title/body. ``version_no`` pins the coding entries to a historical
     version for the read-only version-history viewer.
@@ -97,6 +100,78 @@ async def list_coding_rows(
         version_no=version_no,
     )
     return JSONResponse(result)
+
+
+@router.get("/coding/{ref}/quotes")
+async def list_coding_quotes(
+    ref: str,
+    limit: int = 50,
+    offset: int = 0,
+    code: str | None = None,
+    coder: str | None = None,
+    q: str | None = None,
+    starred_only: bool = False,
+    version_no: int | None = Query(None, description="Read coding entries AS OF this version"),
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
+) -> JSONResponse:
+    """Paginated quote bank for a coding file owned by the authenticated user.
+    Each row represents one coded quote with exact character offsets, inspectable
+    source text/context, quote notes, coder attribution, and user-scoped starred status.
+    """
+    result = await coding_service.list_quote_bank(
+        db,
+        user_id,
+        ref,
+        code=code,
+        coder=coder,
+        q=q,
+        starred_only=starred_only,
+        limit=limit,
+        offset=offset,
+        version_no=version_no,
+    )
+    return JSONResponse(result)
+
+
+@router.put("/coding/{ref}/quotes/{entry_id}/star")
+async def set_coding_quote_star(
+    ref: str,
+    entry_id: int,
+    payload: StarQuoteRequest,
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
+) -> JSONResponse:
+    """Star or unstar a quote entry for the writing draft/evidence shortlist."""
+    starred = await coding_service.set_quote_star(
+        db,
+        user_id,
+        ref,
+        entry_id,
+        payload.starred,
+    )
+    return JSONResponse({"entry_id": entry_id, "starred": starred})
+
+
+@router.patch("/coding/{ref}/quotes/{entry_id}/notes")
+async def update_coding_quote_notes(
+    ref: str,
+    entry_id: int,
+    payload: UpdateQuoteNotesRequest,
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
+) -> JSONResponse:
+    """Attach or edit the note on a live coded quote. Saved as a new
+    coding version, so the quote comes back under a new ``entry_id``.
+    """
+    new_entry_id, notes = await coding_service.update_quote_note(
+        db,
+        user_id,
+        ref,
+        entry_id,
+        payload.notes,
+    )
+    return JSONResponse({"entry_id": new_entry_id, "notes": notes})
 
 
 @router.get("/coding/{ref}/text")

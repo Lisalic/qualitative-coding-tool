@@ -7,6 +7,8 @@ const ONLY_OPTIONS = [
   { value: "all", label: "All rows" },
   { value: "coded", label: "Coded" },
   { value: "uncoded", label: "Uncoded" },
+  { value: "ai", label: "AI-coded" },
+  { value: "human", label: "Human only" },
 ];
 
 function rowPreview(row) {
@@ -75,17 +77,16 @@ export default function CodingDocumentList({
       }
       header={
         <>
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-col gap-1.5">
             <div className="text-xs text-paper/70">
               {totalCoded} of {totalRows} rows coded
             </div>
-            <div className="flex shrink-0 gap-1.5">
+            <div className="flex flex-wrap gap-1.5">
               <button
                 type="button"
                 className={btnSm}
                 onClick={onSelectUncoded}
                 disabled={disabled || selectAllLoading || uncodedCount === 0}
-                title="Select every row that has no codes yet -- the rows an AI recode can help with without overwriting your own work"
               >
                 {`Uncoded${uncodedCount ? ` (${uncodedCount})` : ""}`}
               </button>

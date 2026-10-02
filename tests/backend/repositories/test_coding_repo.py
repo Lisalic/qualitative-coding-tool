@@ -761,6 +761,30 @@ class TestListRowsWithCodesAndCountRows:
             assert {r["item_id"] for r in rows} == {"t3_s2", "t1_c1"}
             assert await count_rows(session, f.id, only="uncoded") == 2
 
+    async def test_only_ai_and_only_human_filters(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await make_user(session)
+            f = await _make_file(session, user)
+            await self._seed(session, f.id)
+            # s2: AI-only; c1: AI and human -- both count as "ai"; s1 stays human-only.
+            await bulk_insert_coding_entries(
+                session, f.id,
+                [
+                    _entry("s2", "A", "b", row_type="submission", coder="ai", coder_model="m"),
+                    _entry("c1", "A", "a", row_type="comment", coder="ai", coder_model="m"),
+                    _entry("c1", "B", "c", row_type="comment"),
+                ],
+            )
+            await session.commit()
+
+            ai_rows = await list_rows_with_codes(session, f.id, only="ai")
+            assert {r["item_id"] for r in ai_rows} == {"t3_s2", "t1_c1"}
+            assert await count_rows(session, f.id, only="ai") == 2
+
+            human_rows = await list_rows_with_codes(session, f.id, only="human")
+            assert [r["item_id"] for r in human_rows] == ["t3_s1"]
+            assert await count_rows(session, f.id, only="human") == 1
+
     async def test_code_filter(self, session_factory) -> None:
         async with session_factory() as session:
             user = await make_user(session)

@@ -807,3 +807,11 @@ class AiModelOut(BaseModel):
     label: str
     paid: bool
     pricing: Optional[AiModelPricing] = None
+
+
+class StarQuoteRequest(BaseModel):
+    starred: bool = Field(True, description="True to star, False to unstar")
+
+
+class UpdateQuoteNotesRequest(BaseModel):
+    notes: Optional[str] = Field(None, description="Note text attached to the quote")

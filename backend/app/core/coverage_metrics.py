@@ -51,7 +51,8 @@ def compute_coverage_metrics(
 
     Parameters:
         total_rows: Total number of rows in the corpus artifact.
-        entries: CodingEntry instances or dicts (carrying row_type, post_id, code, code_uid).
+        entries: CodingEntry instances or dicts (carrying row_type, post_id, code, code_uid,
+            and optionally coder -- counted per code as ai_entry_count/human_entry_count).
         codes: CodebookCode instances or dicts (carrying code_uid, name, family_uid, family_name).
 
     Returns:
@@ -101,6 +102,8 @@ def compute_coverage_metrics(
             "name": c_name,
             "position": pos,
             "entry_count": 0,
+            "ai_entry_count": 0,
+            "human_entry_count": 0,
             "row_keys": set(),
         }
 
@@ -158,6 +161,8 @@ def compute_coverage_metrics(
                 "name": resolved_c_name,
                 "position": 999999,
                 "entry_count": 0,
+                "ai_entry_count": 0,
+                "human_entry_count": 0,
                 "row_keys": set(),
             }
 
@@ -166,6 +171,10 @@ def compute_coverage_metrics(
 
         code_entry = family_meta[f_uid]["codes"][resolved_c_uid]
         code_entry["entry_count"] += 1
+        if _get_field(entry, "coder") == "ai":
+            code_entry["ai_entry_count"] += 1
+        else:
+            code_entry["human_entry_count"] += 1
         code_entry["row_keys"].add(row_key)
 
     # 3. Overall coded vs uncoded counts
@@ -284,6 +293,8 @@ def compute_coverage_metrics(
                     "name": c_data["name"],
                     "position": c_data["position"],
                     "entry_count": c_data["entry_count"],
+                    "ai_entry_count": c_data["ai_entry_count"],
+                    "human_entry_count": c_data["human_entry_count"],
                     "row_count": c_rows,
                     "row_percentage": _safe_percentage(c_rows, effective_total_rows),
                 }

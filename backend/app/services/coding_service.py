@@ -225,6 +225,117 @@ async def get_coding_text(
     return await coding_repo.render_coding_text(session, file_id, version_no=version_no)
 
 
+async def list_quote_bank(
+    session: AsyncSession,
+    user_id: int,
+    ref: str,
+    *,
+    code: str | None = None,
+    coder: str | None = None,
+    q: str | None = None,
+    starred_only: bool = False,
+    limit: int = 50,
+    offset: int = 0,
+    version_no: int | None = None,
+) -> dict:
+    """Paginated quote bank for a coding file owned by user_id."""
+    file_id = await file_repo.resolve_file_id(session, ref, user_id, file_types=("coding",))
+    quotes, total = await coding_repo.list_quote_bank(
+        session,
+        file_id,
+        user_id,
+        code=code,
+        coder=coder,
+        q=q,
+        starred_only=starred_only,
+        limit=limit,
+        offset=offset,
+        version_no=version_no,
+    )
+    return {"quotes": quotes, "total": total}
+
+
+async def set_quote_star(
+    session: AsyncSession,
+    user_id: int,
+    ref: str,
+    entry_id: int,
+    starred: bool,
+) -> bool:
+    """Star or unstar a quote entry for the calling user."""
+    file_id = await file_repo.resolve_file_id(session, ref, user_id, file_types=("coding",))
+    result = await coding_repo.set_quote_star(
+        session,
+        user_id=user_id,
+        file_id=file_id,
+        entry_id=entry_id,
+        starred=starred,
+    )
+    await session.commit()
+    return result
+
+
+async def update_quote_note(
+    session: AsyncSession,
+    user_id: int,
+    ref: str,
+    entry_id: int,
+    notes: str | None,
+) -> tuple[int, str | None]:
+    """Set the note on one live quote as a new coding version.
+
+    A note is part of the coding's content, so it is written through the
+    same SCD-2 path as any row edit (``replace_entries_for_items`` over
+    the quote's item) rather than updated in place -- a read AS OF an
+    earlier version keeps showing the note that version had. Returns the
+    re-inserted entry's new id alongside the cleaned note.
+    """
+    file_id = await file_repo.resolve_file_id(session, ref, user_id, file_types=("coding",))
+    entry = await coding_repo.get_entry_for_file(session, file_id, entry_id)
+    if entry.valid_to is not None:
+        raise ValidationAppError("Only a live quote can be annotated")
+
+    cleaned = notes.strip() if notes and notes.strip() else None
+    if cleaned == entry.notes:
+        return entry.id, cleaned
+
+    target = (entry.code_uid, entry.start_offset, entry.end_offset)
+    siblings = await coding_repo.live_entries_for_item(session, file_id, entry.row_type, entry.post_id)
+    entries = [
+        {
+            "code": e.code,
+            "code_uid": e.code_uid,
+            "quote": e.quote,
+            "start_offset": e.start_offset,
+            "end_offset": e.end_offset,
+            "notes": cleaned if e.id == entry.id else e.notes,
+            "coder": e.coder,
+            "coder_model": e.coder_model,
+        }
+        for e in siblings
+    ]
+    row_type, post_id = entry.row_type, entry.post_id
+
+    version = await version_service.commit_coding_version(
+        session, file_id=file_id, author_user_id=user_id, origin=ORIGIN_EDITED,
+    )
+    await coding_repo.replace_entries_for_items(
+        session,
+        file_id,
+        [{"row_type": row_type, "post_id": post_id, "entries": entries}],
+        version_no=version.version_no,
+    )
+    await session.flush()
+
+    new_id = next(
+        e.id
+        for e in await coding_repo.live_entries_for_item(session, file_id, row_type, post_id)
+        if (e.code_uid, e.start_offset, e.end_offset) == target
+    )
+    await session.commit()
+    return new_id, cleaned
+
+
 # ---------------------------------------------------------------------------
 # Editing a coding artifact: codebook, rows, metadata
 # ---------------------------------------------------------------------------

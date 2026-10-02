@@ -125,3 +125,17 @@ def test_family_rollups_and_renamed_codes():
     assert code_in_fam["name"] == "Current Name"
     assert code_in_fam["entry_count"] == 2
     assert code_in_fam["row_count"] == 2
+
+
+def test_per_code_ai_and_human_entry_counts():
+    codes = [{"code_uid": "u1", "name": "A", "family_uid": "f", "family_name": "F", "position": 0}]
+    entries = [
+        {"row_type": "submission", "post_id": "1", "code": "A", "code_uid": "u1", "coder": "ai"},
+        {"row_type": "submission", "post_id": "2", "code": "A", "code_uid": "u1", "coder": "human"},
+        {"row_type": "submission", "post_id": "3", "code": "A", "code_uid": "u1"},
+    ]
+    result = compute_coverage_metrics(total_rows=3, entries=entries, codes=codes)
+    code = result["family_rollups"][0]["codes"][0]
+    assert code["entry_count"] == 3
+    assert code["ai_entry_count"] == 1
+    assert code["human_entry_count"] == 2

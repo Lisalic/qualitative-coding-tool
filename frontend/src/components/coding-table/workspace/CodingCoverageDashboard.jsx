@@ -176,7 +176,7 @@ export default function CodingCoverageDashboard({ schema, refreshKey, getCodeCol
               </div>
               <div className="flex flex-col gap-1 pl-1">
                 {(fam.codes || []).map((code) => {
-                  const badgeColor = getCodeColor ? getCodeColor(code.name) : "#888";
+                  const badgeColor = getCodeColor ? getCodeColor(code.code_uid) : "#888";
                   return (
                     <div key={code.code_uid} className="flex justify-between items-center text-[11px]">
                       <div className="flex items-center gap-1.5 truncate pr-2">
@@ -189,6 +189,14 @@ export default function CodingCoverageDashboard({ schema, refreshKey, getCodeCol
                         </span>
                       </div>
                       <span className="font-mono text-paper/50 shrink-0">
+                        {code.ai_entry_count > 0 && (
+                          <span
+                            className="mr-1.5 text-[10px]"
+                            title={`${code.ai_entry_count} AI-coded, ${code.human_entry_count} human-coded segments`}
+                          >
+                            AI {code.ai_entry_count} &middot; H {code.human_entry_count}
+                          </span>
+                        )}
                         {code.row_count} <span className="text-[10px]">({code.row_percentage}%)</span>
                       </span>
                     </div>
