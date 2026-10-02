@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -8,6 +8,8 @@ from backend.app.api.utils import get_user_id_from_request, _hash_password, _ver
 from backend.app.database import get_async_db, User
 from backend.app.auth import create_access_token
 from backend.app.config import settings
+from backend.app.api.schemas import ForgotPasswordRequest, MessageResponse, ResetPasswordRequest
+from backend.app.services import auth_service
 
 router = APIRouter()
 
@@ -83,3 +85,25 @@ async def logout():
     resp = JSONResponse({"message": "Logged out"})
     resp.set_cookie("access_token", "", httponly=True, samesite="lax", max_age=0)
     return resp
+
+
+@router.post("/forgot-password/", status_code=202, response_model=MessageResponse)
+async def forgot_password(
+    payload: ForgotPasswordRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_async_db),
+) -> MessageResponse:
+    # Same response whether or not the account exists; the email goes out
+    # after the response so send latency can't reveal it either.
+    to_send = await auth_service.request_password_reset(db, payload.email)
+    if to_send is not None:
+        background_tasks.add_task(auth_service.send_reset_email, *to_send)
+    return MessageResponse(message="If an account exists for that email, a reset link has been sent.")
+
+
+@router.post("/reset-password/", response_model=MessageResponse)
+async def reset_password(
+    payload: ResetPasswordRequest, db: AsyncSession = Depends(get_async_db)
+) -> MessageResponse:
+    await auth_service.reset_password(db, payload.token, payload.new_password)
+    return MessageResponse(message="Password updated. You can now log in.")

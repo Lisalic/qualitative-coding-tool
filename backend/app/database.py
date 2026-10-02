@@ -139,6 +139,9 @@ class User(Base):
     email = Column(String, unique=True, nullable=False)
     password = Column("hashed_password", String, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    # Last time a reset email was sent -- a per-account cooldown that holds
+    # across every backend instance (see services/auth_service.py).
+    password_reset_requested_at = Column(DateTime(timezone=True), nullable=True)
 
     projects = relationship("Project", back_populates="user", cascade="all, delete-orphan")
     files = relationship("File", back_populates="user", cascade="all, delete-orphan")

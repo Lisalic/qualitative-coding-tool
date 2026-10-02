@@ -1,12 +1,11 @@
-import { Link } from "react-router-dom";
 import ErrorDisplay from "../components/feedback/ErrorDisplay";
 import AuthLinksSection from "../components/auth/AuthLinksSection";
 import AuthFormSection from "../components/auth/AuthFormSection";
 import PageHeading from "../components/primitives/PageHeading";
-import useLoginPage from "../components/auth/useLoginPage";
+import useResetPasswordPage from "../components/auth/useResetPasswordPage";
 
-const Login = () => {
-  const page = useLoginPage();
+const ResetPassword = () => {
+  const page = useResetPasswordPage();
 
   return (
     <div className="flex h-full flex-col items-center justify-center overflow-y-auto gap-6 px-6 py-12">
@@ -15,27 +14,22 @@ const Login = () => {
         className="text-center text-2xl font-bold sm:text-3xl"
       />
       <AuthFormSection
-        mode="login"
-        email={page.email}
+        mode="reset"
         password={page.password}
-        onEmailChange={page.setEmail}
+        confirmPassword={page.confirmPassword}
         onPasswordChange={page.setPassword}
+        onConfirmPasswordChange={page.setConfirmPassword}
         onSubmit={page.handleSubmit}
+        disabled={page.submitting || !page.token}
       />
-      <Link
-        to="/forgot-password"
-        className="text-sm text-paper underline underline-offset-2 hover:text-paper/70"
-      >
-        Forgot password?
-      </Link>
       <AuthLinksSection
-        promptText="Don't have an account?"
-        linkTo="/register"
-        linkLabel="Register here"
+        promptText="Link expired?"
+        linkTo="/forgot-password"
+        linkLabel="Request a new one"
       />
       <ErrorDisplay message={page.message} type={page.messageType} variant="message" />
     </div>
   );
 };
 
-export default Login;
+export default ResetPassword;

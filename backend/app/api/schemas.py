@@ -815,3 +815,17 @@ class StarQuoteRequest(BaseModel):
 
 class UpdateQuoteNotesRequest(BaseModel):
     notes: Optional[str] = Field(None, description="Note text attached to the quote")
+
+
+class ForgotPasswordRequest(_StrippingModel):
+    email: str = Field(..., min_length=1)
+
+
+class ResetPasswordRequest(BaseModel):
+    # Plain BaseModel: a password must never be whitespace-stripped.
+    token: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=1)
+
+
+class MessageResponse(BaseModel):
+    message: str

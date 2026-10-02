@@ -31,6 +31,10 @@ def get_user_id_from_request(request: Request):
     except Exception:
         return None
 
+    # Purpose-scoped tokens (e.g. password reset) are never session tokens.
+    if payload.get("purpose") is not None:
+        return None
+
     sub = payload.get("sub")
     if sub is not None:
         try:

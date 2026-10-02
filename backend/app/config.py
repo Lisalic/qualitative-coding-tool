@@ -13,4 +13,14 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 480
     jwt_refresh_token_expire_minutes: int = 10080
 
+    # Password-reset email (Brevo transactional API). The reset link is built
+    # from frontend_url, never from the request's Host/Origin, so a forged
+    # header can't redirect a victim's token to an attacker's domain.
+    brevo_api_key: str = ""
+    brevo_sender_email: str = ""
+    brevo_sender_name: str = "Qualitative Coding Tool"
+    frontend_url: str = "http://localhost:5173"
+    password_reset_token_expire_minutes: int = 30
+    password_reset_cooldown_seconds: int = 60
+
 settings = Settings()

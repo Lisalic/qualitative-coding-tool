@@ -35,6 +35,8 @@ const Lineage = React.lazy(() => import("./pages/Lineage"));
 const VersionHistory = React.lazy(() => import("./pages/VersionHistory"));
 const Login = React.lazy(() => import("./pages/Login"));
 const Register = React.lazy(() => import("./pages/Register"));
+const ForgotPassword = React.lazy(() => import("./pages/ForgotPassword"));
+const ResetPassword = React.lazy(() => import("./pages/ResetPassword"));
 
 function App() {
   return (
@@ -63,6 +65,8 @@ function App() {
                 <Route path="/" element={<AuthGate />} />
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />
+                <Route path="/forgot-password" element={<ForgotPassword />} />
+                <Route path="/reset-password" element={<ResetPassword />} />
                 <Route
                   path="/import"
                   element={
