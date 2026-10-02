@@ -1,4 +1,3 @@
-import re
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config
@@ -10,7 +9,8 @@ from alembic import context
 # Import the app's Base *and* every module that defines a table on it, so
 # `target_metadata` reflects the full schema for autogenerate. Mirrors the
 # same reasoning as the storage_models import in backend/app/main.py.
-from backend.app.database import Base, DATABASE_URL  # noqa: E402
+from backend.app.database import Base  # noqa: E402
+from backend.app.core.migrations import sync_database_url  # noqa: E402
 from backend.app import storage_models  # noqa: E402,F401
 from backend.app import versioning_models  # noqa: E402,F401
 from backend.app.jobs import models as jobs_models  # noqa: E402,F401
@@ -20,13 +20,9 @@ from backend.app.jobs import models as jobs_models  # noqa: E402,F401
 config = context.config
 
 # Single source of truth for the DB URL is backend/app/database.py (env
-# vars / backend/.env), not a separate value duplicated in alembic.ini.
-# Pin the sync driver explicitly: a bare `postgresql://` resolves to
-# psycopg (v3) on SQLAlchemy >= 2.1, which isn't installed -- psycopg2-binary
-# is the sync driver in backend/requirements.txt.
-SYNC_DATABASE_URL = re.sub(
-    r"^postgres(?:ql)?(?:\+[^:/]+)?://", "postgresql+psycopg2://", DATABASE_URL.strip(), count=1
-)
+# vars / backend/.env), not a separate value duplicated in alembic.ini,
+# with the sync driver pinned (see sync_database_url).
+SYNC_DATABASE_URL = sync_database_url()
 # `%%` because Alembic keeps options in a ConfigParser, which reads a bare
 # `%` as interpolation -- and a URL-encoded password is full of them.
 config.set_main_option("sqlalchemy.url", SYNC_DATABASE_URL.replace("%", "%%"))

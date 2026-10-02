@@ -500,6 +500,89 @@ class TestStartupUpgrade:
         assert app_logger.disabled is False
 
 
+def _untracked_state(db_url: str, *, empty_version_table: bool = False) -> None:
+    """A database `create_all` built and Alembic never tracked -- production's
+    real shape: no revision, `users` missing the column added since, a table
+    added since, and a column the code no longer has.
+    """
+    from backend.app.database import Base
+    from backend.app import storage_models, versioning_models  # noqa: F401
+    from backend.app.jobs import models as jobs_models  # noqa: F401
+
+    engine = create_engine(db_url)
+    try:
+        Base.metadata.create_all(engine)
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE users DROP COLUMN password_reset_requested_at"))
+            conn.execute(text("DROP TABLE starred_quotes"))
+            conn.execute(text("ALTER TABLE files ADD COLUMN legacy_note TEXT NOT NULL DEFAULT ''"))
+            conn.execute(text("ALTER TABLE files ALTER COLUMN legacy_note DROP DEFAULT"))
+            if empty_version_table:
+                conn.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
+    finally:
+        engine.dispose()
+
+
+def _public_tables(db_url: str) -> set[str]:
+    engine = create_engine(db_url)
+    try:
+        return set(inspect(engine).get_table_names())
+    finally:
+        engine.dispose()
+
+
+class TestUntrackedSchema:
+    """`upgrade_to_head` against a schema Alembic never tracked: report the
+    drift, change nothing (running the chain from base would fail on the
+    first `CREATE TABLE users`).
+    """
+
+    @pytest.mark.parametrize("empty_version_table", [False, True])
+    def test_reports_drift_and_changes_nothing(
+        self, alembic_config, alembic_db_url, caplog, empty_version_table
+    ):
+        import logging
+
+        from backend.app.core.migrations import upgrade_to_head
+
+        _untracked_state(alembic_db_url, empty_version_table=empty_version_table)
+        tables_before = _public_tables(alembic_db_url)
+        # Other tests here go through `alembic.ini`, whose fileConfig
+        # disables existing loggers.
+        logging.getLogger("backend.app.core.migrations").disabled = False
+
+        with caplog.at_level(logging.ERROR, logger="backend.app.core.migrations"):
+            upgrade_to_head()
+
+        messages = [r.getMessage() for r in caplog.records if r.name == "backend.app.core.migrations"]
+        assert any("no Alembic revision" in m for m in messages), messages
+        drift = sorted(m for m in messages if m.startswith("Schema drift: ") and "estimated rows" not in m)
+        assert drift == [
+            "Schema drift: add_column users.password_reset_requested_at DATETIME",
+            "Schema drift: add_index idx_starred_quotes_user_file on starred_quotes(user_id, file_id)",
+            "Schema drift: add_table starred_quotes (id INTEGER NOT NULL, user_id INTEGER NOT NULL, "
+            "file_id INTEGER NOT NULL, row_type VARCHAR NOT NULL, post_id VARCHAR NOT NULL, "
+            "code_uid VARCHAR NOT NULL, start_offset INTEGER NOT NULL, end_offset INTEGER NOT NULL, "
+            "created_at DATETIME NOT NULL)",
+            "Schema drift: remove_column files.legacy_note TEXT NOT NULL",
+        ]
+        assert any("estimated rows" in m and "users=" in m for m in messages)
+
+        assert _public_tables(alembic_db_url) == tables_before
+        assert "password_reset_requested_at" not in _user_columns(alembic_db_url)
+
+    def test_empty_database_still_upgrades(self, alembic_config, alembic_db_url):
+        from backend.app.core.migrations import report_untracked_schema
+
+        assert report_untracked_schema() is False
+
+    def test_tracked_database_is_not_reported(self, alembic_config, alembic_db_url):
+        from backend.app.core.migrations import report_untracked_schema
+
+        command.upgrade(alembic_config, "head")
+        assert report_untracked_schema() is False
+
+
 def _free_port() -> int:
     import socket
 
