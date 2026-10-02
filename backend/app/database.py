@@ -10,6 +10,7 @@ from sqlalchemy import (
     Integer,
     ForeignKey,
     DateTime,
+    Index,
     Table,
 )
 from sqlalchemy.orm import relationship
@@ -146,6 +147,9 @@ class User(Base):
     projects = relationship("Project", back_populates="user", cascade="all, delete-orphan")
     files = relationship("File", back_populates="user", cascade="all, delete-orphan")
     prompts = relationship("Prompt", back_populates="user", cascade="all, delete-orphan")
+
+    # Emails are case-insensitive: Foo@x.com and foo@x.com are one account.
+    __table_args__ = (Index("uq_users_email_lower", func.lower(email), unique=True),)
 
 
 class Project(Base):

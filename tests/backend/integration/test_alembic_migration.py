@@ -179,16 +179,16 @@ class TestDowngradeUpgradeRoundTrip:
         when run all the way to base, not as a single step.
         """
         command.upgrade(alembic_config, "head")
-        # Head is a7c3e5f19b20 (add users.password_reset_requested_at).
-        # Downgrading 1 step must drop that column.
+        # Head is b8d4f2a6c1e7 (unique index on lower(users.email)).
+        # Downgrading 1 step must drop that index.
         command.downgrade(alembic_config, "-1")
 
         engine = create_engine(alembic_db_url)
         try:
-            columns_after_downgrade = {c["name"] for c in inspect(engine).get_columns("users")}
+            indexes_after_downgrade = {i["name"] for i in inspect(engine).get_indexes("users")}
         finally:
             engine.dispose()
-        assert "password_reset_requested_at" not in columns_after_downgrade
+        assert "uq_users_email_lower" not in indexes_after_downgrade
 
         command.upgrade(alembic_config, "head")
 
@@ -325,7 +325,7 @@ class TestExistingDatabaseNoOp:
                 current = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
         finally:
             engine.dispose()
-        assert current == "a7c3e5f19b20", "expected upgrade head to stay at stamped head"
+        assert current == "b8d4f2a6c1e7", "expected upgrade head to stay at stamped head"
 
 
 def _version(db_url: str) -> str:
@@ -379,9 +379,9 @@ class TestStartupUpgrade:
         from backend.app.core.migrations import upgrade_to_head
 
         upgrade_to_head()
-        assert _version(alembic_db_url) == "a7c3e5f19b20"
+        assert _version(alembic_db_url) == "b8d4f2a6c1e7"
         upgrade_to_head()
-        assert _version(alembic_db_url) == "a7c3e5f19b20"
+        assert _version(alembic_db_url) == "b8d4f2a6c1e7"
 
     def test_recovers_the_production_state(self, alembic_config, alembic_db_url):
         from sqlalchemy import select
@@ -394,7 +394,7 @@ class TestStartupUpgrade:
 
         upgrade_to_head()
 
-        assert _version(alembic_db_url) == "a7c3e5f19b20"
+        assert _version(alembic_db_url) == "b8d4f2a6c1e7"
         assert "password_reset_requested_at" in _user_columns(alembic_db_url)
         # The exact query production 500'd on.
         engine = create_engine(alembic_db_url)
@@ -422,7 +422,7 @@ class TestStartupUpgrade:
 
         upgrade_to_head()
 
-        assert _version(alembic_db_url) == "a7c3e5f19b20"
+        assert _version(alembic_db_url) == "b8d4f2a6c1e7"
 
     def test_concurrent_upgrades_are_serialized(self, alembic_config, alembic_db_url):
         """Two containers booting at once (an overlapping deploy) must not
@@ -448,7 +448,7 @@ class TestStartupUpgrade:
         outputs = [proc.communicate(timeout=120)[0].decode() for proc in procs]
 
         assert [proc.returncode for proc in procs] == [0] * len(procs), "\n\n".join(outputs)
-        assert _version(alembic_db_url) == "a7c3e5f19b20"
+        assert _version(alembic_db_url) == "b8d4f2a6c1e7"
 
     def test_password_with_url_encoded_characters(self, alembic_config, alembic_db_url, monkeypatch):
         """Production's password percent-encodes to a URL full of `%`, which
@@ -478,7 +478,7 @@ class TestStartupUpgrade:
 
             upgrade_to_head()
 
-            assert _version(alembic_db_url) == "a7c3e5f19b20"
+            assert _version(alembic_db_url) == "b8d4f2a6c1e7"
         finally:
             with admin.connect() as conn:
                 conn.execute(text(f"DROP OWNED BY {role}"))
@@ -533,6 +533,7 @@ PRODUCTION_DRIFT = [
     'add_index idx_submissions_live on submissions(file_id, valid_to)',
     'add_index uq_comments_file_id_id_live on comments(file_id, id) unique',
     'add_index uq_submissions_file_id_id_live on submissions(file_id, id) unique',
+    'add_index uq_users_email_lower on users(email) unique',
     'remove_column coding_entries.evidence TEXT',
     'remove_column files.systemprompt VARCHAR',
     'remove_column files.userprompt VARCHAR',
@@ -645,7 +646,7 @@ class TestUntrackedSchemaRebuild:
         finally:
             migrations_logger.removeHandler(caplog.handler)
 
-        assert _version(alembic_db_url) == "a7c3e5f19b20"
+        assert _version(alembic_db_url) == "b8d4f2a6c1e7"
         assert _drift(alembic_db_url) == []
         assert {t: _rows(alembic_db_url, q) for t, q in _KEPT_ROWS_SQL.items()} == kept_before
         assert kept_before["users"] and kept_before["projects"] and kept_before["prompts"]
@@ -720,7 +721,7 @@ class TestUntrackedSchemaRebuild:
 
         assert [proc.returncode for proc in procs] == [0] * len(procs), "\n\n".join(outputs)
         assert sum("Rebuilt the untracked database schema" in out for out in outputs) == 1, outputs
-        assert _version(alembic_db_url) == "a7c3e5f19b20"
+        assert _version(alembic_db_url) == "b8d4f2a6c1e7"
         assert [r[1] for r in _rows(alembic_db_url, _KEPT_ROWS_SQL["users"])] == ["ana@x.com", "bo@x.com"]
 
 
@@ -798,7 +799,7 @@ class TestAppBootsOnProductionState:
         _production_state(alembic_config, alembic_db_url)
 
         with _RunningApp(alembic_db_url) as base:
-            assert _version(alembic_db_url) == "a7c3e5f19b20"
+            assert _version(alembic_db_url) == "b8d4f2a6c1e7"
             _assert_auth_works(base)
 
     def test_untracked_production_replica(self, alembic_config, alembic_db_url):
@@ -811,7 +812,7 @@ class TestAppBootsOnProductionState:
         _prod_replica(alembic_config, alembic_db_url)
 
         with _RunningApp(alembic_db_url) as base:
-            assert _version(alembic_db_url) == "a7c3e5f19b20"
+            assert _version(alembic_db_url) == "b8d4f2a6c1e7"
             _assert_auth_works(base)
 
             ana = httpx.post(f"{base}/api/login/", json={"email": "ana@x.com", "password": "ana-pass"})

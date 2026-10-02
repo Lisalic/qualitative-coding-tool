@@ -1,9 +1,12 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
 
 
 
 class Settings(BaseSettings):
-    model_config = {"extra": "allow", "env_file": ".env"}
+    # backend/.env, not the cwd -- uvicorn runs from the repo root.
+    model_config = {"extra": "allow", "env_file": Path(__file__).resolve().parents[1] / ".env"}
     database_url: str = ""
     secret_key: str = "your-secret-key-here"
 

@@ -13,11 +13,11 @@ from __future__ import annotations
 
 import inspect
 import re
-from typing import Any, Literal, Optional, Type, TypeVar
+from typing import Annotated, Any, Literal, Optional, Type, TypeVar
 
 from fastapi import Form
 from fastapi.exceptions import RequestValidationError
-from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, Field, ValidationError, field_validator, model_validator
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -817,8 +817,25 @@ class UpdateQuoteNotesRequest(BaseModel):
     notes: Optional[str] = Field(None, description="Note text attached to the quote")
 
 
+# Emails are case-insensitive account identifiers: every auth body trims and
+# lowercases them, and lookups compare against lower(users.email) (see
+# services/auth_service.py::find_user_by_email).
+NormalizedEmail = Annotated[str, AfterValidator(lambda v: v.strip().lower()), Field(min_length=1)]
+
+
+# Plain BaseModel: a password must never be whitespace-stripped.
+class RegisterRequest(BaseModel):
+    email: NormalizedEmail
+    password: str
+
+
+class LoginRequest(BaseModel):
+    email: NormalizedEmail
+    password: str
+
+
 class ForgotPasswordRequest(_StrippingModel):
-    email: str = Field(..., min_length=1)
+    email: NormalizedEmail
 
 
 class ResetPasswordRequest(BaseModel):

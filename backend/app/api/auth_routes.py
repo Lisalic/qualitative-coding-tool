@@ -1,6 +1,5 @@
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,26 +7,21 @@ from backend.app.api.utils import get_user_id_from_request, _hash_password, _ver
 from backend.app.database import get_async_db, User
 from backend.app.auth import create_access_token
 from backend.app.config import settings
-from backend.app.api.schemas import ForgotPasswordRequest, MessageResponse, ResetPasswordRequest
+from backend.app.api.schemas import (
+    ForgotPasswordRequest,
+    LoginRequest,
+    MessageResponse,
+    RegisterRequest,
+    ResetPasswordRequest,
+)
 from backend.app.services import auth_service
 
 router = APIRouter()
 
 
-class RegisterRequest(BaseModel):
-    email: str
-    password: str
-
-
-class LoginRequest(BaseModel):
-    email: str
-    password: str
-
-
 @router.post("/login/")
 async def login(payload: LoginRequest, db: AsyncSession = Depends(get_async_db)):
-    r = await db.execute(select(User).where(User.email == payload.email))
-    user = r.scalar_one_or_none()
+    user = await auth_service.find_user_by_email(db, payload.email)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
@@ -43,9 +37,7 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_async_db))
 
 @router.post("/register/")
 async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_async_db)):
-    r = await db.execute(select(User).where(User.email == payload.email))
-    existing = r.scalar_one_or_none()
-    if existing:
+    if await auth_service.find_user_by_email(db, payload.email):
         raise HTTPException(status_code=400, detail="Email already registered")
 
     hashed = _hash_password(payload.password)

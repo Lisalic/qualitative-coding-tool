@@ -25,6 +25,15 @@ class TestRegister:
         assert resp.status_code == 400
         assert "already registered" in resp.json()["detail"]
 
+    def test_register_duplicate_email_differing_only_in_case_returns_400(self, client) -> None:
+        client.post("/api/register/", json={"email": "a@b.com", "password": "x"})
+        resp = client.post("/api/register/", json={"email": " A@B.Com ", "password": "y"})
+        assert resp.status_code == 400
+
+    def test_register_stores_email_lowercased(self, client) -> None:
+        resp = client.post("/api/register/", json={"email": " Mixed@Case.COM ", "password": "x"})
+        assert resp.json()["email"] == "mixed@case.com"
+
     def test_register_missing_field_returns_422(self, client) -> None:
         resp = client.post("/api/register/", json={"email": "a@b.com"})
         assert resp.status_code == 422
@@ -49,6 +58,27 @@ class TestLogin:
         resp = client.post("/api/login/", json={"email": "a@b.com", "password": "wrong"})
         assert resp.status_code == 401
         assert resp.json()["detail"] == "Invalid credentials"
+
+    def test_login_email_is_case_insensitive(self, client) -> None:
+        client.post("/api/register/", json={"email": "a@b.com", "password": "pw"})
+        resp = client.post("/api/login/", json={"email": " A@B.COM ", "password": "pw"})
+        assert resp.status_code == 200
+
+    @pytest.fixture()
+    async def mixed_case_user(self, async_sqlite_engine) -> None:
+        """A row stored before emails were normalized on the way in."""
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+
+        from backend.app.api.utils import _hash_password
+        from backend.app.database import User
+
+        async with async_sessionmaker(async_sqlite_engine)() as db:
+            db.add(User(email="Legacy@B.com", password=_hash_password("pw")))
+            await db.commit()
+
+    def test_login_matches_mixed_case_stored_email(self, client, mixed_case_user) -> None:
+        resp = client.post("/api/login/", json={"email": "legacy@b.com", "password": "pw"})
+        assert resp.status_code == 200
 
     def test_login_unknown_email_returns_401_not_404(self, client) -> None:
         # Must not leak whether the email exists via a different status.
@@ -136,6 +166,12 @@ class TestPasswordReset:
         to, link = sent[0]
         assert to == "a@b.com"
         assert link.startswith("http://app.test/reset-password?token=")
+
+    def test_forgot_email_is_case_insensitive(self, client, sent) -> None:
+        client.post("/api/register/", json={"email": "a@b.com", "password": "old"})
+        resp = client.post("/api/forgot-password/", json={"email": " A@B.COM "})
+        assert resp.status_code == 202
+        assert [to for to, _ in sent] == ["a@b.com"]
 
     def test_forgot_unknown_email_same_response_and_no_send(self, client, sent) -> None:
         client.post("/api/register/", json={"email": "a@b.com", "password": "old"})

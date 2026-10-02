@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from html import escape
 from typing import Optional
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.utils import _hash_password
@@ -39,6 +39,11 @@ def _password_fingerprint(stored_hash: str) -> str:
     return hashlib.sha256(stored_hash.encode("utf-8")).hexdigest()[:32]
 
 
+async def find_user_by_email(db: AsyncSession, email: str) -> Optional[User]:
+    """Case-insensitive lookup; ``email`` must already be normalized (lowercased)."""
+    return (await db.execute(select(User).where(func.lower(User.email) == email))).scalar_one_or_none()
+
+
 def create_reset_token(user: User) -> str:
     return create_access_token(
         {"sub": str(user.id), "purpose": RESET_PURPOSE, "pwh": _password_fingerprint(user.password)},
@@ -57,7 +62,7 @@ async def request_password_reset(db: AsyncSession, email: str) -> Optional[tuple
     and unconfigured email -- the route answers identically in every case
     so the response never reveals whether an account exists.
     """
-    user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
+    user = await find_user_by_email(db, email)
     if user is None:
         return None
     if not email_configured():
