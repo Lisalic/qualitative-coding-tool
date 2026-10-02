@@ -55,18 +55,6 @@ def get_context_length(model: str) -> int:
     return context_length_for(model)
 
 
-def estimate_tokens(text: str) -> int:
-    """Rough chars/4 token estimate.
-
-    Not a real tokenizer -- OpenRouter fans out to many model families
-    (OpenAI, Anthropic, Google, Meta, ...), each with its own real
-    tokenizer, so no single tokenizer would be accurate for all of them.
-    This heuristic reserves generous headroom and fails safe by
-    under-filling batches rather than overflowing a model's context.
-    """
-    return len(text or "") // CHARS_PER_TOKEN
-
-
 def max_prompt_chars(
     model: str,
     *,

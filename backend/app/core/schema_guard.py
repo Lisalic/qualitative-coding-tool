@@ -19,7 +19,7 @@ _PATTERN_CACHE: dict[tuple[str, ...], re.Pattern[str]] = {}
 def _pattern_for_prefixes(prefixes: tuple[str, ...]) -> re.Pattern[str]:
     """``^(?:prefix1|prefix2|...)[A-Za-z0-9_]+$`` -- at least one char after the prefix.
 
-    Matches the original ``is_proj_schema``'s ``^proj_[A-Za-z0-9_]+$`` exactly
+    Matches the historical ``^proj_[A-Za-z0-9_]+$`` convention exactly
     for the single-prefix case (verified: rejects a bare ``"proj_"``).
     """
     pattern = _PATTERN_CACHE.get(prefixes)
@@ -51,16 +51,6 @@ def is_valid_artifact_schema(
     if not name:
         return False
     return bool(_pattern_for_prefixes(allowed_prefixes).match(name))
-
-
-def is_proj_schema(name: str) -> bool:
-    """True when ``name`` matches the ``proj_<hex>`` schema convention.
-
-    Kept as a narrower alias of :func:`is_valid_artifact_schema` for
-    call sites that specifically only accept ``proj_`` (raw/filtered data),
-    matching the original helper in ``api/utils.py``.
-    """
-    return is_valid_artifact_schema(name, allowed_prefixes=("proj_",))
 
 
 def require_valid_schema(

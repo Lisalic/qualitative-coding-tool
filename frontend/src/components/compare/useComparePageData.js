@@ -8,7 +8,6 @@ export default function useComparePageData({
   fieldBName,
   initialA = "",
   validationMessage,
-  usesJobPolling = false,
 }) {
   const [items, setItems] = useState([]);
   const [a, setA] = useState(initialA || "");
@@ -117,27 +116,12 @@ export default function useComparePageData({
     try {
       setLoading(true);
 
-      if (usesJobPolling) {
-        const { ok, data, error: pollError } = await postFormAndPoll(compareEndpoint, form);
-        if (!ok) {
-          setError(pollError || "Comparison failed");
-        } else {
-          setComparison((data && data.comparison) || "");
-          setCreatedFile((data && data.file) || null);
-        }
+      const { ok, data, error: pollError } = await postFormAndPoll(compareEndpoint, form);
+      if (!ok) {
+        setError(pollError || "Comparison failed");
       } else {
-        const response = await apiFetch(compareEndpoint, {
-          method: "POST",
-          body: form,
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || errorData.detail || "Comparison failed");
-        }
-
-        const data = await response.json();
-        setComparison(data.comparison);
+        setComparison((data && data.comparison) || "");
+        setCreatedFile((data && data.file) || null);
       }
     } catch (err) {
       setError(err.message);

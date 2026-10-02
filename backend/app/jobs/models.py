@@ -10,16 +10,6 @@ from sqlalchemy.sql import func
 
 from backend.app.database import Base
 
-JOB_STATUSES = (
-    "pending",
-    "running",
-    "succeeded",
-    "partial",
-    "retryable_failure",
-    "failed",
-    "cancelled",
-)
-
 TERMINAL_STATUSES = frozenset({
     "succeeded",
     "failed",

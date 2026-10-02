@@ -32,12 +32,6 @@ class ValidationAppError(AppError):
     status_code = 400
 
 
-class UpstreamServiceError(AppError):
-    """Wraps a failure from an external service call (e.g. OpenRouter)."""
-
-    status_code = 502
-
-
 class ContextBudgetError(AppError):
     """The prompt can't fit the target model's context window even before
     reserving room for its completion (and, for the compare paths, even

@@ -149,4 +149,4 @@ Old dynamic per-artifact schemas (`proj_*`/`cmp_*`/`sum_*`) from before the fixe
 
 Deployed to Azure Web App via `.github/workflows/main_qualitative-coding-tool.yml` on push to `main`. The workflow uploads the repo as-is (dependency install happens server-side via Azure Oryx); the Azure startup command runs `python -m uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT`. CORS in `main.py` is locked to `http://localhost:5173` plus the deployed Vercel frontend origins — update that list when adding a new frontend origin.
 
-Several backend modules (`databasemanager.py`, `auth.py`) use a `try: from backend.app.X import ... except Exception: from app.X import ...` fallback pattern, because the Azure deployment and local `uvicorn backend.app.main:app` runs can end up with different values on `sys.path`/cwd.
+Several backend modules (e.g. `auth.py`) use a `try: from backend.app.X import ... except Exception: from app.X import ...` fallback pattern, because the Azure deployment and local `uvicorn backend.app.main:app` runs can end up with different values on `sys.path`/cwd.

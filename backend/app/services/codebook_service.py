@@ -754,8 +754,7 @@ async def _run_compare_codebooks_job(job_id: int, payload: dict) -> dict:
     ``codebook_generator.get_client`` directly.
 
     Persists the comparison as a ``File`` (``file_type="codebook_comparison"``)
-    the same way ``_materialize_codebook`` persists a codebook -- no more
-    separate ``/api/save-comparison/`` step required.
+    the same way ``_materialize_codebook`` persists a codebook.
     ``artifact_edges`` rows link the new file to BOTH source codebooks,
     ordered ``side_a``/``side_b`` -- that ordering is load-bearing, since
     the comparison prose refers to the codebooks by name in that order.

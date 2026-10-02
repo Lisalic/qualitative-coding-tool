@@ -7,12 +7,10 @@ covers the route/auth/response-shape behavior on top of this.
 """
 
 import pytest
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from backend.app.core.exceptions import ForbiddenError, NotFoundError
 from backend.app.database import File, User
-from backend.app.repositories import version_repo
 from backend.app.services import content_service, version_service
 
 
@@ -26,130 +24,6 @@ async def _make_user(session, email: str = "a@b.com") -> User:
     session.add(user)
     await session.commit()
     return user
-
-
-class TestSaveComparison:
-    async def test_happy_path_writes_file_and_content(self, session_factory) -> None:
-        async with session_factory() as session:
-            user = await _make_user(session)
-            file_rec = await content_service.save_comparison(
-                session,
-                user.id,
-                content="comparison text",
-                title="My Comparison",
-                description="a desc",
-                file_type="codebook_comparison",
-                project_id=None,
-                parent_file_ids=None,
-            )
-
-            assert file_rec.id is not None
-            assert file_rec.filename == "My Comparison"
-            assert file_rec.file_type == "codebook_comparison"
-            assert file_rec.schemaname.startswith("cmp_")
-            assert file_rec.description == "a desc"
-
-            content = await version_service.read_blob(session, file_rec.id)
-            assert content == "comparison text"
-
-    async def test_default_file_type_and_title(self, session_factory) -> None:
-        async with session_factory() as session:
-            user = await _make_user(session)
-            file_rec = await content_service.save_comparison(
-                session,
-                user.id,
-                content="x",
-                title="   ",
-                description=None,
-                file_type=None,
-                project_id=None,
-                parent_file_ids=None,
-            )
-            assert file_rec.filename == "comparison"
-            assert file_rec.file_type == "comparison"
-
-    async def test_links_parent_file_dependencies(self, session_factory) -> None:
-        async with session_factory() as session:
-            user = await _make_user(session)
-            parent = File(user_id=user.id, filename="p", schemaname="proj_p", file_type="codebook")
-            session.add(parent)
-            await session.commit()
-
-            file_rec = await content_service.save_comparison(
-                session,
-                user.id,
-                content="x",
-                title="t",
-                description=None,
-                file_type="codebook_comparison",
-                project_id=None,
-                parent_file_ids=[parent.id],
-            )
-
-            edges = await version_repo.list_parent_edges(session, file_rec.id)
-            assert [e.parent_file_id for e in edges] == [parent.id]
-            assert edges[0].relation == "derived_from"
-            assert edges[0].role == "source_data"
-
-    async def test_links_owned_project(self, session_factory) -> None:
-        from backend.app.database import Project
-
-        async with session_factory() as session:
-            user = await _make_user(session)
-            proj = Project(user_id=user.id, projectname="proj", description=None)
-            session.add(proj)
-            await session.commit()
-
-            file_rec = await content_service.save_comparison(
-                session,
-                user.id,
-                content="x",
-                title="t",
-                description=None,
-                file_type="codebook_comparison",
-                project_id=proj.id,
-                parent_file_ids=None,
-            )
-
-            await session.refresh(proj, attribute_names=["files"])
-            assert [f.id for f in proj.files] == [file_rec.id]
-
-    async def test_project_not_found_raises(self, session_factory) -> None:
-        async with session_factory() as session:
-            user = await _make_user(session)
-            with pytest.raises(NotFoundError):
-                await content_service.save_comparison(
-                    session,
-                    user.id,
-                    content="x",
-                    title="t",
-                    description=None,
-                    file_type=None,
-                    project_id=999999,
-                    parent_file_ids=None,
-                )
-
-    async def test_project_wrong_owner_raises_forbidden(self, session_factory) -> None:
-        from backend.app.database import Project
-
-        async with session_factory() as session:
-            owner = await _make_user(session, "owner@x.com")
-            other = await _make_user(session, "other@x.com")
-            proj = Project(user_id=owner.id, projectname="proj", description=None)
-            session.add(proj)
-            await session.commit()
-
-            with pytest.raises(ForbiddenError):
-                await content_service.save_comparison(
-                    session,
-                    other.id,
-                    content="x",
-                    title="t",
-                    description=None,
-                    file_type=None,
-                    project_id=proj.id,
-                    parent_file_ids=None,
-                )
 
 
 class TestSaveSummary:

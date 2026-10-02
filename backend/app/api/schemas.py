@@ -224,23 +224,6 @@ class FilterPreviewRequest(_StrippingModel):
         return self
 
 
-class FilterPreviewResponse(BaseModel):
-    """Result of a finished ``filter_preview`` job, read back from
-    ``GET /api/jobs/{id}``.
-
-    Ids only -- no ``file``, because nothing was created.
-    """
-
-    include_post_ids: list[str] = Field(default_factory=list)
-    include_comment_ids: list[str] = Field(default_factory=list)
-    exclude_post_ids: list[str] = Field(default_factory=list)
-    exclude_comment_ids: list[str] = Field(default_factory=list)
-    partial: bool = False
-    partial_error: Optional[str] = None
-    batches_processed: Optional[dict[str, int]] = None
-    batches_total: Optional[dict[str, int]] = None
-
-
 class AssistRunIn(_StrippingModel):
     """One assistant run's accept/dismiss bookkeeping, as recorded by an
     editor -- the C2 provenance channel
@@ -328,29 +311,6 @@ class MemoUpsertRequest(_StrippingModel):
     body: str = Field(default="")
 
 
-class MemoOut(BaseModel):
-    row_type: str
-    row_id: str
-    body: str
-    updated_at: Optional[str] = None
-
-
-class MemoListResponse(BaseModel):
-    """Response for ``GET /api/memos/?schema=...`` -- every memo on one
-    file, fetched once per database rather than once per visible row.
-    """
-
-    memos: list[MemoOut] = Field(default_factory=list)
-
-
-class MemoUpsertResponse(BaseModel):
-    """Response for ``PUT /api/memos/``. A null ``memo`` is the
-    successful "cleared" outcome, not an error.
-    """
-
-    memo: Optional[MemoOut] = None
-
-
 # ---------------------------------------------------------------------------
 # Codebook editor -- an AI-assist preview and a manual submit, mirroring
 # the FilterPreview/ManualFilter pair.
@@ -398,31 +358,6 @@ class CodebookPreviewRequest(_StrippingModel):
         return _strip_db_suffix_value(value)
 
 
-class ProposedCode(BaseModel):
-    """One code the preview job proposes. Carries no ``code_uid``: a
-    proposal has no identity until the researcher accepts it, at which
-    point the editor mints one (see ``lib/codebookEditorState.js``).
-    """
-
-    family_name: str = ""
-    name: str
-    definition: Optional[str] = None
-    inclusion: Optional[str] = None
-    exclusion: Optional[str] = None
-    keywords: Optional[str] = None
-    example: Optional[str] = None
-
-
-class CodebookPreviewResponse(BaseModel):
-    """Job result read back from ``GET /api/jobs/{id}``."""
-
-    proposals: list[ProposedCode] = []
-    partial: bool = False
-    partial_error: Optional[str] = None
-    batches_processed: Optional[dict[str, int]] = None
-    batches_total: Optional[dict[str, int]] = None
-
-
 def _validate_codebook_schema_list(value: Any) -> Any:
     """Normalize a list of source-codebook refs: strip each entry (via
     ``_strip_db_suffix_value``) and drop exact duplicates while
@@ -442,40 +377,6 @@ def _validate_codebook_schema_list(value: Any) -> Any:
             seen.add(cleaned)
         normalized.append(cleaned)
     return normalized
-
-
-class SourceCodeRef(BaseModel):
-    """One source code a merged proposal claims to come from, already
-    resolved server-side against the codebook the model actually read --
-    see ``codebook_service._verify_proposal_sources``. ``codebook`` is
-    that source codebook's ``schemaname``, so the client can key display
-    names and "already merged" coverage off the same ref it sent in the
-    request.
-    """
-
-    codebook: str
-    family_name: str = ""
-    name: str
-
-
-class MergedCodeProposal(BaseModel):
-    """One merged code the integrate-codebooks preview job proposes.
-    Same seven content fields as ``ProposedCode``, plus the provenance
-    that is the whole point of a merge review. Carries no ``code_uid``
-    for the same reason ``ProposedCode`` doesn't -- and accepting one
-    mints a FRESH identity rather than carrying any source's across (see
-    ``codebook_service.create_integrated_codebook``).
-    """
-
-    family_name: str = ""
-    name: str
-    definition: Optional[str] = None
-    inclusion: Optional[str] = None
-    exclusion: Optional[str] = None
-    keywords: Optional[str] = None
-    example: Optional[str] = None
-    sources: list[SourceCodeRef] = Field(default_factory=list)
-    rationale: Optional[str] = None
 
 
 class IntegrateCodebookPreviewRequest(_StrippingModel):
@@ -520,16 +421,6 @@ class IntegrateCodebookPreviewRequest(_StrippingModel):
             if not re.match(_COMPARISON_SCHEMA_PATTERN, ref or ""):
                 raise ValueError(f"Invalid comparison reference: {ref!r}")
         return value
-
-
-class IntegrateCodebookPreviewResponse(BaseModel):
-    """Job result read back from ``GET /api/jobs/{id}``."""
-
-    proposals: list[MergedCodeProposal] = []
-    partial: bool = False
-    partial_error: Optional[str] = None
-    batches_processed: Optional[dict[str, int]] = None
-    batches_total: Optional[dict[str, int]] = None
 
 
 class IntegrateCodebookRequest(_StrippingModel):
@@ -697,8 +588,6 @@ class CodingRowUpdate(_StrippingModel):
 
     item_id: str = Field(min_length=1)
     entries: list[CodingEntryIn] = Field(default_factory=list)
-
-
 
 
 class CodebookCodeIn(_StrippingModel):

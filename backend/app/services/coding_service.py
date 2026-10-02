@@ -413,8 +413,7 @@ async def duplicate_coding(
     ``version_service.fork_lineage``'s docstring for why), its own
     submissions/comments rows (``raw_data_repo.copy_all_rows``), its
     ``coding_entries`` (``coding_repo.copy_entries``), its project links,
-    and its lineage (``version_service.fork_lineage``, replacing the old
-    ``FileDependency``-era ``_clone_file_dependencies``).
+    and its lineage (``version_service.fork_lineage``).
 
     ``from_version_no=None`` (the default) forks from the current head.
     Passing a version number instead forks from that point in history --

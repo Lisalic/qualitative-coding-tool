@@ -25,17 +25,6 @@ class TestGetContextLength:
         assert context_window.get_context_length("not/a/real-model") == 32_000
 
 
-class TestEstimateTokens:
-    def test_chars_over_four(self) -> None:
-        assert context_window.estimate_tokens("a" * 400) == 100
-
-    def test_empty_string(self) -> None:
-        assert context_window.estimate_tokens("") == 0
-
-    def test_none_treated_as_empty(self) -> None:
-        assert context_window.estimate_tokens(None) == 0
-
-
 class TestMaxPromptChars:
     def test_splits_window_into_scaffold_output_and_utilized_input(self, monkeypatch) -> None:
         monkeypatch.setattr(context_window, "get_context_length", lambda model: 10_000)

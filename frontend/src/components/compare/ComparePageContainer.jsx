@@ -21,7 +21,6 @@ const CONFIG_BY_MODE = {
     validationMessage: "Select two codebooks to compare",
     viewPath: "/codebook-comparison-view",
     viewStateKey: "selected",
-    usesJobPolling: true,
   },
   coding: {
     title: "Compare Coding",
@@ -38,7 +37,6 @@ const CONFIG_BY_MODE = {
     validationMessage: "Select two codings to compare",
     viewPath: "/coding-comparison-view",
     viewStateKey: "selectedCodedData",
-    usesJobPolling: true,
   },
 };
 
@@ -75,7 +73,6 @@ export default function ComparePageContainer({
     fieldBName: config.fieldBName,
     initialA,
     validationMessage: config.validationMessage,
-    usesJobPolling: config.usesJobPolling,
   });
 
   return (

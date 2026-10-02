@@ -1,6 +1,6 @@
 """Tests for backend/app/api/utils.py.
 
-Covers: normalize_schema, is_proj_schema, get_user_id_from_request,
+Covers: normalize_schema, get_user_id_from_request,
 _hash_password, _verify_password.
 
 Two of these tests (test_bearer_with_no_token_* and
@@ -18,7 +18,7 @@ from backend.app.api.utils import (
     _verify_password,
     get_user_id_from_request,
 )
-from backend.app.core.schema_guard import is_proj_schema, normalize_schema
+from backend.app.core.schema_guard import normalize_schema
 
 
 # ---------------------------------------------------------------------------
@@ -56,47 +56,6 @@ class TestNormalizeSchema:
 
     def test_does_not_validate_structure(self) -> None:
         assert normalize_schema("'; DROP TABLE x--") == "'; DROP TABLE x--"
-
-
-# ---------------------------------------------------------------------------
-# is_proj_schema
-# ---------------------------------------------------------------------------
-
-
-class TestIsProjSchema:
-    @pytest.mark.parametrize(
-        "name",
-        ["proj_a", "proj_A9", "proj__", "proj_0", "proj_" + "a" * 500],
-    )
-    def test_valid_names(self, name: str) -> None:
-        assert is_proj_schema(name) is True
-
-    @pytest.mark.parametrize("name", [None, ""])
-    def test_none_and_empty_are_false(self, name) -> None:
-        assert is_proj_schema(name) is False
-
-    def test_bare_prefix_with_no_suffix_is_false(self) -> None:
-        # The `+` quantifier requires at least one trailing char.
-        assert is_proj_schema("proj_") is False
-
-    def test_trailing_newline_hole(self) -> None:
-        # Classic Python-regex `$`-matches-before-trailing-newline gap.
-        assert is_proj_schema("proj_a\n") is True
-        assert is_proj_schema("proj_a\nx") is False
-
-    def test_case_sensitive_prefix(self) -> None:
-        assert is_proj_schema("PROJ_a") is False
-        assert is_proj_schema("Proj_a") is False
-
-    def test_leading_whitespace_rejected(self) -> None:
-        assert is_proj_schema(" proj_a") is False
-
-    @pytest.mark.parametrize("name", ["proj_a-b", "proj_a.db", "proj_a b"])
-    def test_disallowed_characters_rejected(self, name: str) -> None:
-        assert is_proj_schema(name) is False
-
-    def test_ascii_only_character_class(self) -> None:
-        assert is_proj_schema("proj_é") is False
 
 
 # ---------------------------------------------------------------------------

@@ -125,7 +125,6 @@ See [tools/projects.md](tools/projects.md).
 
 | Method | Path | Body | Response |
 |---|---|---|---|
-| POST | `/api/save-comparison/` | `content`, `title` (required), `description`, `file_type` (default `"comparison"`), `project_id`, `parent_file_ids` (JSON array of ints) | `{message, file_id, schema_name}` |
 | POST | `/api/save-summary/` | `content`, `name` (required), `description`, `project_id` | `{message, file: {id, schema_name, filename}}` |
 | GET | `/api/summary/{summary_id}` | — | `{"summary": {content, display_name, description}}` |
 

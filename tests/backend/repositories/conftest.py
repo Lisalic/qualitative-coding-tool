@@ -1,7 +1,7 @@
 """Shared helpers for repository tests -- builds directly on the
 ``async_sqlite_engine`` fixture from ``tests/conftest.py`` (same
 ``async_sessionmaker(async_sqlite_engine, expire_on_commit=False)``
-pattern already used in ``tests/backend/test_databasemanager.py``), just
+pattern used throughout the suite), just
 factored out to avoid repeating it in every test file.
 """
 

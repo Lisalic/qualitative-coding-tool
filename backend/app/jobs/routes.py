@@ -26,6 +26,7 @@ def _isoformat(value: Any) -> str | None:
 async def get_batch_estimate(
     model: str = Query(..., description="OpenRouter model slug"),
     item_count: int = Query(1, ge=1, description="Number of items or batches"),
+    user_id: int = Depends(require_user_id),
 ) -> dict[str, Any]:
     """Provide conservative pre-run cost and duration estimates (QC-005)."""
     return estimate_batch_cost(model, item_count)

@@ -751,19 +751,11 @@ class TestIntegrateCodebookRoute:
 
 
 # ---------------------------------------------------------------------------
-# content_routes.py -- save-comparison / save-summary / summary/{id}
+# content_routes.py -- save-summary / summary/{id}
 # ---------------------------------------------------------------------------
 
 
-class TestSaveComparisonAndSummaryAuth:
-    def test_save_comparison_requires_auth_before_any_db_work(self, client) -> None:
-        # No AsyncDatabaseManager/engine patch needed: with a sentinel
-        # Postgres DATABASE_URL, a call that reaches the DB would hang or
-        # error loudly -- getting a clean 401 here proves auth is checked
-        # first for this route (unlike generate-codebook above).
-        resp = client.post("/api/save-comparison/", data={"content": "x", "title": "t"})
-        assert resp.status_code == 401
-
+class TestSaveSummaryAuth:
     def test_save_summary_requires_auth_before_content_check(self, client) -> None:
         # Non-empty content: httpx's TestClient drops empty-string form
         # fields entirely when encoding `data=`, so an actually-empty

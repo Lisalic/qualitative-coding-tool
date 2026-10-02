@@ -3,7 +3,6 @@ from backend.app.core.exceptions import (
     ForbiddenError,
     NotFoundError,
     UnauthorizedError,
-    UpstreamServiceError,
     ValidationAppError,
 )
 
@@ -23,9 +22,6 @@ class TestStatusCodes:
 
     def test_validation_is_400(self) -> None:
         assert ValidationAppError("x").status_code == 400
-
-    def test_upstream_service_is_502(self) -> None:
-        assert UpstreamServiceError("x").status_code == 502
 
 
 class TestMessage:
