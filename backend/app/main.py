@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
 
 from backend.app import ai_models
 from backend.app.api import routes
@@ -62,6 +63,19 @@ app = FastAPI(title="Qualitative Coding API", lifespan=lifespan)
 @app.exception_handler(AppError)
 async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
     return JSONResponse({"error": exc.message}, status_code=exc.status_code)
+
+
+@app.exception_handler(IntegrityError)
+async def integrity_error_handler(request: Request, exc: IntegrityError) -> JSONResponse:
+    """A unique/foreign-key constraint caught a conflicting write -- almost
+    always two requests racing (a double-click, two tabs). The client gets
+    a 409 it can act on, not a 500 echoing the SQL.
+    """
+    logger.warning("Integrity error on %s %s: %s", request.method, request.url.path, exc.orig)
+    return JSONResponse(
+        {"error": "That change conflicts with data saved at the same moment. Refresh and try again."},
+        status_code=409,
+    )
 
 app.add_middleware(
     CORSMiddleware,

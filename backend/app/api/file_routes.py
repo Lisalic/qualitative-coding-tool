@@ -1,5 +1,4 @@
 import json
-import traceback
 
 from fastapi import APIRouter, File as FastAPIFile, HTTPException, UploadFile, Form, Depends, Request
 from fastapi.responses import JSONResponse
@@ -7,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.schemas import DeleteRowsRequest
 from backend.app.core.auth_dependency import optional_user_id, require_user_id
-from backend.app.core.exceptions import AppError
 from backend.app.database import get_async_db
 from backend.app.services import file_service
 
@@ -27,7 +25,7 @@ async def upload_zst_file(
     # Format validation stays here (pure request checks, no DB/IO), and
     # runs before auth -- matches the old handler's tested ordering
     # (a bad filename/data_type 400s even with no auth header).
-    if not file.filename.endswith('.zst'):
+    if not (file.filename or "").lower().endswith('.zst'):
         raise HTTPException(status_code=400, detail="File must be a .zst file")
 
     allowed = ("comments", "posts")
@@ -35,10 +33,7 @@ async def upload_zst_file(
         raise HTTPException(status_code=400, detail="data_type must be 'posts' or 'comments'")
     import_data_type = "submissions" if data_type == "posts" else data_type
 
-    try:
-        content = await file.read()
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to read uploaded file: {exc}")
+    content = await file.read()
 
     # Manual auth check (not `Depends(require_user_id)`): the guard
     # clauses above must fire before auth, which only holds if auth is
@@ -47,22 +42,19 @@ async def upload_zst_file(
     if not user_id:
         raise HTTPException(status_code=401, detail="Unauthenticated")
 
-    try:
-        file_rec, result = await file_service.upload_zst(
-            db,
-            user_id,
-            file_content=content,
-            filename=file.filename,
-            data_type=import_data_type,
-            name=name,
-            description=description,
-            project_id=project_id,
-        )
-    except (HTTPException, AppError):
-        raise
-    except Exception as exc:
-        traceback.print_exc()
-        return JSONResponse({"error": str(exc)}, status_code=500)
+    # No catch-all around service calls in this module: an unexpected
+    # error is FastAPI's plain 500 (logged with its traceback), never a
+    # response echoing the exception's text -- SQL, paths, row values.
+    file_rec, result = await file_service.upload_zst(
+        db,
+        user_id,
+        file_content=content,
+        filename=file.filename,
+        data_type=import_data_type,
+        name=name,
+        description=description,
+        project_id=project_id,
+    )
 
     return JSONResponse({
         "file_name": file.filename,
@@ -108,21 +100,16 @@ async def merge_databases(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid request body: {exc}") from exc
+        raise HTTPException(status_code=400, detail="Invalid request body") from exc
 
-    try:
-        _file_rec, result = await file_service.merge_databases(
-            db,
-            user_id,
-            source_schemas=db_list,
-            name=name,
-            description=description,
-            project_id=project_id,
-        )
-    except (HTTPException, AppError):
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    _file_rec, result = await file_service.merge_databases(
+        db,
+        user_id,
+        source_schemas=db_list,
+        name=name,
+        description=description,
+        project_id=project_id,
+    )
 
     return JSONResponse(result)
 
@@ -144,12 +131,7 @@ async def delete_database(
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    try:
-        filename = await file_service.delete_database(db, user_id, schema)
-    except (HTTPException, AppError):
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to delete file/schema: {exc}")
+    filename = await file_service.delete_database(db, user_id, schema)
 
     return JSONResponse({"message": f"File '{filename}' deleted"})
 
@@ -177,15 +159,9 @@ async def delete_rows(
     if payload.table not in ("submissions", "comments"):
         return JSONResponse({"error": "Invalid table"}, status_code=400)
 
-    try:
-        deleted = await file_service.delete_rows(
-            db, user_id, schemaname=schema, table=payload.table, row_ids=payload.row_ids
-        )
-    except AppError:
-        raise
-    except Exception as exc:
-        traceback.print_exc()
-        return JSONResponse({"error": str(exc)}, status_code=500)
+    deleted = await file_service.delete_rows(
+        db, user_id, schemaname=schema, table=payload.table, row_ids=payload.row_ids
+    )
 
     return JSONResponse({"deleted": deleted})
 
@@ -199,7 +175,9 @@ async def move_rows(
     """Move rows between file schemas."""
     try:
         body = await request.json()
-    except Exception:
+    except ValueError:
+        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+    if not isinstance(body, dict):
         return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
 
     source = (body.get("source_schema") or "").strip()
@@ -219,20 +197,14 @@ async def move_rows(
     if not isinstance(row_ids, list) or len(row_ids) == 0:
         return JSONResponse({"error": "row_ids must be a non-empty list"}, status_code=400)
 
-    try:
-        moved = await file_service.move_rows(
-            db,
-            user_id,
-            source_schema=source,
-            target_schema=target,
-            table=table,
-            row_ids=row_ids,
-        )
-    except AppError:
-        raise
-    except Exception as exc:
-        traceback.print_exc()
-        return JSONResponse({"error": str(exc)}, status_code=500)
+    moved = await file_service.move_rows(
+        db,
+        user_id,
+        source_schema=source,
+        target_schema=target,
+        table=table,
+        row_ids=row_ids,
+    )
 
     if moved == 0:
         return JSONResponse({"moved": 0, "message": "No matching rows found"})
