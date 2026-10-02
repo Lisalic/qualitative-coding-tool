@@ -1,3 +1,4 @@
+import re
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config
@@ -19,7 +20,13 @@ config = context.config
 
 # Single source of truth for the DB URL is backend/app/database.py (env
 # vars / backend/.env), not a separate value duplicated in alembic.ini.
-config.set_main_option("sqlalchemy.url", DATABASE_URL)
+# Pin the sync driver explicitly: a bare `postgresql://` resolves to
+# psycopg (v3) on SQLAlchemy >= 2.1, which isn't installed -- psycopg2-binary
+# is the sync driver in backend/requirements.txt.
+SYNC_DATABASE_URL = re.sub(
+    r"^postgres(?:ql)?(?:\+[^:/]+)?://", "postgresql+psycopg2://", DATABASE_URL.strip(), count=1
+)
+config.set_main_option("sqlalchemy.url", SYNC_DATABASE_URL)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

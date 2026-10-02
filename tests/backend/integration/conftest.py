@@ -59,7 +59,9 @@ def _admin_url_and_target_db() -> tuple[str, str]:
         base = f"postgresql://{auth}{pg_host}:{pg_port}/postgres"
 
     parts = urlsplit(base)
-    admin_url = urlunsplit((parts.scheme, parts.netloc, "/postgres", "", ""))
+    # Pin psycopg2: a bare `postgresql://` resolves to psycopg (v3) on
+    # SQLAlchemy >= 2.1, which isn't a project dependency.
+    admin_url = urlunsplit(("postgresql+psycopg2", parts.netloc, "/postgres", "", ""))
     target_db = f"qualitative_coding_tool_test_{uuid.uuid4().hex[:8]}"
     return admin_url, target_db
 

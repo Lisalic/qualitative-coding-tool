@@ -7,21 +7,21 @@ the fixed, indexed ``submissions``/``comments`` tables in
 ``backend/app/storage_models.py``, keyed by ``file_id``, via
 ``repositories/raw_data_repo.py``.
 
-Streaming-import decision (see ``upload_zst`` docstring): keeps
-``backend.scripts.import_db.stream_zst_to_postgres`` unchanged (still
-writes into a throwaway dynamic schema), then copies that schema's rows
-into the fixed tables and drops the now-redundant dynamic schema -- see
-the docstring for the reasoning (this was "option (b)" in the plan).
+Uploads stream straight into the fixed tables: ``upload_zst`` pulls row
+batches off ``backend.scripts.import_db.iter_zst_records`` on a worker
+thread and bulk-inserts them on the request's async session -- no
+per-upload landing schema.
 """
 
 from __future__ import annotations
 
 import asyncio
+import itertools
 import os
 import secrets
 import tempfile
 
-from sqlalchemy import delete, func, or_, select, text, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.exceptions import ForbiddenError, ValidationAppError
@@ -38,12 +38,12 @@ from backend.app.versioning_models import (
     RELATION_MERGED_FROM,
     ROLE_MERGE_INPUT,
 )
-from backend.scripts.import_db import stream_zst_to_postgres
+from backend.scripts.import_db import iter_zst_records
 
-# Columns read from the old dynamic per-upload schema (mirrors
-# `backend/scripts/migrate_to_fixed_tables.py`'s `_fetch_submissions`/
-# `_fetch_comments` -- everything except the generated `word_count`
-# column, which `raw_data_repo.bulk_insert_*` computes itself).
+_UPLOAD_BATCH_SIZE = 1000
+
+# Source columns of a raw row -- everything except `word_count`, which
+# `raw_data_repo.bulk_insert_*` computes itself.
 _SUBMISSION_SOURCE_COLUMNS = (
     "id", "subreddit", "title", "selftext", "author", "created_utc", "score", "num_comments",
 )
@@ -55,28 +55,6 @@ _COMMENT_SOURCE_COLUMNS = (
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
-
-
-async def _dynamic_table_exists(session: AsyncSession, schemaname: str, table: str) -> bool:
-    result = await session.execute(
-        text("SELECT to_regclass(:tbl)"), {"tbl": f'"{schemaname}"."{table}"'}
-    )
-    return result.scalar() is not None
-
-
-async def _fetch_dynamic_rows(
-    session: AsyncSession, schemaname: str, table: str, columns: tuple[str, ...]
-) -> list[dict]:
-    """Read every row of ``table`` out of the old dynamic schema
-    ``schemaname`` (raw SQL -- reading FROM the old per-artifact schemas
-    is still expected/fine, only writing into new ones is retired). Empty
-    list if the table doesn't exist in that schema.
-    """
-    if not await _dynamic_table_exists(session, schemaname, table):
-        return []
-    cols_sql = ", ".join(columns)
-    result = await session.execute(text(f'SELECT {cols_sql} FROM "{schemaname}"."{table}"'))
-    return [dict(row) for row in result.mappings().all()]
 
 
 async def _get_owned_file_by_schemaname(session: AsyncSession, schemaname: str, user_id: int) -> File:
@@ -95,16 +73,6 @@ async def _get_owned_file_by_schemaname(session: AsyncSession, schemaname: str, 
     if file_rec is None:
         raise ForbiddenError("File not found or not owned by user")
     return file_rec
-
-
-async def _drop_dynamic_schema(session: AsyncSession, schemaname: str) -> None:
-    """Drop a throwaway per-upload dynamic schema after its rows have
-    been copied into the fixed tables. Split out as its own function (as
-    opposed to inlining the ``text(...)`` call) purely so unit tests can
-    monkeypatch it -- it's Postgres-only DDL, unrunnable against the
-    in-memory SQLite engine the non-integration test suite uses.
-    """
-    await session.execute(text(f'DROP SCHEMA IF EXISTS "{schemaname}" CASCADE'))
 
 
 async def _upsert_file_table_count(session: AsyncSession, file_id: int, table: str, row_count: int) -> None:
@@ -130,7 +98,6 @@ async def upload_zst(
     file_content: bytes,
     filename: str,
     data_type: str,
-    subreddits: list[str] | None,
     name: str | None,
     description: str | None,
     project_id: int | None,
@@ -143,22 +110,9 @@ async def upload_zst(
     submissions/comments mapping and the ``.zst``/JSON/data_type format
     checks stay in the route (pure request validation, no DB/IO).
 
-    Streaming-import decision: **option (b)** from the plan --
-    ``stream_zst_to_postgres`` is left untouched, still writing into a
-    throwaway ``CREATE SCHEMA IF NOT EXISTS "proj_<hex>"`` (it has its own
-    batching/memory-management already tuned for large files; rewriting
-    it to write the fixed tables directly, inside a background thread,
-    would mean either handing it an ``AsyncSession`` across a thread
-    boundary -- not safe -- or a second, parallel sync-write path into the
-    fixed tables, doubling the surface area for a script this plan
-    otherwise doesn't need to touch). After streaming completes, this
-    function reads that throwaway schema's rows back out (still-cheap raw
-    SQL, same technique ``migrate_to_fixed_tables.py`` uses to read FROM
-    old dynamic schemas) and bulk-copies them into the fixed tables for
-    this upload's ``file_id`` via ``raw_data_repo.bulk_insert_*``. The
-    throwaway schema is then dropped -- once copied, nothing else ever
-    reads it, so leaving it around would just be schema-sprawl for a
-    schema that was never anything but a landing pad.
+    Parsing (decompression + JSON) is blocking, so each batch of
+    ``_UPLOAD_BATCH_SIZE`` rows is pulled off ``iter_zst_records`` on a
+    worker thread; the insert itself runs on this async session.
     """
     base_name = name if name is not None else filename.replace(".zst", "")
     schema_name = f"proj_{secrets.token_hex(6)}"
@@ -196,22 +150,19 @@ async def upload_zst(
             tmp.write(file_content)
             tmp_path = tmp.name
 
-        inserted_counts = await asyncio.to_thread(
-            stream_zst_to_postgres, tmp_path, schema_name, data_type, subreddits, 1000,
+        records = iter_zst_records(tmp_path, data_type)
+        bulk_insert = (
+            raw_data_repo.bulk_insert_submissions
+            if data_type == "submissions"
+            else raw_data_repo.bulk_insert_comments
         )
+        inserted = 0
+        while batch := await asyncio.to_thread(list, itertools.islice(records, _UPLOAD_BATCH_SIZE)):
+            inserted += await bulk_insert(session, file_rec.id, batch)
 
-        if inserted_counts.get("submissions", 0) > 0:
-            rows = await _fetch_dynamic_rows(session, schema_name, "submissions", _SUBMISSION_SOURCE_COLUMNS)
-            copied = await raw_data_repo.bulk_insert_submissions(session, file_rec.id, rows)
-            await _upsert_file_table_count(session, file_rec.id, "submissions", copied)
-
-        if inserted_counts.get("comments", 0) > 0:
-            rows = await _fetch_dynamic_rows(session, schema_name, "comments", _COMMENT_SOURCE_COLUMNS)
-            copied = await raw_data_repo.bulk_insert_comments(session, file_rec.id, rows)
-            await _upsert_file_table_count(session, file_rec.id, "comments", copied)
-
-        # Drop the now-redundant throwaway schema (see docstring).
-        await _drop_dynamic_schema(session, schema_name)
+        inserted_counts[data_type] = inserted
+        if inserted:
+            await _upsert_file_table_count(session, file_rec.id, data_type, inserted)
         await session.commit()
     finally:
         if tmp_path:
@@ -238,9 +189,8 @@ async def _fetch_fixed_rows(
     session: AsyncSession, file_id: int, table: str, columns: tuple[str, ...]
 ) -> list[dict]:
     """Read the source columns of ``table`` (``submissions``/``comments``)
-    out of the fixed tables for ``file_id``, mirroring
-    ``_fetch_dynamic_rows``'s column set/shape so ``_merge_table_into_target``
-    doesn't need to know which storage a row came from.
+    out of the fixed tables for ``file_id``, as plain dicts ready for
+    ``raw_data_repo.bulk_insert_*``.
     """
     model = Submission if table == "submissions" else Comment
     cols = [getattr(model, c) for c in columns]
@@ -358,10 +308,7 @@ async def merge_databases(
 
     Each ``source_schemas`` entry is resolved to a ``raw_data`` file
     *owned by* ``user_id`` via ``file_repo.get_owned_file`` before it's
-    read -- fixes a pre-existing gap (see known-issues.md #5) where rows
-    were read from any ``proj_*``-prefixed schema regardless of ownership,
-    with only the resulting ``FileDependency`` link ownership-scoped. A
-    source naming a file the caller doesn't own (or that doesn't exist)
+    read. A source naming a file the caller doesn't own (or that doesn't exist)
     now raises ``NotFoundError`` instead of silently contributing no rows.
 
     Returns ``(None, response_dict)`` -- not a ``File`` -- for the
@@ -475,8 +422,7 @@ async def delete_database(session: AsyncSession, user_id: int, file_ref: str) ->
     in the subset matching its ``file_type``, so deleting from all of
     them is simplest and harmless).
 
-    Ordering matters for the new tables in a way it didn't for the old
-    single ``FileDependency`` table: a FORK's v1 ``ArtifactVersion`` can
+    Ordering matters: a FORK's v1 ``ArtifactVersion`` can
     point cross-file at this file's head (``parent_version_id`` -- see
     ``versioning_models.ArtifactVersion``'s docstring for why), so any
     such pointer must be nulled out before this file's own versions are

@@ -22,7 +22,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-pytestmark = pytest.mark.usefixtures("override_db")
 
 
 def _auth_headers(make_token, sub="1"):

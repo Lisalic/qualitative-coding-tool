@@ -20,10 +20,9 @@ connection is ever reused across requests/loops.
 from urllib.parse import urlsplit, urlunsplit
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 
-from backend.app.database import get_async_db, get_db
+from backend.app.database import get_async_db
 from backend.app.main import app as fastapi_app
 
 
@@ -32,21 +31,12 @@ def test_register_login_create_project_flow(integration_sync_engine, integration
     async_url = urlunsplit(("postgresql+asyncpg", parts.netloc, parts.path, "", ""))
     async_engine = create_async_engine(async_url, poolclass=NullPool)
 
-    SyncSession = sessionmaker(bind=integration_sync_engine, expire_on_commit=False)
     AsyncSession = async_sessionmaker(async_engine, expire_on_commit=False)
-
-    def _get_db():
-        db = SyncSession()
-        try:
-            yield db
-        finally:
-            db.close()
 
     async def _get_async_db():
         async with AsyncSession() as session:
             yield session
 
-    fastapi_app.dependency_overrides[get_db] = _get_db
     fastapi_app.dependency_overrides[get_async_db] = _get_async_db
     try:
         from fastapi.testclient import TestClient
@@ -76,5 +66,4 @@ def test_register_login_create_project_flow(integration_sync_engine, integration
         assert create_resp.status_code == 200
         assert create_resp.json()["project"]["projectname"] == "Integration Project"
     finally:
-        fastapi_app.dependency_overrides.pop(get_db, None)
         fastapi_app.dependency_overrides.pop(get_async_db, None)

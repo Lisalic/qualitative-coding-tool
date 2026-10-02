@@ -17,7 +17,6 @@ router = APIRouter()
 @router.post("/upload-zst/")
 async def upload_zst_file(
     file: UploadFile = FastAPIFile(...),
-    subreddits: str = Form(None),
     data_type: str = Form(...),
     name: str = Form(None),
     description: str = Form(None),
@@ -27,16 +26,9 @@ async def upload_zst_file(
 ):
     # Format validation stays here (pure request checks, no DB/IO), and
     # runs before auth -- matches the old handler's tested ordering
-    # (a bad filename/subreddits/data_type 400s even with no auth header).
+    # (a bad filename/data_type 400s even with no auth header).
     if not file.filename.endswith('.zst'):
         raise HTTPException(status_code=400, detail="File must be a .zst file")
-
-    subreddit_list = None
-    if subreddits:
-        try:
-            subreddit_list = json.loads(subreddits)
-        except json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="Invalid subreddits format")
 
     allowed = ("comments", "posts")
     if data_type not in allowed:
@@ -62,7 +54,6 @@ async def upload_zst_file(
             file_content=content,
             filename=file.filename,
             data_type=import_data_type,
-            subreddits=subreddit_list,
             name=name,
             description=description,
             project_id=project_id,
@@ -74,7 +65,6 @@ async def upload_zst_file(
         return JSONResponse({"error": str(exc)}, status_code=500)
 
     return JSONResponse({
-        "status": "completed",
         "file_name": file.filename,
         "authenticated": True,
         **result,

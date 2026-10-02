@@ -34,13 +34,12 @@ from unittest.mock import MagicMock  # noqa: E402
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
-from sqlalchemy import create_engine, event  # noqa: E402
+from sqlalchemy import event  # noqa: E402
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
-from sqlalchemy.orm import Session, sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
 from backend.app.auth import create_access_token  # noqa: E402
-from backend.app.database import Base, Project, User, get_async_db, get_db  # noqa: E402
+from backend.app.database import Base, Project, User, get_async_db  # noqa: E402
 from backend.app.main import app as fastapi_app  # noqa: E402
 
 
@@ -74,50 +73,6 @@ def client() -> Iterator[TestClient]:
     triggers it -- verified empirically with a lifespan that raises.
     """
     yield TestClient(fastapi_app)
-
-
-@pytest.fixture()
-def sqlite_engine():
-    """Fresh in-memory SQLite database per test, standing in for the
-    relational metadata tables (``users``, ``projects``, ``files``, ...).
-    ``StaticPool`` keeps one connection alive across ``Session()`` calls
-    within a single test so ``:memory:`` data isn't lost between queries.
-    """
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    _enable_sqlite_foreign_keys(engine)
-    Base.metadata.create_all(engine)
-    try:
-        yield engine
-    finally:
-        engine.dispose()
-
-
-@pytest.fixture()
-def db_session(sqlite_engine) -> Iterator[Session]:
-    SessionLocal = sessionmaker(bind=sqlite_engine, expire_on_commit=False)
-    session = SessionLocal()
-    try:
-        yield session
-    finally:
-        session.close()
-
-
-@pytest.fixture()
-def override_db(db_session: Session) -> Iterator[Session]:
-    """Install a ``get_db`` override that always yields ``db_session``."""
-
-    def _get_db():
-        yield db_session
-
-    fastapi_app.dependency_overrides[get_db] = _get_db
-    try:
-        yield db_session
-    finally:
-        fastapi_app.dependency_overrides.pop(get_db, None)
 
 
 @pytest.fixture()
@@ -186,20 +141,6 @@ async def override_async_db(async_sqlite_engine) -> AsyncIterator[None]:
         yield
     finally:
         fastapi_app.dependency_overrides.pop(get_async_db, None)
-
-
-@pytest.fixture()
-def patch_async_database_manager(monkeypatch, async_sqlite_engine):
-    """Some routes (e.g. ``list_projects``, ``save_comparison``) construct
-    ``AsyncDatabaseManager()`` directly instead of going through
-    ``Depends(get_async_db)``, so ``app.dependency_overrides`` can't reach
-    them. ``AsyncDatabaseManager.__aenter__`` calls the module-level
-    ``AsyncSessionLocal`` imported into ``backend.app.databasemanager`` --
-    patch that name to a sessionmaker bound to the in-memory SQLite engine.
-    """
-    SessionLocal = async_sessionmaker(async_sqlite_engine, expire_on_commit=False)
-    monkeypatch.setattr("backend.app.databasemanager.AsyncSessionLocal", SessionLocal)
-    return SessionLocal
 
 
 @pytest.fixture()

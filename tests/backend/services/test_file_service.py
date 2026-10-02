@@ -5,15 +5,10 @@ in-memory async SQLite session (`async_sqlite_engine` from
 `tests/conftest.py`) -- pure ORM operations on the fixed tables, no
 Postgres-only SQL involved.
 
-`upload_zst` involves both real `.zst` streaming and raw SQL reads from
-the throwaway dynamic Postgres schema `stream_zst_to_postgres` writes
-into (`to_regclass`, quoted dynamic schema names) that SQLite can't run
--- that's mocked at the `stream_zst_to_postgres` / `_fetch_dynamic_rows`
-/ `_drop_dynamic_schema` boundary here for fast, deterministic unit
-coverage. Real end-to-end coverage of the dynamic-schema read/drop path
-is intentionally left to the opt-in integration suite
-(`tests/backend/integration/`), since it needs a real Postgres to create
-the throwaway dynamic schema in the first place.
+`upload_zst` parses the upload with `import_db.iter_zst_records` and
+bulk-inserts straight into the fixed tables, so it also runs against the
+SQLite fixture -- fed plain NDJSON bytes (the parser reads uncompressed
+text before falling back to zstd).
 
 `merge_databases` reads its sources from the fixed `submissions`/
 `comments` tables by `file_id` (ownership-checked via
@@ -414,46 +409,35 @@ class TestMoveRows:
 
 
 # ---------------------------------------------------------------------------
-# upload_zst -- mocked at the streaming / dynamic-schema-read boundary
+# upload_zst -- real parsing, straight into the fixed tables
 # ---------------------------------------------------------------------------
 
 
+def _ndjson(*records: dict) -> bytes:
+    import json
+
+    return "\n".join(json.dumps(r) for r in records).encode()
+
+
 class TestUploadZst:
-    async def test_happy_path_copies_streamed_rows_into_fixed_tables(
-        self, session_factory, monkeypatch
-    ) -> None:
-        def _fake_stream(tmp_path, schema_name, data_type, subreddit_filter, batch_size):
-            assert schema_name.startswith("proj_")
-            assert data_type == "submissions"
-            return {"submissions": 2, "comments": 0}
-
-        async def _fake_fetch(session, schemaname, table, columns):
-            assert table == "submissions"
-            return [
-                {"id": "a", "subreddit": "s", "title": "t1", "selftext": "x", "author": "u",
-                 "created_utc": 1, "score": 1, "num_comments": 0},
-                {"id": "b", "subreddit": "s", "title": "t2", "selftext": "y", "author": "u",
-                 "created_utc": 2, "score": 2, "num_comments": 0},
-            ]
-
-        dropped = []
-
-        async def _fake_drop(session, schemaname):
-            dropped.append(schemaname)
-
-        monkeypatch.setattr(file_service, "stream_zst_to_postgres", _fake_stream)
-        monkeypatch.setattr(file_service, "_fetch_dynamic_rows", _fake_fetch)
-        monkeypatch.setattr(file_service, "_drop_dynamic_schema", _fake_drop)
+    async def test_happy_path_inserts_parsed_rows_into_fixed_tables(self, session_factory) -> None:
+        content = _ndjson(
+            {"id": "a", "subreddit": "s", "title": "t1", "selftext": "x", "author": "u",
+             "created_utc": 1, "score": 1, "num_comments": 0},
+            {"id": "b", "subreddit": "s", "title": "t2", "selftext": "y", "author": "u",
+             "created_utc": 2, "score": 2, "num_comments": 0},
+            {"id": "a", "subreddit": "s", "title": "dup", "selftext": "z"},
+            {"id": "c", "subreddit": "s", "title": "gone", "selftext": "[deleted]"},
+        ) + b"\nnot json\n"
 
         async with session_factory() as session:
             user = await _make_user(session)
 
             file_rec, result = await file_service.upload_zst(
                 session, user.id,
-                file_content=b"irrelevant-bytes",
+                file_content=content,
                 filename="dump.zst",
                 data_type="submissions",
-                subreddits=None,
                 name="My Upload",
                 description="desc",
                 project_id=None,
@@ -463,10 +447,9 @@ class TestUploadZst:
             assert file_rec.file_type == "raw_data"
             assert result["inserted_counts"] == {"submissions": 2, "comments": 0}
             assert result["schema_name"] == file_rec.schemaname
-            assert dropped == [file_rec.schemaname]
 
             rows = (await session.execute(select(Submission).where(Submission.file_id == file_rec.id))).scalars().all()
-            assert sorted(r.id for r in rows) == ["a", "b"]
+            assert sorted((r.id, r.title) for r in rows) == [("a", "t1"), ("b", "t2")]
 
             ft = (
                 await session.execute(
@@ -475,49 +458,51 @@ class TestUploadZst:
             ).scalar_one()
             assert ft.row_count == 2
 
-    async def test_default_name_strips_zst_suffix(self, session_factory, monkeypatch) -> None:
-        async def _fake_fetch(*args, **kwargs):
-            return []
-
-        async def _fake_drop(*args, **kwargs):
-            return None
-
-        monkeypatch.setattr(
-            file_service, "stream_zst_to_postgres",
-            lambda *a, **k: {"submissions": 0, "comments": 0},
+    async def test_comments_strip_link_prefix(self, session_factory) -> None:
+        content = _ndjson(
+            {"id": "c1", "subreddit": "s", "body": "hello", "author": "u",
+             "link_id": "t3_abc", "parent_id": "t3_abc"},
         )
-        monkeypatch.setattr(file_service, "_fetch_dynamic_rows", _fake_fetch)
-        monkeypatch.setattr(file_service, "_drop_dynamic_schema", _fake_drop)
-
         async with session_factory() as session:
             user = await _make_user(session)
-            file_rec, _result = await file_service.upload_zst(
+            file_rec, result = await file_service.upload_zst(
                 session, user.id,
-                file_content=b"x",
+                file_content=content,
+                filename="c.zst",
+                data_type="comments",
+                name=None,
+                description=None,
+                project_id=None,
+            )
+            assert result["inserted_counts"] == {"submissions": 0, "comments": 1}
+            row = (await session.execute(select(Comment).where(Comment.file_id == file_rec.id))).scalar_one()
+            assert row.link_id == "abc"
+            assert row.word_count == 1
+
+    async def test_default_name_strips_zst_suffix(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_rec, result = await file_service.upload_zst(
+                session, user.id,
+                file_content=b"",
                 filename="reddit-dump.zst",
                 data_type="submissions",
-                subreddits=None,
                 name=None,
                 description=None,
                 project_id=None,
             )
             assert file_rec.filename == "reddit-dump"
+            assert result["inserted_counts"] == {"submissions": 0, "comments": 0}
 
-    async def test_project_not_found_raises(self, session_factory, monkeypatch) -> None:
-        monkeypatch.setattr(
-            file_service, "stream_zst_to_postgres",
-            lambda *a, **k: {"submissions": 0, "comments": 0},
-        )
-
+    async def test_project_not_found_raises(self, session_factory) -> None:
         async with session_factory() as session:
             user = await _make_user(session)
             with pytest.raises(NotFoundError):
                 await file_service.upload_zst(
                     session, user.id,
-                    file_content=b"x",
+                    file_content=b"",
                     filename="x.zst",
                     data_type="submissions",
-                    subreddits=None,
                     name="n",
                     description=None,
                     project_id=999999,

@@ -36,8 +36,6 @@ export default function FileUpload({ onUploadSuccess }) {
   const [loading, setLoading] = useState(false);
   const [createdFile, setCreatedFile] = useState(null);
   const [error, setError] = useState("");
-  const [subredditInput, setSubredditInput] = useState("");
-  const [subredditTags, setSubredditTags] = useState([]);
   const [dataType, setDataType] = useState("posts");
   const [customName, setCustomName] = useState("");
   const [description, setDescription] = useState("");
@@ -55,29 +53,6 @@ export default function FileUpload({ onUploadSuccess }) {
       setError("Please select a .zst file");
       setFile(null);
     }
-  };
-
-  const handleAddSubreddit = (e) => {
-    if (e.key === "Enter" || e.key === ",") {
-      e.preventDefault();
-      const value = subredditInput.trim().replace(/,\s*$/, "");
-      if (value && !subredditTags.includes(value.toLowerCase())) {
-        setSubredditTags([...subredditTags, value.toLowerCase()]);
-        setSubredditInput("");
-      }
-    }
-  };
-
-  const handleAddSubredditClick = () => {
-    const value = subredditInput.trim();
-    if (value && !subredditTags.includes(value.toLowerCase())) {
-      setSubredditTags([...subredditTags, value.toLowerCase()]);
-      setSubredditInput("");
-    }
-  };
-
-  const handleRemoveSubreddit = (index) => {
-    setSubredditTags(subredditTags.filter((_, i) => i !== index));
   };
 
   const handleSubmit = async (e) => {
@@ -105,11 +80,6 @@ export default function FileUpload({ onUploadSuccess }) {
     try {
       const formData = new FormData();
       formData.append("file", file);
-
-      if (subredditTags.length > 0) {
-        formData.append("subreddits", JSON.stringify(subredditTags));
-      }
-
       formData.append("data_type", dataType);
       formData.append("name", customName.trim());
       if (description && description.trim()) {
@@ -145,8 +115,6 @@ export default function FileUpload({ onUploadSuccess }) {
       setCreatedFile(data);
 
       setFile(null);
-      setSubredditTags([]);
-      setSubredditInput("");
       setDataType("posts");
       setCustomName("");
       setDescription("");
@@ -293,57 +261,6 @@ export default function FileUpload({ onUploadSuccess }) {
                   </label>
                 </div>
               </div>
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="subreddit-input" className="text-sm">
-                Filter by Subreddits (optional)
-              </label>
-              <div className="flex gap-2">
-                <input
-                  id="subreddit-input"
-                  type="text"
-                  placeholder="Enter subreddit name..."
-                  value={subredditInput}
-                  onChange={(e) => setSubredditInput(e.target.value)}
-                  disabled={loading}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      handleAddSubredditClick();
-                    }
-                  }}
-                  className={`${inputClasses} flex-1`}
-                />
-                <button
-                  type="button"
-                  onClick={handleAddSubredditClick}
-                  disabled={loading || !subredditInput.trim()}
-                  className={btnClasses}
-                >
-                  Add
-                </button>
-              </div>
-              {subredditTags.length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {subredditTags.map((tag, index) => (
-                    <span
-                      key={index}
-                      className="flex items-center gap-1.5 border border-paper px-2.5 py-1 text-sm"
-                    >
-                      {tag}
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveSubreddit(index)}
-                        className="text-paper/70 hover:text-paper"
-                        aria-label={`Remove ${tag}`}
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
             </div>
           </Panel>
 

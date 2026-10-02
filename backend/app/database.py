@@ -11,9 +11,8 @@ from sqlalchemy import (
     ForeignKey,
     DateTime,
     Table,
-    create_engine,
 )
-from sqlalchemy.orm import relationship, sessionmaker
+from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.ext.asyncio import (
     AsyncAttrs,
@@ -75,10 +74,6 @@ def _sync_url_to_asyncpg(sync_url: str) -> tuple[str, dict[str, Any]]:
 
 ASYNC_DATABASE_URL, _async_connect_args = _sync_url_to_asyncpg(DATABASE_URL)
 
-# Create SQLAlchemy engine and session factory (sync — scripts and incremental migration)
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
-
 async_engine = create_async_engine(
     ASYNC_DATABASE_URL,
     pool_pre_ping=True,
@@ -95,17 +90,8 @@ AsyncSessionLocal = async_sessionmaker(
 Base = declarative_base(cls=AsyncAttrs)
 
 
-def get_db():
-    """Yield a SQLAlchemy session for FastAPI dependency injection."""
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
 async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
-    """Async session for FastAPI; callers commit/rollback explicitly (matches get_db).
+    """Async session for FastAPI; callers commit/rollback explicitly.
 
     Catches ``BaseException``, not just ``Exception``: a cancelled request
     (client disconnect) raises ``asyncio.CancelledError``/``GeneratorExit``

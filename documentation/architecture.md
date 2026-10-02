@@ -139,9 +139,8 @@ Three more revisions shrink `artifact_versions` itself, in sequence: `e7a3d1c9b4
 
 `d1f4a8c2e6b9` ("artifact_assists + coding_entries.coder") adds the AI-assist provenance channel described above (GAP-4/avenues B1, C2 in `documentation/research/qualitative-coding-landscape-and-expansion.md`): `coding_entries.coder`/`coder_model` (`server_default='human'`, since every entry that existed before this revision was written by a human edit or an already-accepted recode indistinguishable from one) and the new `artifact_assists` table. No backfill beyond the column default — the proposal/accept state that would distinguish an old row's true origin was never persisted before this revision, so there is nothing truthful to reconstruct.
 
-One-off scripts relate to storage migrations:
+Old dynamic per-artifact schemas (`proj_*`/`cmp_*`/`sum_*`) from before the fixed-table move may still exist in a given database; nothing reads them, and they can be dropped by hand with `DROP SCHEMA … CASCADE`.
 
-- `backend/scripts/drop_migrated_schemas.py` — irreversible `DROP SCHEMA` for already-migrated schemas; dry-run by default, requires `--confirm`.
 (`backfill_codebook_codes.py`, referenced by the docstrings of `c2e58b41d7af`/`d4f97a2c6e1b` as the manual step between them, has been removed — it read `files.systemprompt`/`userprompt` and `artifact_content`, all of which `d4f97a2c6e1b` itself drops, so it could only ever run in the window between those two revisions. That window is closed on every real database, and a fresh database has nothing to backfill.)
 
 (`migrate_to_fixed_tables.py`, the original dynamic-schema-to-fixed-table backfill, has been removed — its job was already done on every real database, and its target table, `artifact_content`, no longer exists after the version-spine cutover.)

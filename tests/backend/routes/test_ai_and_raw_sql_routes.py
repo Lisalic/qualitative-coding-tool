@@ -22,7 +22,6 @@ module's job-kickoff pattern.
 
 import pytest
 
-pytestmark = pytest.mark.usefixtures("override_db")
 
 
 # ---------------------------------------------------------------------------

@@ -83,14 +83,6 @@ class TestUploadZst:
         assert resp.status_code == 400
         assert ".zst" in resp.json()["detail"]
 
-    def test_invalid_subreddits_json_returns_400(self, client) -> None:
-        resp = client.post(
-            "/api/upload-zst/",
-            files={"file": ("data.zst", b"x", "application/octet-stream")},
-            data={"data_type": "posts", "subreddits": "{not json", "project_id": "1"},
-        )
-        assert resp.status_code == 400
-
     def test_invalid_data_type_returns_400(self, client) -> None:
         resp = client.post(
             "/api/upload-zst/",
