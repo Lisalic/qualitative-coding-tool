@@ -2,7 +2,6 @@ from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
-from sqlalchemy import text
 
 from alembic import context
 
@@ -10,7 +9,7 @@ from alembic import context
 # `target_metadata` reflects the full schema for autogenerate. Mirrors the
 # same reasoning as the storage_models import in backend/app/main.py.
 from backend.app.database import Base  # noqa: E402
-from backend.app.core.migrations import sync_database_url  # noqa: E402
+from backend.app.core.migrations import lock_for_migrations, sync_database_url  # noqa: E402
 from backend.app import storage_models  # noqa: E402,F401
 from backend.app import versioning_models  # noqa: E402,F401
 from backend.app.jobs import models as jobs_models  # noqa: E402,F401
@@ -33,10 +32,6 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
-
-# Arbitrary app-wide key for the Postgres advisory lock that serializes
-# concurrent upgrades (see run_migrations_online).
-MIGRATION_LOCK_KEY = 7_206_001
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
@@ -71,10 +66,15 @@ def run_migrations_offline() -> None:
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode.
 
-    In this scenario we need to create an Engine
-    and associate a connection with the context.
-
+    The app's startup upgrade (``backend/app/core/migrations.py``) hands
+    over its own connection, already inside its transaction and holding
+    the migration lock; the CLI path opens one and takes the lock here.
     """
+    connection = config.attributes.get("connection")
+    if connection is not None:
+        _run_migrations(connection)
+        return
+
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
@@ -82,21 +82,17 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        if connection.dialect.name == "postgresql":
-            # The app upgrades on every startup, and an overlapping deploy
-            # can boot a new container before the old one stops. Session-
-            # level, so it outlives the commit and is released when the
-            # connection closes; the second upgrader then finds head
-            # already applied.
-            connection.execute(text("SELECT pg_advisory_lock(:key)"), {"key": MIGRATION_LOCK_KEY})
-            connection.commit()
+        lock_for_migrations(connection)
+        _run_migrations(connection)
 
-        context.configure(
-            connection=connection, target_metadata=target_metadata
-        )
 
-        with context.begin_transaction():
-            context.run_migrations()
+def _run_migrations(connection) -> None:
+    context.configure(
+        connection=connection, target_metadata=target_metadata
+    )
+
+    with context.begin_transaction():
+        context.run_migrations()
 
 
 if context.is_offline_mode():

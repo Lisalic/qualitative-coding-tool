@@ -500,25 +500,102 @@ class TestStartupUpgrade:
         assert app_logger.disabled is False
 
 
-def _untracked_state(db_url: str, *, empty_version_table: bool = False) -> None:
-    """A database `create_all` built and Alembic never tracked -- production's
-    real shape: no revision, `users` missing the column added since, a table
-    added since, and a column the code no longer has.
+# The schema drift production's startup logged on 2026-10-02 (sorted): a
+# database `create_all` built and Alembic never tracked. `_prod_replica`
+# must reproduce it exactly.
+PRODUCTION_DRIFT = [
+    'add_column coding_entries.code_uid VARCHAR NOT NULL',
+    'add_column coding_entries.coder VARCHAR NOT NULL has-default',
+    'add_column coding_entries.coder_model VARCHAR',
+    'add_column coding_entries.end_offset INTEGER NOT NULL',
+    'add_column coding_entries.id INTEGER NOT NULL',
+    'add_column coding_entries.notes TEXT',
+    'add_column coding_entries.quote TEXT NOT NULL',
+    'add_column coding_entries.row_type VARCHAR NOT NULL has-default',
+    'add_column coding_entries.start_offset INTEGER NOT NULL',
+    'add_column coding_entries.valid_from INTEGER NOT NULL has-default',
+    'add_column coding_entries.valid_to INTEGER',
+    'add_column comments.pk INTEGER NOT NULL',
+    'add_column comments.valid_from INTEGER NOT NULL has-default',
+    'add_column comments.valid_to INTEGER',
+    'add_column jobs.accounting JSON',
+    'add_column jobs.progress JSON',
+    'add_column jobs.salvaged_output JSON',
+    'add_column submissions.pk INTEGER NOT NULL',
+    'add_column submissions.valid_from INTEGER NOT NULL has-default',
+    'add_column submissions.valid_to INTEGER',
+    'add_column users.password_reset_requested_at DATETIME',
+    'add_index idx_coding_entries_file_id_code_uid on coding_entries(file_id, code_uid)',
+    'add_index idx_coding_entries_file_id_coder on coding_entries(file_id, coder)',
+    'add_index idx_coding_entries_file_id_row on coding_entries(file_id, row_type, post_id)',
+    'add_index idx_coding_entries_live on coding_entries(file_id, valid_to)',
+    'add_index idx_comments_live on comments(file_id, valid_to)',
+    'add_index idx_submissions_live on submissions(file_id, valid_to)',
+    'add_index uq_comments_file_id_id_live on comments(file_id, id) unique',
+    'add_index uq_submissions_file_id_id_live on submissions(file_id, id) unique',
+    'remove_column coding_entries.evidence TEXT',
+    'remove_column files.systemprompt VARCHAR',
+    'remove_column files.userprompt VARCHAR',
+    'remove_table artifact_content (file_id INTEGER NOT NULL, content TEXT NOT NULL, created_at TIMESTAMP)',
+    'remove_table file_dependencies (id INTEGER NOT NULL, child_file_id INTEGER NOT NULL, parent_file_id INTEGER NOT NULL, created_at TIMESTAMP)',
+]
+
+
+def _prod_replica(alembic_config, db_url: str, *, empty_version_table: bool = False) -> None:
+    """Production's schema, rebuilt: the chain only ever reached
+    `8b0a568ce28c`, every later table came from `create_all` in its final
+    shape, and Alembic's own bookkeeping is gone. Seeded with accounts and
+    with rows in the tables that get dropped.
     """
+    from backend.app.api.utils import _hash_password
     from backend.app.database import Base
     from backend.app import storage_models, versioning_models  # noqa: F401
     from backend.app.jobs import models as jobs_models  # noqa: F401
 
+    command.upgrade(alembic_config, "8b0a568ce28c")
     engine = create_engine(db_url)
     try:
         Base.metadata.create_all(engine)
         with engine.begin() as conn:
-            conn.execute(text("ALTER TABLE users DROP COLUMN password_reset_requested_at"))
-            conn.execute(text("DROP TABLE starred_quotes"))
-            conn.execute(text("ALTER TABLE files ADD COLUMN legacy_note TEXT NOT NULL DEFAULT ''"))
-            conn.execute(text("ALTER TABLE files ALTER COLUMN legacy_note DROP DEFAULT"))
+            conn.execute(text("DROP TABLE alembic_version"))
             if empty_version_table:
                 conn.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
+            conn.execute(
+                text("INSERT INTO users (id, email, hashed_password) VALUES (5, 'ana@x.com', :a), (9, 'bo@x.com', :b)"),
+                {"a": _hash_password("ana-pass"), "b": _hash_password("bo-pass")},
+            )
+            conn.execute(text("INSERT INTO projects (id, user_id, projectname, description) VALUES (3, 5, 'Thesis', 'ch. 2')"))
+            conn.execute(text("INSERT INTO prompts (id, user_id, promptname, prompt, type) VALUES (7, 9, 'P', 'Find themes', 'filter')"))
+            conn.execute(text(
+                "INSERT INTO files (id, user_id, filename, schemaname, file_type, systemprompt) "
+                "VALUES (11, 5, 'dump.zst', 'proj_ab12', 'raw_data', 'old')"
+            ))
+            conn.execute(text("INSERT INTO project_files (project_id, file_id) VALUES (3, 11)"))
+            conn.execute(text("INSERT INTO submissions (file_id, id, title) VALUES (11, 's1', 'One'), (11, 's2', 'Two')"))
+            conn.execute(text("INSERT INTO coding_entries (file_id, post_id, code, evidence) VALUES (11, 's1', 'Trust', 'x')"))
+            conn.execute(text("INSERT INTO artifact_content (file_id, content) VALUES (11, 'old blob')"))
+    finally:
+        engine.dispose()
+
+
+def _drift(db_url: str) -> list[str]:
+    from backend.app.core.migrations import _describe
+    from backend.app.database import Base
+
+    engine = create_engine(db_url)
+    try:
+        with engine.connect() as conn:
+            diffs = compare_metadata(MigrationContext.configure(conn), Base.metadata)
+    finally:
+        engine.dispose()
+    return sorted(_describe(c) for d in diffs for c in (d if isinstance(d, list) else [d]))
+
+
+def _rows(db_url: str, sql: str) -> list[tuple]:
+    engine = create_engine(db_url)
+    try:
+        with engine.begin() as conn:
+            return [tuple(r) for r in conn.execute(text(sql)).all()]
     finally:
         engine.dispose()
 
@@ -531,56 +608,120 @@ def _public_tables(db_url: str) -> set[str]:
         engine.dispose()
 
 
-class TestUntrackedSchema:
-    """`upgrade_to_head` against a schema Alembic never tracked: report the
-    drift, change nothing (running the chain from base would fail on the
-    first `CREATE TABLE users`).
+_KEPT_ROWS_SQL = {
+    "users": "SELECT id, email, hashed_password, created_at FROM users ORDER BY id",
+    "projects": "SELECT id, user_id, projectname, description, created_at FROM projects ORDER BY id",
+    "prompts": "SELECT id, user_id, promptname, prompt, type FROM prompts ORDER BY id",
+}
+
+
+class TestUntrackedSchemaRebuild:
+    """`upgrade_to_head` against production's real shape: a schema Alembic
+    never tracked. Rebuilt at head, keeping users/projects/prompts.
     """
 
+    def test_replica_matches_production(self, alembic_config, alembic_db_url):
+        _prod_replica(alembic_config, alembic_db_url)
+        assert _drift(alembic_db_url) == PRODUCTION_DRIFT
+
     @pytest.mark.parametrize("empty_version_table", [False, True])
-    def test_reports_drift_and_changes_nothing(
+    def test_rebuilds_at_head_keeping_accounts(
         self, alembic_config, alembic_db_url, caplog, empty_version_table
     ):
         import logging
 
         from backend.app.core.migrations import upgrade_to_head
 
-        _untracked_state(alembic_db_url, empty_version_table=empty_version_table)
-        tables_before = _public_tables(alembic_db_url)
-        # Other tests here go through `alembic.ini`, whose fileConfig
-        # disables existing loggers.
-        logging.getLogger("backend.app.core.migrations").disabled = False
-
-        with caplog.at_level(logging.ERROR, logger="backend.app.core.migrations"):
+        _prod_replica(alembic_config, alembic_db_url, empty_version_table=empty_version_table)
+        kept_before = {t: _rows(alembic_db_url, q) for t, q in _KEPT_ROWS_SQL.items()}
+        # `_prod_replica` ran Alembic through `alembic.ini`, whose fileConfig
+        # replaces the root handlers (caplog's included) and disables
+        # existing loggers -- capture on the module's own logger instead.
+        migrations_logger = logging.getLogger("backend.app.core.migrations")
+        migrations_logger.disabled = False
+        migrations_logger.addHandler(caplog.handler)
+        try:
             upgrade_to_head()
+        finally:
+            migrations_logger.removeHandler(caplog.handler)
 
-        messages = [r.getMessage() for r in caplog.records if r.name == "backend.app.core.migrations"]
-        assert any("no Alembic revision" in m for m in messages), messages
-        drift = sorted(m for m in messages if m.startswith("Schema drift: ") and "estimated rows" not in m)
-        assert drift == [
-            "Schema drift: add_column users.password_reset_requested_at DATETIME",
-            "Schema drift: add_index idx_starred_quotes_user_file on starred_quotes(user_id, file_id)",
-            "Schema drift: add_table starred_quotes (id INTEGER NOT NULL, user_id INTEGER NOT NULL, "
-            "file_id INTEGER NOT NULL, row_type VARCHAR NOT NULL, post_id VARCHAR NOT NULL, "
-            "code_uid VARCHAR NOT NULL, start_offset INTEGER NOT NULL, end_offset INTEGER NOT NULL, "
-            "created_at DATETIME NOT NULL)",
-            "Schema drift: remove_column files.legacy_note TEXT NOT NULL",
-        ]
-        assert any("estimated rows" in m and "users=" in m for m in messages)
+        assert _version(alembic_db_url) == "a7c3e5f19b20"
+        assert _drift(alembic_db_url) == []
+        assert {t: _rows(alembic_db_url, q) for t, q in _KEPT_ROWS_SQL.items()} == kept_before
+        assert kept_before["users"] and kept_before["projects"] and kept_before["prompts"]
+        for table in ("files", "project_files", "submissions", "coding_entries"):
+            assert _rows(alembic_db_url, f"SELECT count(*) FROM {table}") == [(0,)]
+        assert not {"artifact_content", "file_dependencies"} & _public_tables(alembic_db_url)
+        assert any("Rebuilt the untracked database schema" in r.getMessage() for r in caplog.records)
+
+        # Sequences continue past the restored ids.
+        assert _rows(
+            alembic_db_url,
+            "INSERT INTO users (email, hashed_password) VALUES ('new@x.com', 'x') RETURNING id",
+        ) == [(10,)]
+
+    def test_a_failure_leaves_the_database_untouched(self, alembic_config, alembic_db_url, monkeypatch):
+        from backend.app.core import migrations
+
+        _prod_replica(alembic_config, alembic_db_url)
+        tables_before = _public_tables(alembic_db_url)
+        users_before = _rows(alembic_db_url, _KEPT_ROWS_SQL["users"])
+        real_upgrade = migrations.command.upgrade
+
+        def upgrade_then_fail(cfg, revision):
+            real_upgrade(cfg, revision)
+            raise RuntimeError("simulated failure after the schema was rebuilt")
+
+        monkeypatch.setattr(migrations.command, "upgrade", upgrade_then_fail)
+        with pytest.raises(RuntimeError, match="simulated failure"):
+            migrations.upgrade_to_head()
 
         assert _public_tables(alembic_db_url) == tables_before
-        assert "password_reset_requested_at" not in _user_columns(alembic_db_url)
+        assert _rows(alembic_db_url, _KEPT_ROWS_SQL["users"]) == users_before
+        assert _rows(alembic_db_url, "SELECT count(*) FROM submissions") == [(2,)]
+        assert _drift(alembic_db_url) == PRODUCTION_DRIFT
 
-    def test_empty_database_still_upgrades(self, alembic_config, alembic_db_url):
-        from backend.app.core.migrations import report_untracked_schema
+    def test_runs_once(self, alembic_config, alembic_db_url):
+        from backend.app.core.migrations import upgrade_to_head
 
-        assert report_untracked_schema() is False
+        _prod_replica(alembic_config, alembic_db_url)
+        upgrade_to_head()
+        _rows(
+            alembic_db_url,
+            "INSERT INTO files (user_id, filename, schemaname, file_type) "
+            "VALUES (5, 'after.zst', 'proj_cd34', 'raw_data') RETURNING id",
+        )
 
-    def test_tracked_database_is_not_reported(self, alembic_config, alembic_db_url):
-        from backend.app.core.migrations import report_untracked_schema
+        upgrade_to_head()
 
-        command.upgrade(alembic_config, "head")
-        assert report_untracked_schema() is False
+        assert _rows(alembic_db_url, "SELECT filename FROM files") == [("after.zst",)]
+
+    def test_concurrent_starts_rebuild_once(self, alembic_config, alembic_db_url):
+        import subprocess
+        import sys
+
+        _prod_replica(alembic_config, alembic_db_url)
+        env = {**os.environ, "DATABASE_URL": alembic_db_url}
+        script = (
+            "import logging; logging.basicConfig(level=logging.WARNING); "
+            "from backend.app.core.migrations import upgrade_to_head; upgrade_to_head()"
+        )
+        procs = [
+            subprocess.Popen(
+                [sys.executable, "-c", script],
+                cwd=REPO_ROOT,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+            for _ in range(4)
+        ]
+        outputs = [proc.communicate(timeout=180)[0].decode() for proc in procs]
+
+        assert [proc.returncode for proc in procs] == [0] * len(procs), "\n\n".join(outputs)
+        assert sum("Rebuilt the untracked database schema" in out for out in outputs) == 1, outputs
+        assert _version(alembic_db_url) == "a7c3e5f19b20"
+        assert [r[1] for r in _rows(alembic_db_url, _KEPT_ROWS_SQL["users"])] == ["ana@x.com", "bo@x.com"]
 
 
 def _free_port() -> int:
@@ -591,24 +732,24 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-class TestAppBootsOnProductionState:
-    def test_login_and_register_work_after_startup(self, alembic_config, alembic_db_url):
-        """Boot the real app the way Azure does (`python -m uvicorn
-        backend.app.main:app`) against the production-shaped database, then
-        hit the endpoints that 500'd: login (unknown and known user),
-        register, and /me.
-        """
+class _RunningApp:
+    """The real app, booted the way Azure does (`python -m uvicorn
+    backend.app.main:app`) against `db_url`.
+    """
+
+    def __init__(self, db_url: str):
+        self.db_url = db_url
+
+    def __enter__(self) -> str:
         import subprocess
         import sys
         import time
 
         import httpx
 
-        _production_state(alembic_config, alembic_db_url)
-
         port = _free_port()
-        env = {**os.environ, "DATABASE_URL": alembic_db_url, "JWT_SECRET_KEY": "integration-secret"}
-        proc = subprocess.Popen(
+        env = {**os.environ, "DATABASE_URL": self.db_url, "JWT_SECRET_KEY": "integration-secret"}
+        self.proc = subprocess.Popen(
             [sys.executable, "-m", "uvicorn", "backend.app.main:app", "--port", str(port)],
             cwd=REPO_ROOT,
             env=env,
@@ -616,32 +757,66 @@ class TestAppBootsOnProductionState:
             stderr=subprocess.STDOUT,
         )
         base = f"http://127.0.0.1:{port}"
-        try:
-            deadline = time.monotonic() + 60
-            while True:
-                assert proc.poll() is None, proc.stdout.read().decode()
-                try:
-                    if httpx.get(f"{base}/", timeout=1).status_code == 200:
-                        break
-                except httpx.HTTPError:
-                    pass
-                assert time.monotonic() < deadline, "app did not start within 60s"
-                time.sleep(0.25)
+        deadline = time.monotonic() + 60
+        while True:
+            assert self.proc.poll() is None, self.proc.stdout.read().decode()
+            try:
+                if httpx.get(f"{base}/", timeout=1).status_code == 200:
+                    return base
+            except httpx.HTTPError:
+                pass
+            assert time.monotonic() < deadline, "app did not start within 60s"
+            time.sleep(0.25)
 
+    def __exit__(self, *exc) -> None:
+        self.proc.terminate()
+        self.proc.wait(timeout=15)
+
+
+def _assert_auth_works(base: str) -> None:
+    import httpx
+
+    unknown = httpx.post(f"{base}/api/login/", json={"email": "nobody@x.com", "password": "pw"})
+    assert unknown.status_code == 401, unknown.text
+
+    registered = httpx.post(f"{base}/api/register/", json={"email": "new@x.com", "password": "secret123"})
+    assert registered.status_code == 200, registered.text
+
+    logged_in = httpx.post(f"{base}/api/login/", json={"email": "new@x.com", "password": "secret123"})
+    assert logged_in.status_code == 200, logged_in.text
+
+    token = logged_in.json()["access_token"]
+    me = httpx.get(f"{base}/api/me/", headers={"Authorization": f"Bearer {token}"})
+    assert me.status_code == 200, me.text
+
+
+class TestAppBootsOnProductionState:
+    def test_tracked_database_one_revision_behind(self, alembic_config, alembic_db_url):
+        """Stamped one revision short, with the table that deploy's
+        `create_all` made: login (unknown and known user), register, /me.
+        """
+        _production_state(alembic_config, alembic_db_url)
+
+        with _RunningApp(alembic_db_url) as base:
             assert _version(alembic_db_url) == "a7c3e5f19b20"
+            _assert_auth_works(base)
 
-            unknown = httpx.post(f"{base}/api/login/", json={"email": "nobody@x.com", "password": "pw"})
-            assert unknown.status_code == 401, unknown.text
+    def test_untracked_production_replica(self, alembic_config, alembic_db_url):
+        """Production's actual shape on 2026-10-02: an existing account
+        still logs in with its password after the rebuild, and the
+        features that write the rebuilt tables work.
+        """
+        import httpx
 
-            registered = httpx.post(f"{base}/api/register/", json={"email": "new@x.com", "password": "secret123"})
-            assert registered.status_code == 200, registered.text
+        _prod_replica(alembic_config, alembic_db_url)
 
-            logged_in = httpx.post(f"{base}/api/login/", json={"email": "new@x.com", "password": "secret123"})
-            assert logged_in.status_code == 200, logged_in.text
+        with _RunningApp(alembic_db_url) as base:
+            assert _version(alembic_db_url) == "a7c3e5f19b20"
+            _assert_auth_works(base)
 
-            token = logged_in.json()["access_token"]
-            me = httpx.get(f"{base}/api/me/", headers={"Authorization": f"Bearer {token}"})
-            assert me.status_code == 200, me.text
-        finally:
-            proc.terminate()
-            proc.wait(timeout=15)
+            ana = httpx.post(f"{base}/api/login/", json={"email": "ana@x.com", "password": "ana-pass"})
+            assert ana.status_code == 200, ana.text
+            headers = {"Authorization": f"Bearer {ana.json()['access_token']}"}
+            projects = httpx.get(f"{base}/api/projects/", headers=headers)
+            assert projects.status_code == 200, projects.text
+            assert [p["projectname"] for p in projects.json()["projects"]] == ["Thesis"]

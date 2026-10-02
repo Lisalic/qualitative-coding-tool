@@ -46,10 +46,7 @@ async def lifespan(app: FastAPI):
     except Exception:
         # Keep serving on the existing schema rather than crash-looping the
         # container; requests that need the missing schema fail on their own.
-        logger.exception(
-            "Database migration to Alembic head failed on startup. If this database "
-            "predates Alembic tracking, stamp its current revision with `alembic stamp`."
-        )
+        logger.exception("Database migration to Alembic head failed on startup; serving on the existing schema")
     reconciled = await reconcile_orphaned_jobs_on_startup()
     if reconciled > 0:
         logger.warning("Reconciled %d orphaned jobs on startup", reconciled)
