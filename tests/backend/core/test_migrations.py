@@ -19,7 +19,7 @@ class TestAlembicConfig:
     def test_points_at_the_repo_migration_chain(self) -> None:
         cfg = migrations.alembic_config()
         assert (migrations.ALEMBIC_DIR / "env.py").is_file()
-        assert ScriptDirectory.from_config(cfg).get_heads() == ["b8d4f2a6c1e7"]
+        assert ScriptDirectory.from_config(cfg).get_heads() == ["c3d9e7a2f1b4"]
 
     def test_has_no_ini_file_so_env_py_leaves_app_logging_alone(self) -> None:
         # env.py calls logging.config.fileConfig only when a file is set,

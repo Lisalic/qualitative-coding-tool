@@ -7,11 +7,11 @@ already passes around; these tables are looked up by ``file_id``
 (resolved from ``schemaname`` via ``repositories/file_repo.py``), not by
 a dynamic schema name spliced into SQL.
 
-``word_count`` on ``Submission``/``Comment`` is declared here as a plain
-``Integer`` for ORM/test purposes (SQLite has no equivalent of Postgres
-generated columns); the real ``GENERATED ALWAYS AS (...) STORED`` DDL is
-added by ``backend/alembic/versions/a1e6f2c9b3d7_baseline_untracked_schema.py``,
-matching the expression the old per-artifact-schema DDL used.
+``word_count`` on ``Submission``/``Comment`` is a plain ``Integer`` that
+the app fills in on every write (``raw_data_repo._word_count``), on
+Postgres and SQLite alike -- it was once a ``GENERATED ALWAYS`` column,
+which rejected those writes; see
+``backend/alembic/versions/c3d9e7a2f1b4_word_count_plain_column.py``.
 
 Artifact *content* no longer lives here: the old one-blob-per-file
 ``ArtifactContent`` table is gone (see

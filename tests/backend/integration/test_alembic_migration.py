@@ -24,16 +24,18 @@ genuinely empty database" untestable if this file reused them.
 
 from __future__ import annotations
 
+import json
 import os
 
 import pytest
+import zstandard as zstd
 from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, inspect, make_url, text
 
-from tests.backend.integration.conftest import _admin_url_and_target_db
+from tests.backend.integration.conftest import _admin_url_and_target_db, skip_or_fail_without_database
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
@@ -59,8 +61,8 @@ def alembic_db_url():
     try:
         with admin_engine.connect() as conn:
             conn.execute(text(f'CREATE DATABASE "{target_db}"'))
-    except Exception as exc:  # pragma: no cover - environment-dependent
-        pytest.skip(f"Could not create throwaway alembic-test database: {exc}")
+    except Exception as exc:  # noqa: BLE001 - environment-dependent setup failure skips the test
+        skip_or_fail_without_database(f"Could not create throwaway alembic-test database: {exc}")
     finally:
         admin_engine.dispose()
 
@@ -143,6 +145,20 @@ class TestUpgradeFromEmpty:
         assert {"coder", "coder_model"} <= coding_entries_columns
 
 
+def _word_count_generation(db_url: str) -> str:
+    engine = create_engine(db_url)
+    try:
+        with engine.connect() as conn:
+            return conn.execute(
+                text(
+                    "SELECT is_generated FROM information_schema.columns "
+                    "WHERE table_name = 'submissions' AND column_name = 'word_count'"
+                )
+            ).scalar_one()
+    finally:
+        engine.dispose()
+
+
 class TestDowngradeUpgradeRoundTrip:
     def test_downgrade_then_upgrade_round_trip(self, alembic_config, alembic_db_url):
         """`upgrade head` -> `downgrade base` -> `upgrade head` leaves the
@@ -179,18 +195,13 @@ class TestDowngradeUpgradeRoundTrip:
         when run all the way to base, not as a single step.
         """
         command.upgrade(alembic_config, "head")
-        # Head is b8d4f2a6c1e7 (unique index on lower(users.email)).
-        # Downgrading 1 step must drop that index.
+        # Head is c3d9e7a2f1b4 (word_count becomes a plain column).
+        # Downgrading 1 step must make it generated again.
         command.downgrade(alembic_config, "-1")
-
-        engine = create_engine(alembic_db_url)
-        try:
-            indexes_after_downgrade = {i["name"] for i in inspect(engine).get_indexes("users")}
-        finally:
-            engine.dispose()
-        assert "uq_users_email_lower" not in indexes_after_downgrade
+        assert _word_count_generation(alembic_db_url) == "ALWAYS"
 
         command.upgrade(alembic_config, "head")
+        assert _word_count_generation(alembic_db_url) == "NEVER"
 
         engine = create_engine(alembic_db_url)
         try:
@@ -245,57 +256,109 @@ class TestSchemaMatchesOrmMetadata:
         assert not unexpected, f"Unallowed schema drift after upgrade head: {unexpected}"
 
 
-class TestGeneratedWordCountColumn:
-    def test_word_count_is_a_generated_column(self, alembic_config, alembic_db_url):
-        """`storage_models.py`'s module docstring claims `word_count` is
-        backed by a real Postgres `GENERATED ALWAYS AS (...) STORED`
-        column -- before `a1e6f2c9b3d7` this was aspirational (no
-        revision ever wrote that DDL). Assert it's actually true, and
-        that the expression actually computes.
+class TestEmailIndexRevision:
+    def _users_at_previous_revision(self, alembic_config, alembic_db_url, emails):
+        command.upgrade(alembic_config, "a7c3e5f19b20")
+        engine = create_engine(alembic_db_url)
+        try:
+            with engine.begin() as conn:
+                for email in emails:
+                    conn.execute(
+                        text("INSERT INTO users (email, hashed_password) VALUES (:e, 'x')"), {"e": email}
+                    )
+        finally:
+            engine.dispose()
+
+    def test_lowercases_existing_emails(self, alembic_config, alembic_db_url):
+        self._users_at_previous_revision(alembic_config, alembic_db_url, ["Ana@X.com ", "bo@x.com"])
+        command.upgrade(alembic_config, "head")
+        engine = create_engine(alembic_db_url)
+        try:
+            with engine.connect() as conn:
+                emails = conn.execute(text("SELECT email FROM users ORDER BY email")).scalars().all()
+        finally:
+            engine.dispose()
+        assert emails == ["ana@x.com", "bo@x.com"]
+
+    def test_names_case_duplicate_accounts_instead_of_failing_on_the_constraint(
+        self, alembic_config, alembic_db_url
+    ):
+        self._users_at_previous_revision(alembic_config, alembic_db_url, ["Foo@x.com", "foo@x.com"])
+        with pytest.raises(RuntimeError, match=r"foo@x\.com \(2 accounts\)"):
+            command.upgrade(alembic_config, "head")
+        assert _version(alembic_db_url) == "a7c3e5f19b20"
+
+
+class TestWordCountColumn:
+    def test_word_count_is_a_plain_column(self, alembic_config, alembic_db_url):
+        """`c3d9e7a2f1b4` turns `word_count` from `GENERATED ALWAYS` into a
+        plain column the app fills in -- a generated column rejects the
+        app's explicit writes.
         """
         command.upgrade(alembic_config, "head")
 
         engine = create_engine(alembic_db_url)
         try:
             with engine.connect() as conn:
-                result = conn.execute(
-                    text(
-                        "SELECT column_name, generation_expression "
-                        "FROM information_schema.columns "
-                        "WHERE table_name = 'submissions' "
-                        "  AND column_name = 'word_count'"
-                    )
-                ).one()
-                assert result[0] == "word_count"
-                assert result[1] is not None
-                assert "regexp_replace" in result[1] or "regexp_split_to_array" in result[1]
-
-                user_id = conn.execute(
-                    text("INSERT INTO users (email, hashed_password) VALUES ('gen@x.com', 'x') RETURNING id")
-                ).scalar_one()
-                file_id = conn.execute(
-                    text(
-                        "INSERT INTO files (filename, schemaname, file_type, user_id) "
-                        "VALUES ('f', 'raw_f', 'raw_data', :u) RETURNING id"
-                    ),
-                    {"u": user_id},
-                ).scalar_one()
-                sub_id = conn.execute(
-                    text(
-                        "INSERT INTO submissions (file_id, id, title, selftext, valid_from) "
-                        "VALUES (:f, 'sub_1', 'One two three', 'four five', 1) RETURNING pk"
-                    ),
-                    {"f": file_id},
-                ).scalar_one()
-
-                count = conn.execute(
-                    text("SELECT word_count FROM submissions WHERE pk = :pk"),
-                    {"pk": sub_id},
-                ).scalar_one()
-                assert count == 5, f"word_count didn't compute as expected: got {count}"
-                conn.commit()
+                for table in ("submissions", "comments"):
+                    is_generated = conn.execute(
+                        text(
+                            "SELECT is_generated FROM information_schema.columns "
+                            "WHERE table_name = :t AND column_name = 'word_count'"
+                        ),
+                        {"t": table},
+                    ).scalar_one()
+                    assert is_generated == "NEVER", f"{table}.word_count is still generated"
         finally:
             engine.dispose()
+
+    async def test_app_writes_rows_on_a_migrated_schema(self, alembic_config, alembic_db_url):
+        """Uploads and row copies set `word_count` explicitly; on the
+        migrated schema (what production runs) they must succeed. The
+        unit suite can't see this -- it builds SQLite via `create_all`.
+        """
+        from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+
+        from backend.app.repositories import raw_data_repo
+        from backend.app.storage_models import Comment, Submission
+
+        command.upgrade(alembic_config, "head")
+
+        engine = create_async_engine(make_url(alembic_db_url).set(drivername="postgresql+asyncpg"))
+        try:
+            async with AsyncSession(engine) as session:
+                user_id = (
+                    await session.execute(
+                        text("INSERT INTO users (email, hashed_password) VALUES ('wc@x.com', 'x') RETURNING id")
+                    )
+                ).scalar_one()
+                source_id, target_id = [
+                    (
+                        await session.execute(
+                            text(
+                                "INSERT INTO files (filename, schemaname, file_type, user_id) "
+                                "VALUES (:n, :n, 'raw_data', :u) RETURNING id"
+                            ),
+                            {"n": name, "u": user_id},
+                        )
+                    ).scalar_one()
+                    for name in ("proj_src", "proj_dst")
+                ]
+
+                await raw_data_repo.bulk_insert_submissions(
+                    session, source_id, [{"id": "s1", "title": "One two three", "selftext": "four\nfive"}]
+                )
+                await raw_data_repo.bulk_insert_comments(session, source_id, [{"id": "c1", "body": "  six seven "}])
+                await raw_data_repo.copy_all_rows(session, source_file_id=source_id, target_file_id=target_id)
+                await session.commit()
+
+                for model, expected in ((Submission, 5), (Comment, 2)):
+                    counts = (
+                        await session.execute(text(f"SELECT file_id, word_count FROM {model.__tablename__}"))
+                    ).all()
+                    assert sorted(counts) == [(source_id, expected), (target_id, expected)]
+        finally:
+            await engine.dispose()
 
 
 class TestExistingDatabaseNoOp:
@@ -325,7 +388,7 @@ class TestExistingDatabaseNoOp:
                 current = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
         finally:
             engine.dispose()
-        assert current == "b8d4f2a6c1e7", "expected upgrade head to stay at stamped head"
+        assert current == "c3d9e7a2f1b4", "expected upgrade head to stay at stamped head"
 
 
 def _version(db_url: str) -> str:
@@ -379,9 +442,9 @@ class TestStartupUpgrade:
         from backend.app.core.migrations import upgrade_to_head
 
         upgrade_to_head()
-        assert _version(alembic_db_url) == "b8d4f2a6c1e7"
+        assert _version(alembic_db_url) == "c3d9e7a2f1b4"
         upgrade_to_head()
-        assert _version(alembic_db_url) == "b8d4f2a6c1e7"
+        assert _version(alembic_db_url) == "c3d9e7a2f1b4"
 
     def test_recovers_the_production_state(self, alembic_config, alembic_db_url):
         from sqlalchemy import select
@@ -394,7 +457,7 @@ class TestStartupUpgrade:
 
         upgrade_to_head()
 
-        assert _version(alembic_db_url) == "b8d4f2a6c1e7"
+        assert _version(alembic_db_url) == "c3d9e7a2f1b4"
         assert "password_reset_requested_at" in _user_columns(alembic_db_url)
         # The exact query production 500'd on.
         engine = create_engine(alembic_db_url)
@@ -422,7 +485,7 @@ class TestStartupUpgrade:
 
         upgrade_to_head()
 
-        assert _version(alembic_db_url) == "b8d4f2a6c1e7"
+        assert _version(alembic_db_url) == "c3d9e7a2f1b4"
 
     def test_concurrent_upgrades_are_serialized(self, alembic_config, alembic_db_url):
         """Two containers booting at once (an overlapping deploy) must not
@@ -448,7 +511,7 @@ class TestStartupUpgrade:
         outputs = [proc.communicate(timeout=120)[0].decode() for proc in procs]
 
         assert [proc.returncode for proc in procs] == [0] * len(procs), "\n\n".join(outputs)
-        assert _version(alembic_db_url) == "b8d4f2a6c1e7"
+        assert _version(alembic_db_url) == "c3d9e7a2f1b4"
 
     def test_password_with_url_encoded_characters(self, alembic_config, alembic_db_url, monkeypatch):
         """Production's password percent-encodes to a URL full of `%`, which
@@ -478,7 +541,7 @@ class TestStartupUpgrade:
 
             upgrade_to_head()
 
-            assert _version(alembic_db_url) == "b8d4f2a6c1e7"
+            assert _version(alembic_db_url) == "c3d9e7a2f1b4"
         finally:
             with admin.connect() as conn:
                 conn.execute(text(f"DROP OWNED BY {role}"))
@@ -646,7 +709,7 @@ class TestUntrackedSchemaRebuild:
         finally:
             migrations_logger.removeHandler(caplog.handler)
 
-        assert _version(alembic_db_url) == "b8d4f2a6c1e7"
+        assert _version(alembic_db_url) == "c3d9e7a2f1b4"
         assert _drift(alembic_db_url) == []
         assert {t: _rows(alembic_db_url, q) for t, q in _KEPT_ROWS_SQL.items()} == kept_before
         assert kept_before["users"] and kept_before["projects"] and kept_before["prompts"]
@@ -721,7 +784,7 @@ class TestUntrackedSchemaRebuild:
 
         assert [proc.returncode for proc in procs] == [0] * len(procs), "\n\n".join(outputs)
         assert sum("Rebuilt the untracked database schema" in out for out in outputs) == 1, outputs
-        assert _version(alembic_db_url) == "b8d4f2a6c1e7"
+        assert _version(alembic_db_url) == "c3d9e7a2f1b4"
         assert [r[1] for r in _rows(alembic_db_url, _KEPT_ROWS_SQL["users"])] == ["ana@x.com", "bo@x.com"]
 
 
@@ -799,7 +862,7 @@ class TestAppBootsOnProductionState:
         _production_state(alembic_config, alembic_db_url)
 
         with _RunningApp(alembic_db_url) as base:
-            assert _version(alembic_db_url) == "b8d4f2a6c1e7"
+            assert _version(alembic_db_url) == "c3d9e7a2f1b4"
             _assert_auth_works(base)
 
     def test_untracked_production_replica(self, alembic_config, alembic_db_url):
@@ -812,7 +875,7 @@ class TestAppBootsOnProductionState:
         _prod_replica(alembic_config, alembic_db_url)
 
         with _RunningApp(alembic_db_url) as base:
-            assert _version(alembic_db_url) == "b8d4f2a6c1e7"
+            assert _version(alembic_db_url) == "c3d9e7a2f1b4"
             _assert_auth_works(base)
 
             ana = httpx.post(f"{base}/api/login/", json={"email": "ana@x.com", "password": "ana-pass"})
@@ -821,3 +884,14 @@ class TestAppBootsOnProductionState:
             projects = httpx.get(f"{base}/api/projects/", headers=headers)
             assert projects.status_code == 200, projects.text
             assert [p["projectname"] for p in projects.json()["projects"]] == ["Thesis"]
+
+            records = b"\n".join(
+                json.dumps({"id": f"p{i}", "title": "Title", "selftext": "one two three"}).encode() for i in range(3)
+            )
+            upload = httpx.post(
+                f"{base}/api/upload-zst/",
+                headers=headers,
+                data={"data_type": "posts", "name": "Upload", "project_id": "3"},
+                files={"file": ("dump.zst", zstd.ZstdCompressor().compress(records))},
+            )
+            assert upload.status_code == 200, upload.text

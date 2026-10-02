@@ -39,6 +39,16 @@ def pytest_collection_modifyitems(items):
             item.add_marker(pytest.mark.integration)
 
 
+def skip_or_fail_without_database(reason: str) -> None:
+    """Skip when no Postgres is available -- unless ``REQUIRE_INTEGRATION_DB``
+    is set (CI sets it), where a skip would let a broken database service
+    pass the whole suite silently.
+    """
+    if os.environ.get("REQUIRE_INTEGRATION_DB"):
+        pytest.fail(reason)
+    pytest.skip(reason)
+
+
 def _admin_url_and_target_db() -> tuple[str, str]:
     """Derive an admin connection URL (targeting the default `postgres`
     maintenance DB) and a fresh, disposable target database name, from
@@ -76,8 +86,8 @@ def integration_db_url():
     try:
         with admin_engine.connect() as conn:
             conn.execute(text(f'CREATE DATABASE "{target_db}"'))
-    except Exception as exc:  # pragma: no cover - environment-dependent
-        pytest.skip(f"Could not create throwaway integration database: {exc}")
+    except Exception as exc:  # noqa: BLE001 - environment-dependent setup failure skips the suite
+        skip_or_fail_without_database(f"Could not create throwaway integration database: {exc}")
     finally:
         admin_engine.dispose()
 
