@@ -19,7 +19,7 @@ A `/**...*/` block above an exported component/hook/function states its purpose 
 
 ## Backend layering
 
-- Entry point `backend/app/main.py` mounts every router under `/api` (see `backend/app/api/routes.py`) and creates ORM tables on startup via `Base.metadata.create_all` (convenience/tests only — real schema changes go through Alembic, see [Migrations](#migrations)).
+- Entry point `backend/app/main.py` mounts every router under `/api` (see `backend/app/api/routes.py`) and on startup upgrades the database to Alembic head (`backend/app/core/migrations.py`, see [Migrations](#migrations)).
 - Domain routers live in `backend/app/api/*_routes.py`, one per feature area (auth, files, prompts, codebooks, coding, data, projects, content, models) plus `backend/app/jobs/routes.py`. Every route is uniformly async: `Depends(get_async_db)` for DB access, `Depends(require_user_id)` for auth.
 - Routes stay thin and delegate to `backend/app/services/<domain>_service.py`, which in turn uses `backend/app/repositories/` for DB access and `backend/scripts/*.py` for pipeline/LLM logic.
 - New layers introduced by the recent storage refactor, all under `backend/app/`:
@@ -129,7 +129,7 @@ Not every version owns a `codebook_codes` row set of its own. v1, the 3 most rec
 
 ## Migrations
 
-Alembic is used for schema changes (`alembic.ini` at repo root, `backend/alembic/`, revisions under `backend/alembic/versions/`). `Base.metadata.create_all` still runs at startup for convenience and in tests, but any real schema change goes through a new Alembic revision.
+Alembic is used for schema changes (`alembic.ini` at repo root, `backend/alembic/`, revisions under `backend/alembic/versions/`). The app runs `alembic upgrade head` on every startup (`main.py`'s lifespan → `backend/app/core/migrations.py::upgrade_to_head`), so deploying a revision also applies it; `backend/alembic/env.py` takes a Postgres advisory lock first so overlapping containers don't race, and a failed upgrade is logged while the app keeps serving on the existing schema. Startup no longer runs `Base.metadata.create_all`, which only created missing tables and let a new column reach production code before the production database; unit tests still use it for their SQLite schema. Any real schema change goes through a new Alembic revision.
 
 Revision `a1e6f2c9b3d7` ("baseline untracked schema") is the root of the chain and exists purely so `alembic upgrade head` works against a genuinely empty database — before it, most tables (`users`, `projects`, `files`, `file_tables`, `project_files`, a since-removed `file_dependencies`, `prompts`, `submissions`, `comments`, a since-removed `artifact_content`, `coding_entries`) had never actually been created by any revision, only by `create_all`, so the chain silently depended on that convenience path having already run. **No operator action is needed on any existing database** — a database already stamped past this point in history sees the new root as already-satisfied and `alembic upgrade head` is a no-op for it; only a fresh/empty database exercises this revision's DDL. See its module docstring for the full story, including how a Postgres-only `sa.Computed(...)` column now makes the `word_count` generated-column claim in `backend/app/storage_models.py` actually true.
 

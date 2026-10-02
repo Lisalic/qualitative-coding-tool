@@ -23,6 +23,11 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # The deploy that shipped this revision still built tables with
+    # `create_all` at startup, which created `starred_quotes` before any
+    # migration ran -- adopt that table instead of failing on a duplicate.
+    if sa.inspect(op.get_bind()).has_table('starred_quotes'):
+        return
     op.create_table(
         'starred_quotes',
         sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),

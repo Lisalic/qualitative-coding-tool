@@ -22,6 +22,11 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # Production 500'd on every `users` query until this column existed, and
+    # the stopgap was adding it by hand -- tolerate that rather than fail.
+    columns = {c['name'] for c in sa.inspect(op.get_bind()).get_columns('users')}
+    if 'password_reset_requested_at' in columns:
+        return
     op.add_column(
         'users',
         sa.Column('password_reset_requested_at', sa.DateTime(timezone=True), nullable=True),

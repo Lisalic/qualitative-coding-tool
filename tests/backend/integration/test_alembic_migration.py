@@ -326,3 +326,204 @@ class TestExistingDatabaseNoOp:
         finally:
             engine.dispose()
         assert current == "a7c3e5f19b20", "expected upgrade head to stay at stamped head"
+
+
+def _version(db_url: str) -> str:
+    engine = create_engine(db_url)
+    try:
+        with engine.connect() as conn:
+            return conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+    finally:
+        engine.dispose()
+
+
+def _user_columns(db_url: str) -> set[str]:
+    engine = create_engine(db_url)
+    try:
+        return {c["name"] for c in inspect(engine).get_columns("users")}
+    finally:
+        engine.dispose()
+
+
+def _production_state(alembic_config, db_url: str) -> None:
+    """The database as the deploy that shipped `f4c8b2a1e0d3`/`a7c3e5f19b20`
+    left it: stamped one revision short of both, with `starred_quotes`
+    already created by the startup `create_all` that deploy still ran, and
+    `users` still missing `password_reset_requested_at`.
+    """
+    from backend.app.database import Base
+    from backend.app import storage_models, versioning_models  # noqa: F401
+    from backend.app.jobs import models as jobs_models  # noqa: F401
+
+    command.upgrade(alembic_config, "e8a2b3c4d5f6")
+    engine = create_engine(db_url)
+    try:
+        Base.metadata.create_all(engine)
+        with engine.connect() as conn:
+            conn.execute(
+                text("INSERT INTO users (email, hashed_password) VALUES ('existing@x.com', 'x')")
+            )
+            conn.commit()
+        assert inspect(engine).has_table("starred_quotes")
+    finally:
+        engine.dispose()
+    assert "password_reset_requested_at" not in _user_columns(db_url)
+
+
+class TestStartupUpgrade:
+    """`backend.app.core.migrations.upgrade_to_head`, which the app runs on
+    every startup in place of `Base.metadata.create_all`.
+    """
+
+    def test_builds_an_empty_database_and_is_idempotent(self, alembic_config, alembic_db_url):
+        from backend.app.core.migrations import upgrade_to_head
+
+        upgrade_to_head()
+        assert _version(alembic_db_url) == "a7c3e5f19b20"
+        upgrade_to_head()
+        assert _version(alembic_db_url) == "a7c3e5f19b20"
+
+    def test_recovers_the_production_state(self, alembic_config, alembic_db_url):
+        from sqlalchemy import select
+        from sqlalchemy.orm import Session
+
+        from backend.app.core.migrations import upgrade_to_head
+        from backend.app.database import User
+
+        _production_state(alembic_config, alembic_db_url)
+
+        upgrade_to_head()
+
+        assert _version(alembic_db_url) == "a7c3e5f19b20"
+        assert "password_reset_requested_at" in _user_columns(alembic_db_url)
+        # The exact query production 500'd on.
+        engine = create_engine(alembic_db_url)
+        try:
+            with Session(engine) as session:
+                user = session.execute(select(User).where(User.email == "existing@x.com")).scalar_one()
+                assert user.password_reset_requested_at is None
+        finally:
+            engine.dispose()
+
+    def test_adopts_a_column_added_by_hand(self, alembic_config, alembic_db_url):
+        from backend.app.core.migrations import upgrade_to_head
+
+        command.upgrade(alembic_config, "f4c8b2a1e0d3")
+        engine = create_engine(alembic_db_url)
+        try:
+            with engine.connect() as conn:
+                conn.execute(text(
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS "
+                    "password_reset_requested_at TIMESTAMP WITH TIME ZONE"
+                ))
+                conn.commit()
+        finally:
+            engine.dispose()
+
+        upgrade_to_head()
+
+        assert _version(alembic_db_url) == "a7c3e5f19b20"
+
+    def test_concurrent_upgrades_are_serialized(self, alembic_config, alembic_db_url):
+        """Two containers booting at once (an overlapping deploy) must not
+        race each other through the chain. Separate processes, as in
+        production -- Alembic's `context` is process-global, so threads in
+        one process can't stand in for this.
+        """
+        import subprocess
+        import sys
+
+        env = {**os.environ, "DATABASE_URL": alembic_db_url}
+        script = "from backend.app.core.migrations import upgrade_to_head; upgrade_to_head()"
+        procs = [
+            subprocess.Popen(
+                [sys.executable, "-c", script],
+                cwd=REPO_ROOT,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+            for _ in range(4)
+        ]
+        outputs = [proc.communicate(timeout=120)[0].decode() for proc in procs]
+
+        assert [proc.returncode for proc in procs] == [0] * len(procs), "\n\n".join(outputs)
+        assert _version(alembic_db_url) == "a7c3e5f19b20"
+
+    def test_leaves_app_loggers_enabled(self, alembic_config, alembic_db_url):
+        import logging
+
+        from backend.app.core.migrations import upgrade_to_head
+
+        # Other tests here go through `alembic.ini`, whose fileConfig has
+        # already disabled every existing logger -- start from enabled.
+        app_logger = logging.getLogger("backend.app.main")
+        app_logger.disabled = False
+
+        upgrade_to_head()
+
+        assert app_logger.disabled is False
+
+
+def _free_port() -> int:
+    import socket
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+class TestAppBootsOnProductionState:
+    def test_login_and_register_work_after_startup(self, alembic_config, alembic_db_url):
+        """Boot the real app the way Azure does (`python -m uvicorn
+        backend.app.main:app`) against the production-shaped database, then
+        hit the endpoints that 500'd: login (unknown and known user),
+        register, and /me.
+        """
+        import subprocess
+        import sys
+        import time
+
+        import httpx
+
+        _production_state(alembic_config, alembic_db_url)
+
+        port = _free_port()
+        env = {**os.environ, "DATABASE_URL": alembic_db_url, "JWT_SECRET_KEY": "integration-secret"}
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "uvicorn", "backend.app.main:app", "--port", str(port)],
+            cwd=REPO_ROOT,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        base = f"http://127.0.0.1:{port}"
+        try:
+            deadline = time.monotonic() + 60
+            while True:
+                assert proc.poll() is None, proc.stdout.read().decode()
+                try:
+                    if httpx.get(f"{base}/", timeout=1).status_code == 200:
+                        break
+                except httpx.HTTPError:
+                    pass
+                assert time.monotonic() < deadline, "app did not start within 60s"
+                time.sleep(0.25)
+
+            assert _version(alembic_db_url) == "a7c3e5f19b20"
+
+            unknown = httpx.post(f"{base}/api/login/", json={"email": "nobody@x.com", "password": "pw"})
+            assert unknown.status_code == 401, unknown.text
+
+            registered = httpx.post(f"{base}/api/register/", json={"email": "new@x.com", "password": "secret123"})
+            assert registered.status_code == 200, registered.text
+
+            logged_in = httpx.post(f"{base}/api/login/", json={"email": "new@x.com", "password": "secret123"})
+            assert logged_in.status_code == 200, logged_in.text
+
+            token = logged_in.json()["access_token"]
+            me = httpx.get(f"{base}/api/me/", headers={"Authorization": f"Bearer {token}"})
+            assert me.status_code == 200, me.text
+        finally:
+            proc.terminate()
+            proc.wait(timeout=15)

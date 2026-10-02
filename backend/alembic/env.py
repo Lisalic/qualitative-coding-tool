@@ -3,6 +3,7 @@ from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
+from sqlalchemy import text
 
 from alembic import context
 
@@ -34,6 +35,10 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
+
+# Arbitrary app-wide key for the Postgres advisory lock that serializes
+# concurrent upgrades (see run_migrations_online).
+MIGRATION_LOCK_KEY = 7_206_001
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
@@ -79,6 +84,15 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
+        if connection.dialect.name == "postgresql":
+            # The app upgrades on every startup, and an overlapping deploy
+            # can boot a new container before the old one stops. Session-
+            # level, so it outlives the commit and is released when the
+            # connection closes; the second upgrader then finds head
+            # already applied.
+            connection.execute(text("SELECT pg_advisory_lock(:key)"), {"key": MIGRATION_LOCK_KEY})
+            connection.commit()
+
         context.configure(
             connection=connection, target_metadata=target_metadata
         )
