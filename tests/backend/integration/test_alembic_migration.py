@@ -450,6 +450,41 @@ class TestStartupUpgrade:
         assert [proc.returncode for proc in procs] == [0] * len(procs), "\n\n".join(outputs)
         assert _version(alembic_db_url) == "a7c3e5f19b20"
 
+    def test_password_with_url_encoded_characters(self, alembic_config, alembic_db_url, monkeypatch):
+        """Production's password percent-encodes to a URL full of `%`, which
+        Alembic's ConfigParser used to choke on before ever connecting.
+        """
+        import uuid
+        from urllib.parse import quote, urlsplit, urlunsplit
+
+        from backend.app import database as db_module
+        from backend.app.core.migrations import upgrade_to_head
+
+        role = f"qc_pct_{uuid.uuid4().hex[:8]}"
+        password = "p@ss%w0rd:/?"
+        admin = create_engine(alembic_db_url, isolation_level="AUTOCOMMIT")
+        try:
+            with admin.connect() as conn:
+                conn.execute(text(f"CREATE ROLE {role} LOGIN PASSWORD :pw"), {"pw": password})
+                conn.execute(text(f"GRANT ALL ON SCHEMA public TO {role}"))
+
+            parts = urlsplit(alembic_db_url)
+            host = parts.netloc.rsplit("@", 1)[-1]
+            role_url = urlunsplit(
+                ("postgresql", f"{role}:{quote(password, safe='')}@{host}", parts.path, "", "")
+            )
+            assert "%" in role_url
+            monkeypatch.setattr(db_module, "DATABASE_URL", role_url)
+
+            upgrade_to_head()
+
+            assert _version(alembic_db_url) == "a7c3e5f19b20"
+        finally:
+            with admin.connect() as conn:
+                conn.execute(text(f"DROP OWNED BY {role}"))
+                conn.execute(text(f"DROP ROLE {role}"))
+            admin.dispose()
+
     def test_leaves_app_loggers_enabled(self, alembic_config, alembic_db_url):
         import logging
 

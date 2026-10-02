@@ -27,7 +27,9 @@ config = context.config
 SYNC_DATABASE_URL = re.sub(
     r"^postgres(?:ql)?(?:\+[^:/]+)?://", "postgresql+psycopg2://", DATABASE_URL.strip(), count=1
 )
-config.set_main_option("sqlalchemy.url", SYNC_DATABASE_URL)
+# `%%` because Alembic keeps options in a ConfigParser, which reads a bare
+# `%` as interpolation -- and a URL-encoded password is full of them.
+config.set_main_option("sqlalchemy.url", SYNC_DATABASE_URL.replace("%", "%%"))
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
