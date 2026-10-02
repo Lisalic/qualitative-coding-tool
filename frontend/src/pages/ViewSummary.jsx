@@ -41,7 +41,7 @@ export default function ViewSummary() {
             placeholder="Select summary…"
           />
           {selected && (
-            <ExportDropdown fileId={selected} artifactType="summary" />
+            <ExportDropdown fileId={selected} artifactType="document" />
           )}
         </div>
       }

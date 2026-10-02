@@ -1,4 +1,5 @@
 import ErrorDisplay from "../feedback/ErrorDisplay";
+import ExportDropdown from "../export/ExportDropdown";
 import ArtifactPicker from "../primitives/ArtifactPicker";
 import MarkdownDisplay from "../primitives/MarkdownDisplay";
 import PageShell from "../shell/PageShell";
@@ -37,17 +38,20 @@ export default function ComparisonViewPageContainer({
       width="wide"
       bodyClassName="flex flex-col gap-3"
       actions={
-        <ArtifactPicker
-          showProjectFilter={true}
-          projects={projectsList}
-          selectedProject={selectedProject}
-          onProjectChange={setSelectedProject}
-          items={available}
-          selectedId={selected}
-          onSelect={setSelected}
-          emptyMessage={emptyMessage}
-          placeholder={pickerPlaceholder}
-        />
+        <div className="flex items-center gap-2">
+          <ArtifactPicker
+            showProjectFilter={true}
+            projects={projectsList}
+            selectedProject={selectedProject}
+            onProjectChange={setSelectedProject}
+            items={available}
+            selectedId={selected}
+            onSelect={setSelected}
+            emptyMessage={emptyMessage}
+            placeholder={pickerPlaceholder}
+          />
+          {selected && <ExportDropdown fileId={selected} artifactType="document" />}
+        </div>
       }
     >
       {loading ? (

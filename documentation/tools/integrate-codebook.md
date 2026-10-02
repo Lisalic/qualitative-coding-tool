@@ -37,7 +37,7 @@ No sample-size or content-scope controls — nothing is sampled; the assistant r
 
 **Workspace (right rail)**
 
-The rail has two tabs: **Code** (the full text of the source code last clicked in the left pane) and **Comparison**. The Comparison tab lists every [Compare Codebooks](compare-codebooks.md) report made from the selected sources — found through each source's `GET /api/artifacts/{ref}/lineage` children, reports covering two or more of the sources first — and renders the chosen one. When a report covers the selection the workspace opens on it, since compare-then-integrate is the intended workflow. With "Use this comparison to guide the AI merge" ticked, the report's text goes to the model after the source codebooks and before the researcher's suggestions, as guidance only: proposals must still cite the codebooks themselves.
+The rail has two tabs: **Code** (the full text of the source code last clicked in the left pane) and **Comparison**. The Comparison tab lists every [Compare Codebooks](compare-codebooks.md) report made between two of the selected sources (`GET /api/codebook-comparisons?codebooks=…`, newest first — a report comparing a source against an unselected codebook is not offered) and renders the chosen one. When there is one the workspace opens on it, since compare-then-integrate is the intended workflow. With "Use this comparison to guide the AI merge" ticked, the report's text goes to the model after the source codebooks and before the researcher's suggestions, as guidance only: proposals must still cite the codebooks themselves.
 
 ## What happens on submit
 

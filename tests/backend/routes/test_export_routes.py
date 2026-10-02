@@ -1,6 +1,6 @@
 """Unit tests for backend/app/api/export_routes.py.
 
-Validates export endpoints (/api/export/{file_id}/...), ensuring authentication,
+Validates export endpoints (/api/export/{ref}/...), ensuring authentication,
 owner scoping, HTTP headers, and Content-Disposition attachments.
 """
 
@@ -215,6 +215,14 @@ async def test_export_coding_route_csv_and_json(client, session_factory, make_to
     assert resp_j.status_code == 200
     assert resp_j.json()["entries"][0]["quote"] == "Quoted evidence"
 
+    # The frontend addresses artifacts by schemaname, not numeric id.
+    resp_ref = client.get(
+        f"/api/export/{file_rec.schemaname}/coding?format=csv",
+        cookies={"access_token": make_token(sub=str(user.id))},
+    )
+    assert resp_ref.status_code == 200
+    assert "Quoted evidence" in resp_ref.text
+
 
 async def test_export_memos_and_summary_routes(client, session_factory, make_token):
     user = await _make_user(session_factory, "user_memo@example.com")
@@ -370,3 +378,38 @@ async def test_export_project_bundle_route(client, session_factory, make_token):
 async def test_export_project_bundle_requires_auth(client) -> None:
     resp = client.get("/api/export/projects/1/bundle")
     assert resp.status_code == 401
+
+
+@pytest.mark.parametrize(
+    "file_type,suffix",
+    [("summary", "summary"), ("codebook_comparison", "comparison"), ("coding_comparison", "comparison")],
+)
+async def test_export_document_returns_the_stored_markdown(
+    client, session_factory, make_token, file_type, suffix
+):
+    user = await _make_user(session_factory, f"doc-{file_type}@example.com")
+    file_rec = await _make_file(session_factory, user.id, f"my_{file_type}", file_type)
+    async with session_factory() as session:
+        await version_service.commit_blob_version(
+            session, file_id=file_rec.id, author_user_id=user.id, origin="generated",
+            content="# Findings\n\nThemes emerged.",
+        )
+        await session.commit()
+
+    resp = client.get(
+        f"/api/export/{file_rec.schemaname}/document",
+        cookies={"access_token": make_token(sub=str(user.id))},
+    )
+    assert resp.status_code == 200
+    assert resp.text == "# Findings\n\nThemes emerged."
+    assert f'filename="my_{file_type}_v1_{suffix}.md"' in resp.headers["content-disposition"]
+
+
+async def test_export_document_rejects_a_non_document_file(client, session_factory, make_token):
+    user = await _make_user(session_factory, "doc-reject@example.com")
+    file_rec = await _make_file(session_factory, user.id, "a_coding", "coding")
+    resp = client.get(
+        f"/api/export/{file_rec.id}/document",
+        cookies={"access_token": make_token(sub=str(user.id))},
+    )
+    assert resp.status_code == 400

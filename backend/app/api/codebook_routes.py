@@ -109,6 +109,31 @@ async def list_codebooks(
     return JSONResponse({"codebooks": codebooks})
 
 
+@router.get("/codebook-comparisons")
+async def list_codebook_comparisons(
+    codebooks: list[str] = Query(..., description="Codebook refs; returns comparisons between any two of them"),
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
+) -> JSONResponse:
+    """Compare Codebook reports made between at least two of the given
+    codebooks -- the integrate editor's "Comparison" tab.
+    """
+    files = await codebook_service.list_comparisons_between(db, user_id, codebooks)
+    return JSONResponse(
+        {
+            "comparisons": [
+                {
+                    "id": str(f.id),
+                    "schema_name": f.schemaname,
+                    "filename": f.filename,
+                    "created_at": f.created_at.isoformat() if f.created_at else None,
+                }
+                for f in files
+            ]
+        }
+    )
+
+
 @router.put("/codebook/{ref}")
 async def save_project_codebook(
     ref: str,

@@ -22,7 +22,9 @@ from backend.app.jobs import service as jobs_service
 from backend.app.jobs.models import TERMINAL_STATUSES
 from backend.app.repositories import version_repo
 from backend.app.services import codebook_service, version_service
+from backend.app.services.version_service import EdgeSpec
 from backend.app.storage_models import Comment, Submission
+from backend.app.versioning_models import RELATION_COMPARED, ROLE_SIDE_A, ROLE_SIDE_B
 
 
 _ONE_CODE = [
@@ -1443,3 +1445,62 @@ class TestCreateIntegratedCodebook:
                     project_id=None,
                     codes=list(self._CODES),
                 )
+
+
+# ---------------------------------------------------------------------------
+# list_comparisons_between
+# ---------------------------------------------------------------------------
+
+
+class TestListComparisonsBetween:
+    """Only comparisons made between two of the selected codebooks count --
+    one against an unselected codebook does not."""
+
+    async def _comparison(self, session, owner_id: int, schemaname: str, side_a: File, side_b: File) -> File:
+        cmp_file = await _make_file(session, owner_id, file_type="codebook_comparison", schemaname=schemaname)
+        await version_service.commit_blob_version(
+            session, file_id=cmp_file.id, author_user_id=owner_id, origin="generated", content="report",
+            parents=[
+                EdgeSpec(parent_file_id=side_a.id, relation=RELATION_COMPARED, role=ROLE_SIDE_A, position=0),
+                EdgeSpec(parent_file_id=side_b.id, relation=RELATION_COMPARED, role=ROLE_SIDE_B, position=1),
+            ],
+        )
+        await session.commit()
+        return cmp_file
+
+    async def test_returns_only_comparisons_between_selected(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_a = await _make_file(session, user.id, file_type="codebook", schemaname="proj_a")
+            file_b = await _make_file(session, user.id, file_type="codebook", schemaname="proj_b")
+            file_c = await _make_file(session, user.id, file_type="codebook", schemaname="proj_c")
+            file_d = await _make_file(session, user.id, file_type="codebook", schemaname="proj_d")
+            cmp_bc = await self._comparison(session, user.id, "cmp_bc", file_b, file_c)
+            await self._comparison(session, user.id, "cmp_ad", file_a, file_d)
+
+            found = await codebook_service.list_comparisons_between(
+                session, user.id, [file_a.schemaname, file_b.schemaname, file_c.schemaname]
+            )
+            assert [f.id for f in found] == [cmp_bc.id]
+
+    async def test_empty_when_only_compared_with_outside_codebooks(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_a = await _make_file(session, user.id, file_type="codebook", schemaname="proj_a")
+            file_b = await _make_file(session, user.id, file_type="codebook", schemaname="proj_b")
+            file_c = await _make_file(session, user.id, file_type="codebook", schemaname="proj_c")
+            await self._comparison(session, user.id, "cmp_ac", file_a, file_c)
+
+            found = await codebook_service.list_comparisons_between(
+                session, user.id, [file_a.schemaname, file_b.schemaname]
+            )
+            assert found == []
+
+    async def test_rejects_non_codebook_ref(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_a = await _make_file(session, user.id, file_type="codebook", schemaname="proj_a")
+            await _make_file(session, user.id, file_type="raw_data", schemaname="proj_raw")
+
+            with pytest.raises(NotFoundError):
+                await codebook_service.list_comparisons_between(session, user.id, [file_a.schemaname, "proj_raw"])

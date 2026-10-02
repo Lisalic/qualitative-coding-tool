@@ -19,6 +19,7 @@ import EditorOutputFields from "../editor-shell/EditorOutputFields";
 import EditorWorkspace from "../editor-shell/EditorWorkspace";
 import EditorActionBar from "../editor-shell/EditorActionBar";
 import IntegrateBuilderPane from "./IntegrateBuilderPane";
+import IntegrateChangeSourcesModal from "./IntegrateChangeSourcesModal";
 import IntegrateRail from "./IntegrateRail";
 import IntegrateSourcePane from "./IntegrateSourcePane";
 import IntegrateSourcePicker from "./IntegrateSourcePicker";
@@ -51,6 +52,18 @@ import { useSourceComparisons } from "./useSourceComparisons";
  * row list -- a merge output is always a fresh codebook, and its
  * "source data" is the codebooks themselves, not raw rows.
  */
+/** Carry a saved draft over to a new storage key (the draft hook re-reads
+ * on a key change). Best-effort: without localStorage there's no draft. */
+function moveDraft(fromKey, toKey) {
+  try {
+    const saved = window.localStorage.getItem(fromKey);
+    if (saved !== null) window.localStorage.setItem(toKey, saved);
+    window.localStorage.removeItem(fromKey);
+  } catch {
+    // localStorage unavailable -- nothing was persisted to move.
+  }
+}
+
 export default function IntegrateCodebookEditor() {
   const location = useLocation();
   const initialProjectId = useInitialProjectId();
@@ -75,6 +88,7 @@ export default function IntegrateCodebookEditor() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [createdFile, setCreatedFile] = useState(null);
+  const [changingSources, setChangingSources] = useState(false);
 
   const codebookOptions = useMemo(
     () => (codebooks || []).filter((entry) => entry?.metadata?.file_type !== "codebook_comparison"),
@@ -88,19 +102,23 @@ export default function IntegrateCodebookEditor() {
     return names;
   }, [codebookOptions]);
 
-  const storageKey = selectedRefs.length >= 2 ? integrateDraftStorageKey(selectedRefs) : "";
-  const editor = useCodebookEditorState(storageKey);
+  // Set at "Continue" from the selection at that point. Change Sources
+  // (below) moves the draft to the new selection's key rather than
+  // abandoning it, so reopening this page with the same codebooks
+  // selected restores the draft either way.
+  const [sessionStorageKey, setSessionStorageKey] = useState("");
+  const editor = useCodebookEditorState(sessionStorageKey);
 
   const { sources, loading: sourcesLoading, error: sourcesError } = useSourceCodebooks(
     started ? selectedRefs : [],
   );
   const { comparisons, loading: comparisonsLoading } = useSourceComparisons(started ? selectedRefs : []);
 
-  // Open on the comparison when one covers the selection -- reading it is
-  // the natural first step of a merge. Re-evaluated whenever the source
-  // set (and therefore the comparison list) changes.
+  // Open on the newest comparison when there is one -- reading it is the
+  // natural first step of a merge. Re-evaluated whenever the source set
+  // (and therefore the comparison list) changes.
   useEffect(() => {
-    const best = comparisons.find((c) => c.coversSelection) || null;
+    const best = comparisons[0] || null;
     setSelectedComparison(best?.ref || null);
     setUseComparisonInAi(true);
     setRailTab(best ? "comparison" : "code");
@@ -200,7 +218,10 @@ export default function IntegrateCodebookEditor() {
               projectOptions={projects}
             />
           }
-          onSubmit={() => setStarted(true)}
+          onSubmit={() => {
+            setSessionStorageKey(integrateDraftStorageKey(selectedRefs));
+            setStarted(true);
+          }}
           submitLabel="Continue"
           submitLoadingLabel="Continue"
           submitDisabled={!canContinue}
@@ -211,84 +232,103 @@ export default function IntegrateCodebookEditor() {
   }
 
   return (
-    <EditorWorkspace
-      title="Integrate Codebook"
-      emphasis="builder"
-      subtitle={`${selectedRefs.length} codebooks · ${totalSourceCodes} codes`}
-      actions={
-        <button type="button" className={btn} onClick={() => setStarted(false)}>
-          Change sources
-        </button>
-      }
-      banners={
-        <>
-          {sourcesError && (
-            <div className="shrink-0">
-              <ErrorDisplay message={sourcesError} variant="alert" />
-            </div>
-          )}
-          {createdFile && (
-            <div className="shrink-0">
-              <ArtifactCreatedMessage
-                name={createdFile.filename}
-                viewPath="/codebook-view"
-                viewState={{ selected: createdFile.schema_name }}
-              />
-            </div>
-          )}
-        </>
-      }
-      list={
-        <IntegrateSourcePane
-          sources={sources}
-          codebookNames={codebookNames}
-          loading={sourcesLoading}
-          activeKey={activeCode?.key}
-          onSelectCode={selectCode}
-          draftCount={draftCount}
-          onCopyCode={editor.copyCode}
-          disabled={submitting}
+    <>
+      <EditorWorkspace
+        title="Integrate Codebook"
+        emphasis="builder"
+        subtitle={`${selectedRefs.length} codebooks · ${totalSourceCodes} codes`}
+        actions={
+          <button type="button" className={btn} onClick={() => setChangingSources(true)}>
+            Change sources
+          </button>
+        }
+        banners={
+          <>
+            {sourcesError && (
+              <div className="shrink-0">
+                <ErrorDisplay message={sourcesError} variant="alert" />
+              </div>
+            )}
+            {createdFile && (
+              <div className="shrink-0">
+                <ArtifactCreatedMessage
+                  name={createdFile.filename}
+                  viewPath="/codebook-view"
+                  viewState={{ selected: createdFile.schema_name }}
+                />
+              </div>
+            )}
+          </>
+        }
+        list={
+          <IntegrateSourcePane
+            sources={sources}
+            codebookNames={codebookNames}
+            loading={sourcesLoading}
+            activeKey={activeCode?.key}
+            onSelectCode={selectCode}
+            draftCount={draftCount}
+            onCopyCode={editor.copyCode}
+            disabled={submitting}
+          />
+        }
+        reader={<IntegrateBuilderPane editor={editor} codebookNames={codebookNames} disabled={submitting} />}
+        rail={
+          <IntegrateRail
+            tab={railTab}
+            onTabChange={setRailTab}
+            comparisons={comparisons}
+            comparisonsLoading={comparisonsLoading}
+            selectedComparison={selectedComparison}
+            onSelectComparison={setSelectedComparison}
+            useComparisonInAi={useComparisonInAi}
+            onUseComparisonInAiChange={setUseComparisonInAi}
+            active={activeCode}
+            codebookName={activeCode ? codebookNames[activeCode.source.ref] : ""}
+            codebooks={selectedRefs}
+            existingCodes={editor.existingCodes}
+            onProposals={editor.receiveProposals}
+            disabled={submitting}
+          />
+        }
+        actionBar={
+          <EditorActionBar
+            summary={
+              <>
+                {draftCount} code{draftCount === 1 ? "" : "s"}
+                {proposed > 0 ? ` · ${proposed} awaiting review` : ""}
+                {aiAccepted > 0 ? ` · ${aiAccepted} from AI` : ""}
+              </>
+            }
+            secondaryLabel="Clear"
+            onSecondary={editor.clearDraft}
+            secondaryDisabled={submitting || (draftCount === 0 && proposed === 0)}
+            primaryLabel="Create codebook"
+            primaryLoadingLabel="Saving..."
+            primaryLoading={submitting}
+            onPrimary={handleSubmit}
+            primaryDisabled={!canSubmit}
+            errorMessage={submitError}
+          />
+        }
+      />
+      {changingSources && (
+        <IntegrateChangeSourcesModal
+          codebooks={codebookOptions}
+          selected={selectedRefs}
+          onClose={() => setChangingSources(false)}
+          onChange={(nextRefs) => {
+            const nextKey = integrateDraftStorageKey(nextRefs);
+            if (nextKey !== sessionStorageKey) {
+              moveDraft(sessionStorageKey, nextKey);
+              setSessionStorageKey(nextKey);
+            }
+            setSelectedRefs(nextRefs);
+            setActiveCode(null);
+            setChangingSources(false);
+          }}
         />
-      }
-      reader={<IntegrateBuilderPane editor={editor} codebookNames={codebookNames} disabled={submitting} />}
-      rail={
-        <IntegrateRail
-          tab={railTab}
-          onTabChange={setRailTab}
-          comparisons={comparisons}
-          comparisonsLoading={comparisonsLoading}
-          selectedComparison={selectedComparison}
-          onSelectComparison={setSelectedComparison}
-          useComparisonInAi={useComparisonInAi}
-          onUseComparisonInAiChange={setUseComparisonInAi}
-          active={activeCode}
-          codebookName={activeCode ? codebookNames[activeCode.source.ref] : ""}
-          codebooks={selectedRefs}
-          existingCodes={editor.existingCodes}
-          onProposals={editor.receiveProposals}
-          disabled={submitting}
-        />
-      }
-      actionBar={
-        <EditorActionBar
-          summary={
-            <>
-              {draftCount} code{draftCount === 1 ? "" : "s"}
-              {proposed > 0 ? ` · ${proposed} awaiting review` : ""}
-              {aiAccepted > 0 ? ` · ${aiAccepted} from AI` : ""}
-            </>
-          }
-          secondaryLabel="Clear"
-          onSecondary={editor.clearDraft}
-          secondaryDisabled={submitting || (draftCount === 0 && proposed === 0)}
-          primaryLabel="Create codebook"
-          primaryLoadingLabel="Saving..."
-          primaryLoading={submitting}
-          onPrimary={handleSubmit}
-          primaryDisabled={!canSubmit}
-          errorMessage={submitError}
-        />
-      }
-    />
+      )}
+    </>
   );
 }

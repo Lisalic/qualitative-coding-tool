@@ -744,6 +744,34 @@ async def test_export_project_bundle_includes_comparison_markdown(session, user_
 
 
 @pytest.mark.asyncio
+async def test_export_project_bundle_includes_saved_summary_markdown(session, user_id):
+    from backend.app.database import Project, async_link_file_to_project
+
+    project = Project(user_id=user_id, projectname="Sum Project", description="")
+    session.add(project)
+    await session.commit()
+    await session.refresh(project)
+
+    sum_file = await _make_file(session, user_id, "Themes", "summary")
+    await version_service.commit_blob_version(
+        session, file_id=sum_file.id, author_user_id=user_id, origin="generated",
+        content="# Themes\n\nThree themes.",
+    )
+    await async_link_file_to_project(session, sum_file.id, project.id)
+    await session.commit()
+
+    bundle, _, _ = await export_service.export_project_bundle(session, project.id, user_id)
+
+    import zipfile
+    import io as _io
+
+    with zipfile.ZipFile(_io.BytesIO(bundle)) as zf:
+        paths = [n for n in zf.namelist() if n.startswith("summaries/")]
+        assert paths == [f"summaries/{sum_file.id}_themes_summary.md"]
+        assert zf.read(paths[0]).decode("utf-8") == "# Themes\n\nThree themes."
+
+
+@pytest.mark.asyncio
 async def test_export_project_bundle_unowned_project_raises(session, user_id, other_user_id):
     from backend.app.core.exceptions import ForbiddenError
     from backend.app.database import Project

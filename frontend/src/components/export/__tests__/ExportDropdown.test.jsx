@@ -46,6 +46,33 @@ describe("ExportDropdown", () => {
     expect(items).toEqual([".qdc", ".csv"]);
   });
 
+  it("sends the coding privacy flags only when ticked", async () => {
+    vi.spyOn(api, "apiFetch").mockResolvedValue({ ok: false, status: 500 });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    act(() => {
+      root.render(<ExportDropdown fileId="proj_abc" artifactType="coding" />);
+    });
+    act(() => {
+      container.querySelector("button").click();
+    });
+
+    const items = [...container.querySelectorAll('[role="menuitem"]')];
+    expect(items.map((el) => el.textContent)).toEqual([".csv", ".csv (matrix)", ".json"]);
+
+    const [sourceText] = container.querySelectorAll('input[type="checkbox"]');
+    act(() => {
+      sourceText.click();
+    });
+    await act(async () => {
+      items[1].click();
+    });
+
+    expect(api.apiFetch).toHaveBeenCalledWith(
+      "/api/export/proj_abc/coding?format=csv&layout=wide&include_source_text=true",
+    );
+  });
+
   it("displays accessible error state with role='alert' when export fails", async () => {
     vi.spyOn(api, "apiFetch").mockResolvedValue({
       ok: false,

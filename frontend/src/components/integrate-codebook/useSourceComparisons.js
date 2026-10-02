@@ -2,15 +2,9 @@ import { useEffect, useState } from "react";
 import { requestJson } from "../../api";
 
 /**
- * Find the Compare Codebook reports that were made from the codebooks
- * being integrated, so the researcher can read the comparison while
- * merging -- the intended compare-then-integrate workflow.
- *
- * No list endpoint of its own: a comparison is an `artifact_edges` child
- * of each codebook it compared, so `GET /api/artifacts/{ref}/lineage`
- * on every selected source already names them. Comparisons that cover
- * two (or more) of the selected codebooks sort first; ones touching
- * only one source still show, since they may still be useful reading.
+ * Find the Compare Codebook reports made between at least two of the
+ * codebooks being integrated (`GET /api/codebook-comparisons`), so the
+ * researcher can read the comparison while merging.
  */
 export function useSourceComparisons(refs) {
   const [comparisons, setComparisons] = useState([]);
@@ -19,7 +13,7 @@ export function useSourceComparisons(refs) {
   const key = (refs || []).join("|");
 
   useEffect(() => {
-    if (!refs || refs.length === 0) {
+    if (!refs || refs.length < 2) {
       setComparisons([]);
       return undefined;
     }
@@ -27,31 +21,13 @@ export function useSourceComparisons(refs) {
     let cancelled = false;
     setLoading(true);
 
-    (async () => {
-      const results = await Promise.all(
-        refs.map((ref) => requestJson(`/api/artifacts/${encodeURIComponent(ref)}/lineage`, { method: "GET" })),
-      );
+    const query = refs.map((ref) => `codebooks=${encodeURIComponent(ref)}`).join("&");
+    requestJson(`/api/codebook-comparisons?${query}`, { method: "GET" }).then((result) => {
       if (cancelled) return;
-
-      const byRef = new Map();
-      results.forEach((result) => {
-        if (!result.ok) return;
-        for (const child of result.data?.children || []) {
-          if (child.file_type !== "codebook_comparison" || !child.schema_name) continue;
-          const entry = byRef.get(child.schema_name) || {
-            ref: child.schema_name,
-            name: child.filename || child.schema_name,
-            coveredSources: 0,
-          };
-          entry.coveredSources += 1;
-          byRef.set(child.schema_name, entry);
-        }
-      });
-
-      const list = [...byRef.values()].sort((a, b) => b.coveredSources - a.coveredSources);
-      setComparisons(list.map((entry) => ({ ...entry, coversSelection: entry.coveredSources >= 2 })));
+      const list = result.ok ? result.data?.comparisons || [] : [];
+      setComparisons(list.map((cmp) => ({ ref: cmp.schema_name, name: cmp.filename || cmp.schema_name })));
       setLoading(false);
-    })();
+    });
 
     return () => {
       cancelled = true;

@@ -231,6 +231,19 @@ async def list_child_edges(session: AsyncSession, parent_file_id: int) -> list[A
     return list(result.scalars().all())
 
 
+async def list_child_edges_for_parents(
+    session: AsyncSession, parent_file_ids: Sequence[int], *, relation: str
+) -> list[ArtifactEdge]:
+    if not parent_file_ids:
+        return []
+    result = await session.execute(
+        select(ArtifactEdge).where(
+            ArtifactEdge.parent_file_id.in_(parent_file_ids), ArtifactEdge.relation == relation
+        )
+    )
+    return list(result.scalars().all())
+
+
 async def delete_edges_for_file(session: AsyncSession, file_id: int) -> None:
     await session.execute(
         delete(ArtifactEdge).where(

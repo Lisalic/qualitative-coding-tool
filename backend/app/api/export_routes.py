@@ -1,5 +1,6 @@
-"""API routes for exporting codebooks, codings (long/wide), summaries,
-memos, and deterministic project bundles.
+"""API routes for exporting codebooks, codings (long/wide), code-frequency
+summaries, memos, saved summaries/comparisons (``document``), and
+deterministic project bundles.
 
 Each endpoint accepts only the two formats that suit its artifact, not a
 blanket CSV/JSON pair -- codebook ``qdc|csv``, coding ``csv|json``,
@@ -19,24 +20,24 @@ from backend.app.services import export_service
 router = APIRouter(prefix="/export", tags=["export"])
 
 
-@router.get("/{file_id}/codebook")
+@router.get("/{ref}/codebook")
 async def export_codebook(
-    file_id: int,
+    ref: str,
     format: str = Query("qdc", pattern="^(qdc|csv)$"),
     version_no: int | None = Query(None, ge=1),
     user_id: int = Depends(require_user_id),
     db: AsyncSession = Depends(get_async_db),
 ):
     content, media_type, filename = await export_service.export_codebook(
-        db, file_id, user_id, version_no=version_no, export_format=format
+        db, ref, user_id, version_no=version_no, export_format=format
     )
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
     return Response(content=content, media_type=media_type, headers=headers)
 
 
-@router.get("/{file_id}/coding")
+@router.get("/{ref}/coding")
 async def export_coding(
-    file_id: int,
+    ref: str,
     format: str = Query("csv", pattern="^(csv|json)$"),
     layout: str = Query("long", pattern="^(long|wide)$"),
     version_no: int | None = Query(None, ge=1),
@@ -47,7 +48,7 @@ async def export_coding(
 ):
     content, media_type, filename = await export_service.export_coding(
         db,
-        file_id,
+        ref,
         user_id,
         version_no=version_no,
         export_format=format,
@@ -59,30 +60,46 @@ async def export_coding(
     return Response(content=content, media_type=media_type, headers=headers)
 
 
-@router.get("/{file_id}/memos")
+@router.get("/{ref}/memos")
 async def export_memos(
-    file_id: int,
+    ref: str,
     format: str = Query("md", pattern="^(md|csv)$"),
     user_id: int = Depends(require_user_id),
     db: AsyncSession = Depends(get_async_db),
 ):
     content, media_type, filename = await export_service.export_memos(
-        db, file_id, user_id, export_format=format
+        db, ref, user_id, export_format=format
     )
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
     return Response(content=content, media_type=media_type, headers=headers)
 
 
-@router.get("/{file_id}/summary")
+@router.get("/{ref}/summary")
 async def export_summary(
-    file_id: int,
+    ref: str,
     format: str = Query("md", pattern="^md$"),
     version_no: int | None = Query(None, ge=1),
     user_id: int = Depends(require_user_id),
     db: AsyncSession = Depends(get_async_db),
 ):
     content, media_type, filename = await export_service.export_summary(
-        db, file_id, user_id, version_no=version_no, export_format=format
+        db, ref, user_id, version_no=version_no, export_format=format
+    )
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return Response(content=content, media_type=media_type, headers=headers)
+
+
+@router.get("/{ref}/document")
+async def export_document(
+    ref: str,
+    format: str = Query("md", pattern="^md$"),
+    version_no: int | None = Query(None, ge=1),
+    user_id: int = Depends(require_user_id),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """A saved summary or comparison, as its stored markdown."""
+    content, media_type, filename = await export_service.export_document(
+        db, ref, user_id, version_no=version_no, export_format=format
     )
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
     return Response(content=content, media_type=media_type, headers=headers)

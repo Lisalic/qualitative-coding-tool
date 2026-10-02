@@ -50,6 +50,7 @@ See [tools/prompt-manager.md](tools/prompt-manager.md).
 | POST | `/api/codebook-preview/` | JSON `{api_key, database, model, prompt?, sample_percentage, content_scope, existing_codes?}` | `202 {job_id, status}` → result `{proposals, partial?}` — creates nothing | **job** |
 | POST | `/api/codebook/manual` | JSON `{database, name, description?, project_id?, codes}` | `{message, file}` — the codebook editor's only create path | direct |
 | POST | `/api/compare-codebooks/` | `as_form(CompareCodebooksRequest)` | `202 {job_id, status}` → result `{comparison, file}` | **job** |
+| GET | `/api/codebook-comparisons` | query `codebooks` (repeated, ≥2) | `{comparisons: [{id, schema_name, filename, created_at}]}` — comparisons between two of the given codebooks | direct |
 | POST | `/api/integrate-codebook-preview/` | JSON `{api_key, codebooks, model, prompt?, existing_codes?}` | `202 {job_id, status}` → result `{proposals, partial?}` — creates nothing | **job** |
 | POST | `/api/codebook/integrate` | JSON `{codebooks, name, description?, project_id, codes, assist_runs?}` | `{message, file}` — the integrate editor's only create path | direct |
 
@@ -81,14 +82,15 @@ Structural (no-LLM) diffing between two versions of the *same* codebook/coding a
 
 Owner-scoped, byte-deterministic for unchanged data. An explicit `version_no` that doesn't resolve to a real version 404s rather than silently returning an empty export.
 
-Each endpoint accepts only the formats that suit its artifact — not a blanket CSV/JSON pair — and a format outside that set 422s rather than falling through to the default:
+`{ref}` is a file's numeric id or its `schema_name`. Each endpoint accepts only the formats that suit its artifact — not a blanket CSV/JSON pair — and a format outside that set 422s rather than falling through to the default:
 
 | Method | Path | Query | Response | Kind |
 |---|---|---|---|---|
-| GET | `/api/export/{file_id}/codebook` | `format` (qdc\|csv, default qdc), `version_no?` | qdc: [REFI-QDA Codebook](https://www.qdasoftware.org/refi-qda-codebook) XML, importable by NVivo/ATLAS.ti/MAXQDA (`backend/app/core/qdc.py`); csv: one row per code for a spreadsheet or R | direct |
-| GET | `/api/export/{file_id}/coding` | `format` (csv\|json, default csv), `layout` (long\|wide, default long), `version_no?`, `include_source_text` (default false), `include_author` (default false) | long: one row per coded segment; wide: one row per dataset item including uncoded ones, one column per code | direct |
-| GET | `/api/export/{file_id}/summary` | `format` (md only), `version_no?` | markdown frequency table, grouped by `code_uid` (stable across renames) | direct |
-| GET | `/api/export/{file_id}/memos` | `format` (md\|csv, default md) | row memos; md keeps a memo body's paragraph breaks, which a single CSV cell flattens | direct |
+| GET | `/api/export/{ref}/codebook` | `format` (qdc\|csv, default qdc), `version_no?` | qdc: [REFI-QDA Codebook](https://www.qdasoftware.org/refi-qda-codebook) XML, importable by NVivo/ATLAS.ti/MAXQDA (`backend/app/core/qdc.py`); csv: one row per code for a spreadsheet or R | direct |
+| GET | `/api/export/{ref}/coding` | `format` (csv\|json, default csv), `layout` (long\|wide, default long), `version_no?`, `include_source_text` (default false), `include_author` (default false) | long: one row per coded segment; wide: one row per dataset item including uncoded ones, one column per code | direct |
+| GET | `/api/export/{ref}/summary` | `format` (md only), `version_no?` | markdown frequency table, grouped by `code_uid` (stable across renames) | direct |
+| GET | `/api/export/{ref}/memos` | `format` (md\|csv, default md) | row memos; md keeps a memo body's paragraph breaks, which a single CSV cell flattens | direct |
+| GET | `/api/export/{ref}/document` | `format` (md only), `version_no?` | a saved `summary` or `codebook_comparison`/`coding_comparison`, exported as its stored markdown | direct |
 | GET | `/api/export/projects/{project_id}/bundle` | `include_source_text` (default false), `include_author` (default false) | deterministic ZIP: exactly one export per project file in that artifact's best format (codebooks as `.qdc`), a SHA-256 `manifest.json`, and `lineage/project_lineage.json` | direct |
 
 Codebooks lead with `.qdc` because REFI-QDA is the one codebook interchange standard other QDA packages implement — every other format arrives there as an undifferentiated table. The serializer maps this app's `code_uid` (a bare `uuid4().hex`) onto the schema's hyphenated `GUIDType`, re-hyphenating rather than replacing it where the uid is already a UUID, so identity survives the round trip; a code family becomes a non-codable parent `Code` holding its codes. Conformance rules are pinned in `tests/backend/core/test_qdc.py`.

@@ -927,6 +927,35 @@ async def _resolve_comparisons(session: AsyncSession, user_id: int, comparisons:
     return ids
 
 
+async def list_comparisons_between(session: AsyncSession, user_id: int, codebooks: list[str]) -> list[File]:
+    """Every ``codebook_comparison`` owned by ``user_id`` that compared at
+    least two of ``codebooks`` with each other -- what the integrate
+    editor offers as guidance. A comparison of one selected codebook
+    against an unselected one is not included. Newest first.
+    """
+    parent_ids: set[int] = set()
+    for ref in codebooks:
+        schema = require_valid_schema(ref, field_name="codebooks")
+        parent_ids.add(await file_repo.resolve_file_id(session, schema, user_id, file_types=("codebook",)))
+    if len(parent_ids) < 2:
+        return []
+
+    edges = await version_repo.list_child_edges_for_parents(session, list(parent_ids), relation=RELATION_COMPARED)
+    sides_by_child: dict[int, set[int]] = {}
+    for edge in edges:
+        sides_by_child.setdefault(edge.child_file_id, set()).add(edge.parent_file_id)
+    child_ids = [child_id for child_id, sides in sides_by_child.items() if len(sides) >= 2]
+    if not child_ids:
+        return []
+
+    result = await session.execute(
+        select(File)
+        .where(File.id.in_(child_ids), File.user_id == user_id, File.file_type == "codebook_comparison")
+        .order_by(File.created_at.desc(), File.id.desc())
+    )
+    return list(result.scalars().all())
+
+
 def _render_comparison_reports(entries: list[tuple[str, str]]) -> str:
     """Render each comparison report into a
     ``--- COMPARISON REPORT: {filename} ---`` block -- the same idiom as

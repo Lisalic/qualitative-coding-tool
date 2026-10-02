@@ -9,8 +9,8 @@ import { useComparisonContent } from "./useSourceComparisons";
  * the AI merge assistant should follow it. Rendered inside the rail's
  * tabbed `Panel`, so it draws no border of its own.
  *
- * `comparisons` comes from `useSourceComparisons` -- only reports made
- * from at least one of the selected codebooks are offered.
+ * `comparisons` comes from `useSourceComparisons` -- only reports
+ * comparing two of the selected codebooks with each other are offered.
  */
 export default function IntegrateComparisonPanel({
   comparisons,
@@ -31,11 +31,7 @@ export default function IntegrateComparisonPanel({
   if (comparisons.length === 0) {
     return (
       <div className="flex flex-col gap-2 text-sm">
-        <p className="italic text-paper/60">No comparisons of these codebooks yet.</p>
-        <p className="text-paper/60">
-          Compare two of them first to get a report of overlaps, conflicts and suggested merges you can
-          read here -- and hand to the AI merge assistant.
-        </p>
+        <p className="italic text-paper/60">None of these codebooks have been compared with each other.</p>
         <Link
           to="/compare-codebook"
           state={firstSourceRef ? { codebookA: firstSourceRef } : undefined}
@@ -64,7 +60,6 @@ export default function IntegrateComparisonPanel({
           {comparisons.map((cmp) => (
             <option key={cmp.ref} value={cmp.ref}>
               {cmp.name}
-              {cmp.coversSelection ? "" : " (covers one source)"}
             </option>
           ))}
         </select>

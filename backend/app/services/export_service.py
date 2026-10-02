@@ -19,6 +19,11 @@ that best travels -- rather than a uniform CSV/JSON pair:
   numbers exports the coding and counts.
 * memos -- ``md`` first and ``csv`` second: a memo is multi-paragraph
   prose, which a single CSV cell is the wrong shape for.
+* document -- ``md`` only, for the artifacts whose content *is* a
+  markdown blob (a saved ``summary``, a ``codebook_comparison``/
+  ``coding_comparison``): exported as-is, since there are no rows to
+  reshape. Distinct from ``summary`` above, which computes a frequency
+  table *from a coding*.
 
 Coding exports come in two layouts: ``long`` (one row per coded segment)
 and ``wide`` (one row per dataset item, including uncoded ones, with a
@@ -168,7 +173,7 @@ async def _resolve_version(
 
 async def export_codebook(
     session: AsyncSession,
-    file_id: int,
+    ref: int | str,
     user_id: int,
     *,
     version_no: int | None = None,
@@ -183,7 +188,8 @@ async def export_codebook(
     spreadsheet or R.
     """
     _require_format(export_format, ("qdc", "csv"), "Codebook")
-    file_record = await file_repo.get_owned_file(session, str(file_id), user_id)
+    file_record = await file_repo.get_owned_file(session, str(ref), user_id)
+    file_id = file_record.id
     if file_record.file_type != "codebook":
         raise ValidationAppError(f"File {file_id} is not a codebook (type={file_record.file_type})")
 
@@ -219,7 +225,7 @@ async def export_codebook(
 
 async def export_coding(
     session: AsyncSession,
-    file_id: int,
+    ref: int | str,
     user_id: int,
     *,
     version_no: int | None = None,
@@ -233,7 +239,8 @@ async def export_coding(
     0/1 or count column per code).
     """
     _require_format(export_format, ("csv", "json"), "Coding")
-    file_record = await file_repo.get_owned_file(session, str(file_id), user_id)
+    file_record = await file_repo.get_owned_file(session, str(ref), user_id)
+    file_id = file_record.id
     if file_record.file_type != "coding":
         raise ValidationAppError(f"File {file_id} is not a coding artifact (type={file_record.file_type})")
 
@@ -397,7 +404,7 @@ async def export_coding(
 
 async def export_memos(
     session: AsyncSession,
-    file_id: int,
+    ref: int | str,
     user_id: int,
     *,
     export_format: str = "md",
@@ -417,7 +424,8 @@ async def export_memos(
     parameter could filter by.
     """
     _require_format(export_format, ("md", "csv"), "Memo")
-    file_record = await file_repo.get_owned_file(session, str(file_id), user_id)
+    file_record = await file_repo.get_owned_file(session, str(ref), user_id)
+    file_id = file_record.id
     if file_record.file_type not in ("raw_data", "filtered_data", "coding"):
         raise ValidationAppError(
             f"File {file_id} does not carry memos (type={file_record.file_type})"
@@ -465,7 +473,7 @@ async def export_memos(
 
 async def export_summary(
     session: AsyncSession,
-    file_id: int,
+    ref: int | str,
     user_id: int,
     *,
     version_no: int | None = None,
@@ -487,7 +495,8 @@ async def export_summary(
     a rename never reorders the table.
     """
     _require_format(export_format, ("md",), "Summary")
-    file_record = await file_repo.get_owned_file(session, str(file_id), user_id)
+    file_record = await file_repo.get_owned_file(session, str(ref), user_id)
+    file_id = file_record.id
     if file_record.file_type != "coding":
         raise ValidationAppError(f"File {file_id} is not a coding artifact")
 
@@ -517,6 +526,43 @@ async def export_summary(
     return f"{heading}\n\n{table}\n", _MEDIA_TYPES["md"], filename
 
 
+DOCUMENT_FILE_TYPES = {
+    "summary": "summary",
+    "codebook_comparison": "comparison",
+    "coding_comparison": "comparison",
+}
+
+
+async def export_document(
+    session: AsyncSession,
+    ref: int | str,
+    user_id: int,
+    *,
+    version_no: int | None = None,
+    export_format: str = "md",
+) -> tuple[str, str, str]:
+    """Export a markdown-blob artifact (a saved summary or a comparison)
+    as its stored markdown, unchanged.
+    """
+    _require_format(export_format, ("md",), "Document")
+    file_record = await file_repo.get_owned_file(session, str(ref), user_id)
+    file_id = file_record.id
+    suffix = DOCUMENT_FILE_TYPES.get(file_record.file_type)
+    if suffix is None:
+        raise ValidationAppError(
+            f"File {file_id} is not a summary or comparison (type={file_record.file_type})"
+        )
+
+    _, resolved_version_no = await _resolve_version(session, file_id, version_no, label=suffix)
+    content = await version_service.read_blob(session, file_id, version_no=version_no)
+    if content is None:
+        raise NotFoundError(f"No content stored for file {file_id}")
+
+    base_name = (file_record.filename or f"file_{file_id}").rsplit(".", 1)[0]
+    ver_suffix = f"_v{resolved_version_no}" if resolved_version_no is not None else ""
+    return content, _MEDIA_TYPES["md"], f"{base_name}{ver_suffix}_{suffix}.md"
+
+
 async def export_project_bundle(
     session: AsyncSession,
     project_id: int,
@@ -532,7 +578,7 @@ async def export_project_bundle(
     One file in, one file out. Each artifact is written only in the
     format that best preserves it -- codebook ``.qdc`` (REFI-QDA, the
     codebook interchange standard), coding ``.csv`` (segments, long),
-    comparison ``.md`` (its raw blob) -- never the same content twice in
+    comparison/summary ``.md`` (its raw blob) -- never the same content twice in
     two formats. A file's row memos ride along as a single
     ``.md`` sidecar, which for a ``raw_data``/``filtered_data`` file is
     its only export; memos are kept out of the artifact file rather than
@@ -573,6 +619,11 @@ async def export_project_bundle(
             content = await version_service.read_blob(session, f.id)
             if content is not None:
                 bundle_files[f"comparisons/{f.id}_{f_slug}_comparison.md"] = content.encode("utf-8")
+
+        elif f.file_type == "summary":
+            content = await version_service.read_blob(session, f.id)
+            if content is not None:
+                bundle_files[f"summaries/{f.id}_{f_slug}_summary.md"] = content.encode("utf-8")
 
         memos = await export_repo.get_row_memos(session, f.id)
         if memos:

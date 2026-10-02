@@ -33,9 +33,10 @@ describe("exportHelpers", () => {
       ]);
     });
 
-    it("offers csv then json for coding, both pinned to the long layout", () => {
+    it("offers long csv, the wide csv matrix, then json for coding", () => {
       expect(getExportOptions("coding")).toEqual([
         { label: ".csv", target: "coding", format: "csv", extraParams: { layout: "long" } },
+        { label: ".csv (matrix)", target: "coding", format: "csv", extraParams: { layout: "wide" } },
         { label: ".json", target: "coding", format: "json", extraParams: { layout: "long" } },
       ]);
     });
@@ -58,14 +59,15 @@ describe("exportHelpers", () => {
       ]);
     });
 
-    it("labels every option with the bare extension and nothing else", () => {
-      for (const type of ["codebook", "coding", "summary", "memos", "custom"]) {
+    it("labels every option with the extension, qualified only to tell two apart", () => {
+      const expectedCounts = { codebook: 2, coding: 3, summary: 1, document: 1, memos: 2, custom: 2 };
+      for (const [type, count] of Object.entries(expectedCounts)) {
         const opts = getExportOptions(type);
-        // Two formats everywhere but summary, which is markdown-only.
-        expect(opts).toHaveLength(type === "summary" ? 1 : 2);
+        expect(opts).toHaveLength(count);
         for (const opt of opts) {
-          expect(opt.label).toMatch(/^\.[a-z]+$/);
+          expect(opt.label).toMatch(/^\.[a-z]+( \([a-z]+\))?$/);
         }
+        expect(new Set(opts.map((o) => o.label)).size).toBe(opts.length);
       }
     });
   });
