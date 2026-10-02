@@ -5,7 +5,6 @@ create_access_token/decode_access_token round trip, signature
 verification, expiry handling, and every documented failure mode.
 """
 
-import base64
 import binascii
 import json
 
@@ -156,6 +155,17 @@ class TestCreateAccessToken:
     def test_non_serializable_payload_raises_type_error(self) -> None:
         with pytest.raises(TypeError):
             create_access_token({"sub": {1, 2, 3}})  # a set is not JSON-serializable
+
+    @pytest.mark.parametrize("secret", ["", "your-secret-key-here"])
+    def test_refuses_to_sign_or_verify_with_a_placeholder_secret(self, monkeypatch, secret) -> None:
+        """The default lives in this repo; tokens signed with it are forgeable."""
+        token = create_access_token({"sub": "1"})
+        monkeypatch.setattr(settings, "jwt_secret_key", "")
+        monkeypatch.setattr(settings, "secret_key", secret)
+        with pytest.raises(RuntimeError):
+            create_access_token({"sub": "1"})
+        with pytest.raises(ValueError):
+            decode_access_token(token)
 
     def test_secret_key_change_changes_signature(self, monkeypatch, frozen_time: float) -> None:
         monkeypatch.setattr(settings, "jwt_secret_key", "secret-a")

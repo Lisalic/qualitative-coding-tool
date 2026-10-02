@@ -1,11 +1,13 @@
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.api.utils import get_user_id_from_request, _hash_password, _verify_password
+from backend.app.api.utils import _hash_password, _verify_password
 from backend.app.database import get_async_db, User
-from backend.app.auth import create_access_token
+from backend.app.auth import create_access_token, password_fingerprint
+from backend.app.core.auth_dependency import session_user_id
 from backend.app.config import settings
 from backend.app.api.schemas import (
     ForgotPasswordRequest,
@@ -19,6 +21,22 @@ from backend.app.services import auth_service
 router = APIRouter()
 
 
+def _session_response(user: User) -> JSONResponse:
+    """The login/register response: a session token in the body and the
+    cookie. ``pwh`` ties the token to the current password, so a reset
+    ends it (see ``core/auth_dependency.py``).
+    """
+    token = create_access_token({
+        "sub": str(user.id),
+        "email": user.email,
+        "pwh": password_fingerprint(user.password),
+    })
+    resp = JSONResponse({"id": str(user.id), "email": user.email, "access_token": token})
+    max_age = int(settings.jwt_access_token_expire_minutes) * 60
+    resp.set_cookie("access_token", token, httponly=True, samesite="lax", max_age=max_age)
+    return resp
+
+
 @router.post("/login/")
 async def login(payload: LoginRequest, db: AsyncSession = Depends(get_async_db)):
     user = await auth_service.find_user_by_email(db, payload.email)
@@ -28,11 +46,7 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_async_db))
     if not _verify_password(user.password, payload.password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    token = create_access_token({"sub": str(user.id), "email": user.email})
-    resp = JSONResponse({"id": str(user.id), "email": user.email, "access_token": token})
-    max_age = int(settings.jwt_access_token_expire_minutes) * 60
-    resp.set_cookie("access_token", token, httponly=True, samesite="lax", max_age=max_age)
-    return resp
+    return _session_response(user)
 
 
 @router.post("/register/")
@@ -46,29 +60,22 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_asyn
     db.add(user)
     try:
         await db.commit()
-        await db.refresh(user)
-    except Exception as exc:
+    except IntegrityError:
+        # A concurrent registration for the same address won the race to
+        # the lower(email) unique index.
         await db.rollback()
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=400, detail="Email already registered") from None
+    await db.refresh(user)
 
-    token = create_access_token({"sub": str(user.id), "email": user.email})
-    resp = JSONResponse({"id": str(user.id), "email": user.email, "access_token": token})
-    max_age = int(settings.jwt_access_token_expire_minutes) * 60
-    resp.set_cookie("access_token", token, httponly=True, samesite="lax", max_age=max_age)
-    return resp
+    return _session_response(user)
 
 
 @router.get("/me/")
 async def me(request: Request, db: AsyncSession = Depends(get_async_db)):
-    user_id = get_user_id_from_request(request)
-    if not user_id:
+    user_id = await session_user_id(request, db)
+    if user_id is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
-
-    r = await db.execute(select(User).where(User.id == user_id))
-    user = r.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-
+    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one()
     return JSONResponse({"id": str(user.id), "email": user.email})
 
 

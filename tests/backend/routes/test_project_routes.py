@@ -104,11 +104,11 @@ class TestUpdateProject:
         )
         assert resp.status_code == 404
 
-    def test_update_someone_elses_project_returns_403(self, client, make_token) -> None:
+    def test_update_someone_elses_project_returns_403(self, client, make_token, other_user) -> None:
         pid = self._create(client, make_token, sub="1")
         resp = client.post(
             "/api/update-project/",
-            headers=_auth_headers(make_token, sub="2"),
+            headers=_auth_headers(make_token, sub=str(other_user)),
             data={"project_id": pid, "name": "hijacked"},
         )
         assert resp.status_code == 403
@@ -218,7 +218,7 @@ class TestRenameFile:
         assert resp.status_code == 404
 
     async def test_rename_someone_elses_file_returns_404(
-        self, client, make_token, session_factory
+        self, client, make_token, session_factory, other_user
     ) -> None:
         # Ownership is enforced via the WHERE clause itself (File.user_id
         # == user_id), so a mismatch surfaces as 404, not 403.
@@ -232,7 +232,7 @@ class TestRenameFile:
 
         resp = client.post(
             "/api/rename-file/",
-            headers=_auth_headers(make_token, sub="999999"),
+            headers=_auth_headers(make_token, sub=str(other_user)),
             data={"schema_name": "proj_a", "display_name": "x"},
         )
         assert resp.status_code == 404

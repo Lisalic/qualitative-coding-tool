@@ -6,12 +6,33 @@ import base64
 from typing import Dict, Any
 try:
     from backend.app.config import settings
-except Exception:
-    try:
-        from app.config import settings
-    except Exception as exc:
-        print("Failed", exc)
-        raise exc
+except ImportError:
+    from app.config import settings
+
+
+# A secret anyone can read in this repo signs tokens anyone can forge.
+_PLACEHOLDER_SECRETS = {"", "your-secret-key-here"}
+
+
+def password_fingerprint(stored_hash: str) -> str:
+    """Return a 32-character SHA-256 fingerprint of the stored password hash.
+
+    Carried in session JWTs and password reset tokens as ``pwh``: changing
+    the password changes the stored hash, which instantly invalidates all
+    outstanding tokens without maintaining a database revocation list.
+    """
+    return hashlib.sha256(stored_hash.encode("utf-8")).hexdigest()[:32]
+
+
+def _signing_secret() -> bytes:
+    """``JWT_SECRET_KEY`` (or ``SECRET_KEY``), refusing the placeholder
+    default: failing every login loudly beats silently accepting tokens
+    signed with a public key.
+    """
+    secret = settings.jwt_secret_key or settings.secret_key
+    if secret in _PLACEHOLDER_SECRETS:
+        raise RuntimeError("JWT_SECRET_KEY is not set; refusing to sign or verify tokens with a placeholder secret")
+    return secret.encode()
 
 
 def _b64url_encode(data: bytes) -> str:
@@ -40,8 +61,7 @@ def create_access_token(payload: Dict[str, Any], expires_minutes: int = None) ->
     body_b = _b64url_encode(json.dumps(body, separators=(',', ':')).encode())
     signing_input = f"{header_b}.{body_b}".encode()
 
-    secret = (settings.jwt_secret_key or settings.secret_key).encode()
-    sig = hmac.new(secret, signing_input, hashlib.sha256).digest()
+    sig = hmac.new(_signing_secret(), signing_input, hashlib.sha256).digest()
     sig_b = _b64url_encode(sig)
 
     return f"{header_b}.{body_b}.{sig_b}"
@@ -51,8 +71,7 @@ def decode_access_token(token: str) -> Dict[str, Any]:
     try:
         header_b, body_b, sig_b = token.split('.')
         signing_input = f"{header_b}.{body_b}".encode()
-        secret = (settings.jwt_secret_key or settings.secret_key).encode()
-        expected_sig = hmac.new(secret, signing_input, hashlib.sha256).digest()
+        expected_sig = hmac.new(_signing_secret(), signing_input, hashlib.sha256).digest()
         sig = _b64url_decode(sig_b)
         if not hmac.compare_digest(expected_sig, sig):
             raise ValueError("Invalid signature")
@@ -64,5 +83,5 @@ def decode_access_token(token: str) -> Dict[str, Any]:
         if exp is not None and now > int(exp):
             raise ValueError("Token expired")
         return payload
-    except Exception as exc:
-        raise ValueError(str(exc))
+    except Exception as exc:  # noqa: BLE001 - malformed tokens always become ValueError
+        raise ValueError(str(exc)) from exc

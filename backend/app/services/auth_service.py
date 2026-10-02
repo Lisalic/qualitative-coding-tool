@@ -12,7 +12,6 @@ per-account cooldown claimed with one conditional ``UPDATE`` so concurrent
 requests across instances can't each send an email.
 """
 
-import hashlib
 import hmac
 from datetime import datetime, timedelta, timezone
 from html import escape
@@ -22,7 +21,7 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.utils import _hash_password
-from backend.app.auth import create_access_token, decode_access_token
+from backend.app.auth import create_access_token, decode_access_token, password_fingerprint
 from backend.app.config import settings
 from backend.app.core.exceptions import ValidationAppError
 from backend.app.core.logging import get_logger
@@ -34,14 +33,19 @@ logger = get_logger(__name__)
 RESET_PURPOSE = "pwd_reset"
 INVALID_TOKEN_MESSAGE = "This reset link is invalid or has expired. Request a new one."
 
-
-def _password_fingerprint(stored_hash: str) -> str:
-    return hashlib.sha256(stored_hash.encode("utf-8")).hexdigest()[:32]
+_password_fingerprint = password_fingerprint
 
 
 async def find_user_by_email(db: AsyncSession, email: str) -> Optional[User]:
-    """Case-insensitive lookup; ``email`` must already be normalized (lowercased)."""
-    return (await db.execute(select(User).where(func.lower(User.email) == email))).scalar_one_or_none()
+    """Case-insensitive lookup; ``email`` must already be normalized (lowercased).
+
+    Takes the oldest match rather than requiring exactly one: on a
+    database the ``uq_users_email_lower`` revision couldn't apply to (it
+    refuses while case-duplicate accounts exist), ``scalar_one_or_none``
+    raised and every login for that address returned a 500.
+    """
+    result = await db.execute(select(User).where(func.lower(User.email) == email).order_by(User.id).limit(1))
+    return result.scalars().first()
 
 
 def create_reset_token(user: User) -> str:
@@ -115,14 +119,14 @@ async def reset_password(db: AsyncSession, token: str, new_password: str) -> Non
     try:
         payload = decode_access_token(token)
     except ValueError:
-        raise ValidationAppError(INVALID_TOKEN_MESSAGE)
+        raise ValidationAppError(INVALID_TOKEN_MESSAGE) from None
     if payload.get("purpose") != RESET_PURPOSE:
         raise ValidationAppError(INVALID_TOKEN_MESSAGE)
 
     try:
         user_id = int(payload.get("sub"))
     except (TypeError, ValueError):
-        raise ValidationAppError(INVALID_TOKEN_MESSAGE)
+        raise ValidationAppError(INVALID_TOKEN_MESSAGE) from None
     user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
     if user is None or not hmac.compare_digest(
         str(payload.get("pwh", "")), _password_fingerprint(user.password)

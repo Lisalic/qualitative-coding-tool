@@ -21,7 +21,7 @@ from backend.app.database import File, User
 from backend.app.storage_models import Submission
 from backend.app.versioning_models import ArtifactVersion
 
-pytestmark = pytest.mark.usefixtures("override_async_db")
+pytestmark = pytest.mark.usefixtures("override_async_db", "default_user")
 
 
 def _auth_headers(make_token, sub="1"):
@@ -156,7 +156,7 @@ class TestDeleteDatabase:
 
         resp = client.delete(
             "/api/delete-database/proj_a",
-            headers=_auth_headers(make_token, sub="999999"),
+            headers=_auth_headers(make_token),
         )
         assert resp.status_code == 404
 

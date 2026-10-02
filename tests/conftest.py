@@ -38,7 +38,7 @@ from sqlalchemy import event  # noqa: E402
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
-from backend.app.auth import create_access_token  # noqa: E402
+from backend.app.auth import create_access_token, password_fingerprint  # noqa: E402
 from backend.app.database import Base, Project, User, get_async_db  # noqa: E402
 from backend.app.main import app as fastapi_app  # noqa: E402
 
@@ -111,6 +111,21 @@ async def default_user(async_sqlite_engine) -> int:
 
 
 @pytest.fixture()
+async def other_user(async_sqlite_engine, default_user) -> int:
+    """A second real user (password ``"hash"``, so ``make_token`` sessions
+    match), for "can't read or change someone else's ..." tests. A token
+    for a user id that doesn't exist is rejected before ownership is ever
+    checked, so these need a real one.
+    """
+    SessionLocal = async_sessionmaker(async_sqlite_engine, expire_on_commit=False)
+    async with SessionLocal() as session:
+        user = User(email="other-route-test-user@example.com", password="hash")
+        session.add(user)
+        await session.commit()
+        return user.id
+
+
+@pytest.fixture()
 async def default_project(async_sqlite_engine, default_user) -> int:
     """A ``Project`` owned by ``default_user``, for routes that create an
     artifact.
@@ -155,18 +170,26 @@ def frozen_time(monkeypatch) -> float:
 
 @pytest.fixture()
 def make_token():
-    """Factory: ``make_token(sub="1", **extra_claims) -> str`` signed JWT."""
+    """Factory: ``make_token(sub="1", **extra_claims) -> str`` signed JWT.
+
+    Carries the session ``pwh`` claim for a user whose stored password is
+    ``"hash"`` -- what ``default_user`` and the per-module ``_make_user``
+    helpers store -- so the token is a live session for that user. Pass
+    ``pwh=...`` to override it.
+    """
 
     def _make(sub: Any = "1", **extra: Any) -> str:
-        payload = {"sub": sub, **extra}
-        return create_access_token(payload)
+        return create_access_token({"sub": sub, "pwh": password_fingerprint("hash"), **extra})
 
     return _make
 
 
 @pytest.fixture()
-def auth_cookies(make_token) -> dict[str, str]:
-    return {"access_token": make_token()}
+def auth_cookies(make_token, default_user, override_async_db) -> dict[str, str]:
+    """Session cookies for ``default_user``, which exists in the request's
+    database: authentication checks the user on every request.
+    """
+    return {"access_token": make_token(sub=str(default_user))}
 
 
 class FakeRequest:

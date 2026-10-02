@@ -1,10 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.auth_dependency import require_user_id
-from backend.app.database import Prompt, User, get_async_db
+from backend.app.database import Prompt, get_async_db
 from backend.app.services import prompt_service
 
 router = APIRouter()
@@ -32,11 +31,15 @@ async def _parse_body(request: Request) -> dict:
     content_type = (request.headers.get("content-type") or "").lower()
     try:
         if "application/json" in content_type:
-            return await request.json()
-        form = await request.form()
-        return {k: form.get(k) for k in form.keys()}
+            data = await request.json()
+        else:
+            form = await request.form()
+            data = {k: form.get(k) for k in form.keys()}
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid request payload: {str(exc)}")
+        raise HTTPException(status_code=400, detail="Invalid request payload") from exc
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="Invalid request payload")
+    return data
 
 
 @router.get("/prompts/")
@@ -59,21 +62,12 @@ async def create_prompt(
     """Create a new prompt owned by the authenticated user."""
     data = await _parse_body(request)
 
-    promptname = data.get("promptname")
-    prompt_val = data.get("prompt")
-    ptype = data.get("type")
+    promptname = str(data.get("promptname") or "").strip()
+    prompt_val = str(data.get("prompt") or "").strip()
+    ptype = str(data.get("type") or "").strip()
 
     if not promptname or not prompt_val or not ptype:
         raise HTTPException(status_code=400, detail="Missing required fields: promptname, prompt, type")
-
-    # Defensive check preserved from the pre-refactor handler: a
-    # well-signed token can still reference a user row that no longer
-    # exists. Kept as a manual HTTPException (not routed through
-    # prompt_service/AppError) so the response body stays
-    # {"detail": "User not found"} rather than {"error": "..."}.
-    result = await db.execute(select(User).where(User.id == user_id))
-    if result.scalar_one_or_none() is None:
-        raise HTTPException(status_code=401, detail="User not found")
 
     new_prompt = await prompt_service.create_prompt(db, user_id, promptname, prompt_val, ptype)
     return JSONResponse(_prompt_to_dict(new_prompt))

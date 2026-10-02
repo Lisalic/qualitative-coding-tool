@@ -11,7 +11,7 @@ One route exists outside `/api`: `GET /` → `{"message": "Qualitative Coding AP
 | Method | Path | Auth | Body | Response |
 |---|---|---|---|---|
 | POST | `/api/login/` | none | JSON `{email, password}` | `{id, email, access_token}` + `Set-Cookie access_token`; 401 on bad credentials |
-| POST | `/api/register/` | none | JSON `{email, password}` | same shape as login; 400 if email taken |
+| POST | `/api/register/` | none | JSON `{email, password}` (password at least 8 characters, email must look like an address) | same shape as login; 400 if email taken |
 | GET | `/api/me/` | required | — | `{id, email}` |
 | POST | `/api/logout/` | none | — | `{"message": "Logged out"}`, clears the cookie |
 

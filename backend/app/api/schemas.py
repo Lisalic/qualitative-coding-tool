@@ -822,11 +822,28 @@ class UpdateQuoteNotesRequest(BaseModel):
 # services/auth_service.py::find_user_by_email).
 NormalizedEmail = Annotated[str, AfterValidator(lambda v: v.strip().lower()), Field(min_length=1)]
 
+_EMAIL_SHAPE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _require_email_shape(value: str) -> str:
+    if not _EMAIL_SHAPE.match(value):
+        raise ValueError("Enter a valid email address")
+    return value
+
+
+# Shape is checked only when an address is first claimed: login and
+# forgot-password must keep working for any account that already exists.
+NewAccountEmail = Annotated[NormalizedEmail, AfterValidator(_require_email_shape)]
+
+# Checked on register and reset only, never on login, so existing accounts
+# with shorter passwords can still sign in.
+NewPassword = Annotated[str, Field(min_length=8, max_length=1024)]
+
 
 # Plain BaseModel: a password must never be whitespace-stripped.
 class RegisterRequest(BaseModel):
-    email: NormalizedEmail
-    password: str
+    email: NewAccountEmail
+    password: NewPassword
 
 
 class LoginRequest(BaseModel):
@@ -841,7 +858,7 @@ class ForgotPasswordRequest(_StrippingModel):
 class ResetPasswordRequest(BaseModel):
     # Plain BaseModel: a password must never be whitespace-stripped.
     token: str = Field(..., min_length=1)
-    new_password: str = Field(..., min_length=1)
+    new_password: NewPassword
 
 
 class MessageResponse(BaseModel):

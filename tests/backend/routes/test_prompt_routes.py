@@ -125,7 +125,6 @@ class TestCreatePrompt:
             data={"promptname": "p1", "prompt": "text", "type": "filter"},
         )
         assert resp.status_code == 401
-        assert resp.json()["detail"] == "User not found"
 
     async def test_malformed_json_body_returns_400(self, client, make_token, make_user) -> None:
         uid = await make_user()

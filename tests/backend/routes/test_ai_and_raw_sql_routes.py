@@ -151,12 +151,12 @@ class TestWordCountRangesGuard:
         assert body["comments"] == []
 
     async def test_cannot_read_another_users_file(
-        self, client, route_backed_by_sqlite_jobs, make_token
+        self, client, route_backed_by_sqlite_jobs, make_token, default_user, other_user
     ) -> None:
-        file_rec = await _make_file(route_backed_by_sqlite_jobs, user_id=1)
+        file_rec = await _make_file(route_backed_by_sqlite_jobs, user_id=default_user)
         resp = client.get(
             f"/api/word-count-ranges/?schema={file_rec.schemaname}",
-            cookies={"access_token": make_token(sub="2")},
+            cookies={"access_token": make_token(sub=str(other_user))},
         )
         assert resp.status_code == 404
 
@@ -787,7 +787,7 @@ class TestGetSummaryFile:
         assert resp.status_code == 404
 
     def test_cannot_read_another_users_summary(
-        self, client, override_async_db, default_project, make_token
+        self, client, override_async_db, default_project, make_token, other_user
     ) -> None:
         # Save a summary as user 1, then confirm user 2 can't fetch it by
         # schemaname -- proves get_summary_file is ownership-scoped, not
@@ -801,7 +801,7 @@ class TestGetSummaryFile:
         schema_name = save_resp.json()["file"]["schema_name"]
 
         resp = client.get(
-            f"/api/summary/{schema_name}", cookies={"access_token": make_token(sub="2")}
+            f"/api/summary/{schema_name}", cookies={"access_token": make_token(sub=str(other_user))}
         )
         assert resp.status_code == 404
 

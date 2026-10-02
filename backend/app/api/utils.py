@@ -1,20 +1,28 @@
-import os
-import hashlib
 import binascii
+import hashlib
+import hmac
+import os
+from typing import Any, Optional
+
 from fastapi import Request
 
 try:
     from backend.app.auth import decode_access_token
-except Exception:
+except ImportError:
     from app.auth import decode_access_token
 
 
-def get_user_id_from_request(request: Request):
-    """Get user ID from request token. Returns int or None."""
+
+def get_token_payload_from_request(request: Request) -> Optional[dict[str, Any]]:
+    """Extract and validate the JWT session payload from cookies or Authorization header.
+
+    Returns the decoded claims dictionary or ``None`` if absent, malformed,
+    expired, or scoped to a single-purpose flow (e.g. password reset).
+    """
     token = None
     try:
         token = request.cookies.get("access_token")
-    except Exception:
+    except Exception:  # noqa: BLE001 - a broken cookie accessor still permits bearer auth
         token = None
 
     if not token:
@@ -28,20 +36,27 @@ def get_user_id_from_request(request: Request):
 
     try:
         payload = decode_access_token(token)
-    except Exception:
+    except ValueError:
         return None
 
     # Purpose-scoped tokens (e.g. password reset) are never session tokens.
     if payload.get("purpose") is not None:
         return None
 
-    sub = payload.get("sub")
-    if sub is not None:
-        try:
-            return int(sub)
-        except (ValueError, TypeError):
-            return None
-    return None
+    return payload
+
+
+def user_id_from_claims(payload: Optional[dict[str, Any]]) -> Optional[int]:
+    """The user id a session token's ``sub`` claim names, or ``None`` when
+    it is missing or not an integer. Says nothing about whether that user
+    still exists -- see ``core/auth_dependency.py::session_user_id``.
+    """
+    if not payload:
+        return None
+    try:
+        return int(payload.get("sub"))
+    except (TypeError, ValueError):
+        return None
 
 
 def _hash_password(password: str) -> str:
@@ -60,6 +75,6 @@ def _verify_password(stored: str, provided: str) -> bool:
         iterations = int(iterations_s)
         dk = binascii.unhexlify(hash_hex)
         test_dk = hashlib.pbkdf2_hmac("sha256", provided.encode("utf-8"), salt, iterations)
-        return binascii.hexlify(test_dk) == binascii.hexlify(dk)
-    except Exception:
+        return hmac.compare_digest(test_dk, dk)
+    except (ValueError, TypeError, AttributeError, binascii.Error):
         return False

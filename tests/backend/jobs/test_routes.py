@@ -39,15 +39,13 @@ class TestGetJobStatus:
         resp = client.get(f"/api/jobs/{job_id}")
         assert resp.status_code == 401
 
-    async def test_404_for_missing_job(self, client, make_token) -> None:
-        resp = client.get("/api/jobs/999999", headers=_auth_headers(make_token, sub="1"))
+    async def test_404_for_missing_job(self, client, make_token, default_user) -> None:
+        resp = client.get("/api/jobs/999999", headers=_auth_headers(make_token, sub=str(default_user)))
         assert resp.status_code == 404
 
-    async def test_403_for_someone_elses_job(self, client, make_token, SessionLocal) -> None:
-        owner_id, job_id = await _create_user_and_job(SessionLocal, user_email="owner2@example.com")
-        # Authenticate as a different user id than the job's owner.
-        other_sub = str(owner_id + 1)
-        resp = client.get(f"/api/jobs/{job_id}", headers=_auth_headers(make_token, sub=other_sub))
+    async def test_403_for_someone_elses_job(self, client, make_token, SessionLocal, other_user) -> None:
+        _, job_id = await _create_user_and_job(SessionLocal, user_email="owner2@example.com")
+        resp = client.get(f"/api/jobs/{job_id}", headers=_auth_headers(make_token, sub=str(other_user)))
         assert resp.status_code == 403
 
     async def test_200_with_expected_shape_for_owner(self, client, make_token, SessionLocal) -> None:

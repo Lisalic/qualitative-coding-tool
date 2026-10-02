@@ -1,6 +1,7 @@
 """Tests for backend/app/api/utils.py.
 
-Covers: normalize_schema, get_user_id_from_request,
+Covers: normalize_schema, reading a session's user id from a request
+(get_token_payload_from_request + user_id_from_claims),
 _hash_password, _verify_password.
 
 Two of these tests (test_bearer_with_no_token_* and
@@ -16,9 +17,15 @@ import pytest
 from backend.app.api.utils import (
     _hash_password,
     _verify_password,
-    get_user_id_from_request,
+    get_token_payload_from_request,
+    user_id_from_claims,
 )
 from backend.app.core.schema_guard import normalize_schema
+
+
+def get_user_id_from_request(request):
+    """The two real steps auth takes before its database check."""
+    return user_id_from_claims(get_token_payload_from_request(request))
 
 
 # ---------------------------------------------------------------------------
