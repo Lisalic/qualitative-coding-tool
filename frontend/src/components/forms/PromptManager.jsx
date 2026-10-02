@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { api } from "../../api";
 
 const inputClasses =
@@ -10,46 +10,17 @@ export default function PromptManager({
   isOpen = true,
   onClose,
   onLoadPrompt,
-  currentPrompt,
   promptType = "filter",
   examplePrompt = "",
 }) {
   const [savedPrompts, setSavedPrompts] = useState([]);
-  const [newPromptContent, setNewPromptContent] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [editName, setEditName] = useState("");
   const [editContent, setEditContent] = useState("");
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("");
-  useEffect(() => {
-    loadSavedPrompts();
-  }, []);
 
-  useEffect(() => {
-    const handler = () => {
-      loadSavedPrompts();
-    };
-    try {
-      window.addEventListener("promptSaved", handler);
-    } catch (e) {}
-    return () => {
-      try {
-        window.removeEventListener("promptSaved", handler);
-      } catch (e) {}
-    };
-  }, []);
-
-  const showMessage = (text, type = "success") => {
-    setMessage(text);
-    setMessageType(type);
-  };
-
-  const clearMessage = () => {
-    setMessage("");
-    setMessageType("");
-  };
-
-  const loadSavedPrompts = () => {
+  const loadSavedPrompts = useCallback(() => {
     api
       .get(`/api/prompts/?prompt_type=${encodeURIComponent(promptType)}`)
       .then((res) => {
@@ -75,53 +46,25 @@ export default function PromptManager({
         // do not show error as a blocking message on load, but log for debugging
         console.warn("Failed to load prompts:", msg);
       });
+  }, [promptType]);
+
+  useEffect(() => {
+    loadSavedPrompts();
+  }, [loadSavedPrompts]);
+
+  useEffect(() => {
+    window.addEventListener("promptSaved", loadSavedPrompts);
+    return () => window.removeEventListener("promptSaved", loadSavedPrompts);
+  }, [loadSavedPrompts]);
+
+  const showMessage = (text, type = "success") => {
+    setMessage(text);
+    setMessageType(type);
   };
 
-  const savePrompt = () => {
-    if (!newPromptContent.trim()) {
-      showMessage("Please enter prompt content", "error");
-      return;
-    }
-    const nextNumber = savedPrompts.length + 1;
-    const promptName = `Prompt ${nextNumber}`;
-    // Attempt to get authenticated user id for debugging and include it in POST
-    let fetchedUserId = null;
-    api
-      .get("/api/me/")
-      .then((meRes) => {
-        const userId = meRes?.data?.id || meRes?.data?.sub || null;
-        fetchedUserId = userId;
-      })
-      .catch((meErr) => {
-        const uidMsg =
-          meErr?.response?.data?.detail || meErr?.message || "unauthenticated";
-        console.warn("Could not fetch /api/me:", uidMsg);
-      })
-      .finally(() => {
-        const form = new FormData();
-        form.append("promptname", promptName);
-        form.append("prompt", newPromptContent.trim());
-        form.append("type", promptType);
-        if (fetchedUserId) form.append("user_id", fetchedUserId);
-
-        api
-          .post("/api/prompts/", form)
-          .then((res) => {
-            const p = res.data || {};
-            // reload prompts for current page type
-            loadSavedPrompts();
-            setNewPromptContent("");
-            showMessage("Prompt saved successfully!");
-          })
-          .catch((err) => {
-            const msg =
-              err?.response?.data?.detail ||
-              err?.response?.data ||
-              err?.message ||
-              "Failed to save prompt";
-            showMessage(String(msg), "error");
-          });
-      });
+  const clearMessage = () => {
+    setMessage("");
+    setMessageType("");
   };
 
   const startEdit = (prompt) => {
@@ -149,7 +92,7 @@ export default function PromptManager({
 
     api
       .post(`/api/prompts/${id}/update`, form)
-      .then((res) => {
+      .then(() => {
         loadSavedPrompts();
         setEditingId(null);
         setEditName("");

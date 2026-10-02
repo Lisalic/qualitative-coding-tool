@@ -97,24 +97,6 @@ export function toggleExclude(selection, rowType, id) {
   });
 }
 
-/** Set every row in `rows` to `included`, or clear them all if all are already included. */
-export function toggleAll(selection, rowType, ids) {
-  const keys = ids.map((id) => keyFor(rowType, id));
-  const allIncluded = keys.length > 0 && keys.every((k) => selection.included.has(k));
-  return withSets(selection, (next) => {
-    for (const key of keys) {
-      if (allIncluded) {
-        next.included.delete(key);
-        next.aiDecided.delete(key);
-      } else {
-        next.included.add(key);
-        next.excluded.delete(key);
-        next.aiDecided.delete(key);
-      }
-    }
-  });
-}
-
 /**
  * Fold one AI preview run's suggestions into the selection, in EITHER
  * direction.

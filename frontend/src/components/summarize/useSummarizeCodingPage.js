@@ -86,10 +86,10 @@ export default function useSummarizeCodingPage() {
         setCreatedFile((data && data.file) || null);
         if (data?.partial) {
           const reason = data.partial_error
-            ? `Stopped early after an error: ${data.partial_error}`
-            : "This is likely due to a free model's batch limit -- use a paid model or reduce the input size for complete coverage.";
+            ? `Stopped early: ${data.partial_error}`
+            : "Try a paid model or a smaller input.";
           setPartialWarning(
-            `Warning: only ${data.batches_processed}/${data.batches_total} batches completed. ${reason}`,
+            `Only ${data.batches_processed}/${data.batches_total} batches completed. ${reason}`,
           );
         }
       }

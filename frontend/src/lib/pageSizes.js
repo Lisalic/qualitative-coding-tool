@@ -6,7 +6,7 @@
  * 100, so the same control offered different choices depending on which
  * editor you were in.
  */
-export const PAGE_SIZES = [10, 25, 50, 100, 200];
+const PAGE_SIZES = [10, 25, 50, 100, 200];
 
 /** `{value,label}` options for a `Dropdown`. Values stay numbers. */
 export const PAGE_SIZE_OPTIONS = PAGE_SIZES.map((size) => ({

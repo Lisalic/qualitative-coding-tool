@@ -53,8 +53,8 @@ export default function IntegrateAiPanel({ codebooks, existingCodes, onProposals
     if (data?.partial) {
       parts.push(
         data.partial_error
-          ? `Coverage was partial -- stopped early after an error: ${data.partial_error}`
-          : "Coverage was partial -- likely a free model's batch limit. Use a paid model for full coverage.",
+          ? `Stopped early: ${data.partial_error}`
+          : "Only part of the codebooks was processed. Try a paid model.",
       );
     }
     return { message: parts.join(" ") };
@@ -64,7 +64,6 @@ export default function IntegrateAiPanel({ codebooks, existingCodes, onProposals
     <AiAssistPanel
       promptType="generate"
       promptLabel="Your suggestions"
-      promptPlaceholder="Codes to keep separate, rename, or combine; anything the merge should pay attention to (optional)"
       exampleText={EXAMPLE_PROMPTS.integrate}
       runLabel="Propose merged codes"
       runningLabel="Merging..."

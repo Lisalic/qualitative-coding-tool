@@ -1,9 +1,8 @@
-import { useCallback, useState } from "react";
+import { useState } from "react";
 import CodingSetupPanel from "./CodingSetupPanel";
 import CodingWorkspaceSection from "../coding-table/workspace/CodingWorkspaceSection";
 import useViewCodingPage from "../coding-table/workspace/useViewCodingPage";
 import PageShell from "../shell/PageShell";
-import { btn } from "../../lib/uiClasses";
 
 /**
  * Apply Codebook, as one iterative screen.
@@ -33,20 +32,10 @@ export default function CodingEditor() {
     pinnedDescription: artifact?.description || "",
   });
 
-  const handleCreated = useCallback((file) => {
+  const handleCreated = (file) => {
     if (!file?.schema_name) return;
     setArtifact(file);
-  }, []);
-
-  const startAnother = useCallback(() => {
-    if (
-      page.isSessionDirty &&
-      !window.confirm("You have unsaved coding changes. Start a new coding and discard them?")
-    ) {
-      return;
-    }
-    setArtifact(null);
-  }, [page.isSessionDirty]);
+  };
 
   if (!artifact) {
     return (
@@ -56,14 +45,5 @@ export default function CodingEditor() {
     );
   }
 
-  return (
-    <CodingWorkspaceSection
-      page={page}
-      leadingActions={
-        <button type="button" className={btn} onClick={startAnother}>
-          New coding
-        </button>
-      }
-    />
-  );
+  return <CodingWorkspaceSection page={page} />;
 }

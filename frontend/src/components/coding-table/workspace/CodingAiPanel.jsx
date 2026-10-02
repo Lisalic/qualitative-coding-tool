@@ -40,11 +40,6 @@ export default function CodingAiPanel({
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-sm text-paper/70">
-        Apply the codebook to documents with AI. Results are staged for review -- nothing is saved until you
-        click Save.
-      </p>
-
       <div className="flex flex-col gap-2 border border-line bg-surface-raised px-2.5 py-2">
         <div className="text-sm">
           <span className="font-semibold">{selectedCount}</span> document{selectedCount === 1 ? "" : "s"} selected
@@ -94,9 +89,6 @@ export default function CodingAiPanel({
             ? `Code ${selectedCount} document${selectedCount === 1 ? "" : "s"} with AI`
             : "Code with AI"}
       </button>
-      {selectedCount === 0 && !loading && (
-        <p className="text-xs text-paper/50">Tick documents in the list, or use the buttons above.</p>
-      )}
 
       {loading && progress && (
         <ProgressBar current={progress.current} total={progress.total} label={progress.label} />

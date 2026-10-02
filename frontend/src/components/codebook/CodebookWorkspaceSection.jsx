@@ -4,6 +4,7 @@ import CodeLegend from "../coding-table/CodeLegend";
 import ExportDropdown from "../export/ExportDropdown";
 import PageEmptyState from "../primitives/PageEmptyState";
 import PromptPanel from "../primitives/PromptPanel";
+import ToolsMenu, { toolsMenuItem } from "../primitives/ToolsMenu";
 import PageShell from "../shell/PageShell";
 import Panel from "../shell/Panel";
 import { getCodeColor } from "../../lib/codingUtils";
@@ -64,40 +65,70 @@ export default function CodebookWorkspaceSection({
   const actions = (
     <>
       {picker}
-      <button
-        type="button"
-        className={btnClasses}
-        onClick={() => navigate("/compare-codebook", { state: { codebookA: selectedCodebook } })}
-      >
-        Compare
-      </button>
-      <button
-        type="button"
-        className={btnClasses}
-        onClick={() => navigate("/integrate-codebook", { state: { codebookA: selectedCodebook } })}
-      >
-        Integrate
-      </button>
-      <button
-        type="button"
-        className={btnClasses}
-        onClick={() => navigate(`/versions?ref=${encodeURIComponent(selectedCodebook)}`)}
-      >
-        History
-      </button>
-      <button
-        type="button"
-        className={btnClasses}
-        onClick={() => navigate("/lineage", { state: { ref: selectedCodebook } })}
-      >
-        Lineage
-      </button>
-      <ExportDropdown fileId={selectedCodebook} artifactType="codebook" />
-      {hasPromptInfo(promptInfo) && (
-        <button type="button" className={btnClasses} onClick={() => setShowPrompt((v) => !v)}>
-          {showPrompt ? "Hide" : "Show"} Prompt
-        </button>
-      )}
+      <ToolsMenu label="Tools">
+        {({ close }) => (
+          <>
+            <button
+              type="button"
+              className={toolsMenuItem}
+              onClick={() => {
+                navigate("/compare-codebook", { state: { codebookA: selectedCodebook } });
+                close();
+              }}
+            >
+              Compare
+            </button>
+            <button
+              type="button"
+              className={toolsMenuItem}
+              onClick={() => {
+                navigate("/integrate-codebook", { state: { codebookA: selectedCodebook } });
+                close();
+              }}
+            >
+              Integrate
+            </button>
+            <button
+              type="button"
+              className={toolsMenuItem}
+              onClick={() => {
+                navigate(`/versions?ref=${encodeURIComponent(selectedCodebook)}`);
+                close();
+              }}
+            >
+              History
+            </button>
+            <button
+              type="button"
+              className={toolsMenuItem}
+              onClick={() => {
+                navigate("/lineage", { state: { ref: selectedCodebook } });
+                close();
+              }}
+            >
+              Lineage
+            </button>
+            <ExportDropdown
+              fileId={selectedCodebook}
+              artifactType="codebook"
+              triggerClassName={toolsMenuItem}
+              onAction={close}
+            />
+            {hasPromptInfo(promptInfo) && (
+              <button
+                type="button"
+                className={toolsMenuItem}
+                onClick={() => {
+                  setShowPrompt((v) => !v);
+                  close();
+                }}
+              >
+                {showPrompt ? "Hide" : "Show"} Prompt
+              </button>
+            )}
+          </>
+        )}
+      </ToolsMenu>
       {!isEditMode ? (
         <button
           type="button"

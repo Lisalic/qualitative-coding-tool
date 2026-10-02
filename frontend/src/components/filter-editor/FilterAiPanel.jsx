@@ -108,8 +108,8 @@ export default function FilterAiPanel({ database, included, excluded, onAccept, 
     if (data?.partial) {
       parts.push(
         data.partial_error
-          ? `Coverage was partial -- stopped early after an error: ${data.partial_error}`
-          : "Coverage was partial -- likely a free model's batch limit. Use a paid model or a smaller sample for full coverage.",
+          ? `Stopped early: ${data.partial_error}`
+          : "Only part of the sample was processed. Try a paid model or a smaller sample.",
       );
     }
     return { message: parts.join(" ") };
@@ -191,7 +191,7 @@ export default function FilterAiPanel({ database, included, excluded, onAccept, 
               id="filterEditorTags"
               value={filterTags}
               onChange={(e) => setFilterTags(e.target.value)}
-              placeholder="Include comma separated keywords to speed up filtering."
+              placeholder="Comma-separated"
               rows={2}
               className={textarea}
               disabled={fieldsDisabled}

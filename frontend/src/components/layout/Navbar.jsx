@@ -96,7 +96,9 @@ function Navbar() {
                 try {
                   localStorage.removeItem("access_token");
                   delete api.defaults.headers.common["Authorization"];
-                } catch (e) {}
+                } catch {
+                  // localStorage unavailable -- nothing stored to clear.
+                }
                 window.dispatchEvent(new Event("auth-changed"));
                 navigate("/");
               }}

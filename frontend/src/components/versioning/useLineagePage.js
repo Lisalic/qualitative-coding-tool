@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 import { apiFetch, requestJson } from "../../api";
 
-export const FILE_TYPE_LABELS = {
+const FILE_TYPE_LABELS = {
   raw_data: "Raw Data",
   filtered_data: "Filtered Data",
   codebook: "Codebook",

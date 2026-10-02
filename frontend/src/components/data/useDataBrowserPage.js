@@ -31,14 +31,15 @@ export default function useDataBrowserPage({ mode = "raw" } = {}) {
   const location = useLocation();
   const config = MODE_CONFIG[mode] || MODE_CONFIG.raw;
   const scoped = useProjectScopedFiles(config.fileType);
+  const { setSelectedDatabase } = scoped;
 
   useEffect(() => {
     if (!location.state?.selectedDatabase) return;
     const selected = location.state.selectedDatabase;
     const selectedId =
       typeof selected === "string" ? selected : selected?.name || selected?.id || "";
-    scoped.setSelectedDatabase(selectedId);
-  }, [location.state, scoped.setSelectedDatabase]);
+    setSelectedDatabase(selectedId);
+  }, [location.state, setSelectedDatabase]);
 
   const projects = useMemo(
     () => (scoped.projectsList.length > 0 ? scoped.projectsList : scoped.userProjects || []),

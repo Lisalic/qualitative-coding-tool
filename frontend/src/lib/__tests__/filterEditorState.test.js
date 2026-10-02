@@ -15,7 +15,6 @@ import {
   serializeDraft,
   splitByType,
   stateOf,
-  toggleAll,
   toggleExclude,
   toggleInclude,
 } from "../filterEditorState";
@@ -107,30 +106,6 @@ describe("toggleInclude / toggleExclude", () => {
     s = toggleExclude(s, "comment", "shared");
     expect(stateOf(s, "submission", "shared")).toBe("included");
     expect(stateOf(s, "comment", "shared")).toBe("excluded");
-  });
-});
-
-describe("toggleAll", () => {
-  it("includes every row when not all are included", () => {
-    const s = toggleAll(emptySelection(), "submission", ["s1", "s2", "s3"]);
-    expect(counts(s).included).toBe(3);
-  });
-
-  it("clears them all when every row is already included", () => {
-    let s = toggleAll(emptySelection(), "submission", ["s1", "s2"]);
-    s = toggleAll(s, "submission", ["s1", "s2"]);
-    expect(counts(s).included).toBe(0);
-  });
-
-  it("clears an exclusion when including a page", () => {
-    let s = toggleExclude(emptySelection(), "submission", "s1");
-    s = toggleAll(s, "submission", ["s1", "s2"]);
-    expect(stateOf(s, "submission", "s1")).toBe("included");
-  });
-
-  it("is a no-op on an empty page", () => {
-    const s = toggleAll(emptySelection(), "submission", []);
-    expect(counts(s)).toEqual({ included: 0, excluded: 0, aiDecided: 0 });
   });
 });
 

@@ -4,6 +4,8 @@ import ProtectedRoute from "./components/auth/ProtectedRoute";
 import Sidebar from "./components/layout/Sidebar";
 import Navbar from "./components/layout/Navbar";
 import AuthGate from "./components/auth/AuthGate";
+import DialogHost from "./components/feedback/DialogHost";
+import ToastHost from "./components/feedback/ToastHost";
 
 const ImportPage = React.lazy(() => import("./pages/Import"));
 const Filter = React.lazy(() => import("./pages/Filter"));
@@ -216,6 +218,8 @@ function App() {
             </Suspense>
           </div>
         </main>
+        <DialogHost />
+        <ToastHost />
       </div>
     </Router>
   );

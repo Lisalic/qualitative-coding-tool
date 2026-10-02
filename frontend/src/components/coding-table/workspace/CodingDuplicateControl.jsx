@@ -9,7 +9,7 @@ import { inputSm, btnSm, btnPrimary } from "../../../lib/uiClasses";
  * (not an in-progress edit draft): the copy is a full server-side clone
  * of everything the artifact owns, not a small JSON payload of edits.
  */
-export default function CodingDuplicateControl({ defaultName, onDuplicate, disabled }) {
+export default function CodingDuplicateControl({ defaultName, onDuplicate, disabled, triggerClassName }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [status, setStatus] = useState({ state: "idle", message: "" });
@@ -43,14 +43,14 @@ export default function CodingDuplicateControl({ defaultName, onDuplicate, disab
 
   if (!open) {
     return (
-      <button type="button" className={btnSm} onClick={startOpen} disabled={disabled}>
+      <button type="button" className={triggerClassName || btnSm} onClick={startOpen} disabled={disabled}>
         Duplicate
       </button>
     );
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-col gap-2 p-2">
       <input
         type="text"
         className={inputSm}
@@ -58,18 +58,21 @@ export default function CodingDuplicateControl({ defaultName, onDuplicate, disab
         onChange={(e) => setName(e.target.value)}
         placeholder="New coding name"
         disabled={status.state === "saving"}
+        autoFocus
       />
-      <button
-        type="button"
-        className={btnPrimary}
-        onClick={confirm}
-        disabled={status.state === "saving"}
-      >
-        {status.state === "saving" ? "Duplicating..." : "Confirm"}
-      </button>
-      <button type="button" className={btnSm} onClick={cancel} disabled={status.state === "saving"}>
-        Cancel
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          className={btnPrimary}
+          onClick={confirm}
+          disabled={status.state === "saving"}
+        >
+          {status.state === "saving" ? "Duplicating..." : "Confirm"}
+        </button>
+        <button type="button" className={btnSm} onClick={cancel} disabled={status.state === "saving"}>
+          Cancel
+        </button>
+      </div>
       {status.state === "error" && status.message && (
         <span className="text-sm text-error">{status.message}</span>
       )}

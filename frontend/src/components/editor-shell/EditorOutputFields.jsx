@@ -42,6 +42,7 @@ export default function EditorOutputFields({
         <input
           id={`${idPrefix}Name`}
           type="text"
+          autoComplete="off"
           value={name}
           onChange={(e) => onNameChange(e.target.value)}
           placeholder={namePlaceholder}

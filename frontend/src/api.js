@@ -31,7 +31,9 @@ try {
     const t = localStorage.getItem("access_token");
     if (t) api.defaults.headers.common["Authorization"] = `Bearer ${t}`;
   }
-} catch (e) {}
+} catch {
+  // localStorage unavailable (private mode / blocked) -- stay unauthenticated.
+}
 
 // Normalizes a fetch Response into `{ ok, status, data, error }`, shared by
 // `postForm` and `requestJson`. `error` is a human-readable string when

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../../api";
+import DialogService from "../feedback/DialogService";
 import ToastService from "../feedback/ToastService";
 import FileRowActions from "./FileRowActions";
 import Panel from "../shell/Panel";
@@ -129,10 +130,11 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
     const label = file.display_name || file.schema_name;
     const derived = await fetchDerivedNames(file.schema_name);
     const derivedNote = derived.length
-      ? ` ${derived.length} artifact${derived.length === 1 ? "" : "s"} derived from it (${derived.join(", ")}) will be kept, but will lose the recorded link back to it.`
+      ? ` Derived files (${derived.join(", ")}) are kept but lose their link to it.`
       : "";
-    const confirmed = await ToastService.confirm(
-      `Are you sure you want to delete "${label}"? This action cannot be undone.${derivedNote}`,
+    const confirmed = await DialogService.confirm(
+      `Delete "${label}"? This cannot be undone.${derivedNote}`,
+      { title: "Delete file", confirmLabel: "Delete", danger: true },
     );
     if (!confirmed) {
       return;
@@ -167,8 +169,9 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
       setMergeError("Please enter a name for the merged database");
       return;
     }
-    const confirmed = await ToastService.confirm(
+    const confirmed = await DialogService.confirm(
       `Merge ${selectedDatabases.length} databases into "${mergeName.trim()}"?`,
+      { title: "Merge databases", confirmLabel: "Merge" },
     );
     if (!confirmed) return;
     setMergeLoading(true);

@@ -603,12 +603,6 @@ export default function VersionHistoryPanel({ history, fileType, onDuplicateFrom
           />
         )}
 
-        {viewingVersion == null && selected.length < 2 && !diff && (
-          <p className="text-sm text-paper/60">
-            Select two versions on the left to see what changed, or click &ldquo;View&rdquo; on one to see its content.
-          </p>
-        )}
-
         {viewingVersion == null && diffLoading && <p className="text-sm text-paper/60">Computing diff...</p>}
 
         {viewingVersion == null && diff && (

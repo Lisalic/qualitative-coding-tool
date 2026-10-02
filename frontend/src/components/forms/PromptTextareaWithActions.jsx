@@ -92,7 +92,6 @@ export default function PromptTextareaWithActions({
         isOpen={isPromptManagerOpen}
         onClose={() => setIsPromptManagerOpen(false)}
         onLoadPrompt={onChange}
-        currentPrompt={value}
         promptType={promptType}
         examplePrompt={exampleText}
       />

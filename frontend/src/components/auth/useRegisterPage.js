@@ -32,13 +32,17 @@ export default function useRegisterPage() {
             localStorage.setItem("access_token", token);
             api.defaults.headers.common.Authorization = `Bearer ${token}`;
           }
-        } catch (error) {}
+        } catch {
+          // localStorage unavailable -- the cookie still carries the session.
+        }
 
         setMessage("Registration successful!");
         setMessageType("success");
         try {
           window.dispatchEvent(new Event("auth-changed"));
-        } catch (error) {}
+        } catch {
+          // Non-browser environment -- nothing listening for the event.
+        }
         setTimeout(() => navigate("/"), 1000);
       } catch (err) {
         const msg =

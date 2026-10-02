@@ -45,7 +45,7 @@ All project/file admin actions are direct (non-job) calls:
 - Create: `POST /api/create-project/` (`name`, `description`) — sync FormData.
 - Update header: `POST /api/update-project/` (`project_id`, `name`, `description`).
 - Rename file: `POST /api/rename-file/` (`schema_name`, `display_name`, `description`).
-- Delete file: confirm dialog (`ToastService.confirm`) → `DELETE /api/delete-database/{schema_name}`.
+- Delete file: themed confirm dialog (`DialogService.confirm`) → `DELETE /api/delete-database/{schema_name}`.
 - Merge: confirm dialog → `POST /api/merge-databases/` (`databases` as a JSON array, `name`, `project_id`) — creates a new `raw_data` file combining rows from all selected sources, deduplicated by row id, with a `FileDependency` back to every owned source.
 
 The Project page has no single-project-by-id endpoint — `useProjectPage.js` fetches `GET /api/projects/` and finds the matching project client-side.

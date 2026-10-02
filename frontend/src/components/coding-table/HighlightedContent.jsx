@@ -183,7 +183,7 @@ const HighlightedContent = ({
 
   const nameByUid = buildNameByUidLookup(codeEvidence, availableCodes);
 
-  const calculateLines = () => {
+  const calculateLines = useCallback(() => {
     if (!containerRef.current) return;
 
     const container = containerRef.current;
@@ -251,17 +251,18 @@ const HighlightedContent = ({
 
     setLines(newLines);
     setMarginWidth(boundedWidth);
-  };
+  }, [getCodeColor]);
 
+  // Re-measure after every render that can move a coded span: new text
+  // or new evidence re-lays out the spans `calculateLines` reads.
   useEffect(() => {
     calculateLines();
-  }, [content, codeEvidence, getCodeColor]);
+  }, [content, codeEvidence, calculateLines]);
 
   useEffect(() => {
-    const handleResize = () => calculateLines();
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, [getCodeColor]);
+    window.addEventListener("resize", calculateLines);
+    return () => window.removeEventListener("resize", calculateLines);
+  }, [calculateLines]);
 
   // Hide the hover tooltip (coded-span mouseover) on any scroll (window
   // or scrollable parent) -- unrelated to the selection popup below.

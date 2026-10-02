@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { apiFetch } from "../../api";
 import MemoEditor from "./MemoEditor";
 
@@ -28,15 +28,7 @@ export default function EntryModal({
   const [comments, setComments] = useState([]);
   const [loadingComments, setLoadingComments] = useState(false);
 
-  useEffect(() => {
-    if (isOpen && entry && entry.type === "submission") {
-      fetchComments(entry.id);
-    } else {
-      setComments([]);
-    }
-  }, [isOpen, entry]);
-
-  const fetchComments = async (submissionId) => {
+  const fetchComments = useCallback(async (submissionId) => {
     try {
       setLoadingComments(true);
       const response = await apiFetch(
@@ -51,7 +43,15 @@ export default function EntryModal({
     } finally {
       setLoadingComments(false);
     }
-  };
+  }, [database]);
+
+  useEffect(() => {
+    if (isOpen && entry && entry.type === "submission") {
+      fetchComments(entry.id);
+    } else {
+      setComments([]);
+    }
+  }, [isOpen, entry, fetchComments]);
 
   if (!isOpen || !entry) return null;
 

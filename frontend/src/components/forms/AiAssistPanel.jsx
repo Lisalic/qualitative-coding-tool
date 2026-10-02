@@ -196,7 +196,6 @@ export default function AiAssistPanel({
               disabled={disabled}
               valueDisplay={`${samplePercentage}%`}
               valueMinWidth="70px"
-              caption="Percentage of the still-undecided rows to send to the model."
             />
           )}
 

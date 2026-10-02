@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../../api";
+import DialogService from "../feedback/DialogService";
 import ToastService from "../feedback/ToastService";
 
 export function useDataTableActions({
@@ -77,8 +78,9 @@ export function useDataTableActions({
 
   const deleteSelected = useCallback(async () => {
     if (!currentDatabase || selectedRows.size === 0) return;
-    const confirmed = await ToastService.confirm(
-      `Delete ${selectedRows.size} selected entries? This closes them out of the live view -- the artifact's version history keeps a record, and they can be restored from an earlier version.`,
+    const confirmed = await DialogService.confirm(
+      `Delete ${selectedRows.size} selected entries? Earlier versions keep them.`,
+      { title: "Delete entries", confirmLabel: "Delete", danger: true },
     );
     if (!confirmed) return;
 
@@ -136,8 +138,9 @@ export function useDataTableActions({
       return;
     }
 
-    const confirmed = await ToastService.confirm(
+    const confirmed = await DialogService.confirm(
       `Move ${selectedRows.size} selected entries to ${targetDb}?`,
+      { title: "Move entries", confirmLabel: "Move" },
     );
     if (!confirmed) return;
 

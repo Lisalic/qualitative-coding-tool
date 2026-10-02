@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { mintClientCodeUid } from "../../lib/codingUtils";
 import { badge, btnSm, inputSm } from "../../lib/uiClasses";
+import DialogService from "../feedback/DialogService";
 
 const btnSmall = btnSm;
 const inputClasses = `min-w-0 ${inputSm}`;
@@ -181,8 +182,17 @@ const CodeLegend = ({
   }, [updateDraftTree]);
 
   const removeFamily = useCallback(
-    (familyIndex, hasCodes) => {
-      if (hasCodes && !window.confirm("Remove this family and all its codes?")) return;
+    async (familyIndex, hasCodes) => {
+      if (
+        hasCodes &&
+        !(await DialogService.confirm("Remove this family and all its codes?", {
+          title: "Remove family",
+          confirmLabel: "Remove",
+          danger: true,
+        }))
+      ) {
+        return;
+      }
       updateDraftTree((tree) => tree.filter((_, i) => i !== familyIndex));
     },
     [updateDraftTree],

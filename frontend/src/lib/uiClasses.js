@@ -44,9 +44,6 @@ export const select = input;
 
 export const textarea = `${input} w-full resize-y`;
 
-/** Section label inside a Panel header, or a sub-heading within a Panel body. */
-export const panelHeader = "text-sm font-semibold uppercase tracking-wide";
-
 /** Small muted caption: timestamps, counts, helper text. */
 export const meta = "text-xs text-paper/50";
 

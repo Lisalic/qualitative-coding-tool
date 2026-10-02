@@ -388,7 +388,7 @@ export function draftStorageKey(sourceDatabase, targetCodebook = "") {
 /** Prefix for the integrate editor's own drafts, kept distinct from
  * `DRAFT_STORAGE_PREFIX` (Create Codebook's) so the two tools' localStorage
  * entries never collide even if a schema/ref string happened to coincide. */
-export const INTEGRATE_DRAFT_STORAGE_PREFIX = "integrateCodebookDraft:";
+const INTEGRATE_DRAFT_STORAGE_PREFIX = "integrateCodebookDraft:";
 
 /**
  * One draft per SET of source codebooks being integrated -- sorted and

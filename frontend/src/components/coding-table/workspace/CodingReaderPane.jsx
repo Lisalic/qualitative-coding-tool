@@ -1,6 +1,7 @@
 import { useState } from "react";
 import HighlightedContent from "../HighlightedContent";
 import Panel from "../../shell/Panel";
+import MemoEditor from "../../data/MemoEditor";
 import { badge, btnSm } from "../../../lib/uiClasses";
 import { rollUpCoder } from "../../../lib/codingUtils";
 
@@ -97,6 +98,8 @@ export default function CodingReaderPane({
   onRemoveEntry,
   onUpdateNotes,
   onRecodeThisDocument,
+  memo = null,
+  onSaveMemo = null,
   readOnly = false,
 }) {
   if (!activeRow) {
@@ -191,6 +194,16 @@ export default function CodingReaderPane({
             Cancel
           </button>
         </div>
+      )}
+
+      {/* The row's analytic memo -- the same one written on this row in
+          the data viewer or filter editor, copied forward with the row. */}
+      {!readOnly && onSaveMemo && (
+        <MemoEditor
+          key={`${activeRow.row_type}:${activeRow.post_id}`}
+          memo={memo}
+          onSave={(body) => onSaveMemo(activeRow.row_type, activeRow.post_id, body)}
+        />
       )}
     </Panel>
   );

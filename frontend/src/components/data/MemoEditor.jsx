@@ -47,10 +47,6 @@ export default function MemoEditor({ memo, onSave, compact = false }) {
   return (
     <div className={compact ? "pt-2" : "mt-6 border-t border-paper/20 pt-4"}>
       {!compact && <h3 className="mb-2 text-lg font-medium">Memo</h3>}
-      <p className="mb-2 text-sm text-paper/60">
-        Your notes on this row. Memos follow the row into any database filtered
-        or coded from this one.
-      </p>
       <textarea
         value={draft}
         onChange={(e) => setDraft(e.target.value)}

@@ -10,9 +10,6 @@ const Landing = () => {
         title="Qualitative Coding Tool"
         className="text-4xl font-bold sm:text-5xl"
       />
-      <p className="max-w-md text-paper/70">
-        Analyze, compare, and summarize qualitative coding projects in one place.
-      </p>
       <section className="flex gap-4">
         <Link
           to="/login"

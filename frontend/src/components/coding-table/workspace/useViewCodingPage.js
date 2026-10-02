@@ -4,6 +4,7 @@ import { apiFetch, postJsonAndPoll, requestJson } from "../../../api";
 import { buildRecodeItemsPayload, MissingFieldsError } from "../../../lib/apiContracts";
 import { cloneCodebookTree, flattenTreeToCodes, groupCodesByFamily, rollUpCoder } from "../../../lib/codingUtils";
 import { normalizeCodingRowEdits } from "../../../lib/codingViewHelpers";
+import DialogService from "../../feedback/DialogService";
 
 const ROWS_PER_PAGE = 25;
 const SEARCH_DEBOUNCE_MS = 400;
@@ -759,8 +760,15 @@ export default function useViewCodingPage({
   ]);
 
   const handleCodedDataChange = useCallback(
-    (codedDataId) => {
-      if (isSessionDirty && !window.confirm("You have unsaved coding changes. Switch files and discard them?")) {
+    async (codedDataId) => {
+      if (
+        isSessionDirty &&
+        !(await DialogService.confirm("You have unsaved coding changes. Switch files and discard them?", {
+          title: "Unsaved changes",
+          confirmLabel: "Discard changes",
+          danger: true,
+        }))
+      ) {
         return;
       }
       setSelectedCodedData(codedDataId);

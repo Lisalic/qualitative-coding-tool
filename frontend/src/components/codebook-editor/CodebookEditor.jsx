@@ -374,7 +374,7 @@ export default function CodebookEditor() {
                   <label className="text-sm">Source database</label>
                   <p className="text-sm text-paper/60">
                     {!targetCodebook
-                      ? "Select a codebook -- its own source database is used."
+                      ? "—"
                       : autoSource.loading
                         ? "Finding the codebook's source database..."
                         : autoSource.error || sourceLabel || "Not recorded"}

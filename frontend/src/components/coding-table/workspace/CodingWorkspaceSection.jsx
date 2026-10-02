@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import ExportDropdown from "../../export/ExportDropdown";
+import { useRowMemos } from "../../data/useRowMemos";
 import CodingDuplicateControl from "./CodingDuplicateControl";
 import CodingTextView from "./CodingTextView";
 import CodingQuoteBank from "./CodingQuoteBank";
@@ -11,12 +12,13 @@ import CodingAiPanel from "./CodingAiPanel";
 import ViewModeTabs from "../../primitives/ViewModeTabs";
 import PageEmptyState from "../../primitives/PageEmptyState";
 import PromptPanel from "../../primitives/PromptPanel";
+import ToolsMenu, { toolsMenuItem } from "../../primitives/ToolsMenu";
 import PageShell from "../../shell/PageShell";
 import EditorRail from "../../editor-shell/EditorRail";
 import EditorActionBar from "../../editor-shell/EditorActionBar";
 import { EDITOR_GRID_CLASSES } from "../../editor-shell/EditorWorkspace";
 import { useEditorShortcuts } from "../../editor-shell/useEditorShortcuts";
-import { btn, btnSm, btnActive } from "../../../lib/uiClasses";
+import { btn, btnActive } from "../../../lib/uiClasses";
 import { hasPromptInfo } from "../../../lib/promptInfo";
 import { flattenCodebookCodes, getCodeColor } from "../../../lib/codingUtils";
 
@@ -72,6 +74,7 @@ export default function CodingWorkspaceSection({
   const [showPrompt, setShowPrompt] = useState(false);
   const [railTab, setRailTab] = useState("codebook");
   const navigate = useNavigate();
+  const { getMemo, saveMemo } = useRowMemos(page.selectedCodingSchema);
 
   const promptInfo = {
     systemPrompt: page.systemPrompt,
@@ -129,30 +132,69 @@ export default function CodingWorkspaceSection({
         onChange={page.setViewMode}
         containerClassName="flex gap-1.5"
       />
-      <button
-        type="button"
-        className={btnSm}
-        onClick={() => navigate(`/versions?ref=${encodeURIComponent(page.selectedCodingSchema)}`)}
-      >
-        History
-      </button>
-      <button
-        type="button"
-        className={btnSm}
-        onClick={() => navigate("/lineage", { state: { ref: page.selectedCodingSchema } })}
-      >
-        Lineage
-      </button>
-      {hasPromptInfo(promptInfo) && (
-        <button type="button" className={btnSm} onClick={() => setShowPrompt((v) => !v)}>
-          {showPrompt ? "Hide" : "Show"} Prompt
-        </button>
-      )}
-      <ExportDropdown fileId={page.selectedCodingSchema} artifactType="coding" />
-      <CodingDuplicateControl
-        defaultName={page.selectedCodedDataName}
-        onDuplicate={page.handleDuplicate}
-      />
+      <ToolsMenu label="Tools">
+        {({ close }) => (
+          <>
+            <button
+              type="button"
+              className={toolsMenuItem}
+              onClick={() => {
+                navigate(`/versions?ref=${encodeURIComponent(page.selectedCodingSchema)}`);
+                close();
+              }}
+            >
+              History
+            </button>
+            <button
+              type="button"
+              className={toolsMenuItem}
+              onClick={() => {
+                navigate("/lineage", { state: { ref: page.selectedCodingSchema } });
+                close();
+              }}
+            >
+              Lineage
+            </button>
+            {hasPromptInfo(promptInfo) && (
+              <button
+                type="button"
+                className={toolsMenuItem}
+                onClick={() => {
+                  setShowPrompt((v) => !v);
+                  close();
+                }}
+              >
+                {showPrompt ? "Hide" : "Show"} Prompt
+              </button>
+            )}
+            <ExportDropdown
+              fileId={page.selectedCodingSchema}
+              artifactType="coding"
+              triggerClassName={toolsMenuItem}
+              onAction={close}
+            />
+            <ExportDropdown
+              fileId={page.selectedCodingSchema}
+              artifactType="summary"
+              label="Export code frequencies"
+              triggerClassName={toolsMenuItem}
+              onAction={close}
+            />
+            <ExportDropdown
+              fileId={page.selectedCodingSchema}
+              artifactType="memos"
+              label="Export memos"
+              triggerClassName={toolsMenuItem}
+              onAction={close}
+            />
+            <CodingDuplicateControl
+              defaultName={page.selectedCodedDataName}
+              onDuplicate={page.handleDuplicate}
+              triggerClassName={toolsMenuItem}
+            />
+          </>
+        )}
+      </ToolsMenu>
     </>
   );
 
@@ -224,6 +266,8 @@ export default function CodingWorkspaceSection({
               page.recodeThisDocument();
               setRailTab("ai");
             }}
+            memo={page.activeRow ? getMemo(page.activeRow.row_type, page.activeRow.post_id) : null}
+            onSaveMemo={saveMemo}
           />
 
           <EditorRail scroll={false}>

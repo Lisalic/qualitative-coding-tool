@@ -36,7 +36,7 @@ export default function SliderField({
             {valueDisplay}
           </span>
         </div>
-        <div className="mt-1.5 text-sm text-paper/60">{caption}</div>
+        {caption && <div className="mt-1.5 text-sm text-paper/60">{caption}</div>}
       </div>
     </div>
   );
