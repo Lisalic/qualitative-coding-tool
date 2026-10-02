@@ -6,7 +6,7 @@ Save, reuse, edit, and delete prompt text across sessions, scoped by which tool 
 
 ## Where to find it
 
-Not a route — a modal (`components/forms/PromptManager.jsx`) opened by the "Load prompt" button next to a prompt textarea. Three `promptType`s wire into it: `filter` on [Filter](filter.md)'s AI-assist panel, `generate` on [Codebook](codebook.md)'s AI-assist panel, and `apply` on the Apply Codebook workspace's AI-recode bar (`CodingRecodeBar.jsx`'s methodology field). [Compare Codebooks](compare-codebooks.md), [Compare Codings](compare-codings.md), and [Summarize Coding](summarize-coding.md) each have their own inline example-prompt button instead and do not integrate with this saved library.
+Not a route — a modal (`components/forms/PromptManager.jsx`) opened by the "Load prompt" button next to a prompt textarea. Three `promptType`s wire into it: `filter` on [Filter](filter.md)'s AI-assist panel, `generate` on [Codebook](codebook.md)'s AI-assist panel, and `apply` on the Apply Codebook workspace's AI Coding tab (`CodingAiPanel.jsx`'s methodology field). [Compare Codebooks](compare-codebooks.md), [Compare Codings](compare-codings.md), and [Summarize Coding](summarize-coding.md) each have their own inline example-prompt button instead and do not integrate with this saved library.
 
 ## Prerequisites
 

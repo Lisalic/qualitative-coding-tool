@@ -371,13 +371,13 @@ User-facing behavior:
   covers the same ground.
 - The workspace is a 3-pane reader (`CodingWorkspaceSection.jsx`): a
   document list on the left, the active document's full text and applied
-  codes in the center, and a right rail holding the codebook plus the AI
-  recode tool pinned at its foot. Selecting text and clicking a code -- in
+  codes in the center, and a tabbed right rail -- **Codebook**, **AI
+  Coding**, **Coverage**, in that order. Selecting text and clicking a code -- in
   the popup at the selection or in the sidebar -- tags it; the popup also
   takes `1`-`9` for its Nth *currently visible* code (i.e. after its own
   search filter), with the ordinal shown next to each option so the
   mapping is never a guess; `j`/`k` step through the document list.
-- Select any subset of rows (or use **Select all**/**Uncoded (N)**) and open the **Recode with AI** disclosure at the foot of the right rail to re-run the AI classifier over just that subset with a chosen model; the result is staged as reviewable proposals in the same editing session as manual tags and codebook edits, not written until Save. **A row already coded by hand this session is never overwritten by a recode** -- it is skipped and reported as such, the same "the assistant may add, never overwrite" rule the filter editor enforces.
+- Open the rail's **AI Coding** tab, pick rows (tick them in the list, or use its **Select uncoded** / **Select all** / **This document** buttons) and run **Code N documents with AI** to run the AI classifier over just that subset with a chosen model; the result is staged as reviewable proposals in the same editing session as manual tags and codebook edits, not written until Save. **A row already coded by hand this session is never overwritten by a recode** -- it is skipped and reported as such, the same "the assistant may add, never overwrite" rule the filter editor enforces.
 - Manual tagging, codebook edits, and accepted recode proposals all accumulate in one editing session; Save Changes commits everything together as exactly one new version.
 - Duplicate forks the whole saved artifact (codebook snapshot, its own rows, its coding, lineage, project links) under a new name.
 
@@ -389,7 +389,7 @@ Frontend implementation:
   `frontend/src/components/editor-shell/`) and then this same workspace on
   the artifact it just created
 - Coding workspace: `frontend/src/pages/ViewCoding.jsx`, `frontend/src/components/coding-table/workspace/useViewCodingPage.js`, `frontend/src/components/coding-table/workspace/CodingWorkspaceSection.jsx` (shares `EDITOR_GRID_CLASSES`/`EditorRail`/`EditorActionBar` with the filter and codebook editors' workspaces)
-- Document list, reader pane, codebook sidebar, and the AI-recode disclosure (rendered in the right rail, below the codebook sidebar, built on the shared `frontend/src/components/forms/AiAssistPanel.jsx`'s chrome): `frontend/src/components/coding-table/workspace/CodingDocumentList.jsx`, `CodingReaderPane.jsx`, `CodingCodebookSidebar.jsx`, `CodingRecodeBar.jsx`
+- Document list, reader pane, and the tabbed right rail (Codebook / AI Coding / Coverage; tabs via `frontend/src/components/primitives/RailTabs.jsx`): `frontend/src/components/coding-table/workspace/CodingDocumentList.jsx`, `CodingReaderPane.jsx`, `CodingCodebookSidebar.jsx`, `CodingAiPanel.jsx`
 - The `1`-`9` code shortcut lives in `frontend/src/components/coding-table/HighlightedContent.jsx` (built on the shared `useEditorShortcuts`), since it needs the same filtered/visible code list the selection popup renders
 - Read-only rendered text tab: `frontend/src/components/coding-table/workspace/CodingTextView.jsx`
 - Fork-the-whole-artifact control: `frontend/src/components/coding-table/workspace/CodingDuplicateControl.jsx`

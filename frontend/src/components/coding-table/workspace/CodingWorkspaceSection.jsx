@@ -6,7 +6,7 @@ import CodingTextView from "./CodingTextView";
 import CodingDocumentList from "./CodingDocumentList";
 import CodingReaderPane from "./CodingReaderPane";
 import CodingCodebookSidebar from "./CodingCodebookSidebar";
-import CodingRecodeBar from "./CodingRecodeBar";
+import CodingAiPanel from "./CodingAiPanel";
 import ViewModeTabs from "../../primitives/ViewModeTabs";
 import PageEmptyState from "../../primitives/PageEmptyState";
 import PromptPanel from "../../primitives/PromptPanel";
@@ -40,8 +40,8 @@ function sessionSummary(page) {
  * 3-pane View Coding workspace, inspired by desktop qualitative coding
  * tools (Taguette/Atlas.ti-style): a compact document list on the left,
  * one document's full text in the center (the only place full post/
- * comment text is ever shown), and the codebook plus the AI recode tool
- * on the right. Select text in the center pane and click a code -- in
+ * comment text is ever shown), and a tabbed rail on the right --
+ * Codebook, AI Coding, Coverage. Select text in the center pane and click a code -- in
  * the popup at the selection, or in the sidebar -- to tag it. Manual
  * tagging, codebook edits, and accepted AI recode proposals all
  * accumulate in ONE editing session (see useViewCodingPage's docstring);
@@ -69,6 +69,7 @@ export default function CodingWorkspaceSection({
   emptyMessage = "Select a coding to view",
 }) {
   const [showPrompt, setShowPrompt] = useState(false);
+  const [railTab, setRailTab] = useState("codebook");
   const navigate = useNavigate();
 
   const promptInfo = {
@@ -209,11 +210,38 @@ export default function CodingWorkspaceSection({
             onApplyCode={page.applyCodeToSelection}
             onRemoveEntry={page.removeCodeEntry}
             onUpdateNotes={page.updateEntryNotes}
-            onRecodeThisDocument={page.recodeThisDocument}
+            onRecodeThisDocument={() => {
+              page.recodeThisDocument();
+              setRailTab("ai");
+            }}
           />
 
           <EditorRail scroll={false}>
             <CodingCodebookSidebar
+              activeTab={railTab}
+              onTabChange={setRailTab}
+              selectedCount={page.selectedItemIds.size}
+              aiPanel={
+                <CodingAiPanel
+                  selectedCount={page.selectedItemIds.size}
+                  matchingCount={page.rowsTotal}
+                  hasActiveDocument={Boolean(page.activeItemId)}
+                  onSelectAll={page.selectAllMatching}
+                  onSelectUncoded={page.selectUncodedMatching}
+                  onSelectThisDocument={page.recodeThisDocument}
+                  onClearSelection={page.clearSelection}
+                  selectAllLoading={page.selectAllLoading}
+                  model={page.recodeModel}
+                  onModelChange={page.setRecodeModel}
+                  methodology={page.recodeMethodology}
+                  onMethodologyChange={page.setRecodeMethodology}
+                  onRecode={page.handleRecodeSelected}
+                  loading={page.recodeLoading}
+                  progress={page.recodeProgress}
+                  error={page.recodeError}
+                  summary={page.recodeSummary}
+                />
+              }
               schema={page.selectedCodingSchema}
               refreshKey={page.refreshKey}
               codebookTree={page.codebookDraft}
@@ -230,21 +258,6 @@ export default function CodingWorkspaceSection({
               onFinishEdit={page.finishCodebookEdit}
               onCancelEdit={page.cancelCodebookEdit}
             />
-            <div className="shrink-0">
-              <CodingRecodeBar
-                selectedCount={page.selectedItemIds.size}
-                model={page.recodeModel}
-                onModelChange={page.setRecodeModel}
-                methodology={page.recodeMethodology}
-                onMethodologyChange={page.setRecodeMethodology}
-                onRecode={page.handleRecodeSelected}
-                onClearSelection={page.clearSelection}
-                loading={page.recodeLoading}
-                progress={page.recodeProgress}
-                error={page.recodeError}
-                summary={page.recodeSummary}
-              />
-            </div>
           </EditorRail>
         </div>
       )}

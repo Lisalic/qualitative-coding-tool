@@ -23,6 +23,7 @@ T = TypeVar("T", bound=BaseModel)
 
 
 _SCHEMA_PATTERN = r"^proj_[A-Za-z0-9_]+$"
+_COMPARISON_SCHEMA_PATTERN = r"^cmp_[A-Za-z0-9_]+$"
 
 ContentScope = Literal["both", "posts", "comments"]
 
@@ -489,6 +490,10 @@ class IntegrateCodebookPreviewRequest(_StrippingModel):
     model: str = Field(min_length=1)
     prompt: Optional[str] = None
     existing_codes: list[ExistingCodeRef] = Field(default_factory=list)
+    comparisons: list[str] = Field(
+        default_factory=list,
+        description="Codebook comparison schema names (cmp_<id>) to give the model as merge guidance",
+    )
 
     @field_validator("codebooks", mode="before")
     @classmethod
@@ -501,6 +506,19 @@ class IntegrateCodebookPreviewRequest(_StrippingModel):
         for ref in value:
             if not re.match(_SCHEMA_PATTERN, ref or ""):
                 raise ValueError(f"Invalid codebook reference: {ref!r}")
+        return value
+
+    @field_validator("comparisons", mode="before")
+    @classmethod
+    def _normalize_comparisons(cls, value: Any) -> Any:
+        return _validate_codebook_schema_list(value)
+
+    @field_validator("comparisons")
+    @classmethod
+    def _comparisons_are_cmp_schemas(cls, value: list[str]) -> list[str]:
+        for ref in value:
+            if not re.match(_COMPARISON_SCHEMA_PATTERN, ref or ""):
+                raise ValueError(f"Invalid comparison reference: {ref!r}")
         return value
 
 

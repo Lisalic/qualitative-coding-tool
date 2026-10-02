@@ -1204,6 +1204,97 @@ class TestIntegrateCodebookJobHandlerEndToEnd:
             assert not integrate_mock.called
 
 
+class TestIntegrateCodebookWithComparison:
+    """A Compare Codebook report chosen in the integrate workspace goes to
+    the model as merge guidance -- ownership- and type-checked, never
+    accepted as a source codebook."""
+
+    async def _seed(self, session, owner_id: int):
+        file_a = await _make_file(session, owner_id, file_type="codebook", schemaname="proj_a")
+        file_b = await _make_file(session, owner_id, file_type="codebook", schemaname="proj_b")
+        await _seed_codes(session, file_a.id, owner_id, "codebook A text")
+        await _seed_codes(session, file_b.id, owner_id, "codebook B text")
+        cmp_file = await _make_file(
+            session, owner_id, file_type="codebook_comparison", schemaname="cmp_ab", filename="A vs B",
+        )
+        await version_service.commit_blob_version(
+            session, file_id=cmp_file.id, author_user_id=owner_id, origin="generated",
+            content="Merge C from both; they overlap heavily.",
+        )
+        await session.commit()
+        return file_a, file_b, cmp_file
+
+    async def test_comparison_text_reaches_the_prompt(self, session_factory, monkeypatch) -> None:
+        integrate_mock = AsyncMock(return_value=(_merge_proposal_json(), "sys", "user"))
+        monkeypatch.setattr(
+            "backend.app.services.codebook_service.codebook_generator_module.integrate_codebooks",
+            integrate_mock,
+        )
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_a, file_b, cmp_file = await self._seed(session, user.id)
+
+            job = await codebook_service.start_integrate_codebook_job(
+                session,
+                user.id,
+                codebooks=[file_a.schemaname, file_b.schemaname],
+                api_key="k",
+                model=None,
+                prompt="keep C separate",
+                comparisons=[cmp_file.schemaname, cmp_file.schemaname],
+            )
+            assert job.payload["comparison_file_ids"] == [cmp_file.id]
+
+            finished = await _wait_for_terminal_status(session, job.id, user.id)
+            assert finished.status == "succeeded", finished.error
+
+        blocks = integrate_mock.call_args.kwargs["comparison_blocks"]
+        assert "--- COMPARISON REPORT: A vs B ---" in blocks
+        assert "Merge C from both" in blocks
+
+    async def test_no_comparison_sends_empty_blocks(self, session_factory, monkeypatch) -> None:
+        integrate_mock = AsyncMock(return_value=(_merge_proposal_json(), "sys", "user"))
+        monkeypatch.setattr(
+            "backend.app.services.codebook_service.codebook_generator_module.integrate_codebooks",
+            integrate_mock,
+        )
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_a, file_b, _ = await self._seed(session, user.id)
+            job = await codebook_service.start_integrate_codebook_job(
+                session, user.id, codebooks=[file_a.schemaname, file_b.schemaname],
+                api_key="k", model=None, prompt="",
+            )
+            assert job.payload["comparison_file_ids"] == []
+            finished = await _wait_for_terminal_status(session, job.id, user.id)
+            assert finished.status == "succeeded", finished.error
+
+        assert integrate_mock.call_args.kwargs["comparison_blocks"] == ""
+
+    async def test_a_codebook_passed_as_comparison_is_rejected(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_a, file_b, _ = await self._seed(session, user.id)
+            with pytest.raises(ValidationAppError, match="comparisons"):
+                await codebook_service.start_integrate_codebook_job(
+                    session, user.id, codebooks=[file_a.schemaname, file_b.schemaname],
+                    api_key="k", model=None, prompt="", comparisons=[file_a.schemaname],
+                )
+
+    async def test_another_users_comparison_is_not_found(self, session_factory) -> None:
+        async with session_factory() as session:
+            owner = await _make_user(session, "owner@x.com")
+            other = await _make_user(session, "other@x.com")
+            _, _, cmp_file = await self._seed(session, owner.id)
+            other_a = await _make_file(session, other.id, file_type="codebook", schemaname="proj_oa")
+            other_b = await _make_file(session, other.id, file_type="codebook", schemaname="proj_ob")
+            with pytest.raises(NotFoundError):
+                await codebook_service.start_integrate_codebook_job(
+                    session, other.id, codebooks=[other_a.schemaname, other_b.schemaname],
+                    api_key="k", model=None, prompt="", comparisons=[cmp_file.schemaname],
+                )
+
+
 class TestCreateIntegratedCodebook:
     _CODES = [
         {

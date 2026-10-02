@@ -615,6 +615,14 @@ class TestIntegrateCodebookPreviewGuards:
         )
         assert resp.status_code == 422
 
+    def test_non_cmp_comparison_returns_422(self, client, auth_cookies) -> None:
+        resp = client.post(
+            "/api/integrate-codebook-preview/",
+            json={"api_key": "k", "codebooks": ["proj_a", "proj_b"], "model": "m", "comparisons": ["proj_a"]},
+            cookies=auth_cookies,
+        )
+        assert resp.status_code == 422
+
     def test_missing_model_returns_422(self, client, auth_cookies) -> None:
         resp = client.post(
             "/api/integrate-codebook-preview/",

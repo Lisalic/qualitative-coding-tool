@@ -271,6 +271,19 @@ class TestBuildIntegrateUserPrompt:
         prompt = build_integrate_user_prompt("--- CODEBOOK 1: A ---\ntext", "be thorough")
         assert "--- CODEBOOK 1: A ---" in prompt
         assert "be thorough" in prompt
+        assert "COMPARISON REPORT" not in prompt
+
+    def test_includes_comparison_between_codebooks_and_suggestions(self) -> None:
+        prompt = build_integrate_user_prompt(
+            "--- CODEBOOK 1: A ---\ntext",
+            "be thorough",
+            "--- COMPARISON REPORT: A vs B ---\nthey overlap",
+        )
+        codebook_at = prompt.index("--- CODEBOOK 1: A ---")
+        report_at = prompt.index("--- COMPARISON REPORT: A vs B ---")
+        suggestions_at = prompt.index("be thorough")
+        assert codebook_at < report_at < suggestions_at
+        assert "authoritative" in prompt
 
 
 class TestIntegrateCodebooks:

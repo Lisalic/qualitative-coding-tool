@@ -100,7 +100,7 @@ export default function ComparePageContainer({
 
       <form onSubmit={submitCompare} className="mt-2 border-t border-line pt-4">
         <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-paper/70">
-          AI Synthesis Narrative
+          AI Comparison
         </div>
         <CompareModelPromptPanel
           model={model}

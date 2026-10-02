@@ -1,6 +1,6 @@
-import { useState } from "react";
 import CodeLegend from "../CodeLegend";
 import Panel from "../../shell/Panel";
+import RailTabs from "../../primitives/RailTabs";
 import CodingCoverageDashboard from "./CodingCoverageDashboard";
 import { btnSm } from "../../../lib/uiClasses";
 
@@ -10,10 +10,18 @@ function truncate(text, max = 60) {
 }
 
 /**
- * Right rail: dual-mode sidebar supporting Codebook browsing/editing
- * and descriptive Corpus Coverage analytics.
+ * Right rail: a three-mode sidebar -- Codebook browsing/editing, AI
+ * Coding (`aiPanel`, rendered by the caller), and descriptive Corpus
+ * Coverage analytics. AI Coding sits second, right after the codebook it
+ * applies, because coding with AI is a primary way to use this screen.
+ * The active tab is owned by the caller so other controls (the reader
+ * pane's "recode this document") can switch to AI Coding.
  */
 export default function CodingCodebookSidebar({
+  activeTab,
+  onTabChange,
+  selectedCount = 0,
+  aiPanel,
   schema,
   refreshKey,
   codebookTree,
@@ -30,8 +38,6 @@ export default function CodingCodebookSidebar({
   onFinishEdit,
   onCancelEdit,
 }) {
-  const [activeTab, setActiveTab] = useState("codebook");
-
   const handleCodeToggle = ({ code_uid: codeUid, name }) => {
     if (pendingSelection) {
       onApplyCode(codeUid);
@@ -41,29 +47,16 @@ export default function CodingCodebookSidebar({
   };
 
   const title = (
-    <div className="flex items-center gap-3">
-      <button
-        type="button"
-        className={`text-xs font-semibold uppercase tracking-wider pb-0.5 border-b-2 transition-colors ${
-          activeTab === "codebook"
-            ? "border-paper text-paper"
-            : "border-transparent text-paper/50 hover:text-paper"
-        }`}
-        onClick={() => setActiveTab("codebook")}
-      >
-        Codebook
-      </button>
-      <button
-        type="button"
-        className={`text-xs font-semibold uppercase tracking-wider pb-0.5 border-b-2 transition-colors ${
-          activeTab === "coverage"
-            ? "border-paper text-paper"
-            : "border-transparent text-paper/50 hover:text-paper"
-        }`}
-        onClick={() => setActiveTab("coverage")}
-      >
-        Coverage
-      </button>
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <RailTabs
+        tabs={[
+          { value: "codebook", label: "Codebook" },
+          { value: "ai", label: "AI Coding", count: selectedCount },
+          { value: "coverage", label: "Coverage" },
+        ]}
+        activeTab={activeTab}
+        onChange={onTabChange}
+      />
       {isDirty && activeTab === "codebook" && (
         <span className="text-xs font-normal normal-case text-paper/50">(edited)</span>
       )}
@@ -89,7 +82,9 @@ export default function CodingCodebookSidebar({
 
   return (
     <Panel title={title} actions={actions} className="min-h-0 flex-1" bodyClassName="flex flex-col gap-2">
-      {activeTab === "coverage" ? (
+      {activeTab === "ai" ? (
+        aiPanel
+      ) : activeTab === "coverage" ? (
         <CodingCoverageDashboard
           schema={schema}
           refreshKey={refreshKey}

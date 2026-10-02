@@ -374,6 +374,19 @@ describe("buildIntegratePreviewPayload", () => {
     });
   });
 
+  it("sends comparisons only when given, deduped", () => {
+    expect(buildIntegratePreviewPayload({ ...base, comparisons: [] })).not.toHaveProperty("comparisons");
+    expect(
+      buildIntegratePreviewPayload({ ...base, comparisons: ["cmp_x", "cmp_x"] }).comparisons,
+    ).toEqual(["cmp_x"]);
+  });
+
+  it("rejects a non-comparison ref in comparisons", () => {
+    expect(() => buildIntegratePreviewPayload({ ...base, comparisons: ["proj_a"] })).toThrow(
+      MissingFieldsError,
+    );
+  });
+
   it("carries no name or project -- a preview creates nothing", () => {
     const payload = buildIntegratePreviewPayload({ ...base, existingCodes: [{ name: "a" }] });
     expect(payload).not.toHaveProperty("name");

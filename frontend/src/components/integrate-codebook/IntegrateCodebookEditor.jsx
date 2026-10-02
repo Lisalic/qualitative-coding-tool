@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { requestJson } from "../../api";
 import ArtifactCreatedMessage from "../feedback/ArtifactCreatedMessage";
@@ -23,6 +23,7 @@ import IntegrateRail from "./IntegrateRail";
 import IntegrateSourcePane from "./IntegrateSourcePane";
 import IntegrateSourcePicker from "./IntegrateSourcePicker";
 import { useSourceCodebooks } from "./useSourceCodebooks";
+import { useSourceComparisons } from "./useSourceComparisons";
 
 /**
  * Merge two or more existing codebooks into one, with the source codes
@@ -35,6 +36,9 @@ import { useSourceCodebooks } from "./useSourceCodebooks";
  * the center (`IntegrateBuilderPane`, built on the same `CodeLegend`
  * every other codebook editor uses), and the active source code's full
  * text plus the AI merge assistant in a reference rail on the right.
+ * The rail's Comparison tab shows any Compare Codebook report made from
+ * these sources -- compare-then-integrate is the intended workflow --
+ * and can hand that report to the assistant as merge guidance.
  *
  * The draft starts empty: nothing is in the merged codebook until the
  * researcher accepts an AI-proposed merge or copies a source code by
@@ -65,6 +69,9 @@ export default function IntegrateCodebookEditor() {
   const [selectedProject, setSelectedProject] = useState(initialProjectId);
 
   const [activeCode, setActiveCode] = useState(null);
+  const [railTab, setRailTab] = useState("code");
+  const [selectedComparison, setSelectedComparison] = useState(null);
+  const [useComparisonInAi, setUseComparisonInAi] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [createdFile, setCreatedFile] = useState(null);
@@ -87,6 +94,22 @@ export default function IntegrateCodebookEditor() {
   const { sources, loading: sourcesLoading, error: sourcesError } = useSourceCodebooks(
     started ? selectedRefs : [],
   );
+  const { comparisons, loading: comparisonsLoading } = useSourceComparisons(started ? selectedRefs : []);
+
+  // Open on the comparison when one covers the selection -- reading it is
+  // the natural first step of a merge. Re-evaluated whenever the source
+  // set (and therefore the comparison list) changes.
+  useEffect(() => {
+    const best = comparisons.find((c) => c.coversSelection) || null;
+    setSelectedComparison(best?.ref || null);
+    setUseComparisonInAi(true);
+    setRailTab(best ? "comparison" : "code");
+  }, [comparisons]);
+
+  const selectCode = (code) => {
+    setActiveCode(code);
+    setRailTab("code");
+  };
 
   const toggleRef = (ref) => {
     setSelectedRefs((prev) => (prev.includes(ref) ? prev.filter((r) => r !== ref) : [...prev, ref]));
@@ -221,7 +244,7 @@ export default function IntegrateCodebookEditor() {
           codebookNames={codebookNames}
           loading={sourcesLoading}
           activeKey={activeCode?.key}
-          onSelectCode={setActiveCode}
+          onSelectCode={selectCode}
           draftCount={draftCount}
           onCopyCode={editor.copyCode}
           disabled={submitting}
@@ -230,6 +253,14 @@ export default function IntegrateCodebookEditor() {
       reader={<IntegrateBuilderPane editor={editor} codebookNames={codebookNames} disabled={submitting} />}
       rail={
         <IntegrateRail
+          tab={railTab}
+          onTabChange={setRailTab}
+          comparisons={comparisons}
+          comparisonsLoading={comparisonsLoading}
+          selectedComparison={selectedComparison}
+          onSelectComparison={setSelectedComparison}
+          useComparisonInAi={useComparisonInAi}
+          onUseComparisonInAiChange={setUseComparisonInAi}
           active={activeCode}
           codebookName={activeCode ? codebookNames[activeCode.source.ref] : ""}
           codebooks={selectedRefs}

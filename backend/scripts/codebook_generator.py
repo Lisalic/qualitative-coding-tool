@@ -410,15 +410,33 @@ def build_integrate_system_prompt(existing_codes: str = "") -> str:
     return _INTEGRATE_SYSTEM_PROMPT + _EXISTING_CODES_RULES + existing_codes
 
 
-def build_integrate_user_prompt(codebook_blocks: str, custom_prompt: str) -> str:
+_INTEGRATE_COMPARISON_PREAMBLE = (
+    "The researcher previously compared these codebooks. Use the comparison "
+    "report(s) below as guidance on overlaps, conflicts and suggested merges, "
+    "but treat the codebooks above as authoritative -- only propose codes "
+    "grounded in them, and cite sources from them, never from the report."
+)
+
+
+def build_integrate_user_prompt(codebook_blocks: str, custom_prompt: str, comparison_blocks: str = "") -> str:
     """Public (unlike ``_build_generate_user_prompt``/
     ``_build_consolidation_user_prompt``) because
     ``codebook_service._run_integrate_codebook_job`` needs the exact
     rendered prompt ahead of the LLM call, to size it against the
     model's context window (``context_window.prompt_fits``) before
     spending a call on it.
+
+    ``comparison_blocks`` (optional) is one or more rendered
+    ``--- COMPARISON REPORT: name ---`` sections from Compare Codebook,
+    placed after the codebooks and before the researcher's own
+    suggestions so the merge can follow the comparison's recommendations.
     """
-    return f"{codebook_blocks}\n\nAdditional instructions: {custom_prompt}"
+    parts = [codebook_blocks]
+    comparison_blocks = (comparison_blocks or "").strip()
+    if comparison_blocks:
+        parts.append(f"{_INTEGRATE_COMPARISON_PREAMBLE}\n\n{comparison_blocks}")
+    parts.append(f"Researcher's suggestions: {custom_prompt}")
+    return "\n\n".join(parts)
 
 
 async def integrate_codebooks(
@@ -428,6 +446,7 @@ async def integrate_codebooks(
     *,
     MODEL: str,
     existing_codes: str = "",
+    comparison_blocks: str = "",
 ) -> tuple[str, str, str]:
     """Merge whole codebooks (already rendered into ``codebook_blocks``,
     one ``--- CODEBOOK i: name ---`` section per source) into one, in a
@@ -442,6 +461,6 @@ async def integrate_codebooks(
     Returns ``(result_json, system_prompt, user_prompt)``.
     """
     system_prompt = build_integrate_system_prompt(existing_codes)
-    user_prompt = build_integrate_user_prompt(codebook_blocks, custom_prompt)
+    user_prompt = build_integrate_user_prompt(codebook_blocks, custom_prompt, comparison_blocks)
     result = await _json_client(system_prompt, user_prompt, api_key, MODEL, json_schema=INTEGRATE_JSON_SCHEMA)
     return result, system_prompt, user_prompt

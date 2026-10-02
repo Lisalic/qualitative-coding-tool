@@ -29,16 +29,21 @@ At least two codebook artifacts (a `codebook_comparison` cannot be selected). An
 
 | Field | Required | Notes |
 |---|---|---|
-| Prompt | no | additional merge instructions |
+| Your suggestions | no | the researcher's own merge suggestions (codes to keep separate, rename, combine) |
 | AI Model | no | |
+| Comparison | no | set from the rail's Comparison tab ("Use this comparison to guide the AI merge"); sent as `comparisons: [cmp_…]` |
 
 No sample-size or content-scope controls — nothing is sampled; the assistant reads every source codebook in full.
+
+**Workspace (right rail)**
+
+The rail has two tabs: **Code** (the full text of the source code last clicked in the left pane) and **Comparison**. The Comparison tab lists every [Compare Codebooks](compare-codebooks.md) report made from the selected sources — found through each source's `GET /api/artifacts/{ref}/lineage` children, reports covering two or more of the sources first — and renders the chosen one. When a report covers the selection the workspace opens on it, since compare-then-integrate is the intended workflow. With "Use this comparison to guide the AI merge" ticked, the report's text goes to the model after the source codebooks and before the researcher's suggestions, as guidance only: proposals must still cite the codebooks themselves.
 
 ## What happens on submit
 
 Two independent calls, mirroring [Codebook](codebook.md)'s preview/manual pair:
 
-- **AI assist** (`job_type="integrate_codebook_preview"`, re-runnable any number of times): `buildIntegratePreviewPayload` → `postJsonAndPoll` → `POST /api/integrate-codebook-preview/` → `202 {job_id, status}` → poll. Server-side (`backend/app/services/codebook_service.py::_run_integrate_codebook_job`): reads every source codebook's content (sealing each one's head via `version_service.pin_parent` first), asks the LLM to merge them (`backend/scripts/codebook_generator.py::integrate_codebooks`, one call — no batching, since a merge is inherently over every source at once), verifies each proposal's claimed sources against the codebooks actually read (`_verify_proposal_sources`, dropping anything the model invented), and drops any proposal already covered by the researcher's current draft (sent as `existing_codes`). Creates nothing — a proposal is not an artifact.
+- **AI assist** (`job_type="integrate_codebook_preview"`, re-runnable any number of times): `buildIntegratePreviewPayload` → `postJsonAndPoll` → `POST /api/integrate-codebook-preview/` → `202 {job_id, status}` → poll. Server-side (`backend/app/services/codebook_service.py::_run_integrate_codebook_job`): reads every source codebook's content (sealing each one's head via `version_service.pin_parent` first), plus any `comparisons` (each ownership- and type-checked as a `codebook_comparison` by `_resolve_comparisons`, and pinned the same way), asks the LLM to merge them (`backend/scripts/codebook_generator.py::integrate_codebooks`, one call — no batching, since a merge is inherently over every source at once), verifies each proposal's claimed sources against the codebooks actually read (`_verify_proposal_sources`, dropping anything the model invented), and drops any proposal already covered by the researcher's current draft (sent as `existing_codes`). Creates nothing — a proposal is not an artifact.
 - **Submit** (synchronous, no LLM call): `flattenTreeToCodes` → `buildIntegrateCodebookPayload` → `POST /api/codebook/integrate` → `backend/app/services/codebook_service.py::create_integrated_codebook` → `_materialize_codebook` with N `merged_from`/`merge_input` `artifact_edges` (one per source codebook, in selection order) → `origin=edited`, no model provenance on the version. AI-assist contribution (if any) is recorded separately via `assist_service.record_assist_runs(stage="integrate")`.
 
 Every accepted or hand-added code mints a **fresh** `code_uid`/`family_uid` on the client — never a source codebook's own identity, since the merged codebook is a new artifact and a code merged from several sources cannot honestly wear one source's uid. Per-code merge provenance stays recoverable via that run's `artifact_assists.accepted_refs` → its `job_id` → the job's `result.proposals[].sources`.

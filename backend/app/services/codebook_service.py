@@ -909,6 +909,35 @@ def _render_source_codebooks(entries: list[tuple[str, str]]) -> str:
     return "\n\n".join(blocks)
 
 
+async def _resolve_comparisons(session: AsyncSession, user_id: int, comparisons: list[str]) -> list[int]:
+    """Resolve each ref in ``comparisons`` to a ``File.id`` owned by
+    ``user_id`` and typed ``codebook_comparison`` -- the Compare Codebook
+    reports the researcher chose to guide an integrate run. Anything else
+    (a plain codebook, another user's comparison) is rejected. Deduplicates
+    while preserving order; zero comparisons is fine.
+    """
+    seen: set[int] = set()
+    ids: list[int] = []
+    for ref in comparisons or []:
+        schema = require_valid_schema(ref, field_name="comparisons", allowed_prefixes=("cmp_",))
+        file_id = await file_repo.resolve_file_id(session, schema, user_id, file_types=("codebook_comparison",))
+        if file_id in seen:
+            continue
+        seen.add(file_id)
+        ids.append(file_id)
+    return ids
+
+
+def _render_comparison_reports(entries: list[tuple[str, str]]) -> str:
+    """Render each comparison report into a
+    ``--- COMPARISON REPORT: {filename} ---`` block -- the same idiom as
+    ``_render_source_codebooks``, but unnumbered: a report is guidance,
+    never something a proposal's ``sources`` may cite.
+    """
+    blocks = [f"--- COMPARISON REPORT: {name} ---\n{text}" for name, text in entries if (text or "").strip()]
+    return "\n\n".join(blocks)
+
+
 def _verify_proposal_sources(raw_sources: list[dict], index: dict[tuple[int, str], str]) -> list[dict]:
     """Keep only the ``sources`` entries that resolve against ``index``
     (built from the codebooks this job actually read -- see
@@ -946,6 +975,7 @@ async def start_integrate_codebook_job(
     model: str | None,
     prompt: str,
     existing_codes: list[dict] | None = None,
+    comparisons: list[str] | None = None,
 ) -> Job:
     """Validate and enqueue an ``integrate_codebook_preview`` background
     job. Same guards as ``start_codebook_preview_job`` (api_key present,
@@ -954,11 +984,15 @@ async def start_integrate_codebook_job(
     checks. Takes no ``name``/``project_id`` because, like
     ``codebook_preview``, this job creates no artifact -- only
     ``create_integrated_codebook`` does that.
+
+    ``comparisons`` optionally names Compare Codebook reports to pass the
+    model as merge guidance (see ``_resolve_comparisons``).
     """
     if not api_key:
         raise ValidationAppError("api_key is required")
 
     source_file_ids = await _resolve_source_codebooks(session, user_id, codebooks)
+    comparison_file_ids = await _resolve_comparisons(session, user_id, comparisons or [])
 
     return await enqueue_job(
         session,
@@ -967,6 +1001,7 @@ async def start_integrate_codebook_job(
         payload={
             "user_id": user_id,
             "source_file_ids": source_file_ids,
+            "comparison_file_ids": comparison_file_ids,
             "model": model,
             "prompt": (prompt or "").strip(),
             "existing_codes": existing_codes or [],
@@ -1000,6 +1035,7 @@ async def _run_integrate_codebook_job(job_id: int, payload: dict) -> dict:
     prompt = payload.get("prompt", "")
     api_key = payload["api_key"]
     existing_codes: list[dict] = payload.get("existing_codes") or []
+    comparison_file_ids: list[int] = payload.get("comparison_file_ids") or []
 
     async with AsyncSessionLocal() as session:
         # Read-as-parent: seal each source codebook's head before reading
@@ -1020,6 +1056,14 @@ async def _run_integrate_codebook_job(job_id: int, payload: dict) -> dict:
             for code in codes:
                 key = (i + 1, _code_dedupe_key(code.family_name, code.name))
                 source_index[key] = file_rec.schemaname if file_rec else ""
+        # Comparison reports chosen as guidance -- read-as-parent too, so
+        # the run pins exactly which revision of each report it followed.
+        comparison_entries: list[tuple[str, str]] = []
+        for i, file_id in enumerate(comparison_file_ids):
+            await version_service.pin_parent(session, file_id)
+            text = await version_service.read_blob(session, file_id) or ""
+            file_rec = await session.get(File, file_id)
+            comparison_entries.append(((file_rec.filename if file_rec else None) or f"Comparison {i + 1}", text))
         await session.commit()
 
     if not any(markdown.strip() for _, markdown in entries):
@@ -1027,9 +1071,10 @@ async def _run_integrate_codebook_job(job_id: int, payload: dict) -> dict:
 
     codebook_blocks = _render_source_codebooks(entries)
     existing_codes_rendered = _render_existing_codes(existing_codes)
+    comparison_blocks = _render_comparison_reports(comparison_entries)
 
     system_prompt = codebook_generator_module.build_integrate_system_prompt(existing_codes_rendered)
-    user_prompt = codebook_generator_module.build_integrate_user_prompt(codebook_blocks, prompt)
+    user_prompt = codebook_generator_module.build_integrate_user_prompt(codebook_blocks, prompt, comparison_blocks)
 
     # A merge is inherently over every source codebook at once (see
     # codebook_generator.integrate_codebooks's docstring) -- no batching,
@@ -1052,6 +1097,7 @@ async def _run_integrate_codebook_job(job_id: int, payload: dict) -> dict:
         prompt,
         MODEL=model,
         existing_codes=existing_codes_rendered,
+        comparison_blocks=comparison_blocks,
     )
 
     seen = {_code_dedupe_key(c.get("family_name"), c.get("name")) for c in existing_codes}

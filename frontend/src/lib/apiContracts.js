@@ -34,6 +34,7 @@ export class MissingFieldsError extends Error {
 }
 
 const PROJ_SCHEMA_RE = /^proj_[A-Za-z0-9_]+$/;
+const CMP_SCHEMA_RE = /^cmp_[A-Za-z0-9_]+$/;
 
 function isBlank(value) {
   return (
@@ -356,6 +357,9 @@ export function buildManualCodebookPayload({
  * No `samplePercentage`/`contentScope`: unlike `buildCodebookPreviewPayload`,
  * this asks the model to merge whole codebooks, not sample raw data, so
  * neither field applies.
+ *
+ * `comparisons` (optional) are Compare Codebook reports (`cmp_<id>`) the
+ * model reads as merge guidance; sent only when non-empty.
  */
 export function buildIntegratePreviewPayload({
   apiKey,
@@ -363,6 +367,7 @@ export function buildIntegratePreviewPayload({
   model,
   prompt,
   existingCodes,
+  comparisons,
 }) {
   assertRequired({ apiKey, model }, "integrate-codebook-preview");
   const normalizedCodebooks = assertProjSchemaList(
@@ -378,6 +383,16 @@ export function buildIntegratePreviewPayload({
     existing_codes: existingCodes || [],
   };
   if (!isBlank(prompt)) payload.prompt = prompt;
+
+  const normalizedComparisons = [];
+  for (const ref of comparisons || []) {
+    const cleaned = stripDbSuffix(ref);
+    if (!CMP_SCHEMA_RE.test(cleaned)) {
+      throw new MissingFieldsError(["comparisons (must match cmp_<id>)"], "integrate-codebook-preview");
+    }
+    if (!normalizedComparisons.includes(cleaned)) normalizedComparisons.push(cleaned);
+  }
+  if (normalizedComparisons.length > 0) payload.comparisons = normalizedComparisons;
 
   return payload;
 }

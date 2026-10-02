@@ -14,8 +14,13 @@ import { EXAMPLE_PROMPTS, MissingFieldsError, buildIntegratePreviewPayload } fro
  * reads every source codebook in full. Re-runnable as often as needed:
  * the current draft goes along as `existing_codes`, so a second pass
  * asks for what's still missing rather than restating accepted merges.
+ *
+ * `comparison` (optional, `{ref, name}`) is the Compare Codebook report
+ * the researcher chose in the rail's Comparison tab; when set it goes
+ * along as `comparisons`, so the model follows its recommendations. The
+ * prompt box carries the researcher's own suggestions on top of that.
  */
-export default function IntegrateAiPanel({ codebooks, existingCodes, onProposals, disabled }) {
+export default function IntegrateAiPanel({ codebooks, existingCodes, onProposals, comparison, disabled }) {
   const handleRun = async ({ apiKey, model, prompt, setProgress }) => {
     let payload;
     try {
@@ -25,6 +30,7 @@ export default function IntegrateAiPanel({ codebooks, existingCodes, onProposals
         model,
         prompt,
         existingCodes,
+        comparisons: comparison ? [comparison.ref] : [],
       });
     } catch (err) {
       if (err instanceof MissingFieldsError) return { error: err.message };
@@ -57,7 +63,8 @@ export default function IntegrateAiPanel({ codebooks, existingCodes, onProposals
   return (
     <AiAssistPanel
       promptType="generate"
-      promptPlaceholder="Anything the merge should pay special attention to? (optional)"
+      promptLabel="Your suggestions"
+      promptPlaceholder="Codes to keep separate, rename, or combine; anything the merge should pay attention to (optional)"
       exampleText={EXAMPLE_PROMPTS.integrate}
       runLabel="Propose merged codes"
       runningLabel="Merging..."
@@ -65,6 +72,13 @@ export default function IntegrateAiPanel({ codebooks, existingCodes, onProposals
       showContentScope={false}
       disabled={disabled || codebooks.length < 2}
       onRun={handleRun}
+      renderBeforePrompt={() =>
+        comparison ? (
+          <p className="border border-line bg-surface-raised px-2.5 py-2 text-xs text-paper/80">
+            Guided by comparison &ldquo;{comparison.name}&rdquo;.
+          </p>
+        ) : null
+      }
     />
   );
 }

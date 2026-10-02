@@ -135,7 +135,7 @@ export default function CodingReaderPane({
         </div>
         {!readOnly && (
           <button type="button" className={`${btnSm} shrink-0`} onClick={onRecodeThisDocument}>
-            Recode with AI
+            Code with AI
           </button>
         )}
       </div>

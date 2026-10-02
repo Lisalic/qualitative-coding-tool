@@ -1,5 +1,3 @@
-import Panel from "../shell/Panel";
-
 const FIELDS = [
   ["definition", "Definition"],
   ["inclusion", "Use when"],
@@ -9,23 +7,20 @@ const FIELDS = [
 ];
 
 /**
- * Reference rail (top): the active source code's full fields, read-only
- * -- mirrors `CodebookReaderPane`'s shape and empty state, one level up
- * (a code rather than a raw data row).
+ * Integrate rail's "Code" tab: the active source code's full fields,
+ * read-only -- mirrors `CodebookReaderPane`'s shape and empty state, one
+ * level up (a code rather than a raw data row). Rendered inside the
+ * rail's tabbed `Panel`, so it draws no border of its own.
  */
 export default function IntegrateSourceDetail({ active, codebookName }) {
   if (!active) {
-    return (
-      <Panel className="min-h-0 flex-1">
-        <p className="italic text-paper/60">Select a code from the list to read it.</p>
-      </Panel>
-    );
+    return <p className="italic text-paper/60">Select a code from the list to read it.</p>;
   }
 
   const { source, family, code } = active;
 
   return (
-    <Panel key={active.key} className="min-h-0 flex-1" bodyClassName="flex flex-col gap-3">
+    <div key={active.key} className="flex flex-col gap-3">
       <div className="min-w-0">
         <div className="text-xs uppercase tracking-wide text-paper/50">
           {codebookName || source.ref}
@@ -44,6 +39,6 @@ export default function IntegrateSourceDetail({ active, codebookName }) {
           ) : null,
         )}
       </dl>
-    </Panel>
+    </div>
   );
 }

@@ -259,6 +259,7 @@ async def integrate_codebook_preview(
         model=payload.model,
         prompt=payload.prompt or "",
         existing_codes=[c.model_dump() for c in payload.existing_codes],
+        comparisons=payload.comparisons,
     )
     return JSONResponse({"job_id": job.id, "status": job.status}, status_code=202)
 

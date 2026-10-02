@@ -19,7 +19,7 @@ import { MissingFieldsError, buildManualCodingPayload } from "../../lib/apiContr
  * copied in, codebook snapshotted, nothing tagged -- and drops the
  * researcher into the ViewCoding workspace to tag it themselves, with
  * the AI available there on whichever rows they select (select-all, then
- * Recode with AI). Coding is iterative, so this is only the setup step:
+ * Code with AI). Coding is iterative, so this is only the setup step:
  * on success it hands the new artifact to `onCreated` and its host opens
  * the coding workspace on it (see `components/coding-editor/CodingEditor.jsx`).
  */
