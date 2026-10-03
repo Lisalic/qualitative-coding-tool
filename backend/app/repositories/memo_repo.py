@@ -23,6 +23,7 @@ from __future__ import annotations
 from sqlalchemy import and_, delete, func, insert, literal, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.core.sql_filters import in_values
 from backend.app.storage_models import RowMemo
 
 # Never copied verbatim between files: ``id`` is a surrogate identity and
@@ -145,13 +146,23 @@ async def copy_memos_by_id(
         where = and_(
             RowMemo.file_id == source_file_id,
             RowMemo.row_type == row_type,
-            RowMemo.row_id.in_(ids),
+            in_values(RowMemo.row_id, ids),
         )
-        n = (await session.execute(select(func.count()).select_from(RowMemo).where(where))).scalar() or 0
-        if n:
+        memo_row_ids = (await session.execute(select(RowMemo.row_id).where(where))).scalars().all()
+        if memo_row_ids:
+            # A row moved back to a file it once left meets its own old
+            # memo there (the source keeps memos when a row moves out).
+            # The memo travelling with the row is the current one.
+            await session.execute(
+                delete(RowMemo).where(
+                    RowMemo.file_id == target_file_id,
+                    RowMemo.row_type == row_type,
+                    in_values(RowMemo.row_id, memo_row_ids),
+                )
+            )
             col_names, src_select = _copy_select(target_file_id, where)
             await session.execute(insert(RowMemo).from_select(col_names, src_select))
-        copied += n
+        copied += len(memo_row_ids)
     return copied
 
 

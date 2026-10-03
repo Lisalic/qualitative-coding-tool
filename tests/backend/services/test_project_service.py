@@ -278,6 +278,17 @@ class TestRenameFile:
             assert renamed.filename == "new name"
             assert renamed.description == "new desc"
 
+    async def test_trims_and_refuses_a_blank_name(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            session.add(File(user_id=user.id, filename="orig", schemaname="proj_a", file_type="raw_data"))
+            await session.commit()
+
+            renamed = await project_service.rename_file(session, user.id, "proj_a", "  new  ", None)
+            assert renamed.filename == "new"
+            with pytest.raises(ValidationAppError):
+                await project_service.rename_file(session, user.id, "proj_a", "   ", None)
+
     async def test_not_found_raises(self, session_factory) -> None:
         async with session_factory() as session:
             user = await _make_user(session)

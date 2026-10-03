@@ -210,6 +210,9 @@ async def rename_file(
     which raises ``NotFoundError`` for both "doesn't exist" and "exists,
     not yours" -- matching the old handler's single 404 for both cases.
     """
+    display_name = (display_name or "").strip()
+    if not display_name:
+        raise ValidationAppError("display_name can't be empty")
     file_rec = await file_repo.get_owned_file(session, schema_name.strip(), user_id)
 
     file_rec.filename = display_name

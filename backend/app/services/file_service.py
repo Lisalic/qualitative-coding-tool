@@ -26,6 +26,7 @@ from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.exceptions import ForbiddenError, ValidationAppError
+from backend.app.core.sql_filters import in_values
 from backend.app.database import File, FileTable, async_link_file_to_project
 from backend.app.repositories import file_repo, memo_repo, project_repo, raw_data_repo, version_repo
 from backend.app.services import version_service
@@ -56,6 +57,15 @@ _COMMENT_SOURCE_COLUMNS = (
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
+
+
+def _require_data_file(file_rec: File) -> None:
+    """Row deletes/moves are for data files. A coding file's rows carry
+    ``coding_entries`` this path never closes, so editing its rows here
+    would leave entries pointing at rows that are gone.
+    """
+    if file_rec.file_type not in ("raw_data", "filtered_data"):
+        raise ValidationAppError(f"Rows can only be deleted or moved in a data file, not a {file_rec.file_type} file.")
 
 
 async def _get_owned_file_by_schemaname(session: AsyncSession, schemaname: str, user_id: int) -> File:
@@ -199,12 +209,13 @@ async def _fetch_fixed_rows(
 ) -> list[dict]:
     """Read the source columns of ``table`` (``submissions``/``comments``)
     out of the fixed tables for ``file_id``, as plain dicts ready for
-    ``raw_data_repo.bulk_insert_*``.
+    ``raw_data_repo.bulk_insert_*``. Live rows only -- a row deleted or
+    moved out of the source is history, not content to merge.
     """
     model = Submission if table == "submissions" else Comment
     cols = [getattr(model, c) for c in columns]
-    result = await session.execute(select(*cols).where(model.file_id == file_id))
-    return [dict(zip(columns, row)) for row in result.all()]
+    result = await session.execute(select(*cols).where(model.file_id == file_id, model.valid_to.is_(None)))
+    return [dict(zip(columns, row, strict=False)) for row in result.all()]
 
 
 async def _read_source_tables(session: AsyncSession, source_file_id: int) -> dict[str, list[dict]]:
@@ -512,9 +523,10 @@ async def delete_rows(session: AsyncSession, user_id: int, *, schemaname: str, t
         return 0
 
     file_rec = await _get_owned_file_by_schemaname(session, schema, user_id)
+    _require_data_file(file_rec)
     file_id = file_rec.id
     model = Submission if table == "submissions" else Comment
-    match_condition = (model.file_id == file_id, model.id.in_(row_ids), model.valid_to.is_(None))
+    match_condition = (model.file_id == file_id, in_values(model.id, row_ids), model.valid_to.is_(None))
 
     matching = (
         await session.execute(select(func.count()).select_from(model).where(*match_condition))
@@ -540,7 +552,7 @@ async def delete_rows(session: AsyncSession, user_id: int, *, schemaname: str, t
         )
         await _upsert_file_table_count(session, file_id, table, int(count_result.scalar() or 0))
         await session.commit()
-    except Exception:
+    except Exception:  # noqa: BLE001 - metadata refresh is best effort after the row edit committed
         await session.rollback()
 
     return closed
@@ -584,12 +596,26 @@ async def move_rows(
 
     file_src = await _get_owned_file_by_schemaname(session, source, user_id)
     file_tgt = await _get_owned_file_by_schemaname(session, target, user_id)
+    _require_data_file(file_src)
+    _require_data_file(file_tgt)
+    if file_src.id == file_tgt.id:
+        raise ValidationAppError("Rows can't be moved into the file they're already in.")
     model = Submission if table == "submissions" else Comment
+
+    already_there = (
+        await session.execute(
+            select(func.count()).select_from(model).where(
+                model.file_id == file_tgt.id, in_values(model.id, row_ids), model.valid_to.is_(None)
+            )
+        )
+    ).scalar() or 0
+    if already_there:
+        raise ValidationAppError(f"{already_there} of the selected rows are already in {file_tgt.filename}.")
 
     matching = (
         await session.execute(
             select(func.count()).select_from(model).where(
-                model.file_id == file_src.id, model.id.in_(row_ids), model.valid_to.is_(None)
+                model.file_id == file_src.id, in_values(model.id, row_ids), model.valid_to.is_(None)
             )
         )
     ).scalar() or 0
@@ -621,27 +647,21 @@ async def move_rows(
     )
     await session.execute(
         update(model)
-        .where(model.file_id == file_src.id, model.id.in_(row_ids), model.valid_to.is_(None))
+        .where(model.file_id == file_src.id, in_values(model.id, row_ids), model.valid_to.is_(None))
         .values(valid_to=source_version.version_no - 1)
     )
 
-    # Best-effort FileTable row-count refresh for both sides -- non-fatal,
-    # matching the old handler's own try/except-and-continue behavior.
-    try:
-        src_count = (
+    # Row counts change in the same transaction as the move. (They were once
+    # "best effort" inside a try/except, but on Postgres a failed statement
+    # aborts the transaction, so the commit below -- the move itself --
+    # failed too.)
+    for file_id in (file_src.id, file_tgt.id):
+        live = (
             await session.execute(
-                select(func.count()).select_from(model).where(model.file_id == file_src.id, model.valid_to.is_(None))
+                select(func.count()).select_from(model).where(model.file_id == file_id, model.valid_to.is_(None))
             )
         ).scalar() or 0
-        tgt_count = (
-            await session.execute(
-                select(func.count()).select_from(model).where(model.file_id == file_tgt.id, model.valid_to.is_(None))
-            )
-        ).scalar() or 0
-        await _upsert_file_table_count(session, file_src.id, table, int(src_count))
-        await _upsert_file_table_count(session, file_tgt.id, table, int(tgt_count))
-    except Exception:
-        pass
+        await _upsert_file_table_count(session, file_id, table, int(live))
 
     await session.commit()
     return moved

@@ -23,7 +23,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from backend.app.core.exceptions import ForbiddenError, NotFoundError
+from backend.app.core.exceptions import ForbiddenError, NotFoundError, ValidationAppError
 from backend.app.database import File, FileTable, User
 from backend.app.repositories import version_repo
 from backend.app.services import file_service, version_service
@@ -297,6 +297,70 @@ class TestMoveRows:
             ]
             assert {m.row_id for m in await memo_repo.list_memos(session, src.id)} == {"keep", "move"}
 
+    async def test_rows_of_a_coding_file_cannot_be_moved_or_deleted(self, session_factory) -> None:
+        """Its coding_entries reference those rows; this path never closes them."""
+        async with session_factory() as session:
+            user = await _make_user(session)
+            coding = await _make_file(session, user.id, "proj_coding", file_type="coding")
+            await _make_file(session, user.id, "proj_data")
+            session.add(_submission(coding.id, "x"))
+            await session.commit()
+
+            with pytest.raises(ValidationAppError):
+                await file_service.delete_rows(
+                    session, user.id, schemaname="proj_coding", table="submissions", row_ids=["x"]
+                )
+            with pytest.raises(ValidationAppError):
+                await file_service.move_rows(
+                    session, user.id, source_schema="proj_coding", target_schema="proj_data",
+                    table="submissions", row_ids=["x"],
+                )
+
+    async def test_moving_a_row_back_carries_its_current_memo(self, session_factory) -> None:
+        """The source keeps a moved-out row's memo, so moving the row back
+        meets that old memo; the memo travelling with the row replaces it
+        (this used to hit the memo unique constraint and 500).
+        """
+        from backend.app.repositories import memo_repo
+
+        async with session_factory() as session:
+            user = await _make_user(session)
+            a = await _make_file(session, user.id, "proj_a")
+            b = await _make_file(session, user.id, "proj_b")
+            session.add(_submission(a.id, "x"))
+            await session.commit()
+            await memo_repo.upsert_memo(
+                session, file_id=a.id, row_type="submission", row_id="x", body="first", author_user_id=user.id
+            )
+            await session.commit()
+
+            await file_service.move_rows(
+                session, user.id, source_schema="proj_a", target_schema="proj_b", table="submissions", row_ids=["x"]
+            )
+            await memo_repo.upsert_memo(
+                session, file_id=b.id, row_type="submission", row_id="x", body="edited in b", author_user_id=user.id
+            )
+            await session.commit()
+            moved = await file_service.move_rows(
+                session, user.id, source_schema="proj_b", target_schema="proj_a", table="submissions", row_ids=["x"]
+            )
+
+            assert moved == 1
+            assert [m.body for m in await memo_repo.list_memos(session, a.id)] == ["edited in b"]
+
+    @pytest.mark.parametrize("target", ["proj_a", "proj_b"], ids=["same file", "row already in target"])
+    async def test_colliding_move_is_a_validation_error(self, session_factory, target) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            a = await _make_file(session, user.id, "proj_a")
+            b = await _make_file(session, user.id, "proj_b")
+            session.add_all([_submission(a.id, "x"), _submission(b.id, "x")])
+            await session.commit()
+            with pytest.raises(ValidationAppError):
+                await file_service.move_rows(
+                    session, user.id, source_schema="proj_a", target_schema=target, table="submissions", row_ids=["x"]
+                )
+
     async def test_moves_rows_between_owned_files(self, session_factory) -> None:
         """A "move" closes the source's copy (SCD-2) instead of hard-
         deleting it, and mints one version on each side -- see
@@ -420,6 +484,62 @@ def _ndjson(*records: dict) -> bytes:
 
 
 class TestUploadZst:
+    async def test_cleans_reddit_text_and_skips_removed_posts(self, session_factory) -> None:
+        content = _ndjson(
+            {"id": "a", "title": "Q &amp; A", "selftext": "rent &gt; income\u0000"},
+            {"id": "b", "title": "t", "selftext": "[removed]"},
+            {"id": "c", "title": "Title only", "selftext": "   ", "created_utc": "1700000000.0"},
+        )
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_rec, result = await file_service.upload_zst(
+                session, user.id, file_content=content, filename="dump.zst", data_type="submissions",
+                name="n", description=None, project_id=None,
+            )
+            assert result["inserted_counts"]["submissions"] == 2
+            rows = (
+                await session.execute(
+                    select(Submission).where(Submission.file_id == file_rec.id).order_by(Submission.id)
+                )
+            ).scalars().all()
+            assert [(row.title, row.selftext) for row in rows] == [
+                ("Q & A", "rent > income"), ("Title only", "")
+            ]
+            assert rows[1].created_utc == 1700000000
+
+    async def test_coerces_field_types_and_reports_what_it_skipped(self, session_factory) -> None:
+        """Dumps from different periods mix ints, floats and strings; one
+        string score used to fail the whole upload on Postgres.
+        """
+        content = _ndjson(
+            {"id": 101, "title": "t", "selftext": "body", "score": "7", "num_comments": 2.0, "created_utc": "1600000000"},
+            {"id": "101", "title": "t", "selftext": "same id again"},
+            {"id": "b", "title": "t", "selftext": "[removed]"},
+            {"title": "t", "selftext": "no id"},
+        ) + b"\nnot json\n"
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_rec, result = await file_service.upload_zst(
+                session, user.id, file_content=content, filename="dump.zst", data_type="submissions",
+                name="n", description=None, project_id=None,
+            )
+            row = (await session.execute(select(Submission).where(Submission.file_id == file_rec.id))).scalar_one()
+            assert (row.id, row.score, row.num_comments, row.created_utc) == ("101", 7, 2, 1600000000)
+            assert result["skipped_counts"] == {"duplicate": 1, "no_text": 1, "no_id": 1, "unreadable": 1}
+
+    async def test_corrupt_zstd_is_rejected_and_leaves_no_file(self, session_factory) -> None:
+        import zstandard as zstd
+
+        whole = zstd.ZstdCompressor().compress(_ndjson({"id": "a", "title": "t", "selftext": "x"}) * 50)
+        async with session_factory() as session:
+            user = await _make_user(session)
+            with pytest.raises(ValidationAppError):
+                await file_service.upload_zst(
+                    session, user.id, file_content=whole[: len(whole) // 2], filename="dump.zst",
+                    data_type="submissions", name="Truncated", description=None, project_id=None,
+                )
+            assert (await session.execute(select(File).where(File.filename == "Truncated"))).first() is None
+
     async def test_happy_path_inserts_parsed_rows_into_fixed_tables(self, session_factory) -> None:
         content = _ndjson(
             {"id": "a", "subreddit": "s", "title": "t1", "selftext": "x", "author": "u",
@@ -555,6 +675,21 @@ class TestMergeDatabases:
             assert {e.relation for e in edges} == {"merged_from"}
             assert {e.role for e in edges} == {"merge_input"}
             assert sorted(e.position for e in edges) == [0, 1]
+
+    async def test_skips_rows_deleted_from_a_source(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            parent = await _make_file(session, user.id, "proj_a", filename="A")
+            session.add(_submission(parent.id, "kept"))
+            session.add(_submission(parent.id, "deleted", valid_to=1))
+            await session.commit()
+
+            file_rec, _ = await file_service.merge_databases(
+                session, user.id, source_schemas=["proj_a"], name="Merged", description=None, project_id=None,
+            )
+
+            rows = (await session.execute(select(Submission).where(Submission.file_id == file_rec.id))).scalars().all()
+            assert [r.id for r in rows] == ["kept"]
 
     async def test_no_rows_returns_not_migrated_without_creating_file(self, session_factory) -> None:
         async with session_factory() as session:

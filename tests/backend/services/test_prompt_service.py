@@ -9,7 +9,7 @@ covers the route/auth/response-shape behavior on top of this.
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from backend.app.core.exceptions import ForbiddenError, NotFoundError
+from backend.app.core.exceptions import ForbiddenError, NotFoundError, ValidationAppError
 from backend.app.database import User
 from backend.app.services import prompt_service
 
@@ -81,6 +81,16 @@ class TestUpdatePrompt:
             assert updated.promptname == "renamed"
             assert updated.prompt == "orig text"  # untouched field preserved
             assert updated.type == "filter"
+
+    async def test_update_trims_and_refuses_a_blank_name(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            created = await prompt_service.create_prompt(session, user.id, "orig", "orig text", "filter")
+
+            updated = await prompt_service.update_prompt(session, user.id, created.id, promptname="  spaced  ")
+            assert updated.promptname == "spaced"
+            with pytest.raises(ValidationAppError):
+                await prompt_service.update_prompt(session, user.id, created.id, promptname="   ")
 
     async def test_update_not_found(self, session_factory) -> None:
         async with session_factory() as session:

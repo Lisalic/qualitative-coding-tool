@@ -11,7 +11,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.core.exceptions import ForbiddenError, NotFoundError
+from backend.app.core.exceptions import ForbiddenError, NotFoundError, ValidationAppError
 from backend.app.database import Prompt
 
 _UPDATABLE_FIELDS = ("promptname", "prompt", "type")
@@ -71,8 +71,12 @@ async def update_prompt(
     prompt_row = await _get_owned_prompt(session, user_id, prompt_id)
     for field in _UPDATABLE_FIELDS:
         value = fields.get(field)
-        if value is not None:
-            setattr(prompt_row, field, value)
+        if value is None:
+            continue
+        value = str(value).strip()
+        if not value:
+            raise ValidationAppError(f"{field} can't be empty")
+        setattr(prompt_row, field, value)
     await session.commit()
     await session.refresh(prompt_row)
     return prompt_row
