@@ -104,7 +104,7 @@ Summary is markdown-only by design: a frequency table is a finished reading of a
 | Method | Path | Body | Response | Kind |
 |---|---|---|---|---|
 | GET | `/api/word-count-ranges/` | query `schema` | `{submissions: [{min_words, count}], comments: [...]}`, bins 0–1000 step 10 | direct |
-| GET | `/api/file-entries/` | query `schema`, `limit` (default 10), `offset` (default 0) | `{submissions, comments, total_submissions, total_comments, database, date_created}` | direct |
+| GET | `/api/file-entries/` | query `schema`, `limit` (default 10, max 1000), `offset` (default 0), `q` (only rows whose text, subreddit or author contains it; totals count matches) | `{submissions, comments, total_submissions, total_comments, database, date_created}` | direct |
 | GET | `/api/comments/{submission_id}` | query `database` (default `"original"`) | `{"comments": [...]}` ordered by `created_utc` | direct |
 | POST | `/api/post-contents/` | JSON `{schema, post_ids}` | `{"contents": {post_id: {title, content}}}` | direct |
 | POST | `/api/filter-preview/` | JSON `{api_key, database, model, prompt?, filter_tags?, min_words?, sample_percentage, content_scope, decided_post_ids?, decided_comment_ids?}` | `202 {job_id, status}` → result `{post_ids, comment_ids, partial?}` — creates nothing | **job** |

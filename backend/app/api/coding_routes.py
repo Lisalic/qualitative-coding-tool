@@ -78,10 +78,11 @@ async def get_coding_artifact(
 @router.get("/coding/{ref}/rows")
 async def list_coding_rows(
     ref: str,
-    limit: int = 50,
-    offset: int = 0,
+    # No upper bound: "select all matching" asks for every row at once.
+    limit: int = Query(50, ge=1),
+    offset: int = Query(0, ge=0),
     only: str = Query("all", pattern="^(all|coded|uncoded|ai|human)$"),
-    code: str = None,
+    code: str | None = Query(None, description="Only rows with at least one entry for this code_uid"),
     q: str = None,
     version_no: int | None = Query(None, description="Read coding entries AS OF this version"),
     user_id: int = Depends(require_user_id),
@@ -105,8 +106,8 @@ async def list_coding_rows(
 @router.get("/coding/{ref}/quotes")
 async def list_coding_quotes(
     ref: str,
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     code: str | None = None,
     coder: str | None = None,
     q: str | None = None,

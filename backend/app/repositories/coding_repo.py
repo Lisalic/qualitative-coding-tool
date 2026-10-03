@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.core.coder_rollup import roll_up
 from backend.app.core.exceptions import NotFoundError
 from backend.app.core.item_types import COMMENT, SUBMISSION, qualify_item_id
+from backend.app.core.sql_filters import LIKE_ESCAPE, contains_pattern
 from backend.app.repositories.raw_data_repo import _liveness_condition
 from backend.app.storage_models import CODER_AI, CODER_HUMAN, Comment, CodingEntry, StarredQuote, Submission
 
@@ -411,8 +412,10 @@ def _apply_row_filters(
         )
 
     if q:
-        pattern = f"%{q}%"
-        query = query.where(or_(rows.c.title.ilike(pattern), rows.c.body.ilike(pattern)))
+        pattern = contains_pattern(q)
+        query = query.where(
+            or_(rows.c.title.ilike(pattern, escape=LIKE_ESCAPE), rows.c.body.ilike(pattern, escape=LIKE_ESCAPE))
+        )
 
     return query
 
@@ -694,13 +697,13 @@ async def list_quote_bank(
         stmt = stmt.where(CodingEntry.coder == coder)
 
     if q:
-        pattern = f"%{q}%"
+        pattern = contains_pattern(q)
         stmt = stmt.where(
             or_(
-                CodingEntry.quote.ilike(pattern),
-                CodingEntry.notes.ilike(pattern),
-                source_rows.c.selftext.ilike(pattern),
-                source_rows.c.title.ilike(pattern),
+                CodingEntry.quote.ilike(pattern, escape=LIKE_ESCAPE),
+                CodingEntry.notes.ilike(pattern, escape=LIKE_ESCAPE),
+                source_rows.c.selftext.ilike(pattern, escape=LIKE_ESCAPE),
+                source_rows.c.title.ilike(pattern, escape=LIKE_ESCAPE),
             )
         )
 

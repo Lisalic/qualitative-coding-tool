@@ -162,6 +162,25 @@ class TestGetFileEntries:
             page2 = await data_service.get_file_entries(session, user.id, file_rec.schemaname, limit=2, offset=2)
             assert len(page2["submissions"]) == 1
 
+    async def test_search_covers_every_row_and_treats_wildcards_literally(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_rec = await _make_file(session, user.id)
+            session.add_all(
+                [Submission(file_id=file_rec.id, id=f"s{i:04d}", title="filler", word_count=1) for i in range(30)]
+                + [
+                    Submission(file_id=file_rec.id, id="z1", title="Rent went up 50% this year", word_count=1),
+                    Submission(file_id=file_rec.id, id="z2", title="Rent went up 500 dollars", word_count=1),
+                ]
+            )
+            await session.commit()
+
+            entries = await data_service.get_file_entries(
+                session, user.id, file_rec.schemaname, limit=10, offset=0, q="50%"
+            )
+            assert [s["id"] for s in entries["submissions"]] == ["z1"]
+            assert entries["total_submissions"] == 1
+
     async def test_serialized_rows_omit_file_id(self, session_factory) -> None:
         async with session_factory() as session:
             user = await _make_user(session)

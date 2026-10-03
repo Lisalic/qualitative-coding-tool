@@ -152,14 +152,23 @@ def _liveness_predicate(model, version_no: int | None):
 
 
 async def get_file_entries(
-    session: AsyncSession, user_id: int, schema: str, limit: int, offset: int, version_no: int | None = None
+    session: AsyncSession,
+    user_id: int,
+    schema: str,
+    limit: int,
+    offset: int,
+    version_no: int | None = None,
+    q: str | None = None,
 ) -> dict[str, Any]:
     """Paginated submissions/comments rows (plus total counts) for the
     file identified by ``schema``, owned by ``user_id``. ``version_no``
     reads the file AS OF that version (time travel over the SCD-2
     ranges on ``submissions``/``comments`` -- see their docstrings in
     ``storage_models.py``); the default (``None``) reads the currently
-    LIVE rows.
+    LIVE rows. ``q`` narrows both lists (and their totals) to rows whose
+    text, subreddit or author contains it, case-insensitively -- searched
+    here rather than in the browser so every row is searched, not just
+    the ones on screen.
     """
     normalized = require_valid_schema(schema, field_name="schema")
     file_id = await file_repo.resolve_file_id(session, normalized, user_id)
@@ -167,6 +176,19 @@ async def get_file_entries(
 
     sub_condition = _liveness_predicate(Submission, version_no)
     com_condition = _liveness_predicate(Comment, version_no)
+    term = (q or "").strip()
+    if term:
+        pattern = contains_pattern(term)
+        sub_condition = and_(
+            sub_condition,
+            or_(*(col.ilike(pattern, escape=LIKE_ESCAPE) for col in (
+                Submission.title, Submission.selftext, Submission.subreddit, Submission.author,
+            ))),
+        )
+        com_condition = and_(
+            com_condition,
+            or_(*(col.ilike(pattern, escape=LIKE_ESCAPE) for col in (Comment.body, Comment.subreddit, Comment.author))),
+        )
 
     sub_count = (
         await session.execute(

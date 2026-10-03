@@ -46,9 +46,10 @@ async def word_count_ranges(
 @router.get("/file-entries/")
 async def project_entries(
     schema: str = Query(..., description="File schema name"),
-    limit: int = 10,
-    offset: int = 0,
+    limit: int = Query(10, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
     version_no: int | None = Query(None, description="Read the file AS OF this version instead of live"),
+    q: str | None = Query(None, description="Only rows whose text, subreddit or author contains this"),
     user_id: int = Depends(require_user_id),
     db: AsyncSession = Depends(get_async_db),
 ) -> JSONResponse:
@@ -58,7 +59,7 @@ async def project_entries(
     ``submissions``/``comments``); omitted, it reads the currently live
     rows.
     """
-    entries = await data_service.get_file_entries(db, user_id, schema, limit, offset, version_no)
+    entries = await data_service.get_file_entries(db, user_id, schema, limit, offset, version_no, q)
     return JSONResponse(entries)
 
 

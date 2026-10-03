@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { apiFetch } from "../../api";
 import EntryModal from "./EntryModal";
 import { useDataTableActions } from "./useDataTableActions";
@@ -8,6 +8,7 @@ import Panel from "../shell/Panel";
 import Dropdown from "../primitives/Dropdown";
 import { btn, btnDanger, input, select } from "../../lib/uiClasses";
 import { PAGE_SIZE_OPTIONS } from "../../lib/pageSizes";
+import { formatDate } from "../../lib/formatDate";
 
 // The header row sticks to the top of the Panel's own scroll container, so a
 // long page of rows stays readable without a separate frozen-header widget.
@@ -33,51 +34,57 @@ export default function DataTable({
   const [showModal, setShowModal] = useState(false);
   const [limit, setLimit] = useState(10);
   const [searchTerm, setSearchTerm] = useState("");
+  // What the server is asked to search for: the box's text once typing
+  // pauses, so a search isn't a request per keystroke.
+  const [appliedSearch, setAppliedSearch] = useState("");
   const [page, setPage] = useState(0);
-  const MAX_SEARCH_FETCH = 5000;
+  const latestRequest = useRef(0);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setAppliedSearch(searchTerm.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
 
   const fetchEntries = useCallback(async () => {
-    if (!currentDatabase || String(currentDatabase).trim() === "") {
+    const isProjectSchema = /^proj_[A-Za-z0-9_]+(?:\.db)?$/.test(String(currentDatabase || ""));
+    if (!isProjectSchema) {
       setDbEntries(null);
       setLoading(false);
       return;
     }
 
+    // Only the newest request may update the table: an older, slower
+    // response (a previous page or search) must not overwrite it.
+    const requestId = ++latestRequest.current;
     try {
       setError("");
       setLoading(true);
 
-      const isSearching = (searchTerm || "").trim();
-      const fetchLimit = isSearching ? MAX_SEARCH_FETCH : limit;
-      const offset = page * limit;
-      const offsetParam = isSearching ? 0 : offset;
-      let response;
-      const isProjectSchema = /^proj_[A-Za-z0-9_]+(?:\.db)?$/.test(
-        String(currentDatabase) || "",
-      );
-      if (currentDatabase && isProjectSchema) {
-        response = await apiFetch(
-          `/api/file-entries/?limit=${fetchLimit}&offset=${offsetParam}&schema=${encodeURIComponent(
-            String(currentDatabase),
-          )}`,
-        );
-      }
+      // Search runs server-side over every row; the page is a page of matches.
+      const params = new URLSearchParams({
+        limit: String(limit),
+        offset: String(page * limit),
+        schema: String(currentDatabase),
+      });
+      if (appliedSearch) params.set("q", appliedSearch);
+      const response = await apiFetch(`/api/file-entries/?${params}`);
 
       if (!response.ok) {
-        const text = await response.text();
         throw new Error(
-          `Failed to fetch database entries: ${response.status} ${text || ""}`
+          response.status === 404
+            ? "This database no longer exists."
+            : `Couldn't load the rows (HTTP ${response.status}). Please try again.`,
         );
       }
 
       const data = await response.json();
-      setDbEntries(data);
+      if (requestId === latestRequest.current) setDbEntries(data);
     } catch (err) {
-      setError(`Error: ${err.message}`);
+      if (requestId === latestRequest.current) setError(`Error: ${err.message}`);
     } finally {
-      setLoading(false);
+      if (requestId === latestRequest.current) setLoading(false);
     }
-  }, [currentDatabase, limit, page, searchTerm]);
+  }, [appliedSearch, currentDatabase, limit, page]);
 
   useEffect(() => {
     setCurrentDatabase(database);
@@ -134,55 +141,17 @@ export default function DataTable({
     setSelectedEntry(null);
   };
 
-  const { filteredSubmissions, filteredComments } = useMemo(() => {
-    if (!dbEntries) {
-      return { filteredSubmissions: [], filteredComments: [] };
-    }
-    const q = (searchTerm || "").trim().toLowerCase();
-    const isSearchingLocal = (searchTerm || "").trim();
-    let submissions = dbEntries.submissions || [];
-    let comments = dbEntries.comments || [];
+  const { filteredSubmissions, filteredComments } = useMemo(
+    () => ({
+      filteredSubmissions: dbEntries?.submissions || [],
+      filteredComments: dbEntries?.comments || [],
+    }),
+    [dbEntries],
+  );
 
-    if (q) {
-      submissions = submissions.filter((sub) => {
-        return (
-          (sub.title && sub.title.toLowerCase().includes(q)) ||
-          (sub.selftext && sub.selftext.toLowerCase().includes(q)) ||
-          (sub.subreddit && sub.subreddit.toLowerCase().includes(q)) ||
-          (sub.author && sub.author.toLowerCase().includes(q))
-        );
-      });
-      comments = comments.filter((c) => {
-        return (
-          (c.body && c.body.toLowerCase().includes(q)) ||
-          (c.subreddit && c.subreddit.toLowerCase().includes(q)) ||
-          (c.author && c.author.toLowerCase().includes(q))
-        );
-      });
-    }
-
-    if (Array.isArray(submissions)) {
-      if (isSearchingLocal) {
-        const start = page * limit;
-        submissions = submissions.slice(start, start + limit);
-      } else {
-        submissions = submissions.slice(0, limit);
-      }
-    }
-    if (Array.isArray(comments)) {
-      if (isSearchingLocal) {
-        const start = page * limit;
-        comments = comments.slice(start, start + limit);
-      } else {
-        comments = comments.slice(0, limit);
-      }
-    }
-
-    return {
-      filteredSubmissions: submissions,
-      filteredComments: comments,
-    };
-  }, [dbEntries, searchTerm, page, limit]);
+  const pageCount = dbEntries
+    ? Math.ceil(Math.max(dbEntries.total_submissions || 0, dbEntries.total_comments || 0) / limit)
+    : 0;
 
   // Helpers for modal navigation
   let currentList = [];
@@ -261,30 +230,14 @@ export default function DataTable({
                   </div>
                   {metadata.date_created && metadata.date_created > 0 && (
                     <div>
-                      Date Created:{" "}
-                      {(() => {
-                        try {
-                          return new Date(
-                            metadata.date_created * 1000
-                          ).toLocaleString();
-                        } catch (e) {
-                          return "Unknown";
-                        }
-                      })()}
+                      Date created: {formatDate(metadata.date_created * 1000) || "Unknown"}
                     </div>
                   )}
                 </>
               )}
               {metadata.tables && metadata.created_at && (
                 <div>
-                  Date Created:{" "}
-                  {(() => {
-                    try {
-                      return new Date(metadata.created_at).toLocaleString();
-                    } catch (e) {
-                      return "Unknown";
-                    }
-                  })()}
+                  Date created: {formatDate(metadata.created_at) || "Unknown"}
                 </div>
               )}
             </div>
@@ -309,7 +262,8 @@ export default function DataTable({
             <div className="flex">
               <input
                 type="text"
-                placeholder="Search posts/comments..."
+                placeholder="Search posts and comments…"
+                aria-label="Search posts and comments"
                 value={searchTerm}
                 onChange={(e) => {
                   setSearchTerm(e.target.value);
@@ -327,14 +281,18 @@ export default function DataTable({
           )}
 
           {filteredSubmissions.length > 0 && (
-            <Panel title={`Sample Posts (${limit})`} padded={false} bodyClassName="overflow-auto">
+            <Panel
+              title={`Posts (${(dbEntries.total_submissions ?? filteredSubmissions.length).toLocaleString()})`}
+              padded={false}
+              bodyClassName="overflow-auto"
+            >
               <table className="w-full border-collapse">
                   <thead>
                     <tr>
                       <th className={thClasses} style={{ width: 48 }}>
                         <input
                           type="checkbox"
-                          aria-label="select-all-submissions"
+                          aria-label="Select all posts on this page"
                           className="accent-paper"
                           checked={
                             filteredSubmissions.length > 0 &&
@@ -367,7 +325,16 @@ export default function DataTable({
                     {filteredSubmissions.map((sub) => (
                       <tr
                         key={sub.id}
+                        tabIndex={0}
+                        aria-label={`Open post ${sub.id}`}
                         onClick={() => handleRowClick(sub, "submission")}
+                        onKeyDown={(e) => {
+                          if (e.target !== e.currentTarget) return;
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            handleRowClick(sub, "submission");
+                          }
+                        }}
                         className="cursor-pointer transition-colors hover:bg-white/5"
                       >
                         <td className={tdClasses}>
@@ -375,6 +342,7 @@ export default function DataTable({
                             type="checkbox"
                             className="accent-paper"
                             checked={isSelected("submission", sub.id)}
+                            aria-label={`Select post ${sub.id}`}
                             onChange={(e) =>
                               toggleSelection("submission", sub.id, e)
                             }
@@ -387,17 +355,17 @@ export default function DataTable({
                         </td>
                         {isFilteredView || currentDatabase === "filtered" ? (
                           <>
-                            <td className={`${tdClasses} max-w-[42ch] truncate`}>
+                            <td className={`${tdClasses} max-w-[42ch] truncate`} title={sub.title}>
                               {sub.title}
                             </td>
-                            <td className={`${tdClasses} max-w-[42ch] truncate`}>
+                            <td className={`${tdClasses} max-w-[42ch] truncate`} title={sub.selftext}>
                               {sub.selftext}
                             </td>
                           </>
                         ) : (
                           <>
                             <td className={tdClasses}>{sub.subreddit}</td>
-                            <td className={`${tdClasses} max-w-[42ch] truncate`}>
+                            <td className={`${tdClasses} max-w-[42ch] truncate`} title={sub.title}>
                               {sub.title}
                             </td>
                             <td className={tdClasses}>{sub.author}</td>
@@ -412,14 +380,18 @@ export default function DataTable({
           )}
 
           {filteredComments.length > 0 && (
-            <Panel title={`Sample Comments (${limit})`} padded={false} bodyClassName="overflow-auto">
+            <Panel
+              title={`Comments (${(dbEntries.total_comments ?? filteredComments.length).toLocaleString()})`}
+              padded={false}
+              bodyClassName="overflow-auto"
+            >
               <table className="w-full border-collapse">
                   <thead>
                     <tr>
                       <th className={thClasses} style={{ width: 48 }}>
                         <input
                           type="checkbox"
-                          aria-label="select-all-comments"
+                          aria-label="Select all comments on this page"
                           className="accent-paper"
                           checked={
                             filteredComments.length > 0 &&
@@ -443,7 +415,16 @@ export default function DataTable({
                     {filteredComments.map((comment) => (
                       <tr
                         key={comment.id}
+                        tabIndex={0}
+                        aria-label={`Open comment ${comment.id}`}
                         onClick={() => handleRowClick(comment, "comment")}
+                        onKeyDown={(e) => {
+                          if (e.target !== e.currentTarget) return;
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            handleRowClick(comment, "comment");
+                          }
+                        }}
                         className="cursor-pointer transition-colors hover:bg-white/5"
                       >
                         <td className={tdClasses}>
@@ -451,6 +432,7 @@ export default function DataTable({
                             type="checkbox"
                             className="accent-paper"
                             checked={isSelected("comment", comment.id)}
+                            aria-label={`Select comment ${comment.id}`}
                             onChange={(e) =>
                               toggleSelection("comment", comment.id, e)
                             }
@@ -462,7 +444,7 @@ export default function DataTable({
                           <MemoIndicator memo={getMemo("comment", comment.id)} />
                         </td>
                         <td className={tdClasses}>{comment.subreddit}</td>
-                        <td className={`${tdClasses} max-w-[42ch] truncate`}>
+                        <td className={`${tdClasses} max-w-[42ch] truncate`} title={comment.body}>
                           {comment.body}
                         </td>
                         <td className={tdClasses}>{comment.author}</td>
@@ -476,8 +458,8 @@ export default function DataTable({
 
           {dbEntries.submissions.length === 0 &&
             dbEntries.comments.length === 0 && (
-              <p className="border border-paper/20 bg-white/[0.02] px-4 py-6 text-center italic text-paper/70">
-                No data available. Please upload a file first.
+              <p className="border border-line bg-surface px-4 py-6 text-center italic text-paper/70">
+                {appliedSearch ? `No rows match "${appliedSearch}".` : "This database has no rows."}
               </p>
             )}
 
@@ -492,6 +474,7 @@ export default function DataTable({
             </button>
             <span className="min-w-[80px] text-center text-sm">
               Page {page + 1}
+              {pageCount > 0 ? ` of ${pageCount}` : ""}
             </span>
             <button
               type="button"
