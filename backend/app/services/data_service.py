@@ -42,13 +42,15 @@ import secrets
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import bindparam, func, select, text
+from sqlalchemy import String, and_, bindparam, func, or_, select, text
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.app.core.exceptions import NotFoundError, ValidationAppError
 from backend.app.core.item_types import COMMENT, SUBMISSION, split_item_id
 from backend.app.core.schema_guard import require_valid_schema
+from backend.app.core.sql_filters import LIKE_ESCAPE, contains_pattern, in_values
 from backend.app.database import (
     AsyncSessionLocal,
     File,
@@ -270,7 +272,7 @@ async def get_post_contents(
         rows = await session.execute(
             select(Submission.id, Submission.title, Submission.selftext).where(
                 Submission.file_id == file_id,
-                Submission.id.in_(submission_candidates),
+                in_values(Submission.id, submission_candidates),
                 Submission.valid_to.is_(None),
             )
         )
@@ -286,7 +288,7 @@ async def get_post_contents(
         rows = await session.execute(
             select(Comment.id, Comment.body, Comment.link_id).where(
                 Comment.file_id == file_id,
-                Comment.id.in_(all_comment_candidates),
+                in_values(Comment.id, all_comment_candidates),
                 Comment.valid_to.is_(None),
             )
         )
@@ -298,7 +300,7 @@ async def get_post_contents(
         rows = await session.execute(
             select(Submission.id, Submission.title).where(
                 Submission.file_id == file_id,
-                Submission.id.in_(parent_ids),
+                in_values(Submission.id, parent_ids),
                 Submission.valid_to.is_(None),
             )
         )
@@ -352,7 +354,7 @@ def _word_count_expr_ai_ready(rows: list, content_type: str) -> str:
 
 
 
-def _exclude_clause(ids: list[str] | None, param: str) -> tuple[str, dict[str, Any], list]:
+def _exclude_clause(ids: list[str] | None, param: str, dialect_name: str) -> tuple[str, dict[str, Any], list]:
     """SQL fragment + bind value + expanding-bindparam spec that removes
     already-decided rows from the candidate pool.
 
@@ -366,9 +368,18 @@ def _exclude_clause(ids: list[str] | None, param: str) -> tuple[str, dict[str, A
     one bind parameter per element at execution time rather than us
     interpolating ids into SQL, which is the whole reason the sampling
     queries in this module are allowed to be raw ``text()`` at all.
+    On Postgres the list is instead ONE array parameter: one parameter
+    per id would exceed the 32,767 limit once a researcher has ruled on
+    that many rows (see ``core/sql_filters.py``).
     """
     if not ids:
         return "", {}, []
+    if dialect_name == "postgresql":
+        return (
+            f" AND NOT (id = ANY(:{param}))",
+            {param: list(ids)},
+            [bindparam(param, type_=postgresql.ARRAY(String))],
+        )
     return f" AND id NOT IN :{param}", {param: list(ids)}, [bindparam(param, expanding=True)]
 
 
@@ -424,9 +435,10 @@ async def _sample_source_rows(
     comm_rows: list = []
     submissions_text = ""
     comments_text = ""
+    dialect_name = session.bind.dialect.name
 
     if include_posts:
-        sub_ex_sql, sub_ex_bind, sub_ex_params = _exclude_clause(exclude_submission_ids, "ex_subs")
+        sub_ex_sql, sub_ex_bind, sub_ex_params = _exclude_clause(exclude_submission_ids, "ex_subs", dialect_name)
         subs_params = {"fid": source_file_id, "mw": min_words, **sub_tag_bind, **sub_ex_bind}
         subs_where = (
             f"WHERE file_id = :fid AND valid_to IS NULL AND word_count >= :mw{sub_tag_sql}{sub_ex_sql}"
@@ -452,7 +464,7 @@ async def _sample_source_rows(
         submissions_text = _word_count_expr_ai_ready(sub_rows, "submission") if use_ai_posts else ""
 
     if include_comments:
-        com_ex_sql, com_ex_bind, com_ex_params = _exclude_clause(exclude_comment_ids, "ex_comms")
+        com_ex_sql, com_ex_bind, com_ex_params = _exclude_clause(exclude_comment_ids, "ex_comms", dialect_name)
         comm_params = {"fid": source_file_id, "mw": min_words, **com_tag_bind, **com_ex_bind}
         comm_where = (
             f"WHERE file_id = :fid AND valid_to IS NULL AND word_count >= :mw{com_tag_sql}{com_ex_sql}"
@@ -765,7 +777,7 @@ async def _materialize_filtered_schema(
         link_id_rows = await session.execute(
             select(Comment.link_id).where(
                 Comment.file_id == file_rec.id,
-                Comment.id.in_(comment_ids),
+                in_values(Comment.id, comment_ids),
             )
         )
         orphaned_comments = sum(

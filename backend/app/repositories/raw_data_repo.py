@@ -21,6 +21,7 @@ import math
 from sqlalchemy import and_, func, insert, literal, null, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.core.sql_filters import in_values
 from backend.app.storage_models import Comment, Submission
 
 # Columns never copied verbatim between files: `pk` is a per-row
@@ -46,9 +47,9 @@ def _liveness_condition(model, *, version_no: int | None):
 
 
 def _word_count(text: str | None) -> int:
-    """Count of whitespace-delimited tokens, matching the old
-    ``GENERATED ALWAYS AS (...)`` SQL expression this replaces: normalize
-    whitespace, split on spaces, count non-empty tokens; 0 for empty text.
+    """Count of whitespace-delimited tokens; 0 for empty or
+    whitespace-only text. The single source of ``word_count`` -- the
+    column is a plain integer, not a generated one.
     """
     if not text:
         return 0
@@ -109,14 +110,14 @@ async def fetch_rows_by_id(
     if submission_ids:
         result = await session.execute(
             _live(Submission, select(Submission)).where(
-                Submission.file_id == file_id, Submission.id.in_(submission_ids)
+                Submission.file_id == file_id, in_values(Submission.id, submission_ids)
             )
         )
         subs = list(result.scalars().all())
     if comment_ids:
         result = await session.execute(
             _live(Comment, select(Comment)).where(
-                Comment.file_id == file_id, Comment.id.in_(comment_ids)
+                Comment.file_id == file_id, in_values(Comment.id, comment_ids)
             )
         )
         comments = list(result.scalars().all())
@@ -187,7 +188,7 @@ async def parent_post_context_for_comments(
             Submission,
             select(Submission.id, Submission.title, Submission.selftext).where(
                 Submission.file_id == file_id,
-                Submission.id.in_(link_ids),
+                in_values(Submission.id, link_ids),
             ),
         )
     )
@@ -241,7 +242,7 @@ async def copy_rows_by_id(
         col_names = ["file_id", "valid_from", "valid_to"] + [c.name for c in non_id_cols]
         where = and_(
             Submission.file_id == source_file_id,
-            Submission.id.in_(submission_ids),
+            in_values(Submission.id, submission_ids),
             source_condition(Submission, version_no=source_version_no),
         )
 
@@ -262,7 +263,7 @@ async def copy_rows_by_id(
         col_names = ["file_id", "valid_from", "valid_to"] + [c.name for c in non_id_cols]
         where = and_(
             Comment.file_id == source_file_id,
-            Comment.id.in_(comment_ids),
+            in_values(Comment.id, comment_ids),
             source_condition(Comment, version_no=source_version_no),
         )
 
