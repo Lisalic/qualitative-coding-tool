@@ -51,3 +51,13 @@ export const meta = "text-xs text-paper/50";
  * other short inline provenance/status tag. Square corners per the style
  * guide; white-alpha only, no new palette color. */
 export const badge = "border border-line px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-paper/70";
+
+/**
+ * Pill-style radio: a visually hidden native radio (`sr-only`, NOT
+ * `hidden` -- `display:none` drops it from the tab order) followed by a
+ * bordered label that inverts when checked and shows the focus outline
+ * when the radio has keyboard focus.
+ */
+export const pillRadioInput = "peer sr-only";
+export const pillRadioLabel =
+  "block cursor-pointer border border-paper px-3 py-2 text-center text-sm transition-colors hover:bg-paper hover:text-ink peer-checked:bg-paper peer-checked:text-ink peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-paper peer-disabled:cursor-not-allowed peer-disabled:opacity-40 peer-disabled:hover:bg-transparent peer-disabled:hover:text-paper";

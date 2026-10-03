@@ -21,7 +21,7 @@ See [tools/authentication.md](tools/authentication.md).
 
 | Method | Path | Body | Response |
 |---|---|---|---|
-| POST | `/api/upload-zst/` | multipart: `file` (`.zst`, required), `data_type` (`posts`\|`comments`, required), `name`, `description`, `project_id` (required) | `{file_name, authenticated, display_name, description, schema_name, inserted_counts: {submissions, comments}}` |
+| POST | `/api/upload-zst/` | multipart: `file` (`.zst`, required), `data_type` (`posts`\|`comments`, required), `name`, `description`, `project_id` (required) | `{file_name, authenticated, display_name, description, schema_name, inserted_counts: {submissions, comments}, skipped_counts}` -- `skipped_counts` tallies records left out by reason (`no_text`, `duplicate`, `unreadable`, `no_id`); a truncated or unreadable file is a 400 and creates nothing |
 | POST | `/api/merge-databases/` | `databases` (JSON array of schema names, required), `name`, `description`, `project_id` | `{message, file: {id, schema_name, display_name, description}, file_migrated}` |
 | DELETE | `/api/delete-database/{db_name}` | path param, must start `proj_`/`cmp_`/`sum_` | `{"message": "File '<filename>' deleted"}` |
 | POST | `/api/delete-row/` | form: `schemaname` (`proj_...`), `table` (`submissions`\|`comments`), `row_id` | `{"deleted": 0\|1}` |

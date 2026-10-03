@@ -1,11 +1,12 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../../api";
 import ArtifactCreatedMessage from "../feedback/ArtifactCreatedMessage";
 import Panel from "../shell/Panel";
 import Dropdown from "../primitives/Dropdown";
-import { btn, btnPrimary, input, select } from "../../lib/uiClasses";
+import { btn, btnPrimary, input, pillRadioInput, pillRadioLabel, select } from "../../lib/uiClasses";
 import { toProjectOptions } from "../../lib/projectOptions";
+import { describeSkippedRecords } from "../../lib/importSummary";
 
 function formatApiErrorPayload(parsed, fallback) {
   if (!parsed || typeof parsed !== "object") return fallback;
@@ -27,8 +28,6 @@ function formatApiErrorPayload(parsed, fallback) {
 const inputClasses = input;
 const selectClasses = select;
 const btnClasses = btn;
-const pillLabel =
-  "block cursor-pointer border border-paper px-3 py-1.5 text-center text-sm transition-colors hover:bg-paper hover:text-ink peer-checked:bg-paper peer-checked:text-ink";
 
 export default function FileUpload({ onUploadSuccess }) {
   const navigate = useNavigate();
@@ -43,35 +42,32 @@ export default function FileUpload({ onUploadSuccess }) {
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [projectsError, setProjectsError] = useState("");
   const [selectedProject, setSelectedProject] = useState("");
+  // Validation messages keyed by field, shown next to the field itself.
+  const [fieldErrors, setFieldErrors] = useState({});
+  const fileInputRef = useRef(null);
 
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0];
     if (selectedFile && selectedFile.name.endsWith(".zst")) {
       setFile(selectedFile);
-      setError("");
+      setFieldErrors((prev) => ({ ...prev, file: undefined }));
     } else {
-      setError("Please select a .zst file");
+      setFieldErrors((prev) => ({ ...prev, file: "Choose a .zst file." }));
       setFile(null);
+      // Clear the native input too, or it keeps showing the rejected file.
+      e.target.value = "";
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    if (!file) {
-      setError("Please select a file");
-      return;
-    }
-
-    if (!customName.trim()) {
-      setError("Please enter a database name");
-      return;
-    }
-
-    if (!selectedProject) {
-      setError("Please select a project");
-      return;
-    }
+    const nextFieldErrors = {};
+    if (!file) nextFieldErrors.file = "Choose a .zst file to import.";
+    if (!selectedProject) nextFieldErrors.project = "Choose a project.";
+    if (!customName.trim()) nextFieldErrors.name = "Enter a name for the database.";
+    setFieldErrors(nextFieldErrors);
+    if (Object.keys(nextFieldErrors).length > 0) return;
 
     setLoading(true);
     setCreatedFile(null);
@@ -96,25 +92,29 @@ export default function FileUpload({ onUploadSuccess }) {
 
       if (!response.ok) {
         const text = await response.text();
-        let errorMsg = `Upload failed (HTTP ${response.status})`;
+        let errorMsg =
+          response.status >= 500
+            ? `The upload failed on the server (HTTP ${response.status}). Please try again.`
+            : `The upload failed (HTTP ${response.status}).`;
         try {
           const errorData = text ? JSON.parse(text) : null;
-          errorMsg = formatApiErrorPayload(errorData, text || errorMsg);
-        } catch (e2) {
-          errorMsg = text || errorMsg;
+          errorMsg = formatApiErrorPayload(errorData, errorMsg);
+        } catch {
+          // Not JSON (e.g. a proxy's HTML error page) -- keep the plain message.
         }
         throw new Error(errorMsg);
       }
 
       const text = await response.text();
       if (!text) {
-        throw new Error("Empty response from server");
+        throw new Error("The server didn't confirm the upload. Check your project before trying again.");
       }
       const data = JSON.parse(text);
 
       setCreatedFile(data);
 
       setFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
       setDataType("posts");
       setCustomName("");
       setDescription("");
@@ -123,7 +123,7 @@ export default function FileUpload({ onUploadSuccess }) {
 
       onUploadSuccess(data);
     } catch (err) {
-      setError(`Error: ${err.message}`);
+      setError(err?.message || "The upload failed. Please try again.");
       setLoading(false);
     }
   };
@@ -138,12 +138,12 @@ export default function FileUpload({ onUploadSuccess }) {
         if (!mounted) return;
         if (!resp.ok) {
           const text = await resp.text();
-          let msg = `Could not load projects (HTTP ${resp.status})`;
+          let msg = `Couldn't load your projects (HTTP ${resp.status}). Please refresh to try again.`;
           try {
             const d = text ? JSON.parse(text) : null;
             msg = formatApiErrorPayload(d, msg);
-          } catch (_) {
-            if (text) msg = text;
+          } catch {
+            // Not JSON -- keep the plain message.
           }
           setProjectsError(msg);
           setProjects([]);
@@ -160,7 +160,8 @@ export default function FileUpload({ onUploadSuccess }) {
         setProjects(Array.isArray(data.projects) ? data.projects : []);
       } catch (e3) {
         if (mounted) {
-          setProjectsError(e3?.message || String(e3));
+          console.error("Error loading projects:", e3);
+          setProjectsError("Couldn't reach the server to load your projects. Check your connection and refresh.");
           setProjects([]);
         }
       } finally {
@@ -179,7 +180,7 @@ export default function FileUpload({ onUploadSuccess }) {
         <p className="text-sm text-paper/70">Loading projects…</p>
       )}
       {projectsError && (
-        <p className="border border-error bg-error/10 px-3 py-2 text-sm text-error">
+        <p role="alert" className="border border-error bg-error/10 px-3 py-2 text-sm text-error">
           {projectsError}
         </p>
       )}
@@ -212,23 +213,29 @@ export default function FileUpload({ onUploadSuccess }) {
           >
             <div className="flex flex-col gap-1.5">
               <label htmlFor="zst-file" className="text-sm">
-                Upload .zst File
+                Data file (.zst)
               </label>
               <input
+                ref={fileInputRef}
                 id="zst-file"
                 type="file"
+                aria-describedby="zst-file-help"
                 accept=".zst"
                 onChange={handleFileChange}
                 disabled={loading}
                 className="text-sm file:mr-3 file:border file:border-paper file:bg-ink file:px-3 file:py-1.5 file:text-paper file:hover:bg-paper file:hover:text-ink"
               />
+              <p id="zst-file-help" className="text-xs text-paper/50">
+                A zstandard-compressed file of posts or comments, one JSON record per line.
+              </p>
+              {fieldErrors.file ? <p className="text-xs text-error">{fieldErrors.file}</p> : null}
               {file && (
                 <p className="text-sm text-paper/70">Selected: {file.name}</p>
               )}
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm">Data Type</label>
+            <fieldset className="min-w-0">
+              <legend className="mb-1.5 text-sm">Data type</legend>
               <div className="flex w-full gap-2">
                 <div className="flex-1">
                   <input
@@ -239,9 +246,9 @@ export default function FileUpload({ onUploadSuccess }) {
                     checked={dataType === "posts"}
                     onChange={(e) => setDataType(e.target.value)}
                     disabled={loading}
-                    className="peer hidden"
+                    className={pillRadioInput}
                   />
-                  <label htmlFor="data-type-submissions" className={pillLabel}>
+                  <label htmlFor="data-type-submissions" className={pillRadioLabel}>
                     Posts
                   </label>
                 </div>
@@ -254,14 +261,14 @@ export default function FileUpload({ onUploadSuccess }) {
                     checked={dataType === "comments"}
                     onChange={(e) => setDataType(e.target.value)}
                     disabled={loading}
-                    className="peer hidden"
+                    className={pillRadioInput}
                   />
-                  <label htmlFor="data-type-comments" className={pillLabel}>
+                  <label htmlFor="data-type-comments" className={pillRadioLabel}>
                     Comments
                   </label>
                 </div>
               </div>
-            </div>
+            </fieldset>
           </Panel>
 
           <Panel
@@ -272,7 +279,7 @@ export default function FileUpload({ onUploadSuccess }) {
           >
             <div className="flex flex-col gap-1.5">
               <label htmlFor="project-select" className="text-sm">
-                Select Project
+                Project
               </label>
               <Dropdown
                 id="project-select"
@@ -291,21 +298,23 @@ export default function FileUpload({ onUploadSuccess }) {
                 searchPlaceholder="Search projects…"
                 emptyMessage="No projects match that search."
               />
+              {fieldErrors.project ? <p className="text-xs text-error">{fieldErrors.project}</p> : null}
             </div>
 
             <div className="flex flex-col gap-1.5">
               <label htmlFor="custom-name" className="text-sm">
-                Database Name
+                Database name
               </label>
               <input
                 id="custom-name"
                 type="text"
-                placeholder="Enter database name..."
+                placeholder="my-dataset"
                 value={customName}
                 onChange={(e) => setCustomName(e.target.value)}
                 disabled={loading}
                 className={inputClasses}
               />
+              {fieldErrors.name ? <p className="text-xs text-error">{fieldErrors.name}</p> : null}
             </div>
 
             <div className="flex flex-col gap-1.5">
@@ -314,7 +323,7 @@ export default function FileUpload({ onUploadSuccess }) {
               </label>
               <textarea
                 id="db-description"
-                placeholder="Optional description for this dataset..."
+                placeholder="What this dataset is, where it came from…"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 disabled={loading}
@@ -336,13 +345,13 @@ export default function FileUpload({ onUploadSuccess }) {
             }
             className={btnPrimary}
           >
-            {loading ? "Processing..." : "Upload"}
+            {loading ? "Importing…" : "Import"}
           </button>
         </div>
       </form>
 
       {error && (
-        <p className="border border-error bg-error/10 px-3 py-2 text-center text-sm text-error">
+        <p role="alert" className="border border-error bg-error/10 px-3 py-2 text-center text-sm text-error">
           {error}
         </p>
       )}
@@ -353,6 +362,17 @@ export default function FileUpload({ onUploadSuccess }) {
             viewPath="/data"
             viewState={{ selectedDatabase: createdFile.schema_name }}
           />
+          {Object.values(createdFile.inserted_counts || {}).every((count) => !count) && (
+            <p className="mt-2 border border-error bg-error/10 px-3 py-2 text-sm text-error">
+              No rows were imported. Check that the data type matches the file (posts vs comments) and that
+              its posts have body text.
+            </p>
+          )}
+          {describeSkippedRecords(createdFile.skipped_counts) && (
+            <p className="mt-2 border border-line px-3 py-2 text-sm text-paper/70">
+              {describeSkippedRecords(createdFile.skipped_counts)}
+            </p>
+          )}
         </div>
       )}
     </div>

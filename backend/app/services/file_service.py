@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+from collections import Counter
 import os
 import secrets
 import tempfile
@@ -38,7 +39,7 @@ from backend.app.versioning_models import (
     RELATION_MERGED_FROM,
     ROLE_MERGE_INPUT,
 )
-from backend.scripts.import_db import iter_zst_records
+from backend.scripts.import_db import ImportFormatError, iter_zst_records
 
 _UPLOAD_BATCH_SIZE = 1000
 
@@ -141,8 +142,8 @@ async def upload_zst(
         await async_link_file_to_project(session, file_rec.id, project.id)
         await session.flush()
 
-    await session.commit()
-
+    # One transaction for the File row, its v1, the project link and every
+    # row: a dump that fails partway must not leave an empty file behind.
     tmp_path: str | None = None
     inserted_counts = {"submissions": 0, "comments": 0}
     try:
@@ -150,15 +151,20 @@ async def upload_zst(
             tmp.write(file_content)
             tmp_path = tmp.name
 
-        records = iter_zst_records(tmp_path, data_type)
+        skipped: Counter = Counter()
+        records = iter_zst_records(tmp_path, data_type, skipped)
         bulk_insert = (
             raw_data_repo.bulk_insert_submissions
             if data_type == "submissions"
             else raw_data_repo.bulk_insert_comments
         )
         inserted = 0
-        while batch := await asyncio.to_thread(list, itertools.islice(records, _UPLOAD_BATCH_SIZE)):
-            inserted += await bulk_insert(session, file_rec.id, batch)
+        try:
+            while batch := await asyncio.to_thread(list, itertools.islice(records, _UPLOAD_BATCH_SIZE)):
+                inserted += await bulk_insert(session, file_rec.id, batch)
+        except ImportFormatError as exc:
+            await session.rollback()
+            raise ValidationAppError(str(exc)) from exc
 
         inserted_counts[data_type] = inserted
         if inserted:
@@ -176,6 +182,9 @@ async def upload_zst(
         "description": (description or None),
         "schema_name": schema_name,
         "inserted_counts": inserted_counts,
+        # Records the dump contained but the import left out, by reason
+        # (see import_db.iter_zst_records).
+        "skipped_counts": dict(skipped),
     }
     return file_rec, response
 
