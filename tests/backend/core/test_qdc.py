@@ -266,3 +266,22 @@ class TestOutputShape:
         root = ET.fromstring(serialize_codes_to_qdc([]))
         assert root.find("q:Codes", NS) is not None
         assert list(root.find("q:Codes", NS)) == []
+
+
+class TestControlCharacters:
+    def test_text_pasted_with_control_characters_still_parses(self) -> None:
+        """XML 1.0 forbids most C0 controls; one vertical tab from a Word
+        paste used to make the whole file unreadable to other QDA tools.
+        """
+        codes = [
+            _code(
+                "c1", "Name\x0bwith tab", 1, family_uid="f1", family_name="Fam\x01ily",
+                definition="Line one\x0bline two\tkept\nkept",
+            )
+        ]
+        root = ET.fromstring(serialize_codes_to_qdc(codes).split("\n", 1)[1])
+        family = root.find("q:Codes/q:Code", NS)
+        code = family.find("q:Code", NS)
+        assert family.get("name") == "Family"
+        assert code.get("name") == "Namewith tab"
+        assert "line two\tkept\nkept" in code.find("q:Description", NS).text

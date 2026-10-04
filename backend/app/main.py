@@ -87,6 +87,10 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # The frontend is cross-origin, and browsers hide every non-safelisted
+    # response header from it unless exposed -- without this, exports
+    # always downloaded under the client's fallback name.
+    expose_headers=["Content-Disposition"],
 )
 
 app.include_router(routes.router, prefix="/api")

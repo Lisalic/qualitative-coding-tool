@@ -1,48 +1,55 @@
 """Export service for codebooks, coding entries, row memos, frequency
-summaries, and deterministic project bundles.
+summaries, saved documents, and deterministic project bundles.
 
-Produces deterministic, ordered, valid UTF-8 output. Each artifact kind
-offers exactly two formats -- the one that best preserves it and the one
-that best travels -- rather than a uniform CSV/JSON pair:
+Produces deterministic, ordered output. Most people exporting from this
+app are not technical, so **Word (``.docx``) and Excel (``.xlsx``) come
+first and are the defaults** wherever they fit; the interchange formats
+stay available, listed after, for researchers moving data into R, SPSS
+or another QDA package:
 
-* codebook -- ``qdc`` (REFI-QDA Codebook, the interchange standard
-  NVivo/ATLAS.ti/MAXQDA implement -- see ``core/qdc.py``) and ``csv``
-  (one row per code, carrying ``code_uid``/``family_uid``, for Excel/R).
-  ``qdc`` is the default and what the project bundle archives: a codebook
-  is the artifact researchers most often need to carry into another QDA
-  package, and it is the only one of these exports a standard exists for.
-* coding -- ``csv`` and ``json``. Segments carry offsets, nested code
-  metadata and optionally full source text with arbitrary newlines, so
-  JSON stays the lossless archival form here.
-* summary -- ``md`` only. A frequency table is a finished reading of
-  a coding, not source data something re-parses; anyone wanting the
-  numbers exports the coding and counts.
-* memos -- ``md`` first and ``csv`` second: a memo is multi-paragraph
-  prose, which a single CSV cell is the wrong shape for.
-* document -- ``md`` only, for the artifacts whose content *is* a
-  markdown blob (a saved ``summary``, a ``codebook_comparison``/
-  ``coding_comparison``): exported as-is, since there are no rows to
-  reshape. Distinct from ``summary`` above, which computes a frequency
-  table *from a coding*.
+* codebook -- ``docx`` (default: a readable codebook, families as
+  headings, each code with its definition and rules -- see
+  ``_codebook_docx``), ``xlsx`` (one row per code), ``qdc`` (REFI-QDA
+  Codebook, the interchange standard NVivo/ATLAS.ti/MAXQDA implement --
+  see ``core/qdc.py``) and ``csv``.
+* coding -- ``xlsx`` (default: one workbook holding the coded quotes, the
+  item-by-code matrix, the codebook and code counts as sheets, so nobody
+  has to pick a layout), ``docx`` (a code report: every quote grouped
+  under its code), ``csv`` and ``json``. Only ``csv``/``json`` take a
+  ``layout`` -- see ``export_coding``. JSON stays the lossless archival
+  form (offsets, nested code metadata, full source text).
+* summary -- ``docx`` (default), ``xlsx`` and ``md``: a code-frequency
+  table computed from a coding, a finished reading pasted into a write-up.
+* memos -- ``docx`` (default), ``xlsx``, ``md`` and ``csv``: a memo is
+  multi-paragraph prose, which a document holds best.
+* document -- ``docx`` (default) and ``md``, for the artifacts whose
+  content *is* a markdown blob (a saved ``summary``, a
+  ``codebook_comparison``/``coding_comparison``): the ``md`` export is the
+  stored blob as-is, the ``docx`` one renders it
+  (``core/docx_render.py::markdown_to_docx``). Distinct from ``summary``
+  above, which computes a frequency table *from a coding*.
 
-Coding exports come in two layouts: ``long`` (one row per coded segment)
-and ``wide`` (one row per dataset item, including uncoded ones, with a
-column per code) -- see ``export_coding``. The summary export groups by
-``code_uid``, never by code name, so a rename doesn't fragment history --
-see ``export_summary``/``repositories/export_repo.py::get_code_frequencies_by_uid``.
+Every format writes user text through the sanitizer matching its sink
+(``core/export_text.py``): spreadsheet cells can't become formulas, XML
+formats drop the control characters XML forbids, and generated markdown
+headings/cells can't inject structure or HTML. Word/Excel headers are
+plain language ("Code", "Coded by"); CSV/JSON keep their machine
+headers.
 
-The project bundle (``export_project_bundle``) writes exactly one file
-per project file, always in that artifact's best format, so nothing is
-duplicated across formats; a file's row memos ride along as a single
-``.md`` sidecar. A ``codebook_comparison``/``coding_comparison`` is
-carried as its raw markdown blob -- unlike codebook/coding, a comparison
-has no structured rows to serialize, so its content is exported as-is
-rather than reshaped.
+The summary export groups by ``code_uid``, never by code name, so a
+rename doesn't fragment history -- see
+``repositories/export_repo.py::get_code_frequencies_by_uid``.
+
+The project bundle (``export_project_bundle``) writes each project file
+in the formats the caller picked for its type (``BUNDLE_FORMATS``) --
+by default just that type's first (Word or Excel), so nothing is
+duplicated unless asked for; picking several writes the same artifact
+once per format. A file's row memos ride along as a sidecar the same way.
 
 Privacy: ``include_source_text``/``include_author`` on ``export_coding``
 and ``export_project_bundle`` both default to ``False`` -- an export is
 opt-in to carrying the underlying quote's full source text or its
-author, not opt-out.
+author, not opt-out, in every format.
 """
 
 from __future__ import annotations
@@ -57,8 +64,11 @@ from datetime import datetime
 from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.core import docx_render
 from backend.app.core.exceptions import NotFoundError, ValidationAppError
+from backend.app.core.export_text import md_inline, neutralize_formula
 from backend.app.core.qdc import serialize_codes_to_qdc
+from backend.app.core.xlsx_render import SheetSpec, build_workbook
 from backend.app.repositories import export_repo, file_repo, project_repo, version_repo
 from backend.app.services import version_service
 from backend.app.versioning_models import CodebookCode
@@ -92,12 +102,27 @@ def _json_serial(obj: Any) -> Any:
     raise TypeError(f"Type {type(obj)} not serializable")
 
 
+def _csv_cell(value: Any) -> str:
+    """Exports carry Reddit text verbatim, so a post starting with
+    ``=HYPERLINK(...)`` must reach a spreadsheet as text, not run."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return neutralize_formula(value)
+    return str(value)
+
+
 def _csv_serialize(rows: list[list[Any]], headers: list[str]) -> str:
+    """CSV text for spreadsheets: a UTF-8 BOM so Excel doesn't read it as
+    the local legacy encoding, and text cells neutralized against
+    formula injection (numbers, e.g. a negative score, are left alone).
+    """
     output = io.StringIO()
+    output.write("\ufeff")
     writer = csv.writer(output, lineterminator="\r\n", quoting=csv.QUOTE_MINIMAL)
     writer.writerow(headers)
     for row in rows:
-        writer.writerow(["" if v is None else str(v) for v in row])
+        writer.writerow([_csv_cell(v) for v in row])
     return output.getvalue()
 
 
@@ -107,24 +132,17 @@ _MEDIA_TYPES = {
     "md": "text/markdown; charset=utf-8",
     # REFI-QDA has no registered IANA type; a .qdc is an XML document.
     "qdc": "application/xml; charset=utf-8",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 }
-
-
-def _md_cell(val: Any) -> str:
-    """One markdown table cell: pipes escaped and newlines flattened, so a
-    multi-line definition can't break the row it sits in.
-    """
-    if val is None:
-        return ""
-    return str(val).replace("|", "\\|").replace("\r\n", " ").replace("\n", " ").strip()
 
 
 def _md_table(rows: list[list[Any]], headers: list[str]) -> str:
     lines = [
-        "| " + " | ".join(headers) + " |",
+        "| " + " | ".join(md_inline(h) for h in headers) + " |",
         "|" + "|".join(["---"] * len(headers)) + "|",
     ]
-    lines.extend("| " + " | ".join(_md_cell(v) for v in row) + " |" for row in rows)
+    lines.extend("| " + " | ".join(md_inline(v) for v in row) + " |" for row in rows)
     return "\n".join(lines)
 
 
@@ -171,23 +189,111 @@ async def _resolve_version(
     return version, (version.version_no if version else None)
 
 
+_ROW_TYPE_LABELS = {"submission": "Post", "comment": "Comment"}
+_CODER_LABELS = {"human": "Human", "ai": "AI"}
+
+
+def _row_type_label(row_type: str | None) -> str:
+    return _ROW_TYPE_LABELS.get(row_type or "", (row_type or "").capitalize())
+
+
+def _coder_label(coder: str | None, model: str | None) -> str:
+    label = _CODER_LABELS.get(coder or "human", coder or "")
+    return f"{label} ({model})" if model else label
+
+
+def _version_label(resolved_version_no: int | None) -> str:
+    return f"Version {resolved_version_no}" if resolved_version_no is not None else "No saved version"
+
+
+def _display_name(file_record: Any) -> str:
+    return file_record.filename or f"file_{file_record.id}"
+
+
+def _family_groups(codes: list[CodebookCode]) -> list[tuple[str, list[CodebookCode]]]:
+    """Codes grouped by ``family_uid`` in first-appearance order, each
+    group labelled by its family name ("" for codes without one).
+
+    Grouping by uid, not name, matches the qdc serializer: two families
+    that happen to share a name stay two families.
+    """
+    groups: dict[str, list[CodebookCode]] = {}
+    for c in codes:
+        key = c.family_uid if c.family_uid and c.family_name else ""
+        groups.setdefault(key, []).append(c)
+    return [((group[0].family_name or "") if key else "", group) for key, group in groups.items()]
+
+
+_CODEBOOK_XLSX_HEADERS = [
+    "Family", "Code", "Definition", "Include when", "Exclude when", "Example", "Keywords", "Code ID",
+]
+_CODEBOOK_DOCX_FIELDS = (
+    ("definition", "Definition"),
+    ("inclusion", "Include when"),
+    ("exclusion", "Exclude when"),
+    ("example", "Example"),
+    ("keywords", "Keywords"),
+)
+
+
+def _codebook_xlsx_rows(codes: list[CodebookCode]) -> list[list[Any]]:
+    return [
+        [
+            c.family_name or "", c.name or "", c.definition or "", c.inclusion or "",
+            c.exclusion or "", c.example or "", c.keywords or "", c.code_uid or "",
+        ]
+        for c in codes
+    ]
+
+
+_FREQUENCY_HEADERS = ["Code", "Family", "Times applied", "Items"]
+
+
+def _frequency_rows(summary_data: list[dict[str, Any]]) -> list[list[Any]]:
+    return [[s["name"], s["family_name"], s["frequency"], s["document_count"]] for s in summary_data]
+
+
+def _frequency_xlsx_rows(summary_data: list[dict[str, Any]]) -> list[list[Any]]:
+    return [row + [s["code_uid"]] for row, s in zip(_frequency_rows(summary_data), summary_data, strict=True)]
+
+
+def _codebook_docx(title: str, version_label: str, codes: list[CodebookCode]) -> bytes:
+    doc = docx_render.new_document(f"{title} — codebook", [version_label, f"{len(codes)} code(s)"])
+    if not codes:
+        docx_render.add_paragraph(doc, "This codebook has no codes yet.", italic=True)
+    groups = _family_groups(codes)
+    has_families = any(name for name, _ in groups)
+    for family_name, group in groups:
+        if family_name:
+            docx_render.add_heading(doc, family_name, 1)
+        elif has_families:
+            docx_render.add_heading(doc, "Codes without a family", 1)
+        for c in group:
+            docx_render.add_heading(doc, c.name or "(unnamed code)", 2)
+            for attr, label in _CODEBOOK_DOCX_FIELDS:
+                value = (getattr(c, attr) or "").strip()
+                if value:
+                    docx_render.add_paragraph(doc, value, label=label)
+    return docx_render.to_bytes(doc)
+
+
 async def export_codebook(
     session: AsyncSession,
     ref: int | str,
     user_id: int,
     *,
     version_no: int | None = None,
-    export_format: str = "qdc",
-) -> tuple[str, str, str]:
+    export_format: str = "docx",
+) -> tuple[str | bytes, str, str]:
     """Export codebook as (content, media_type, filename).
 
-    ``qdc`` (the default) is the REFI-QDA Codebook interchange standard,
-    and what the project bundle archives -- it is the only one of these
-    formats another QDA package can import as a codebook rather than as
-    an undifferentiated table. ``csv`` is one row per code for a
-    spreadsheet or R.
+    ``docx`` (the default) is the codebook as a document someone reads
+    and prints; ``xlsx`` one row per code for sorting/filtering; ``qdc``
+    the REFI-QDA interchange standard -- the only format another QDA
+    package imports as a codebook rather than as a table; ``csv`` one row
+    per code for R.
     """
-    _require_format(export_format, ("qdc", "csv"), "Codebook")
+    _require_format(export_format, ("docx", "xlsx", "qdc", "csv"), "Codebook")
     file_record = await file_repo.get_owned_file(session, str(ref), user_id)
     file_id = file_record.id
     if file_record.file_type != "codebook":
@@ -196,16 +302,30 @@ async def export_codebook(
     _, resolved_version_no = await _resolve_version(session, file_id, version_no, label="codebook")
     sorted_codes = await _get_sorted_codebook_codes(session, file_id, version_no=version_no)
 
-    base_name = (file_record.filename or f"file_{file_id}").rsplit(".", 1)[0]
+    base_name = _display_name(file_record).rsplit(".", 1)[0]
     ver_suffix = f"_v{resolved_version_no}" if resolved_version_no is not None else ""
+    filename = f"{base_name}{ver_suffix}_codebook.{export_format}"
+
+    if export_format == "docx":
+        content = _codebook_docx(_display_name(file_record), _version_label(resolved_version_no), sorted_codes)
+        return content, _MEDIA_TYPES["docx"], filename
+
+    if export_format == "xlsx":
+        content = build_workbook(
+            [SheetSpec("Codebook", _CODEBOOK_XLSX_HEADERS, _codebook_xlsx_rows(sorted_codes))],
+            about=[
+                ("File", _display_name(file_record)),
+                ("Version", _version_label(resolved_version_no)),
+                ("Codes", len(sorted_codes)),
+            ],
+        )
+        return content, _MEDIA_TYPES["xlsx"], filename
 
     if export_format == "qdc":
         # `sorted_codes` is already in (position, code_uid) order, which
         # the serializer preserves -- families come out arranged the way
         # the researcher arranged them, not alphabetically.
-        content = serialize_codes_to_qdc(sorted_codes)
-        filename = f"{base_name}{ver_suffix}_codebook.qdc"
-        return content, _MEDIA_TYPES["qdc"], filename
+        return serialize_codes_to_qdc(sorted_codes), _MEDIA_TYPES["qdc"], filename
 
     headers = [
         "code_uid", "name", "family_uid", "family_name", "definition",
@@ -219,8 +339,166 @@ async def export_codebook(
         ]
         for c in sorted_codes
     ]
-    filename = f"{base_name}{ver_suffix}_codebook.csv"
     return _csv_serialize(rows, headers), _MEDIA_TYPES["csv"], filename
+
+
+def _matrix_code_headers(codes: list[CodebookCode]) -> list[str]:
+    """One matrix column header per code, by name -- suffixed with a
+    short uid only where two codes share a name, so no column is
+    ambiguous."""
+    names = [c.name or c.code_uid for c in codes]
+    return [
+        f"{name} ({c.code_uid[:6]})" if names.count(name) > 1 else name
+        for name, c in zip(names, codes, strict=True)
+    ]
+
+
+def _coding_xlsx(
+    *,
+    file_record: Any,
+    resolved_version_no: int | None,
+    codes: list[CodebookCode],
+    entries: list[Any],
+    all_rows: list[dict[str, Any]],
+    row_lookup: dict[tuple[str, str], dict[str, Any]],
+    summary_data: list[dict[str, Any]],
+    include_source_text: bool,
+    include_author: bool,
+) -> bytes:
+    code_meta = {c.code_uid: c for c in codes if c.code_uid}
+
+    quote_headers = ["Item type", "Item ID", "Code", "Family", "Quote", "Notes", "Coded by", "Model"]
+    if include_author:
+        quote_headers.append("Author")
+    if include_source_text:
+        quote_headers.append("Source text")
+    quote_headers += ["Code ID", "Entry ID", "Start offset", "End offset"]
+    quote_rows = []
+    for e in entries:
+        c = code_meta.get(e.code_uid)
+        row_info = row_lookup.get((e.row_type, str(e.post_id))) or {}
+        coder = getattr(e, "coder", "human")
+        r: list[Any] = [
+            _row_type_label(e.row_type), str(e.post_id), (c.name if c else None) or e.code,
+            c.family_name if c else "", e.quote or "", e.notes or "",
+            _CODER_LABELS.get(coder, coder), getattr(e, "coder_model", None) or "",
+        ]
+        if include_author:
+            r.append(row_info.get("author") or "")
+        if include_source_text:
+            r.append(row_info.get("source_text") or "")
+        r += [e.code_uid or "", e.id, e.start_offset, e.end_offset]
+        quote_rows.append(r)
+
+    coded_uids = [c.code_uid for c in codes if c.code_uid]
+    matrix_codes = [code_meta[uid] for uid in coded_uids]
+    item_entries: dict[tuple[str, str], list[str]] = {}
+    for e in entries:
+        assigned = item_entries.setdefault((e.row_type or "", str(e.post_id or "")), [])
+        if e.code_uid:
+            assigned.append(e.code_uid)
+    matrix_headers = ["Item type", "Item ID", "Coded", "Number of codes"]
+    if include_author:
+        matrix_headers.append("Author")
+    if include_source_text:
+        matrix_headers.append("Source text")
+    matrix_headers += _matrix_code_headers(matrix_codes)
+    matrix_rows = []
+    for row in all_rows:
+        assigned = item_entries.get((row["row_type"], row["post_id"]), [])
+        r = [_row_type_label(row["row_type"]), row["post_id"], "Yes" if assigned else "No", len(assigned)]
+        if include_author:
+            r.append(row.get("author") or "")
+        if include_source_text:
+            r.append(row.get("source_text") or "")
+        r += [assigned.count(uid) for uid in coded_uids]
+        matrix_rows.append(r)
+
+    return build_workbook(
+        [
+            SheetSpec("Coded quotes", quote_headers, quote_rows),
+            SheetSpec("Matrix", matrix_headers, matrix_rows),
+            SheetSpec("Codebook", _CODEBOOK_XLSX_HEADERS, _codebook_xlsx_rows(codes)),
+            SheetSpec("Code counts", _FREQUENCY_HEADERS + ["Code ID"], _frequency_xlsx_rows(summary_data)),
+        ],
+        about=[
+            ("File", _display_name(file_record)),
+            ("Version", _version_label(resolved_version_no)),
+            ("Coded quotes", len(entries)),
+            ("Items", len(all_rows)),
+            ("Includes author", "Yes" if include_author else "No"),
+            ("Includes source text", "Yes" if include_source_text else "No"),
+        ],
+    )
+
+
+def _coding_docx(
+    *,
+    file_record: Any,
+    resolved_version_no: int | None,
+    codes: list[CodebookCode],
+    entries: list[Any],
+    row_lookup: dict[tuple[str, str], dict[str, Any]],
+    summary_data: list[dict[str, Any]],
+    include_source_text: bool,
+    include_author: bool,
+) -> bytes:
+    """A code report: code counts, then every quote under its code."""
+    doc = docx_render.new_document(
+        f"{_display_name(file_record)} — coded quotes",
+        [_version_label(resolved_version_no), f"{len(entries)} coded quote(s)"],
+    )
+    docx_render.add_heading(doc, "Code counts", 1)
+    if summary_data:
+        docx_render.add_table(doc, _FREQUENCY_HEADERS, _frequency_rows(summary_data))
+    else:
+        docx_render.add_paragraph(doc, "No codes applied.", italic=True)
+
+    by_uid: dict[str, list[Any]] = {}
+    for e in entries:
+        by_uid.setdefault(e.code_uid or "", []).append(e)
+
+    def add_quotes(code_entries: list[Any]) -> None:
+        if not code_entries:
+            docx_render.add_paragraph(doc, "No quotes coded.", italic=True)
+        for e in code_entries:
+            docx_render.add_paragraph(doc, e.quote or "(no quote text)", style="Quote")
+            reference = (
+                f"{_row_type_label(e.row_type)} {e.post_id} · coded by "
+                f"{_coder_label(getattr(e, 'coder', 'human'), getattr(e, 'coder_model', None))}"
+            )
+            docx_render.add_paragraph(doc, reference, italic=True)
+            if e.notes:
+                docx_render.add_paragraph(doc, e.notes, label="Note")
+            row_info = row_lookup.get((e.row_type, str(e.post_id))) or {}
+            if include_author:
+                docx_render.add_paragraph(doc, row_info.get("author") or "(unknown)", label="Author")
+            if include_source_text:
+                docx_render.add_paragraph(doc, row_info.get("source_text") or "", label="Source text")
+
+    groups = _family_groups(codes)
+    has_families = any(name for name, _ in groups)
+    for family_name, group in groups:
+        if family_name:
+            docx_render.add_heading(doc, family_name, 1)
+        elif has_families:
+            docx_render.add_heading(doc, "Codes without a family", 1)
+        for c in group:
+            docx_render.add_heading(doc, c.name or "(unnamed code)", 2)
+            if c.definition:
+                docx_render.add_paragraph(doc, c.definition, label="Definition")
+            add_quotes(by_uid.get(c.code_uid or "", []))
+
+    # An entry whose code_uid is no longer in the codebook still surfaces,
+    # under the name it was coded with, rather than being dropped.
+    known = {c.code_uid for c in codes}
+    orphans = [uid for uid in by_uid if uid not in known]
+    if orphans:
+        docx_render.add_heading(doc, "Codes no longer in the codebook", 1)
+        for uid in orphans:
+            docx_render.add_heading(doc, by_uid[uid][0].code or uid or "(unnamed code)", 2)
+            add_quotes(by_uid[uid])
+    return docx_render.to_bytes(doc)
 
 
 async def export_coding(
@@ -229,16 +507,32 @@ async def export_coding(
     user_id: int,
     *,
     version_no: int | None = None,
-    export_format: str = "csv",
-    layout: str = "long",
+    export_format: str = "xlsx",
+    layout: str | None = None,
     include_source_text: bool = False,
     include_author: bool = False,
-) -> tuple[str, str, str]:
-    """Export coding data as ``long`` (one row per coded segment quote) or
-    ``wide`` (one row per dataset item -- including uncoded ones -- with a
-    0/1 or count column per code).
+) -> tuple[str | bytes, str, str]:
+    """Export coding data.
+
+    ``xlsx`` (the default) is one workbook with every view as a sheet --
+    coded quotes, the item-by-code matrix (uncoded items included), the
+    codebook and code counts -- and ``docx`` a code report. Neither takes
+    a ``layout``: passing one is an error rather than silently ignored.
+    ``csv``/``json`` do, defaulting to ``long`` (one row per coded segment
+    quote); ``wide`` is one row per dataset item -- including uncoded ones
+    -- with a count column per code.
     """
-    _require_format(export_format, ("csv", "json"), "Coding")
+    _require_format(export_format, ("xlsx", "docx", "csv", "json"), "Coding")
+    if export_format in ("xlsx", "docx"):
+        if layout is not None:
+            raise ValidationAppError(
+                f"layout applies only to csv/json coding exports; {export_format} includes every view"
+            )
+    else:
+        layout = layout or "long"
+        if layout not in ("long", "wide"):
+            raise ValidationAppError(f"Unknown coding export layout: {layout!r}")
+
     file_record = await file_repo.get_owned_file(session, str(ref), user_id)
     file_id = file_record.id
     if file_record.file_type != "coding":
@@ -246,7 +540,7 @@ async def export_coding(
 
     _, resolved_version_no = await _resolve_version(session, file_id, version_no, label="coding")
 
-    base_name = (file_record.filename or f"file_{file_id}").rsplit(".", 1)[0]
+    base_name = _display_name(file_record).rsplit(".", 1)[0]
     ver_suffix = f"_v{resolved_version_no}" if resolved_version_no is not None else ""
 
     codes = await _get_sorted_codebook_codes(session, file_id, version_no=version_no)
@@ -254,11 +548,29 @@ async def export_coding(
     entries = await export_repo.get_coding_entries(session, file_id, version_no=version_no)
 
     row_lookup: dict[tuple[str, str], dict[str, Any]] = {}
-    if include_source_text or include_author or layout == "wide":
+    if include_source_text or include_author or layout == "wide" or export_format == "xlsx":
         all_rows = await export_repo.get_all_rows_for_coding(session, file_id, version_no=version_no)
         row_lookup = {(r["row_type"], r["post_id"]): r for r in all_rows}
     else:
         all_rows = []
+
+    if export_format in ("xlsx", "docx"):
+        summary_data = await export_repo.get_code_frequencies_by_uid(
+            session, file_id, codes=codes, version_no=version_no
+        )
+        if export_format == "xlsx":
+            content = _coding_xlsx(
+                file_record=file_record, resolved_version_no=resolved_version_no, codes=codes,
+                entries=entries, all_rows=all_rows, row_lookup=row_lookup, summary_data=summary_data,
+                include_source_text=include_source_text, include_author=include_author,
+            )
+            return content, _MEDIA_TYPES["xlsx"], f"{base_name}{ver_suffix}_coding.xlsx"
+        content = _coding_docx(
+            file_record=file_record, resolved_version_no=resolved_version_no, codes=codes,
+            entries=entries, row_lookup=row_lookup, summary_data=summary_data,
+            include_source_text=include_source_text, include_author=include_author,
+        )
+        return content, _MEDIA_TYPES["docx"], f"{base_name}{ver_suffix}_coded_quotes.docx"
 
     if layout == "long":
         if export_format == "json":
@@ -332,9 +644,6 @@ async def export_coding(
         filename = f"{base_name}{ver_suffix}_segments_long.csv"
         return _csv_serialize(rows, headers), _MEDIA_TYPES["csv"], filename
 
-    if layout != "wide":
-        raise ValidationAppError(f"Unknown coding export layout: {layout!r}")
-
     # wide: one row per item (including uncoded ones), a column per code.
     item_entries: dict[tuple[str, str], list[str]] = {}
     for e in entries:
@@ -402,20 +711,30 @@ async def export_coding(
     return _csv_serialize(rows, headers), _MEDIA_TYPES["csv"], filename
 
 
+def _memo_meta(m: Any) -> list[str]:
+    meta = [f"memo {m.id}"]
+    if m.author_user_id is not None:
+        meta.append(f"author {m.author_user_id}")
+    if m.created_at:
+        meta.append(f"created {m.created_at.isoformat()}")
+    if m.updated_at:
+        meta.append(f"updated {m.updated_at.isoformat()}")
+    return meta
+
+
 async def export_memos(
     session: AsyncSession,
     ref: int | str,
     user_id: int,
     *,
-    export_format: str = "md",
-) -> tuple[str, str, str]:
+    export_format: str = "docx",
+) -> tuple[str | bytes, str, str]:
     """Export row memos as (content, media_type, filename).
 
-    ``md`` is the default and the form the project bundle archives: a
-    memo body is multi-paragraph prose, which a single CSV cell is the
-    wrong shape for -- it reads as one unwrapped line in a spreadsheet
-    and its blank lines fight the parser. ``csv`` stays available for
-    counting or joining memos against other exports.
+    ``docx`` is the default: a memo body is multi-paragraph prose, which
+    a document holds best. ``md`` keeps the same shape as plain text;
+    ``xlsx``/``csv`` stay available for counting or joining memos against
+    other exports.
 
     No ``version_no`` param: unlike codebook/coding/summary, row memos
     are deliberately not SCD-2 range-versioned (see the ``RowMemo``
@@ -423,7 +742,7 @@ async def export_memos(
     resolve, only the current live set, so there is nothing a version
     parameter could filter by.
     """
-    _require_format(export_format, ("md", "csv"), "Memo")
+    _require_format(export_format, ("docx", "xlsx", "md", "csv"), "Memo")
     file_record = await file_repo.get_owned_file(session, str(ref), user_id)
     file_id = file_record.id
     if file_record.file_type not in ("raw_data", "filtered_data", "coding"):
@@ -432,29 +751,58 @@ async def export_memos(
         )
     memos = await export_repo.get_row_memos(session, file_id)
 
-    base_name = (file_record.filename or f"file_{file_id}").rsplit(".", 1)[0]
+    base_name = _display_name(file_record).rsplit(".", 1)[0]
+    filename = f"{base_name}_memos.{export_format}"
+
+    if export_format == "docx":
+        doc = docx_render.new_document(f"{_display_name(file_record)} — memos", [f"{len(memos)} memo(s)"])
+        if not memos:
+            docx_render.add_paragraph(doc, "No memos.", italic=True)
+        for m in memos:
+            docx_render.add_heading(doc, f"{_row_type_label(m.row_type)} {m.row_id}", 2)
+            docx_render.add_paragraph(doc, " - ".join(_memo_meta(m)), italic=True)
+            # One Word paragraph per markdown paragraph; a single line
+            # break inside one stays a line break.
+            for block in re.split(r"\n\s*\n", (m.body or "").strip()):
+                if block.strip():
+                    docx_render.add_paragraph(doc, block.strip())
+        return docx_render.to_bytes(doc), _MEDIA_TYPES["docx"], filename
+
+    if export_format == "xlsx":
+        content = build_workbook(
+            [
+                SheetSpec(
+                    "Memos",
+                    ["Item type", "Item ID", "Memo", "Author (user ID)", "Created", "Updated", "Memo ID"],
+                    [
+                        [
+                            _row_type_label(m.row_type), m.row_id, m.body or "", m.author_user_id,
+                            m.created_at.isoformat(sep=" ", timespec="minutes") if m.created_at else "",
+                            m.updated_at.isoformat(sep=" ", timespec="minutes") if m.updated_at else "",
+                            m.id,
+                        ]
+                        for m in memos
+                    ],
+                    column_widths={2: 80},
+                )
+            ],
+            about=[("File", _display_name(file_record)), ("Memos", len(memos))],
+        )
+        return content, _MEDIA_TYPES["xlsx"], filename
 
     if export_format == "md":
-        lines = [f"# {file_record.filename or f'file_{file_id}'} -- memos", ""]
+        lines = [f"# {md_inline(_display_name(file_record))} -- memos", ""]
         if not memos:
             lines.append("_No memos._")
         for m in memos:
-            lines.append(f"## {m.row_type} {m.row_id}")
+            lines.append(f"## {md_inline(m.row_type)} {md_inline(m.row_id)}")
             lines.append("")
-            meta = [f"memo {m.id}"]
-            if m.author_user_id is not None:
-                meta.append(f"author {m.author_user_id}")
-            if m.created_at:
-                meta.append(f"created {m.created_at.isoformat()}")
-            if m.updated_at:
-                meta.append(f"updated {m.updated_at.isoformat()}")
-            lines.append(f"*{' - '.join(meta)}*")
+            lines.append(f"*{' - '.join(_memo_meta(m))}*")
             lines.append("")
             # Body verbatim: its paragraph breaks are the point of
             # exporting memos as markdown at all.
             lines.append((m.body or "").strip())
             lines.append("")
-        filename = f"{base_name}_memos.md"
         return "\n".join(lines).rstrip() + "\n", _MEDIA_TYPES["md"], filename
 
     headers = ["memo_id", "row_type", "row_id", "body", "author_user_id", "created_at", "updated_at"]
@@ -467,7 +815,6 @@ async def export_memos(
         ]
         for m in memos
     ]
-    filename = f"{base_name}_memos.csv"
     return _csv_serialize(rows, headers), _MEDIA_TYPES["csv"], filename
 
 
@@ -477,24 +824,19 @@ async def export_summary(
     user_id: int,
     *,
     version_no: int | None = None,
-    export_format: str = "md",
-) -> tuple[str, str, str]:
-    """Export code frequency summary as markdown, grouped strictly by
-    ``code_uid``.
+    export_format: str = "docx",
+) -> tuple[str | bytes, str, str]:
+    """Export a code frequency summary, grouped strictly by ``code_uid``.
 
-    Markdown is the only format offered here, unlike every other export.
-    A frequency summary is a finished read-only reading of a coding --
-    a handful of rows you paste into a write-up -- not source data
-    something downstream re-parses; anyone wanting the underlying numbers
-    exports the coding itself and counts. ``export_format`` is kept in
-    the signature so the route's ``format`` query parameter stays
-    uniform, but ``md`` is the only accepted value.
+    A frequency summary is a finished reading of a coding -- a handful of
+    rows pasted into a write-up -- so ``docx`` is the default; ``xlsx``
+    holds the counts as numbers, and ``md`` the same table as text.
 
     The frequency ordering (descending, then ``code_uid``) is the
     repository's -- see ``export_repo.get_code_frequencies_by_uid`` -- so
     a rename never reorders the table.
     """
-    _require_format(export_format, ("md",), "Summary")
+    _require_format(export_format, ("docx", "xlsx", "md"), "Summary")
     file_record = await file_repo.get_owned_file(session, str(ref), user_id)
     file_id = file_record.id
     if file_record.file_type != "coding":
@@ -506,10 +848,28 @@ async def export_summary(
         session, file_id, codes=codes, version_no=version_no
     )
 
-    base_name = (file_record.filename or f"file_{file_id}").rsplit(".", 1)[0]
+    base_name = _display_name(file_record).rsplit(".", 1)[0]
     ver_suffix = f"_v{resolved_version_no}" if resolved_version_no is not None else ""
+    filename = f"{base_name}{ver_suffix}_summary.{export_format}"
 
-    heading = f"# {file_record.filename or f'file_{file_id}'} -- code frequency"
+    if export_format == "docx":
+        doc = docx_render.new_document(
+            f"{_display_name(file_record)} — code frequency", [_version_label(resolved_version_no)]
+        )
+        if summary_data:
+            docx_render.add_table(doc, _FREQUENCY_HEADERS, _frequency_rows(summary_data))
+        else:
+            docx_render.add_paragraph(doc, "No codes applied.", italic=True)
+        return docx_render.to_bytes(doc), _MEDIA_TYPES["docx"], filename
+
+    if export_format == "xlsx":
+        content = build_workbook(
+            [SheetSpec("Code counts", _FREQUENCY_HEADERS + ["Code ID"], _frequency_xlsx_rows(summary_data))],
+            about=[("File", _display_name(file_record)), ("Version", _version_label(resolved_version_no))],
+        )
+        return content, _MEDIA_TYPES["xlsx"], filename
+
+    heading = f"# {md_inline(_display_name(file_record))} -- code frequency"
     if resolved_version_no is not None:
         heading += f" (v{resolved_version_no})"
     if summary_data:
@@ -522,7 +882,6 @@ async def export_summary(
         )
     else:
         table = "_No codes applied._"
-    filename = f"{base_name}{ver_suffix}_summary.md"
     return f"{heading}\n\n{table}\n", _MEDIA_TYPES["md"], filename
 
 
@@ -539,12 +898,13 @@ async def export_document(
     user_id: int,
     *,
     version_no: int | None = None,
-    export_format: str = "md",
-) -> tuple[str, str, str]:
-    """Export a markdown-blob artifact (a saved summary or a comparison)
-    as its stored markdown, unchanged.
+    export_format: str = "docx",
+) -> tuple[str | bytes, str, str]:
+    """Export a markdown-blob artifact (a saved summary or a comparison):
+    ``docx`` (the default) renders the stored markdown as a Word
+    document, ``md`` returns it unchanged.
     """
-    _require_format(export_format, ("md",), "Document")
+    _require_format(export_format, ("docx", "md"), "Document")
     file_record = await file_repo.get_owned_file(session, str(ref), user_id)
     file_id = file_record.id
     suffix = DOCUMENT_FILE_TYPES.get(file_record.file_type)
@@ -558,9 +918,65 @@ async def export_document(
     if content is None:
         raise NotFoundError(f"No content stored for file {file_id}")
 
-    base_name = (file_record.filename or f"file_{file_id}").rsplit(".", 1)[0]
+    base_name = _display_name(file_record).rsplit(".", 1)[0]
     ver_suffix = f"_v{resolved_version_no}" if resolved_version_no is not None else ""
-    return content, _MEDIA_TYPES["md"], f"{base_name}{ver_suffix}_{suffix}.md"
+    filename = f"{base_name}{ver_suffix}_{suffix}.{export_format}"
+    if export_format == "md":
+        return content, _MEDIA_TYPES["md"], filename
+
+    doc = docx_render.new_document(
+        _display_name(file_record), [f"{suffix.capitalize()} · {_version_label(resolved_version_no)}"]
+    )
+    docx_render.markdown_to_docx(doc, content)
+    return docx_render.to_bytes(doc), _MEDIA_TYPES["docx"], filename
+
+
+# Bundle format tokens per artifact type, each mapped to its bundle path
+# suffix. The first token is the default -- Word or Excel, for a
+# non-technical reader. Coding's csv/json tokens fold in the layout,
+# since long and wide CSV are both ``.csv``.
+BUNDLE_FORMATS: dict[str, dict[str, str]] = {
+    "codebook": {
+        "docx": "_codebook.docx",
+        "xlsx": "_codebook.xlsx",
+        "qdc": "_codebook.qdc",
+        "csv": "_codebook.csv",
+    },
+    "coding": {
+        "xlsx": "_coding.xlsx",
+        "docx": "_coded_quotes.docx",
+        "csv_long": "_segments_long.csv",
+        "csv_wide": "_matrix_wide.csv",
+        "json": "_segments_long.json",
+    },
+    "comparison": {"docx": "_comparison.docx", "md": "_comparison.md"},
+    "summary": {"docx": "_summary.docx", "md": "_summary.md"},
+    "memos": {"docx": "_memos.docx", "xlsx": "_memos.xlsx", "md": "_memos.md", "csv": "_memos.csv"},
+}
+_BUNDLE_CODING_EXPORTS: dict[str, tuple[str, str | None]] = {
+    "xlsx": ("xlsx", None),
+    "docx": ("docx", None),
+    "csv_long": ("csv", "long"),
+    "csv_wide": ("csv", "wide"),
+    "json": ("json", "long"),
+}
+_BUNDLE_DOCUMENT_DIRS = {"comparison": "comparisons", "summary": "summaries"}
+
+
+def _resolve_bundle_formats(kind: str, requested: list[str] | None) -> list[str]:
+    """Validate and de-duplicate one type's requested bundle formats,
+    in ``BUNDLE_FORMATS`` order; ``None``/empty means the default."""
+    allowed = BUNDLE_FORMATS[kind]
+    if not requested:
+        return [next(iter(allowed))]
+    unknown = sorted(set(requested) - allowed.keys())
+    if unknown:
+        raise ValidationAppError(f"Unsupported {kind} bundle format(s): {', '.join(unknown)}")
+    return [token for token in allowed if token in requested]
+
+
+def _as_bytes(content: str | bytes) -> bytes:
+    return content.encode("utf-8") if isinstance(content, str) else content
 
 
 async def export_project_bundle(
@@ -570,25 +986,39 @@ async def export_project_bundle(
     *,
     include_source_text: bool = False,
     include_author: bool = False,
+    codebook_formats: list[str] | None = None,
+    coding_formats: list[str] | None = None,
+    comparison_formats: list[str] | None = None,
+    summary_formats: list[str] | None = None,
+    memo_formats: list[str] | None = None,
 ) -> tuple[bytes, str, str]:
     """Deterministic ZIP bundle of every artifact in a project: a
     manifest with a SHA-256 per file, the project's lineage graph, and
-    exactly one export per project file.
+    one export per project file per requested format.
 
-    One file in, one file out. Each artifact is written only in the
-    format that best preserves it -- codebook ``.qdc`` (REFI-QDA, the
-    codebook interchange standard), coding ``.csv`` (segments, long),
-    comparison/summary ``.md`` (its raw blob) -- never the same content twice in
-    two formats. A file's row memos ride along as a single
-    ``.md`` sidecar, which for a ``raw_data``/``filtered_data`` file is
-    its only export; memos are kept out of the artifact file rather than
-    folded into it because they annotate rows, not codes, and merging
-    them would change the artifact's schema.
+    The ``*_formats`` lists pick the formats (tokens from
+    ``BUNDLE_FORMATS``) each artifact of that type is written in. Left
+    unset, each artifact is written once in its type's first format --
+    Word for codebooks, comparisons, saved summaries and memos, Excel for
+    codings -- so content appears in two formats only when the caller
+    asked for both. A file's row memos ride along as a sidecar, which for
+    a ``raw_data``/``filtered_data`` file is its only export; memos are
+    kept out of the artifact file rather than folded into it because they
+    annotate rows, not codes, and merging them would change the
+    artifact's schema.
 
     Byte-deterministic: entries are written in sorted-path order with a
-    fixed ``date_time`` (2026-01-01 00:00:00), so identical content always
-    produces identical bytes -- no timestamp or filesystem-order noise.
+    fixed ``date_time`` (2026-01-01 00:00:00), and the Word/Excel files
+    inside are themselves frozen the same way (``xlsx_render.freeze_ooxml``),
+    so identical content always produces identical bytes.
     """
+    formats = {
+        "codebook": _resolve_bundle_formats("codebook", codebook_formats),
+        "coding": _resolve_bundle_formats("coding", coding_formats),
+        "comparison": _resolve_bundle_formats("comparison", comparison_formats),
+        "summary": _resolve_bundle_formats("summary", summary_formats),
+        "memos": _resolve_bundle_formats("memos", memo_formats),
+    }
     project = await project_repo.get_owned_project(session, project_id, user_id)
     files = await export_repo.get_project_files(session, project_id)
 
@@ -603,32 +1033,39 @@ async def export_project_bundle(
         f_slug = _slugify(f.filename, default=f"file_{f.id}")
 
         if f.file_type == "codebook":
-            cb_qdc, _, _ = await export_codebook(session, f.id, user_id, export_format="qdc")
-            bundle_files[f"codebooks/{f.id}_{f_slug}_codebook.qdc"] = cb_qdc.encode("utf-8")
+            for token in formats["codebook"]:
+                content, _, _ = await export_codebook(session, f.id, user_id, export_format=token)
+                suffix = BUNDLE_FORMATS["codebook"][token]
+                bundle_files[f"codebooks/{f.id}_{f_slug}{suffix}"] = _as_bytes(content)
 
         elif f.file_type == "coding":
-            content, _, _ = await export_coding(
-                session, f.id, user_id,
-                export_format="csv", layout="long",
-                include_source_text=include_source_text,
-                include_author=include_author,
-            )
-            bundle_files[f"codings/{f.id}_{f_slug}_segments_long.csv"] = content.encode("utf-8")
+            for token in formats["coding"]:
+                export_format, layout = _BUNDLE_CODING_EXPORTS[token]
+                content, _, _ = await export_coding(
+                    session, f.id, user_id,
+                    export_format=export_format, layout=layout,
+                    include_source_text=include_source_text,
+                    include_author=include_author,
+                )
+                suffix = BUNDLE_FORMATS["coding"][token]
+                bundle_files[f"codings/{f.id}_{f_slug}{suffix}"] = _as_bytes(content)
 
-        elif f.file_type in ("codebook_comparison", "coding_comparison"):
-            content = await version_service.read_blob(session, f.id)
-            if content is not None:
-                bundle_files[f"comparisons/{f.id}_{f_slug}_comparison.md"] = content.encode("utf-8")
-
-        elif f.file_type == "summary":
-            content = await version_service.read_blob(session, f.id)
-            if content is not None:
-                bundle_files[f"summaries/{f.id}_{f_slug}_summary.md"] = content.encode("utf-8")
+        elif f.file_type in DOCUMENT_FILE_TYPES:
+            kind = DOCUMENT_FILE_TYPES[f.file_type]
+            for token in formats[kind]:
+                try:
+                    content, _, _ = await export_document(session, f.id, user_id, export_format=token)
+                except NotFoundError:
+                    break  # nothing stored yet -- nothing to carry
+                suffix = BUNDLE_FORMATS[kind][token]
+                bundle_files[f"{_BUNDLE_DOCUMENT_DIRS[kind]}/{f.id}_{f_slug}{suffix}"] = _as_bytes(content)
 
         memos = await export_repo.get_row_memos(session, f.id)
         if memos:
-            m_md, _, _ = await export_memos(session, f.id, user_id, export_format="md")
-            bundle_files[f"memos/{f.id}_{f_slug}_memos.md"] = m_md.encode("utf-8")
+            for token in formats["memos"]:
+                content, _, _ = await export_memos(session, f.id, user_id, export_format=token)
+                suffix = BUNDLE_FORMATS["memos"][token]
+                bundle_files[f"memos/{f.id}_{f_slug}{suffix}"] = _as_bytes(content)
 
     manifest_entries = []
     for path in sorted(bundle_files.keys()):
@@ -644,7 +1081,7 @@ async def export_project_bundle(
         )
 
     manifest = {
-        "schema_version": "2.0",
+        "schema_version": "3.0",
         "project_id": project.id,
         "project_name": project.projectname,
         "description": project.description,
@@ -652,6 +1089,7 @@ async def export_project_bundle(
             "include_source_text": include_source_text,
             "include_author": include_author,
         },
+        "formats": formats,
         "files_count": len(manifest_entries),
         "files": manifest_entries,
     }

@@ -47,6 +47,7 @@ import xml.etree.ElementTree as ET
 from typing import Any, Sequence
 
 from backend.app.core.codebook_render import _body_from_fields
+from backend.app.core.export_text import xml_safe
 
 QDC_NAMESPACE = "urn:QDA-XML:codebook:1.0"
 QDC_ORIGIN = "Qualitative Coding Tool"
@@ -141,6 +142,13 @@ def _description_for(code: Any) -> str:
     return (body or (_field(code, "body") or "")).strip()
 
 
+def _xml_text(value: Any) -> str:
+    # ElementTree escapes markup but writes forbidden control characters
+    # straight through, so one vertical tab pasted from Word made the
+    # whole .qdc unreadable -- see ``core/export_text.py``.
+    return xml_safe(value or "")
+
+
 def _append_code(parent: ET.Element, code: Any) -> ET.Element:
     """Append one codable ``Code``, ``Description`` first per the schema."""
     element = ET.SubElement(
@@ -148,14 +156,14 @@ def _append_code(parent: ET.Element, code: Any) -> ET.Element:
         "Code",
         {
             "guid": code_uid_to_guid(_field(code, "code_uid")),
-            "name": str(_field(code, "name") or ""),
+            "name": _xml_text(_field(code, "name")),
             "isCodable": "true",
             "color": code_uid_to_color_hex(_field(code, "code_uid")),
         },
     )
     description = _description_for(code)
     if description:
-        ET.SubElement(element, "Description").text = description
+        ET.SubElement(element, "Description").text = _xml_text(description)
     return element
 
 
@@ -194,7 +202,7 @@ def serialize_codes_to_qdc(
 
     for family_uid in order:
         group = groups[family_uid]
-        family_name = str(_field(group[0], "family_name") or "")
+        family_name = _xml_text(_field(group[0], "family_name"))
 
         if not family_uid or not family_name:
             for code in group:

@@ -4,7 +4,11 @@ Validates export endpoints (/api/export/{ref}/...), ensuring authentication,
 owner scoping, HTTP headers, and Content-Disposition attachments.
 """
 
+import io
+from urllib.parse import quote
+
 import pytest
+from docx import Document
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from backend.app.database import File, User
@@ -12,6 +16,9 @@ from backend.app.services import version_service
 from backend.app.storage_models import CodingEntry, RowMemo
 
 pytestmark = pytest.mark.usefixtures("override_async_db")
+
+DOCX_MEDIA = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+XLSX_MEDIA = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
 @pytest.fixture()
@@ -164,7 +171,9 @@ async def test_export_codebook_route_qdc_and_csv(client, session_factory, make_t
         cookies={"access_token": make_token(sub=str(user.id))},
     )
     assert resp_default.status_code == 200
-    assert resp_default.text == resp_qdc.text
+    assert resp_default.headers["content-type"] == DOCX_MEDIA
+    assert 'filename="my_cb_v1_codebook.docx"' in resp_default.headers["content-disposition"]
+    assert resp_default.content.startswith(b"PK")
 
     # Formats this artifact no longer offers are rejected, not silently
     # served as the default.
@@ -261,16 +270,23 @@ async def test_export_memos_and_summary_routes(client, session_factory, make_tok
     assert resp_m.status_code == 200
     assert "Noteworthy post memo" in resp_m.text
 
-    # Memos default to markdown when no format is given.
+    # Memos default to Word when no format is given.
     resp_m_default = client.get(
         f"/api/export/{file_rec.id}/memos",
         cookies={"access_token": make_token(sub=str(user.id))},
     )
     assert resp_m_default.status_code == 200
-    assert "text/markdown" in resp_m_default.headers["content-type"]
-    assert "Noteworthy post memo" in resp_m_default.text
+    assert resp_m_default.headers["content-type"] == DOCX_MEDIA
+    assert "Noteworthy post memo" in [p.text for p in Document(io.BytesIO(resp_m_default.content)).paragraphs]
 
-    # Summary -- markdown is the only format it offers.
+    resp_m_xlsx = client.get(
+        f"/api/export/{file_rec.id}/memos?format=xlsx",
+        cookies={"access_token": make_token(sub=str(user.id))},
+    )
+    assert resp_m_xlsx.status_code == 200
+    assert resp_m_xlsx.headers["content-type"] == XLSX_MEDIA
+
+    # Summary as markdown.
     resp_s = client.get(
         f"/api/export/{file_rec.id}/summary?format=md",
         cookies={"access_token": make_token(sub=str(user.id))},
@@ -287,14 +303,84 @@ async def test_export_memos_and_summary_routes(client, session_factory, make_tok
         )
         assert resp_bad.status_code == 422
 
-    # Summary with version_no
+    # Summary with version_no, in the Word default.
     resp_sv = client.get(
         f"/api/export/{file_rec.id}/summary?version_no=1",
         cookies={"access_token": make_token(sub=str(user.id))},
     )
     assert resp_sv.status_code == 200
-    assert "(v1)" in resp_sv.text
-    assert 'attachment; filename="my_data_v1_summary.md"' in resp_sv.headers["content-disposition"]
+    assert resp_sv.headers["content-type"] == DOCX_MEDIA
+    assert 'attachment; filename="my_data_v1_summary.docx"' in resp_sv.headers["content-disposition"]
+    assert "Version 1" in [p.text for p in Document(io.BytesIO(resp_sv.content)).paragraphs]
+
+
+@pytest.mark.parametrize("filename", ["Children’s needs", "调查"])
+async def test_export_filename_outside_latin1_downloads(client, session_factory, make_token, filename):
+    """Headers are Latin-1 on the wire; a curly apostrophe or CJK in a
+    file's name used to 500 every export of it. The real name travels in
+    the RFC 6266 ``filename*``.
+    """
+    user = await _make_user(session_factory, "user_unicode_name@example.com")
+    file_rec = await _make_file(session_factory, user.id, filename, "codebook")
+    code = {"code_uid": "u1", "name": "C", "position": 1, "family_uid": "f", "family_name": "F", "body": ""}
+    async with session_factory() as session:
+        await version_service.commit_codebook_version(
+            session, file_id=file_rec.id, author_user_id=user.id, origin="manual", codes=[code]
+        )
+        await session.commit()
+
+    resp = client.get(
+        f"/api/export/{file_rec.id}/codebook?format=csv",
+        cookies={"access_token": make_token(sub=str(user.id))},
+    )
+    assert resp.status_code == 200
+    assert f"filename*=UTF-8''{quote(f'{filename}_v1_codebook.csv', safe='')}" in resp.headers["content-disposition"]
+
+
+@pytest.mark.parametrize(
+    "ref",
+    ["' OR '1'='1", "1; DROP TABLE files;--", "1 UNION SELECT * FROM users", "proj_x'--"],
+)
+async def test_export_ref_is_bound_not_interpolated(client, session_factory, make_token, ref):
+    """``ref`` reaches the database only as a bound parameter: an
+    injection payload is just a name nothing matches (404), and the
+    caller's real file is untouched."""
+    user = await _make_user(session_factory, "user_sqli@example.com")
+    file_rec = await _make_file(session_factory, user.id, "real.csv", "codebook")
+
+    resp = client.get(
+        f"/api/export/{quote(ref, safe='')}/codebook",
+        cookies={"access_token": make_token(sub=str(user.id))},
+    )
+    assert resp.status_code == 404
+
+    async with session_factory() as session:
+        assert (await session.get(File, file_rec.id)) is not None
+
+
+async def test_export_filename_cannot_inject_headers_or_paths(client, session_factory, make_token):
+    """A file name is user-chosen: CR/LF, quotes and path segments must
+    not split the header or survive into the download name."""
+    user = await _make_user(session_factory, "user_header_inject@example.com")
+    file_rec = await _make_file(session_factory, user.id, 'x\r\nSet-Cookie: a=b"../../evil', "codebook")
+    async with session_factory() as session:
+        await version_service.commit_codebook_version(
+            session, file_id=file_rec.id, author_user_id=user.id, origin="manual", codes=[]
+        )
+        await session.commit()
+
+    resp = client.get(
+        f"/api/export/{file_rec.id}/codebook?format=csv",
+        cookies={"access_token": make_token(sub=str(user.id))},
+    )
+    assert resp.status_code == 200
+    assert "set-cookie" not in resp.headers
+    disposition = resp.headers["content-disposition"]
+    assert "\r" not in disposition and "\n" not in disposition
+    ascii_name = disposition.split('filename="', 1)[1].split('"', 1)[0]
+    assert "/" not in ascii_name and "\\" not in ascii_name and '"' not in ascii_name
+    encoded = disposition.split("filename*=UTF-8''", 1)[1]
+    assert all(ch not in encoded for ch in ('"', "/", "\r", "\n", ";"))
 
 
 async def test_export_codebook_unknown_version_no_returns_404(client, session_factory, make_token):
@@ -335,7 +421,7 @@ async def test_export_coding_wide_layout_and_privacy_flags(client, session_facto
         cookies={"access_token": make_token(sub=str(user.id))},
     )
     assert resp.status_code == 200
-    assert resp.text.strip().split("\r\n")[0] == "row_type,post_id,is_coded,total_codes"
+    assert resp.text.strip().split("\r\n")[0] == "\ufeffrow_type,post_id,is_coded,total_codes"
     assert "bob" not in resp.text
 
     resp_opt_in = client.get(
@@ -375,6 +461,50 @@ async def test_export_project_bundle_route(client, session_factory, make_token):
     assert "bundle_project_project_bundle.zip" in resp.headers["content-disposition"]
 
 
+async def test_export_project_bundle_route_passes_requested_formats(client, session_factory, make_token):
+    import io
+    import json
+    import zipfile
+
+    from backend.app.database import Project, async_link_file_to_project
+
+    user = await _make_user(session_factory, "user_bundle_formats@example.com")
+    async with session_factory() as session:
+        project = Project(user_id=user.id, projectname="Formats Project")
+        session.add(project)
+        await session.commit()
+        await session.refresh(project)
+        project_id = project.id
+
+    file_rec = await _make_file(session_factory, user.id, "cb.csv", "codebook")
+    async with session_factory() as session:
+        await version_service.commit_codebook_version(
+            session, file_id=file_rec.id, author_user_id=user.id, origin="manual", codes=[]
+        )
+        await async_link_file_to_project(session, file_rec.id, project_id)
+        await session.commit()
+
+    resp = client.get(
+        f"/api/export/projects/{project_id}/bundle?codebook_formats=qdc&codebook_formats=csv",
+        cookies={"access_token": make_token(sub=str(user.id))},
+    )
+    assert resp.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+        names = zf.namelist()
+        manifest = json.loads(zf.read("manifest.json"))
+    assert sum(1 for n in names if n.startswith("codebooks/")) == 2
+    assert manifest["formats"]["codebook"] == ["qdc", "csv"]
+
+
+async def test_export_project_bundle_route_rejects_unknown_format(client, session_factory, make_token):
+    user = await _make_user(session_factory, "user_bundle_badfmt@example.com")
+    resp = client.get(
+        "/api/export/projects/1/bundle?coding_formats=qdc",
+        cookies={"access_token": make_token(sub=str(user.id))},
+    )
+    assert resp.status_code == 422
+
+
 async def test_export_project_bundle_requires_auth(client) -> None:
     resp = client.get("/api/export/projects/1/bundle")
     assert resp.status_code == 401
@@ -397,12 +527,25 @@ async def test_export_document_returns_the_stored_markdown(
         await session.commit()
 
     resp = client.get(
-        f"/api/export/{file_rec.schemaname}/document",
+        f"/api/export/{file_rec.schemaname}/document?format=md",
         cookies={"access_token": make_token(sub=str(user.id))},
     )
     assert resp.status_code == 200
     assert resp.text == "# Findings\n\nThemes emerged."
     assert f'filename="my_{file_type}_v1_{suffix}.md"' in resp.headers["content-disposition"]
+
+    resp_default = client.get(
+        f"/api/export/{file_rec.schemaname}/document",
+        cookies={"access_token": make_token(sub=str(user.id))},
+    )
+    assert resp_default.status_code == 200
+    assert resp_default.headers["content-type"] == DOCX_MEDIA
+    assert f'filename="my_{file_type}_v1_{suffix}.docx"' in resp_default.headers["content-disposition"]
+    paragraphs = Document(io.BytesIO(resp_default.content)).paragraphs
+    assert [(p.style.name, p.text) for p in paragraphs][-2:] == [
+        ("Heading 1", "Findings"),
+        ("Normal", "Themes emerged."),
+    ]
 
 
 async def test_export_document_rejects_a_non_document_file(client, session_factory, make_token):
