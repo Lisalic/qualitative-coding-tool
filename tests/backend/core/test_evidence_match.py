@@ -127,3 +127,23 @@ class TestFindQuote:
         content = "Starting text goes on"
         result = find_quote(content, "Starting text")
         assert result == (0, 13)
+
+    def test_decomposed_accent_in_content_matches_precomposed_quote(self) -> None:
+        content = "I love café mornings"
+        start, end = find_quote(content, "café mornings")
+        # The span covers the combining mark, not half of the "é".
+        assert content[start:end] == "café mornings"
+
+    def test_precomposed_content_matches_decomposed_quote(self) -> None:
+        content = "I love café"
+        start, end = find_quote(content, "café")
+        assert content[start:end] == "café"
+
+    def test_trailing_space_in_quote_is_ignored(self) -> None:
+        content = "I was anxious. Then calm."
+        assert find_quote(content, "I was anxious ") == (0, 13)
+
+    def test_zero_width_characters_are_ignored(self) -> None:
+        content = "I was an​xious today"
+        start, end = find_quote(content, "I was anxious today")
+        assert (start, end) == (0, len(content))

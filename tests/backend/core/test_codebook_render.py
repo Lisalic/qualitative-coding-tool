@@ -152,6 +152,12 @@ class TestParseJsonToMergeProposals:
         )
         assert proposals[0]["sources"] == [{"codebook": 2, "family_name": "Anxiety", "name": "Panic"}]
 
+    def test_numeric_string_source_index_is_accepted(self) -> None:
+        proposals = parse_json_to_merge_proposals(
+            self._payload([self._proposal(sources=[{"codebook": "1", "family": "Anxiety", "name": "Panic"}])])
+        )
+        assert proposals[0]["sources"] == [{"codebook": 1, "family_name": "Anxiety", "name": "Panic"}]
+
     def test_source_missing_name_is_dropped(self) -> None:
         proposals = parse_json_to_merge_proposals(
             self._payload([self._proposal(sources=[{"codebook": 1, "family": "Anxiety", "name": ""}])])
@@ -191,6 +197,26 @@ class TestParseMarkdownToCodes:
         assert rows[0]["definition"] == "just some prose"
         assert rows[0]["inclusion"] is None
         assert "Definition: just some prose" in rows[0]["body"]
+
+    _EXISTING = [
+        {
+            "code_uid": "U1", "family_uid": "F1", "family_name": "Emotions", "name": "Children’s needs",
+            "body": "", "definition": None, "inclusion": None, "exclusion": None, "keywords": None,
+            "example": None, "position": 0,
+        }
+    ]
+
+    def test_reimport_keeps_identity_across_case_space_and_quote_changes(self) -> None:
+        raw = "### Code Family: emotions\n#### Code Name: children's  NEEDS\nprose\n"
+        rows = parse_markdown_to_codes(raw, existing=self._EXISTING)
+        assert [(r["code_uid"], r["family_uid"]) for r in rows] == [("U1", "F1")]
+
+    def test_a_code_pasted_twice_gets_two_distinct_uids(self) -> None:
+        block = "### Code Family: Emotions\n#### Code Name: Children’s needs\nprose\n"
+        rows = parse_markdown_to_codes(block + "\n" + block, existing=self._EXISTING)
+        uids = [r["code_uid"] for r in rows]
+        assert uids[0] == "U1"
+        assert len(set(uids)) == 2
 
 
 class TestMaterializeFieldsFromBody:

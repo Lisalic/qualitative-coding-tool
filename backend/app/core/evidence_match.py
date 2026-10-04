@@ -44,14 +44,21 @@ _CHAR_FOLD = {
     " ": " ",  # non-breaking space
 }
 
+# Invisible characters that copy-pasted text carries but a model's echo
+# of it never does. Dropped from both sides.
+_ZERO_WIDTH = frozenset("\u200b\u200c\u200d\u2060\ufeff")
+
 
 def normalize_with_index_map(text: str) -> tuple[str, list[int]]:
     """``(normalized_text, index_map)`` where ``index_map[i]`` is the
     offset in ``text`` that ``normalized_text[i]`` came from.
 
     Normalization: NFKC, the substitutions in :data:`_CHAR_FOLD`,
-    casefolding, and collapsing every run of whitespace to a single
-    space. Leading whitespace is dropped entirely.
+    casefolding, dropping :data:`_ZERO_WIDTH` characters, and collapsing
+    every run of whitespace to a single space. Leading whitespace is
+    dropped entirely. NFKC runs on a base character together with the
+    combining marks after it, so decomposed text (``e`` + U+0301, common
+    from macOS/iOS) matches its precomposed form (``é``).
 
     The index map is what makes a normalized match reversible -- without
     it a hit in normalized space could not be translated into a highlight
@@ -61,25 +68,52 @@ def normalize_with_index_map(text: str) -> tuple[str, list[int]]:
     index_map: list[int] = []
     previous_was_space = True  # True so leading whitespace is skipped
 
-    for original_index, raw_char in enumerate(text or ""):
+    text = text or ""
+    original_index = 0
+    while original_index < len(text):
+        raw_char = text[original_index]
         char = _CHAR_FOLD.get(raw_char, raw_char)
 
+        if raw_char in _ZERO_WIDTH:
+            original_index += 1
+            continue
+
         if char.isspace():
+            original_index += 1
             if previous_was_space:
                 continue
             normalized_chars.append(" ")
-            index_map.append(original_index)
+            index_map.append(original_index - 1)
             previous_was_space = True
             continue
 
-        # NFKC can expand one character into several (e.g. a ligature);
-        # every resulting character maps back to the same original index.
-        for decomposed in unicodedata.normalize("NFKC", char).casefold():
+        cluster_end = _cluster_end(text, original_index)
+        cluster = char + text[original_index + 1:cluster_end]
+        # NFKC can expand one cluster into several characters (e.g. a
+        # ligature); every one maps back to the cluster's first index.
+        for decomposed in unicodedata.normalize("NFKC", cluster).casefold():
             normalized_chars.append(decomposed)
             index_map.append(original_index)
         previous_was_space = False
+        original_index = cluster_end
 
     return "".join(normalized_chars), index_map
+
+
+def normalize_label(text: str | None) -> str:
+    """A short label (a code or family name) folded for comparison --
+    the same normalization quotes get, so "Children’s  needs" and
+    "children's needs" are one name.
+    """
+    return normalize_with_index_map(text or "")[0].strip()
+
+
+def _cluster_end(text: str, index: int) -> int:
+    """One past the last combining mark following ``text[index]``."""
+    end = index + 1
+    while end < len(text) and unicodedata.combining(text[end]):
+        end += 1
+    return end
 
 
 def find_quote(content: str, quote: str) -> tuple[int, int] | None:
@@ -100,7 +134,7 @@ def find_quote(content: str, quote: str) -> tuple[int, int] | None:
         return exact_index, exact_index + len(quote)
 
     normalized_content, index_map = normalize_with_index_map(content)
-    normalized_quote, _ = normalize_with_index_map(quote)
+    normalized_quote = normalize_with_index_map(quote)[0].rstrip()
     if not normalized_quote:
         return None
 
@@ -112,5 +146,5 @@ def find_quote(content: str, quote: str) -> tuple[int, int] | None:
     # ``index_map`` records where each normalized character *started*, so
     # the end of the span is one past the original character that produced
     # the quote's final normalized character.
-    end = index_map[hit + len(normalized_quote) - 1] + 1
+    end = _cluster_end(content, index_map[hit + len(normalized_quote) - 1])
     return start, end

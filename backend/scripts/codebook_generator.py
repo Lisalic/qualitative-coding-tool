@@ -1,5 +1,6 @@
 import json
 
+from backend.app.core.evidence_match import normalize_label
 from backend.app.external import context_window
 from backend.app.external.openrouter_client import chat_completion, json_chat_completion
 from backend.app.external.response_parsers import parse_json_object, strip_markdown_fences
@@ -175,17 +176,28 @@ def merge_codebook_json_drafts(drafts: list[str]) -> str:
 
     Partial map-reduce failure used to ``"\\n\\n".join`` markdown drafts;
     joining JSON objects is invalid, so this is the equivalent fallback.
-    A draft that isn't a ``{"codes": [...]}`` object is skipped.
+    A draft that isn't a ``{"codes": [...]}`` object is skipped, and a
+    code two drafts both proposed (same family and name, compared the way
+    ``codebook_service`` enforces uniqueness) is kept once.
     """
     codes: list[object] = []
+    seen: set[tuple[str, str]] = set()
     for draft in drafts:
         try:
             obj = parse_json_object(draft)
         except (TypeError, ValueError):
             continue
         items = obj.get("codes")
-        if isinstance(items, list):
-            codes.extend(item for item in items if isinstance(item, dict))
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            key = (normalize_label(str(item.get("family") or "")), normalize_label(str(item.get("name") or "")))
+            if key in seen:
+                continue
+            seen.add(key)
+            codes.append(item)
     return json.dumps({"codes": codes})
 
 

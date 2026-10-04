@@ -44,6 +44,7 @@ import re
 import uuid
 from typing import Sequence, TypedDict
 
+from backend.app.core.evidence_match import normalize_label
 from backend.app.external.response_parsers import parse_json_object
 from backend.scripts.display_codebook import parse_codebook_to_json
 
@@ -229,12 +230,30 @@ def _split_labeled_fields(content: str) -> dict[str, str | None]:
 def _identity_indexes(
     existing: Sequence[CodeRow],
 ) -> tuple[dict[str, str], dict[tuple[str, str], str]]:
+    """Existing family uids by name and code uids by ``(family, name)``,
+    keyed on ``normalize_label`` so a re-import that only changed case,
+    spacing or quote style keeps every code's identity.
+    """
     existing_family_uid_by_name: dict[str, str] = {}
     existing_code_uid_by_key: dict[tuple[str, str], str] = {}
     for row in existing:
-        existing_family_uid_by_name.setdefault(row["family_name"], row["family_uid"])
-        existing_code_uid_by_key[(row["family_name"], row["name"])] = row["code_uid"]
+        existing_family_uid_by_name.setdefault(normalize_label(row["family_name"]), row["family_uid"])
+        existing_code_uid_by_key[_code_identity_key(row["family_name"], row["name"])] = row["code_uid"]
     return existing_family_uid_by_name, existing_code_uid_by_key
+
+
+def _code_identity_key(family_name: str, name: str) -> tuple[str, str]:
+    return normalize_label(family_name), normalize_label(name)
+
+
+def _claim_code_uid(existing_code_uid_by_key: dict[tuple[str, str], str], family_name: str, name: str) -> str:
+    """Reuse the existing uid for this code, at most once per parse.
+
+    Pops rather than reads: a second copy of the same code in the input
+    gets a fresh uid instead of the same one twice, which would break
+    ``uq_codebook_codes_version_id_code_uid`` on commit.
+    """
+    return existing_code_uid_by_key.pop(_code_identity_key(family_name, name), None) or uuid.uuid4().hex
 
 
 def parse_json_to_codes(raw: str, *, existing: Sequence[CodeRow] = ()) -> list[CodeRow]:
@@ -266,7 +285,7 @@ def parse_json_to_codes(raw: str, *, existing: Sequence[CodeRow] = ()) -> list[C
             continue
         if family_name != current_family_name:
             current_family_name = family_name
-            current_family_uid = existing_family_uid_by_name.get(family_name) or uuid.uuid4().hex
+            current_family_uid = existing_family_uid_by_name.get(normalize_label(family_name)) or uuid.uuid4().hex
         definition = _optional_text(item.get("definition"))
         inclusion = _optional_text(item.get("inclusion"))
         exclusion = _optional_text(item.get("exclusion"))
@@ -274,7 +293,7 @@ def parse_json_to_codes(raw: str, *, existing: Sequence[CodeRow] = ()) -> list[C
         example = _optional_text(item.get("example"))
         rows.append(
             _new_code_row(
-                code_uid=existing_code_uid_by_key.get((family_name, name)) or uuid.uuid4().hex,
+                code_uid=_claim_code_uid(existing_code_uid_by_key, family_name, name),
                 family_uid=current_family_uid or uuid.uuid4().hex,
                 family_name=family_name,
                 name=name,
@@ -344,6 +363,8 @@ def parse_json_to_merge_proposals(raw: str) -> list[dict]:
                 if not isinstance(entry, dict):
                     continue
                 codebook_index = entry.get("codebook")
+                if isinstance(codebook_index, str) and codebook_index.isdecimal():
+                    codebook_index = int(codebook_index)
                 if not isinstance(codebook_index, int) or isinstance(codebook_index, bool):
                     continue
                 source_name = str(entry.get("name") or "").strip()
@@ -396,7 +417,7 @@ def parse_markdown_to_codes(raw: str, *, existing: Sequence[CodeRow] = ()) -> li
     position = 0
     for family in structure or []:
         family_name = str(family.get("family_name") or "").strip()
-        family_uid = existing_family_uid_by_name.get(family_name) or uuid.uuid4().hex
+        family_uid = existing_family_uid_by_name.get(normalize_label(family_name)) or uuid.uuid4().hex
         for code in family.get("codes") or []:
             name = str(code.get("code_name") or "").strip()
             if not name:
@@ -405,7 +426,7 @@ def parse_markdown_to_codes(raw: str, *, existing: Sequence[CodeRow] = ()) -> li
             materialized = materialize_fields_from_body(content)
             rows.append(
                 _new_code_row(
-                    code_uid=existing_code_uid_by_key.get((family_name, name)) or uuid.uuid4().hex,
+                    code_uid=_claim_code_uid(existing_code_uid_by_key, family_name, name),
                     family_uid=family_uid,
                     family_name=family_name,
                     name=name,

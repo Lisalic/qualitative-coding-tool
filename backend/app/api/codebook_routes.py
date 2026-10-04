@@ -105,7 +105,7 @@ async def list_codebooks(
         }
         for f in files
     ]
-    codebooks.sort(key=lambda x: x.get("name") or x.get("id"))
+    codebooks.sort(key=lambda x: (str(x.get("name") or "").casefold(), str(x.get("id"))))
     return JSONResponse({"codebooks": codebooks})
 
 

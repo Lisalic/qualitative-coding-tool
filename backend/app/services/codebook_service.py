@@ -41,6 +41,7 @@ from backend.app.core.codebook_render import (
     parse_json_to_merge_proposals,
     parse_markdown_to_codes,
 )
+from backend.app.core.evidence_match import normalize_label
 from backend.app.core.exceptions import ContextBudgetError, NotFoundError, ValidationAppError
 from backend.app.core.schema_guard import require_valid_schema
 from backend.app.database import (
@@ -171,6 +172,8 @@ def _resolve_code_rows(codes: list[dict]) -> list[dict]:
     history diff.
     """
     rows: list[dict] = []
+    seen_uids: set[str] = set()
+    seen_names: set[tuple[str, str]] = set()
     for position, code in enumerate(codes):
         code_uid = code.get("code_uid")
         is_new = bool(code.get("is_new"))
@@ -186,10 +189,23 @@ def _resolve_code_rows(codes: list[dict]) -> list[dict]:
                 f"Code {code.get('name')!r}'s family has neither a family_uid nor "
                 "family_is_new=true -- refusing to silently mint a new identity for it."
             )
+        code_uid = code_uid or uuid.uuid4().hex
+        family_uid = family_uid or uuid.uuid4().hex
+        if code_uid in seen_uids:
+            raise ValidationAppError(f"Code {code.get('name')!r} appears twice in this codebook.")
+        seen_uids.add(code_uid)
+        # Names are what researchers (and the AI) refer to codes by, so
+        # two look-alike names in one family could never be told apart.
+        name_key = (family_uid, normalize_label(code.get("name")))
+        if name_key in seen_names:
+            raise ValidationAppError(
+                f"Two codes in family {code.get('family_name')!r} are both named {code.get('name')!r}."
+            )
+        seen_names.add(name_key)
         rows.append(
             {
-                "code_uid": code_uid or uuid.uuid4().hex,
-                "family_uid": family_uid or uuid.uuid4().hex,
+                "code_uid": code_uid,
+                "family_uid": family_uid,
                 "family_name": str(code.get("family_name") or "").strip(),
                 "name": str(code.get("name") or "").strip(),
                 "body": code.get("body") or "",
@@ -232,7 +248,10 @@ async def save_project_codebook(
     being trusted from the request.
     """
     schema = (schema_name or "").strip()
-    file_rec = await file_repo.get_owned_file(session, schema, user_id)
+    # Codebook files only: a coding file's codebook goes through
+    # coding_service.save_coding_revision, which also closes the entries
+    # of any code the save removed.
+    file_rec = await file_repo.get_owned_file(session, schema, user_id, file_types=("codebook",))
 
     rows = _resolve_code_rows(codes)
     version = await version_service.commit_codebook_version(
@@ -276,7 +295,7 @@ async def import_codebook_markdown(
     same codebook reuses identity by ``(family_name, name)`` match
     instead of minting a fresh uid for every code.
     """
-    file_rec = await file_repo.get_owned_file(session, ref, user_id, file_types=("codebook", "coding"))
+    file_rec = await file_repo.get_owned_file(session, ref, user_id, file_types=("codebook",))
     existing = await version_service.read_codes(session, file_rec.id)
     existing_rows = [
         {

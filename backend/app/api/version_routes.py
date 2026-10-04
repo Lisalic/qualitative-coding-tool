@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from backend.app.core.auth_dependency import require_user_id
+from backend.app.core.exceptions import NotFoundError
 from backend.app.database import File, get_async_db
 from backend.app.repositories import file_repo, version_repo
 from backend.app.services import assist_service, version_service
@@ -72,6 +73,11 @@ async def diff_artifact(
     coding_entries or data rows of its own, and vice versa.
     """
     file_rec = await file_repo.get_owned_file(db, ref, user_id)
+    # A missing version would otherwise diff as empty: everything "added"
+    # or "removed", which reads as a real (and alarming) change.
+    for version_no in (from_no, to_no):
+        if await version_repo.get_version_by_no(db, file_rec.id, version_no) is None:
+            raise NotFoundError(f"Version {version_no} not found")
     codebook_diff = await version_service.diff_codebook(db, file_rec.id, from_no=from_no, to_no=to_no)
 
     def _code_ref(code: dict) -> dict:

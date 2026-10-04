@@ -152,6 +152,23 @@ class TestDiff:
         assert resp.status_code == 200
         assert resp.json()["coding"] is None
 
+    async def test_a_version_that_does_not_exist_is_a_404_not_an_empty_diff(
+        self, client, session_factory, make_token
+    ) -> None:
+        user = await _make_user(session_factory)
+        file_rec = await _make_file(session_factory, user.id, schemaname="proj_diff_missing")
+        async with session_factory() as session:
+            await version_service.commit_codebook_version(
+                session, file_id=file_rec.id, author_user_id=user.id, origin="generated", codes=_CODE_A,
+            )
+            await session.commit()
+
+        resp = client.get(
+            "/api/artifacts/proj_diff_missing/diff?from_no=1&to_no=9",
+            cookies={"access_token": make_token(sub=str(user.id))},
+        )
+        assert resp.status_code == 404
+
     async def test_coding_file_reports_rows_recoded_and_code_counts(
         self, client, session_factory, make_token
     ) -> None:
