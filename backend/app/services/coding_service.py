@@ -40,13 +40,14 @@ per save via ``coding_repo.replace_entries_for_items``.
 
 from __future__ import annotations
 
+import re
 import secrets
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from backend.app.core.evidence_match import find_quote
+from backend.app.core.evidence_match import find_quote, normalize_label
 from backend.app.core.exceptions import ContextBudgetError, NotFoundError, ValidationAppError
 from backend.app.core.item_types import COMMENT, SUBMISSION, qualify_item_id, split_item_id
 from backend.app.database import (
@@ -68,7 +69,6 @@ from backend.app.versioning_models import (
     ORIGIN_EDITED,
     ORIGIN_FORKED,
     ORIGIN_GENERATED,
-    ORIGIN_IMPORTED,
     RELATION_COMPARED,
     RELATION_DERIVED_FROM,
     ROLE_CODEBOOK,
@@ -166,6 +166,9 @@ async def get_coding_artifact(
     file_rec = await file_repo.get_owned_file(session, ref, user_id, file_types=("coding",))
     codes = await version_service.read_codes(session, file_rec.id, version_no=version_no)
     total_rows = await coding_repo.count_rows(session, file_rec.id)
+    # Counted per code_uid and named from this version's snapshot -- an
+    # entry's own stored name goes stale after a rename.
+    name_by_uid = {c.code_uid: c.name for c in codes}
     if version_no is None:
         total_coded = await coding_repo.count_rows(session, file_rec.id, only="coded")
         frequency = await coding_repo.code_frequency(session, file_rec.id)
@@ -173,15 +176,22 @@ async def get_coding_artifact(
         entries = await coding_repo.entries_as_of(session, file_rec.id, version_no)
         total_coded = len({(e.row_type, e.post_id) for e in entries})
         counts: dict[str, int] = {}
+        stored_names: dict[str, str] = {}
         for entry in entries:
-            counts[entry.code] = counts.get(entry.code, 0) + 1
-        frequency = sorted(counts.items(), key=lambda kv: -kv[1])
+            counts[entry.code_uid] = counts.get(entry.code_uid, 0) + 1
+            stored_names[entry.code_uid] = entry.code
+        frequency = sorted(
+            ((uid, stored_names[uid], count) for uid, count in counts.items()), key=lambda f: -f[2]
+        )
     return {
         "file": file_rec,
         "codes": codes,
         "total_rows": total_rows,
         "total_coded": total_coded,
-        "code_frequency": [{"code": code, "count": count} for code, count in frequency],
+        "code_frequency": [
+            {"code_uid": uid, "code": name_by_uid.get(uid) or stored, "count": count}
+            for uid, stored, count in frequency
+        ],
     }
 
 
@@ -576,7 +586,9 @@ async def duplicate_coding(
         user_instructions=source_version.user_instructions if source_version else None,
         prompt_meta=source_version.prompt_meta if source_version else None,
     )
-    await raw_data_repo.copy_all_rows(session, source_file_id=source_file.id, target_file_id=file_rec.id)
+    await raw_data_repo.copy_all_rows(
+        session, source_file_id=source_file.id, target_file_id=file_rec.id, source_version_no=from_version_no
+    )
     await memo_repo.copy_all_memos(session, source_file_id=source_file.id, target_file_id=file_rec.id)
     await coding_repo.copy_entries(
         session, source_file_id=source_file.id, target_file_id=file_rec.id, as_of_version_no=from_version_no
@@ -605,25 +617,45 @@ _EMPTY_VALIDATION_COUNTS = {
     "accepted": 0,
     "rejected_unknown_item": 0,
     "rejected_unknown_code": 0,
+    "rejected_ambiguous_code": 0,
     "rejected_quote_not_found": 0,
 }
 
 
-def _codebook_code_lookup(codes) -> dict[str, tuple[str, str]]:
-    """Map of normalized (casefolded, stripped) code name -> ``(canonical
-    spelling, code_uid)``, built from a codebook's actual
-    ``CodebookCode`` rows rather than re-parsing markdown. Lets an
-    AI-produced code name through when it matches case/whitespace-
-    insensitively, while what gets stored is always the codebook's own
-    spelling and its stable ``code_uid`` -- never the model's possibly
-    differently-cased echo of the name, and never a name-only reference
-    that a later rename would orphan.
+async def _current_code_names(session: AsyncSession, file_id: int) -> dict[str, str]:
+    return {c.code_uid: c.name for c in await version_service.read_codes(session, file_id)}
+
+
+def _code_key(reference: str | None) -> str:
+    """``normalize_label`` plus one canonical spacing around ``>``, so the
+    model's "Social>Support" and the codebook's "Social > Support" meet.
     """
-    lookup: dict[str, tuple[str, str]] = {}
+    return re.sub(r"\s*>\s*", " > ", normalize_label(reference))
+
+
+def _codebook_code_lookup(codes) -> dict[str, tuple[str, str] | None]:
+    """Map of normalized code reference -> ``(canonical spelling,
+    code_uid)``, built from a codebook's actual ``CodebookCode`` rows
+    rather than re-parsing markdown. Keys are ``normalize_label``-folded
+    (case, whitespace, curly quotes), so an AI-produced name matches the
+    way a human would read it, while what gets stored is always the
+    codebook's own spelling and its stable ``code_uid``.
+
+    Code names are only unique within a family ("Other" under two
+    families is ordinary), so every code is keyed both by its bare name
+    and by ``"family > name"`` -- the form the apply prompt asks for when
+    a name repeats. A bare name shared by several codes maps to ``None``:
+    ambiguous, never guessed.
+    """
+    lookup: dict[str, tuple[str, str] | None] = {}
     for code in codes:
         name = (code.name or "").strip()
-        if name:
-            lookup[name.casefold()] = (name, code.code_uid)
+        if not name:
+            continue
+        resolved = (name, code.code_uid)
+        bare = _code_key(name)
+        lookup[bare] = None if bare in lookup and lookup[bare] != resolved else resolved
+        lookup[_code_key(f"{code.family_name or ''} > {name}")] = resolved
     return lookup
 
 
@@ -660,16 +692,21 @@ def _validate_and_resolve_coding_entries(
     every quote in that entry (there's nothing left to check them
     against). Returns ``(rows, counts)`` where ``counts`` is
     ``{accepted, rejected_unknown_item, rejected_unknown_code,
-    rejected_quote_not_found}`` -- surfaced in the job result so silently
+    rejected_ambiguous_code, rejected_quote_not_found}`` -- surfaced in the job result so silently
     -dropped work is visible rather than invisible.
     """
     code_lookup = _codebook_code_lookup(codes)
     counts = dict(_EMPTY_VALIDATION_COUNTS)
     rows: list[dict] = []
+    # A model sometimes repeats an (item, code, quote); one span is one
+    # reference, so a repeat would inflate that code's frequency.
+    seen_spans: set[tuple[str, str, str, int, int]] = set()
 
     for entry in raw_entries:
         quotes = entry.get("quotes") or []
         if not quotes:
+            # No quote is no evidence: count it rather than drop it unseen.
+            counts["rejected_quote_not_found"] += 1
             continue
 
         row_type, post_id = split_item_id(entry.get("item_id") or "")
@@ -678,7 +715,11 @@ def _validate_and_resolve_coding_entries(
             counts["rejected_unknown_item"] += len(quotes)
             continue
 
-        resolved = code_lookup.get(str(entry.get("code") or "").strip().casefold())
+        code_key = _code_key(str(entry.get("code") or ""))
+        if code_key in code_lookup and code_lookup[code_key] is None:
+            counts["rejected_ambiguous_code"] += len(quotes)
+            continue
+        resolved = code_lookup.get(code_key)
         if not resolved:
             counts["rejected_unknown_code"] += len(quotes)
             continue
@@ -691,6 +732,10 @@ def _validate_and_resolve_coding_entries(
                 counts["rejected_quote_not_found"] += 1
                 continue
             start, end = match
+            span = (row_type, post_id, code_uid, start, end)
+            if span in seen_spans:
+                continue
+            seen_spans.add(span)
             rows.append(
                 {
                     "row_type": row_type,
@@ -1320,8 +1365,12 @@ async def _run_compare_codings_job(job_id: int, payload: dict) -> dict:
         # structured coding_entries rows (a coding_comparison, which has
         # none) falls back to its raw text.
         async with AsyncSessionLocal() as session:
-            summaries_a = await coding_repo.code_summary_with_samples(session, file_id_a)
-            summaries_b = await coding_repo.code_summary_with_samples(session, file_id_b)
+            summaries_a = await coding_repo.code_summary_with_samples(
+                session, file_id_a, name_by_uid=await _current_code_names(session, file_id_a)
+            )
+            summaries_b = await coding_repo.code_summary_with_samples(
+                session, file_id_b, name_by_uid=await _current_code_names(session, file_id_b)
+            )
 
         agg_a = summarize_coding_module.build_aggregated_coding_data(summaries_a) if summaries_a else text_a
         agg_b = summarize_coding_module.build_aggregated_coding_data(summaries_b) if summaries_b else text_b
@@ -1453,7 +1502,9 @@ async def _run_summarize_coding_job(job_id: int, payload: dict) -> dict:
 
     async with AsyncSessionLocal() as session:
         await version_service.pin_parent(session, source_file_id)
-        code_summaries = await coding_repo.code_summary_with_samples(session, source_file_id)
+        code_summaries = await coding_repo.code_summary_with_samples(
+            session, source_file_id, name_by_uid=await _current_code_names(session, source_file_id)
+        )
         await session.commit()
 
     if not code_summaries:

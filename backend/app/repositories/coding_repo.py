@@ -277,8 +277,14 @@ async def entries_as_of(session: AsyncSession, file_id: int, version_no: int) ->
     return list(result.scalars().all())
 
 
-async def code_frequency(session: AsyncSession, file_id: int) -> list[tuple[str, int]]:
-    """``(code, count)`` pairs for ``file_id``, most frequent first.
+async def code_frequency(session: AsyncSession, file_id: int) -> list[tuple[str, str, int]]:
+    """``(code_uid, code, count)`` triples for ``file_id``, most frequent
+    first. Grouped by ``code_uid``, the stable identity: an entry's
+    ``code`` is the name as of its own last write, so after a rename
+    grouping by name would split one code's count in two (and merge two
+    same-named codes from different families). ``code`` is one of those
+    stored names, a fallback for callers that don't resolve the current
+    name from the codebook snapshot.
 
     ``count`` is the number of ``coding_entries`` rows for that code --
     since a row is now one quote (not one item, see
@@ -288,15 +294,23 @@ async def code_frequency(session: AsyncSession, file_id: int) -> list[tuple[str,
     with the same code applied via two separate quotes counts twice.
     """
     result = await session.execute(
-        _live(select(CodingEntry.code, func.count()).where(CodingEntry.file_id == file_id))
-        .group_by(CodingEntry.code)
-        .order_by(func.count().desc())
+        _live(
+            select(CodingEntry.code_uid, func.max(CodingEntry.code), func.count()).where(
+                CodingEntry.file_id == file_id
+            )
+        )
+        .group_by(CodingEntry.code_uid)
+        .order_by(func.count().desc(), CodingEntry.code_uid)
     )
-    return [(row[0], row[1]) for row in result.all()]
+    return [(row[0], row[1], row[2]) for row in result.all()]
 
 
 async def code_summary_with_samples(
-    session: AsyncSession, file_id: int, *, max_evidence_per_code: int = 5
+    session: AsyncSession,
+    file_id: int,
+    *,
+    name_by_uid: dict[str, str] | None = None,
+    max_evidence_per_code: int = 5,
 ) -> list[dict]:
     """``[{code, count, sample_evidence}]`` for ``file_id``, most frequent
     code first -- ``count`` is an exact ``GROUP BY COUNT(*)`` (via
@@ -305,15 +319,18 @@ async def code_summary_with_samples(
     loading every ``coding_entries`` row for the file. Used to build a
     thematic-summary prompt input that's O(distinct codes) instead of
     O(total coded rows), for datasets too large to hand the LLM verbatim.
+    ``name_by_uid`` (the current codebook snapshot) supplies each code's
+    current name; see ``code_frequency`` for why entries' own names can't.
     """
     freq = await code_frequency(session, file_id)
     summaries = []
-    for code, count in freq:
+    for code_uid, stored_name, count in freq:
         result = await session.execute(
-            _live(select(CodingEntry.quote).where(CodingEntry.file_id == file_id, CodingEntry.code == code))
+            _live(select(CodingEntry.quote).where(CodingEntry.file_id == file_id, CodingEntry.code_uid == code_uid))
             .limit(max_evidence_per_code)
         )
         sample_evidence = [row[0] for row in result.all() if row[0]]
+        code = (name_by_uid or {}).get(code_uid) or stored_name
         summaries.append({"code": code, "count": count, "sample_evidence": sample_evidence})
     return summaries
 
@@ -406,7 +423,7 @@ def _apply_row_filters(
                     entry_scope,
                     CodingEntry.row_type == rows.c.row_type,
                     CodingEntry.post_id == rows.c.item_id,
-                    CodingEntry.code == code,
+                    CodingEntry.code_uid == code,
                 )
             )
         )

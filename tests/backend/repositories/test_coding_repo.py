@@ -141,8 +141,8 @@ class TestCodeFrequency:
             await session.commit()
 
             freq = await code_frequency(session, f.id)
-            assert freq[0] == ("CODE_A", 3)
-            assert freq[1] == ("CODE_B", 1)
+            assert freq[0] == ("CODE_A-uid", "CODE_A", 3)
+            assert freq[1] == ("CODE_B-uid", "CODE_B", 1)
 
     async def test_counts_every_quote_row_not_distinct_items(self, session_factory) -> None:
         # count is per coding_entries row (one row per quote) -- an item
@@ -160,7 +160,7 @@ class TestCodeFrequency:
             await session.commit()
 
             freq = await code_frequency(session, f.id)
-            assert freq == [("CODE_A", 2)]
+            assert freq == [("CODE_A-uid", "CODE_A", 2)]
 
     async def test_empty_returns_empty_list(self, session_factory) -> None:
         async with session_factory() as session:
@@ -583,7 +583,7 @@ class TestSCD2Ranges:
             assert [e.code for e in live] == ["B"]
 
             freq = await code_frequency(session, f.id)
-            assert freq == [("B", 1)]
+            assert freq == [("B-uid", "B", 1)]
 
     async def test_untouched_items_keep_their_range_across_a_version_boundary(self, session_factory) -> None:
         # Editing item p1 under version 2 must not touch item p2's
@@ -791,7 +791,7 @@ class TestListRowsWithCodesAndCountRows:
             f = await _make_file(session, user)
             await self._seed(session, f.id)
 
-            rows = await list_rows_with_codes(session, f.id, code="A")
+            rows = await list_rows_with_codes(session, f.id, code="A-uid")
             assert [r["item_id"] for r in rows] == ["t3_s1"]
 
     async def test_search_matches_title_or_body_case_insensitively(self, session_factory) -> None:

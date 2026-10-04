@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useEditorShortcuts } from "../editor-shell/useEditorShortcuts";
+import { codePointToUtf16Index, utf16ToCodePointIndex } from "../../lib/textOffsets";
+import { inputSm } from "../../lib/uiClasses";
 
 const SELECTION_CHANGE_DEBOUNCE_MS = 50;
 
@@ -57,11 +59,13 @@ const addIntervalToSegment = (segment, interval) => {
  * `codeEvidence` is one entry per quote, already resolved to exact
  * character offsets into `content` server-side (by `evidence_match.py`
  * for an AI coding, or the real DOM selection range for a manual one).
- * Nothing left to search for at render time: an interval is just
- * `content.slice(start_offset, end_offset)`.
+ * Nothing left to search for at render time. Stored offsets count code
+ * points; the intervals here are UTF-16 indices for `content.slice` (see
+ * lib/textOffsets).
  */
-const buildEvidenceIntervals = (content, codeEvidence) =>
-  (codeEvidence || [])
+const buildEvidenceIntervals = (content, codeEvidence) => {
+  const codePointLength = [...content].length;
+  return (codeEvidence || [])
     .filter(
       ({ code_uid: codeUid, start_offset, end_offset }) =>
         codeUid &&
@@ -69,15 +73,16 @@ const buildEvidenceIntervals = (content, codeEvidence) =>
         Number.isInteger(end_offset) &&
         end_offset > start_offset &&
         start_offset >= 0 &&
-        end_offset <= content.length,
+        end_offset <= codePointLength,
     )
     .map(({ code_uid: codeUid, start_offset, end_offset, notes, quote }) => ({
-      start: start_offset,
-      end: end_offset,
+      start: codePointToUtf16Index(content, start_offset),
+      end: codePointToUtf16Index(content, end_offset),
       codeUid,
       quote,
       notes: String(notes || "").trim(),
     }));
+};
 
 const mergeIntervalsToSegments = (intervals) => {
   if (!intervals.length) return [];
@@ -307,8 +312,9 @@ const HighlightedContent = ({
     // Compute the selection's offsets into `content` directly from the
     // real DOM range -- see getTextOffsetInRoot's comment for why this is
     // exact by construction rather than a search.
-    const startOffset = getTextOffsetInRoot(root, range.startContainer, range.startOffset);
-    const endOffset = startOffset + selectedText.length;
+    const startUnits = getTextOffsetInRoot(root, range.startContainer, range.startOffset);
+    const startOffset = utf16ToCodePointIndex(content, startUnits);
+    const endOffset = utf16ToCodePointIndex(content, startUnits + selectedText.length);
 
     lastRangeRef.current = range.cloneRange();
     setTooltip(null);
@@ -320,7 +326,7 @@ const HighlightedContent = ({
       left: endRect.left,
       top: endRect.bottom + 6,
     });
-  }, [onApplyCode, onSelectionChange]);
+  }, [content, onApplyCode, onSelectionChange]);
 
   useEffect(() => {
     if (!onApplyCode) return undefined;
@@ -627,7 +633,8 @@ const HighlightedContent = ({
               type="text"
               value={popoverFilter}
               onChange={(e) => setPopoverFilter(e.target.value)}
-              placeholder="Search codes..."
+              placeholder="Search codes…"
+              aria-label="Search codes"
               // Marks this input for the 1-9 digit shortcut above: it
               // autofocuses the instant a selection is made, so without
               // this the shortcut's own hint text would be a lie -- the
@@ -635,7 +642,7 @@ const HighlightedContent = ({
               // a code. A bare digit is not a realistic code-name search
               // anyway, so letting the shortcut win here costs nothing.
               data-shortcut-input="true"
-              className="mb-1.5 border border-paper bg-surface-raised px-2 py-1 text-xs text-paper placeholder:text-paper/40 focus:outline-none focus:ring-1 focus:ring-paper"
+              className={`mb-1.5 ${inputSm}`}
             />
             <div className="flex flex-col gap-1 overflow-y-auto">
               {filteredPopoverCodes.length === 0 ? (

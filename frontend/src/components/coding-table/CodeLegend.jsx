@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { mintClientCodeUid } from "../../lib/codingUtils";
-import { badge, btnSm, inputSm } from "../../lib/uiClasses";
+import { badge, btnActive, btnSm, inputSm } from "../../lib/uiClasses";
 import DialogService from "../feedback/DialogService";
 
 const btnSmall = btnSm;
+/** The square × / ▸ controls on a family or code row. */
+const iconBtn = `${btnSm} min-w-[28px] leading-none`;
 const inputClasses = `min-w-0 ${inputSm}`;
 const textareaClasses = `${inputClasses} min-h-[2.75rem] w-full resize-y`;
 
@@ -108,9 +110,19 @@ const CodeLegend = ({
     return initial;
   }, [isEditMode, editFamilies, treeFamilies]);
 
-  // Reset only when the codebook or edit mode changes -- not when the
-  // derived expand-map is recomputed. Depending on `buildExpandedState`
-  // undid Expand All on the next render.
+  // Which families exist, by identity. Stable across edits to a family's
+  // codes and across a save, so collapsing a family survives them; it
+  // changes when a different codebook is shown, or a family is added or
+  // removed.
+  const familyIdentity = (isEditMode ? editFamilies : treeFamilies)
+    .map((family, index) => family?.family_uid || family?.familyUid || `#${index}`)
+    .join("|");
+
+  // Reset only when edit mode or the set of families changes -- not on
+  // every draft keystroke (the builders pass their live draft as
+  // `codebookTree`, which used to undo Collapse all on the next edit),
+  // and not when the derived expand-map is recomputed (which undid
+  // Expand all on the next render).
   useEffect(() => {
     if (isEditMode) {
       const list = Array.isArray(draftTree) ? draftTree : [];
@@ -122,10 +134,10 @@ const CodeLegend = ({
       return;
     }
     setExpandedFamilies({});
-    // draftTree is read only when entering edit mode; listing it would
+    // draftTree is read only when the family set changes; listing it would
     // re-expand on every keystroke.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEditMode, codebookTree]);
+  }, [isEditMode, familyIdentity]);
 
   const updateDraftTree = useCallback(
     (updater) => {
@@ -241,11 +253,10 @@ const CodeLegend = ({
   );
 
   const renderCodeNode = (code, key) => {
-    // Selection/filtering stays keyed on the display name (the server's
-    // `?code=` row filter is name-based), while color and the toggle
-    // payload carry `code_uid` -- the stable identity. The name row is
-    // the click target so extra detail text doesn't toggle the filter.
-    const isSelected = selectedCodeSet.has(code.name);
+    // Selection, filtering, color and the toggle payload are all keyed on
+    // `code_uid` -- the stable identity a rename doesn't change. The name
+    // row is the click target so extra detail text doesn't toggle the filter.
+    const isSelected = selectedCodeSet.has(code.code_uid);
     const interactive = !disabled && typeof onCodeToggle === "function";
     const details = showDetails ? codeDetailLines(code) : [];
     const nameRow = (
@@ -257,16 +268,30 @@ const CodeLegend = ({
         <span className={isSelected ? "font-semibold" : ""}>{code.name}</span>
       </>
     );
+    const toggleProps = interactive
+      ? {
+          role: "button",
+          tabIndex: 0,
+          "aria-pressed": isSelected,
+          onClick: () => onCodeToggle(code),
+          onKeyDown: (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onCodeToggle(code);
+            }
+          },
+        }
+      : {};
     if (!showDetails) {
       return (
         <div
           key={key}
-          onClick={interactive ? () => onCodeToggle(code) : undefined}
+          {...toggleProps}
           className={`flex items-center gap-1.5 px-2 py-1 text-sm transition-colors ${
             interactive ? "cursor-pointer" : "cursor-default"
           } ${
             isSelected
-              ? "border-2 border-paper bg-white/10 font-semibold"
+              ? `border border-paper ${btnActive}`
               : "border border-line-soft hover:bg-white/5"
           }`}
         >
@@ -277,17 +302,13 @@ const CodeLegend = ({
     return (
       <div
         key={key}
-        className={
-          isSelected
-            ? "border-2 border-paper bg-white/10"
-            : "border border-line-soft"
-        }
+        className={isSelected ? "border border-paper" : "border border-line-soft"}
       >
         <div
-          onClick={interactive ? () => onCodeToggle(code) : undefined}
+          {...toggleProps}
           className={`flex items-center gap-1.5 px-2 py-1 text-sm transition-colors ${
-            interactive ? "cursor-pointer hover:bg-white/5" : "cursor-default"
-          }`}
+            isSelected ? btnActive : interactive ? "hover:bg-white/5" : ""
+          } ${interactive ? "cursor-pointer" : "cursor-default"}`}
         >
           {nameRow}
         </div>
@@ -361,7 +382,7 @@ const CodeLegend = ({
                             [familyIndex]: !prev[familyIndex],
                           }))
                         }
-                        className="min-w-[28px] border border-paper px-1.5 py-0.5 text-xs transition-colors hover:bg-paper hover:text-ink disabled:opacity-40"
+                        className={iconBtn}
                         disabled={disabled}
                         aria-label={isExpanded ? "Collapse family" : "Expand family"}
                       >
@@ -376,6 +397,7 @@ const CodeLegend = ({
                         handleFamilyNameChange(familyIndex, e.target.value)
                       }
                       placeholder="Code family name"
+                      aria-label="Code family name"
                       disabled={disabled}
                     />
 
@@ -390,7 +412,7 @@ const CodeLegend = ({
                       </button>
                       <button
                         type="button"
-                        className="min-w-[28px] border border-paper px-1.5 py-0.5 text-sm leading-none transition-colors hover:bg-paper hover:text-ink disabled:opacity-40"
+                        className={iconBtn}
                         onClick={() => removeFamily(familyIndex, codes.length > 0)}
                         disabled={disabled}
                         aria-label="Remove family"
@@ -420,7 +442,7 @@ const CodeLegend = ({
                               return (
                                 <div
                                   key={`edit-code-${familyIndex}-${codeIndex}`}
-                                  className="relative flex flex-col gap-1 bg-white/[0.03] py-1 pl-2 pr-1.5 before:absolute before:left-[-13px] before:top-3 before:w-2.5 before:border-t before:border-line-soft before:content-['']"
+                                  className="relative flex flex-col gap-1 bg-surface py-1 pl-2 pr-1.5 before:absolute before:left-[-13px] before:top-3 before:w-2.5 before:border-t before:border-line-soft before:content-['']"
                                 >
                                   <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2">
                                     <div
@@ -443,6 +465,7 @@ const CodeLegend = ({
                                           )
                                         }
                                         placeholder="Code name"
+                                        aria-label="Code name"
                                         disabled={disabled}
                                       />
                                       {isAiAccepted(codeEntry?.code_uid) && (
@@ -453,7 +476,7 @@ const CodeLegend = ({
                                     </div>
                                     <button
                                       type="button"
-                                      className="min-w-[28px] border border-paper px-1.5 py-0.5 text-sm leading-none transition-colors hover:bg-paper hover:text-ink disabled:opacity-40"
+                                      className={iconBtn}
                                       onClick={() =>
                                         removeCode(familyIndex, codeIndex)
                                       }
@@ -517,34 +540,36 @@ const CodeLegend = ({
               onClick={() => setExpandedFamilies(buildExpandedState)}
               className={btnSmall}
             >
-              Expand All
+              Expand all
             </button>
             <button
               type="button"
               onClick={() => setExpandedFamilies({})}
               className={btnSmall}
             >
-              Collapse All
+              Collapse all
             </button>
           </div>
 
           <div className="flex flex-col gap-2">
             {treeFamilies.map((family, index) => (
               <div key={family.familyUid} className="border border-line-soft">
-                <div
+                <button
+                  type="button"
+                  aria-expanded={Boolean(expandedFamilies[index])}
                   onClick={() =>
                     setExpandedFamilies((prev) => ({
                       ...prev,
                       [index]: !prev[index],
                     }))
                   }
-                  className="flex cursor-pointer items-center gap-2 border-b border-line-soft px-2 py-1.5 transition-colors hover:bg-white/5"
+                  className="flex w-full cursor-pointer items-center gap-2 border-b border-line-soft px-2 py-1.5 text-left transition-colors hover:bg-white/5"
                 >
-                  <span className="w-4 text-center">
+                  <span className="w-4 text-center" aria-hidden="true">
                     {expandedFamilies[index] ? "▾" : "▸"}
                   </span>
                   <strong className="text-sm">{family.familyName}</strong>
-                </div>
+                </button>
 
                 {expandedFamilies[index] && (
                   <div className="flex flex-col gap-1.5 p-2">
@@ -556,7 +581,7 @@ const CodeLegend = ({
           </div>
         </div>
       ) : (
-        <div className="text-sm text-paper/70">codebook not found</div>
+        <div className="text-sm text-paper/70">This codebook has no codes yet.</div>
       )}
     </div>
   );

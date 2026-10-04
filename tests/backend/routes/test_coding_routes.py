@@ -18,7 +18,7 @@ Apply Codebook itself has one entry point now, `POST /api/coding/manual`
 (synchronous, no job), covered by `TestManualCodingRoute` below.
 """
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -218,7 +218,7 @@ class TestGetCodingArtifact:
         assert [c["body"] for c in body["codes"]] == ["codebook body"]
         assert body["total_rows"] == 1
         assert body["total_coded"] == 1
-        assert body["code_frequency"] == [{"code": "A", "count": 1}]
+        assert body["code_frequency"] == [{"code_uid": "A-uid", "code": "A", "count": 1}]
         assert body["file"]["schema_name"] == "proj_c"
 
     async def test_cannot_read_another_users_file(
@@ -366,7 +366,7 @@ class TestListCodingRows:
     ) -> None:
         owner = await _make_user(route_backed_by_sqlite_jobs, "owner@x.com")
         other = await _make_user(route_backed_by_sqlite_jobs, "other@x.com")
-        coding_file = await _make_file(route_backed_by_sqlite_jobs, owner.id, schemaname="proj_c")
+        await _make_file(route_backed_by_sqlite_jobs, owner.id, schemaname="proj_c")
 
         resp = client.get(
             "/api/coding/proj_c/rows", headers=_auth_headers(make_token, sub=str(other.id))
@@ -886,6 +886,7 @@ class TestCompareCodingsGuard:
         assert isinstance(body["job_id"], int)
 
 
+@pytest.mark.usefixtures("override_async_db", "default_user")
 class TestSummarizeCodingGuard:
     """``summarize-coding`` kicks off a background job -- the
     schema-prefix/api_key guard clauses still reject synchronously with
@@ -947,6 +948,7 @@ class TestSummarizeCodingGuard:
         assert isinstance(body["job_id"], int)
 
 
+@pytest.mark.usefixtures("override_async_db", "default_user")
 class TestManualCodingRoute:
     """``POST /api/coding/manual`` -- start a coding artifact by hand.
     Synchronous, since it calls no model; the researcher then codes rows

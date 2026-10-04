@@ -21,6 +21,10 @@ class TestQualifyItemId:
 
 
 class TestSplitItemId:
+    def test_ignores_surrounding_whitespace_and_prefix_case(self) -> None:
+        """Model-echoed ids: " T1_abc" is still the comment abc."""
+        assert split_item_id(" T1_abc ") == ("comment", "abc")
+
     def test_round_trips_a_qualified_submission_id(self) -> None:
         assert split_item_id(qualify_item_id(SUBMISSION, "abc123")) == (SUBMISSION, "abc123")
 

@@ -48,10 +48,12 @@ def split_item_id(qualified_id: str) -> tuple[str, str]:
 
     An id with no recognized prefix is treated as :data:`SUBMISSION` --
     see the module docstring for why that is the correct default rather
-    than an error.
+    than an error. Surrounding whitespace and the prefix's case are
+    ignored: a model's echo of ``t1_abc`` as `` T1_abc`` is still a
+    comment, not a submission named " T1_abc".
     """
-    value = qualified_id or ""
+    value = (qualified_id or "").strip()
     for row_type, prefix in _PREFIXES.items():
-        if value.startswith(prefix):
+        if value[: len(prefix)].lower() == prefix:
             return row_type, value[len(prefix):]
     return SUBMISSION, value
