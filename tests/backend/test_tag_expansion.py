@@ -4,7 +4,6 @@
 OpenAI SDK directly.
 """
 
-import time
 
 import pytest
 from unittest.mock import AsyncMock
@@ -40,7 +39,7 @@ class TestTagExpansionError:
         assert err.code == 502
 
     def test_is_a_plain_exception(self) -> None:
-        with pytest.raises(Exception):
+        with pytest.raises(TagExpansionError):
             raise TagExpansionError("x")
 
 
@@ -358,6 +357,16 @@ class TestExpandTagsViaOpenrouter:
 
         assert orig == ["anxiety"]
         assert set(expanded) == {"anxiety", "worry", "panic attack"}
+
+    async def test_seed_tags_survive_a_long_expansion(self, monkeypatch) -> None:
+        """The cap keeps the first terms; the researcher's own tags go first."""
+        many = ", ".join(f'"term {i}"' for i in range(200))
+        response = f'{{"original_tags": ["my tag"], "expanded_terms": [{many}], "notes": ""}}'
+        monkeypatch.setattr("backend.scripts.tag_expansion.chat_completion", AsyncMock(return_value=response))
+
+        _, expanded = await expand_tags_via_openrouter(["my tag"], "sk-key", "model-x")
+
+        assert expanded[0] == "my tag"
 
     async def test_response_format_rejected_falls_back_to_plain_call_same_attempt(
         self, monkeypatch

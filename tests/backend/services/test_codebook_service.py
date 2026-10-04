@@ -223,6 +223,51 @@ class TestListCodebooks:
 
 
 class TestSaveProjectCodebook:
+    @pytest.mark.parametrize(
+        "second",
+        [
+            {"code_uid": "u1", "family_uid": "f2", "family_name": "G", "name": "Other"},
+            {"code_uid": "u2", "family_uid": "f1", "family_name": "F", "name": " c "},
+        ],
+        ids=["same code_uid", "same name in one family"],
+    )
+    async def test_rejects_duplicate_codes(self, session_factory, second) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_rec = await _make_file(session, user.id, file_type="codebook", schemaname="proj_a")
+            with pytest.raises(ValidationAppError):
+                await codebook_service.save_project_codebook(
+                    session, user.id, schema_name=file_rec.schemaname,
+                    codes=_ONE_CODE + [{**second, "body": "", "position": 1}], display_name=None,
+                )
+
+    async def test_same_name_in_two_families_is_allowed(self, session_factory) -> None:
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_rec = await _make_file(session, user.id, file_type="codebook", schemaname="proj_a")
+            other = {"code_uid": "u2", "family_uid": "f2", "family_name": "G", "name": "C", "body": "", "position": 1}
+            await codebook_service.save_project_codebook(
+                session, user.id, schema_name=file_rec.schemaname, codes=_ONE_CODE + [other], display_name=None
+            )
+            assert len(await version_service.read_codes(session, file_rec.id)) == 2
+
+    @pytest.mark.parametrize("file_type", ["coding", "raw_data"])
+    async def test_refuses_a_non_codebook_file(self, session_factory, file_type) -> None:
+        """A coding file's codebook is saved via save_coding_revision, which
+        also closes entries for removed codes; this path would orphan them.
+        """
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_rec = await _make_file(session, user.id, file_type=file_type, schemaname="proj_a")
+            with pytest.raises(NotFoundError):
+                await codebook_service.save_project_codebook(
+                    session, user.id, schema_name=file_rec.schemaname, codes=_ONE_CODE, display_name=None
+                )
+            with pytest.raises(NotFoundError):
+                await codebook_service.import_codebook_markdown(
+                    session, user.id, file_rec.schemaname, markdown="### Code Family: F\n#### Code Name: C\n"
+                )
+
     async def test_happy_path_writes_content_and_display_name(self, session_factory) -> None:
         async with session_factory() as session:
             user = await _make_user(session)

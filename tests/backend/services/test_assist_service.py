@@ -16,7 +16,6 @@ from backend.app.database import File, User
 from backend.app.jobs.models import Job
 from backend.app.services import assist_service, version_service
 from backend.app.versioning_models import (
-    ASSIST_STAGE_CODEBOOK,
     ASSIST_STAGE_CODING,
     ASSIST_STAGE_FILTER,
     ASSIST_STAGE_INTEGRATE,
@@ -182,6 +181,20 @@ class TestRecordAssistRuns:
                 session, user_id=user_id, file_id=file_rec.id, version_id=version_id,
                 stage=ASSIST_STAGE_FILTER, source_file_id=99, runs=[{"job_id": job.id}],
             )
+
+    async def test_accepts_a_partially_completed_job(self, session, user_id) -> None:
+        """Proposals from the batches that did run were shown and accepted;
+        a partial run is still the AI assist that produced them.
+        """
+        file_rec, version_id = await _make_file_with_version(session, user_id)
+        job = await _make_job(
+            session, user_id=user_id, job_type="filter_preview", status="partial", payload={"source_file_id": 99}
+        )
+
+        await assist_service.record_assist_runs(
+            session, user_id=user_id, file_id=file_rec.id, version_id=version_id,
+            stage=ASSIST_STAGE_FILTER, source_file_id=99, runs=[{"job_id": job.id}],
+        )
 
     async def test_rejects_a_job_run_against_a_different_source(self, session, user_id) -> None:
         file_rec, version_id = await _make_file_with_version(session, user_id)

@@ -20,6 +20,7 @@ Per CLAUDE.md's early-prototyping rule there is no compatibility shim for
 the old blob-backed behavior; tests exercise the new shape directly.
 """
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -27,8 +28,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from backend.app.core.codebook_render import parse_markdown_to_codes
-from backend.app.core.exceptions import NotFoundError, ValidationAppError
-from backend.app.database import File, User
+from backend.app.core.exceptions import ForbiddenError, NotFoundError, ValidationAppError
+from backend.app.database import File, Project, User
 from backend.app.repositories import version_repo
 from backend.app.jobs import service as jobs_service
 from backend.app.jobs.models import TERMINAL_STATUSES
@@ -173,6 +174,19 @@ class TestStartSummarizeCodingJobValidation:
                 model=None,
                 prompt="",
                 name="my summary",
+            )
+
+    async def test_someone_elses_project_is_refused_before_any_job_runs(self, session, user_id) -> None:
+        """Checked at enqueue, not after the paid model call."""
+        await _make_file(session, user_id, schemaname="proj_sum_src")
+        other_id = await _make_user(session, "project-owner@example.com")
+        foreign = Project(user_id=other_id, projectname="theirs")
+        session.add(foreign)
+        await session.commit()
+        with pytest.raises((NotFoundError, ForbiddenError)):
+            await coding_service.start_summarize_coding_job(
+                session, user_id, coding="proj_sum_src", api_key="k", model=None, prompt="",
+                name="s", project_id=foreign.id,
             )
 
     async def test_missing_api_key_raises(self, session, user_id) -> None:
@@ -389,7 +403,29 @@ class TestGetCodingArtifact:
         assert [c.body for c in artifact["codes"]] == ["codebook snapshot"]
         assert artifact["total_rows"] == 1
         assert artifact["total_coded"] == 1
-        assert artifact["code_frequency"] == [{"code": "A", "count": 1}]
+        assert artifact["code_frequency"] == [{"code_uid": "A-uid", "code": "A", "count": 1}]
+
+    async def test_renamed_code_counts_once_under_its_current_name(self, session, user_id) -> None:
+        """A save only rewrites the entries it touches, so after renaming a
+        code, older entries still carry the old name. Counting is by
+        code_uid and named from the snapshot ("C"), not split in two.
+        """
+        coding_file = await _make_file(session, user_id, schemaname="proj_renamed", content="body")
+        for post_id, stored_name in (("s1", "Old name"), ("s2", "C")):
+            session.add(Submission(file_id=coding_file.id, id=post_id, title="t", selftext="b", word_count=1))
+            session.add(
+                CodingEntry(
+                    file_id=coding_file.id, post_id=post_id, code=stored_name, code_uid="u1",
+                    quote="b", start_offset=0, end_offset=1,
+                )
+            )
+        await session.commit()
+
+        artifact = await coding_service.get_coding_artifact(session, user_id, "proj_renamed")
+        assert artifact["code_frequency"] == [{"code_uid": "u1", "code": "C", "count": 2}]
+
+        listed = await coding_service.list_coding_rows(session, user_id, "proj_renamed", code="u1")
+        assert sorted(r["item_id"] for r in listed["rows"]) == ["t3_s1", "t3_s2"]
 
     async def test_no_owned_file_raises_not_found(self, session, user_id) -> None:
         with pytest.raises(NotFoundError):
@@ -440,12 +476,12 @@ class TestGetCodingArtifact:
         as_of_v1 = await coding_service.get_coding_artifact(session, user_id, "proj_asof1", version_no=1)
         assert [c.body for c in as_of_v1["codes"]] == ["v1 code"]
         assert as_of_v1["total_coded"] == 1
-        assert as_of_v1["code_frequency"] == [{"code": "A", "count": 1}]
+        assert as_of_v1["code_frequency"] == [{"code_uid": "A-uid", "code": "A", "count": 1}]
 
         live = await coding_service.get_coding_artifact(session, user_id, "proj_asof1")
         assert [c.body for c in live["codes"]] == ["v2 code"]
         assert live["total_coded"] == 1
-        assert live["code_frequency"] == [{"code": "A", "count": 1}]
+        assert live["code_frequency"] == [{"code_uid": "A-uid", "code": "A", "count": 1}]
         # total_rows (the coding file's own copied submissions) never
         # changes with version -- it's identical either way.
         assert as_of_v1["total_rows"] == live["total_rows"] == 2
@@ -984,6 +1020,10 @@ class TestDuplicateCoding:
         source_file = await _make_file(session, user_id, schemaname="proj_dup_v", content="v1 body")
         v1_codes = await version_service.read_codes(session, source_file.id)
         v1_uid = v1_codes[0].code_uid
+        # Rows follow the chosen version too: "gone" was live at v1 and
+        # deleted at v2, "late" arrived at v2.
+        session.add(Submission(file_id=source_file.id, id="gone", title="t", selftext="b", valid_from=1, valid_to=1))
+        session.add(Submission(file_id=source_file.id, id="late", title="t", selftext="b", valid_from=2))
         session.add(
             CodingEntry(
                 file_id=source_file.id, post_id="s1", code="C", code_uid=v1_uid,
@@ -1021,6 +1061,12 @@ class TestDuplicateCoding:
         ).scalars().all()
         # The v1 quote, not the v2 edit -- and re-stamped as the fork's own v1.
         assert [(e.quote, e.valid_from, e.valid_to) for e in copied_entries] == [("e", 1, None)]
+
+        copied_rows = (
+            await session.execute(select(Submission.id).where(Submission.file_id == new_file.id))
+        ).scalars().all()
+        assert "gone" in copied_rows
+        assert "late" not in copied_rows
 
     async def test_blank_display_name_raises_validation_error(self, session, user_id) -> None:
         await _make_file(session, user_id, schemaname="proj_dup_blank")
@@ -1475,7 +1521,7 @@ class TestCompareCodingsJobHandlerEndToEnd:
         # compacted form -- so the job fails loudly instead of silently
         # truncating.
         file_a = await _make_file(session, user_id, schemaname="proj_cmp_of_a")
-        file_b = await _make_file(session, user_id, schemaname="proj_cmp_of_b")
+        await _make_file(session, user_id, schemaname="proj_cmp_of_b")
         session.add(CodingEntry(file_id=file_a.id, post_id="p1", code="CODE_A", code_uid="CODE_A-uid", quote="ev1", start_offset=0, end_offset=3))
         await session.commit()
 
@@ -1767,3 +1813,58 @@ class TestCreateManualCodingParentDeletedMidCall:
             await session.execute(select(File).where(File.user_id == user_id, File.filename == "doomed"))
         ).scalars().all()
         assert codings == []
+
+
+# ---------------------------------------------------------------------------
+# _validate_and_resolve_coding_entries -- code-name resolution
+# ---------------------------------------------------------------------------
+
+
+class TestAiCodeNameResolution:
+    CODES = [
+        SimpleNamespace(family_name="Social", name="Support", code_uid="social-support"),
+        SimpleNamespace(family_name="Practical", name="Support", code_uid="practical-support"),
+        SimpleNamespace(family_name="Needs", name="Children's needs", code_uid="kids"),
+    ]
+    CONTENT = {("submission", "p1"): "My friends gave me support with the children’s needs."}
+
+    def _resolve(self, code: str):
+        return coding_service._validate_and_resolve_coding_entries(
+            [{"item_id": "p1", "code": code, "quotes": ["support"]}],
+            valid_keys=set(self.CONTENT),
+            codes=self.CODES,
+            content_by_key=self.CONTENT,
+        )
+
+    def test_repeated_quotes_count_once_and_empty_ones_are_counted(self) -> None:
+        rows, counts = coding_service._validate_and_resolve_coding_entries(
+            [
+                {"item_id": "p1", "code": "Children's needs", "quotes": ["support", "support"]},
+                {"item_id": "p1", "code": "Children's needs", "quotes": ["support"]},
+                {"item_id": "p1", "code": "Children's needs", "quotes": []},
+            ],
+            valid_keys=set(self.CONTENT),
+            codes=self.CODES,
+            content_by_key=self.CONTENT,
+        )
+        assert len(rows) == 1
+        assert counts["rejected_quote_not_found"] == 1
+
+    def test_bare_name_shared_by_two_families_is_rejected_not_guessed(self) -> None:
+        rows, counts = self._resolve("Support")
+        assert rows == []
+        assert counts["rejected_ambiguous_code"] == 1
+
+    @pytest.mark.parametrize("reference", ["Practical > Support", "practical>support", "  PRACTICAL >  Support "])
+    def test_family_qualified_name_resolves_to_that_family(self, reference) -> None:
+        rows, _ = self._resolve(reference)
+        assert [(r["code"], r["code_uid"]) for r in rows] == [("Support", "practical-support")]
+
+    def test_unique_name_matches_across_quote_and_space_variants(self) -> None:
+        rows, _ = self._resolve("children’s  NEEDS")
+        assert [r["code_uid"] for r in rows] == ["kids"]
+
+    def test_unknown_name_is_counted_as_unknown(self) -> None:
+        rows, counts = self._resolve("Invented")
+        assert rows == []
+        assert counts["rejected_unknown_code"] == 1

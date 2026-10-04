@@ -1,3 +1,5 @@
+import logging
+
 from pydantic import ValidationError
 
 from backend.app.api.schemas import AICodingPayload
@@ -7,6 +9,7 @@ from backend.app.external.response_parsers import parse_json_object
 from backend.app.jobs.progress import ProgressTracker
 
 MAX_RETRIES = 2
+logger = logging.getLogger(__name__)
 
 # JSON Schema for the strict-decoding tier of the compliance ladder (see
 # ``openrouter_client.json_chat_completion``). Flat -- one object per
@@ -41,8 +44,7 @@ async def get_client(system_prompt: str, user_prompt: str, api_key: str, model: 
         raise ValueError("OpenRouter API key is required")
 
     def _on_retry(attempt: int, exc: Exception, wait_seconds: float) -> None:
-        print(f"\nAPI call failed (attempt {attempt}/{MAX_RETRIES}): {type(exc).__name__}")
-        print(f"Retrying in {wait_seconds}s...")
+        logger.warning("API call failed (attempt %s/%s): %s; retrying in %ss", attempt, MAX_RETRIES, type(exc).__name__, wait_seconds)
 
     result = await json_chat_completion(
         system_prompt=system_prompt,
@@ -54,7 +56,7 @@ async def get_client(system_prompt: str, user_prompt: str, api_key: str, model: 
         max_retries=MAX_RETRIES,
         on_retry=_on_retry,
     )
-    print("API call successful.")
+    logger.info("API call successful")
     return result
 
 
@@ -134,7 +136,7 @@ async def classify_posts(
     already succeeded are still returned rather than discarded.
     """
 
-    print("Starting codebook application process...")
+    logger.info("Starting codebook application")
 
     system_prompt = (
         "You are a qualitative data coder.\n"
@@ -180,7 +182,7 @@ async def classify_posts(
     )
     batches = context_window.batch_by_separator(posts_content, max_content_chars, separator=context_window.ITEM_SEPARATOR)
 
-    print(f"Prompts prepared. Sending request to AI model across {len(batches)} batch(es)...")
+    logger.info("Sending coding request across %s batch(es)", len(batches))
 
     if progress is not None:
         await progress.add_total(len(batches))
@@ -192,12 +194,15 @@ async def classify_posts(
         try:
             return parse_coding_response(raw_result)
         except ValueError as exc:
-            print(f"Batch {i+1}/{len(batches)} output could not be parsed as JSON: {exc}")
-            return []
+            # A failure, not an empty result: returning [] here reported
+            # the batch as coded with nothing to propose, and the job as
+            # a full success. Raising lets run_sequential_batches mark
+            # the run partial (or failed, on the first batch).
+            raise ValueError(f"Batch {i+1}/{len(batches)}: the model's reply wasn't valid JSON ({exc})") from exc
 
     batch_results, coverage = await context_window.run_sequential_batches(batches, _run_one_batch, progress=progress)
     coding_entries = [entry for batch_entries in batch_results for entry in (batch_entries or [])]
     last_user_prompt = user_prompts[-1] if user_prompts else ""
 
-    print("Response received from AI model. Codebook application completed.")
+    logger.info("Codebook application completed")
     return coding_entries, system_prompt, last_user_prompt, coverage

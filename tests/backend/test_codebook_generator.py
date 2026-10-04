@@ -108,12 +108,42 @@ class TestMergeCodebookJsonDrafts:
         )
         assert [c["name"] for c in merged["codes"]] == ["One", "Two"]
 
+    def test_a_code_two_drafts_propose_is_kept_once(self) -> None:
+        """A duplicate (same family, same name up to case/quotes/spacing)
+        would otherwise fail the save's one-name-per-family rule.
+        """
+        merged = json.loads(
+            merge_codebook_json_drafts(
+                [
+                    _json_response([_code(name="Children's needs")]),
+                    _json_response([_code(family="a", name="children’s  needs"), _code(name="Other")]),
+                ]
+            )
+        )
+        assert [c["name"] for c in merged["codes"]] == ["Children's needs", "Other"]
+
     def test_skips_invalid_drafts(self) -> None:
         merged = json.loads(merge_codebook_json_drafts(["not json", _json_response([_code()])]))
         assert len(merged["codes"]) == 1
 
 
 class TestGenerateCodebookMapReduce:
+    async def test_malformed_later_draft_is_reported_partial(self, monkeypatch) -> None:
+        monkeypatch.setattr(
+            "backend.scripts.codebook_generator.context_window.max_prompt_chars",
+            lambda model, **kwargs: 50,
+        )
+        mock = AsyncMock(side_effect=[_json_response([_code()]), '{"wrong": []}'])
+        monkeypatch.setattr("backend.scripts.codebook_generator.json_chat_completion", mock)
+
+        result, _, _, coverage = await generate_codebook_map_reduce(
+            ITEM_SEPARATOR.join(["x" * 40, "y" * 40]), "sk-key", MODEL="model-y"
+        )
+        assert json.loads(result)["codes"] == [_code()]
+        assert coverage["batches_processed"] == 1
+        assert coverage["batches_total"] == 2
+        assert "no codes array" in coverage["error"]
+
     async def test_single_batch_skips_reduce_call(self, monkeypatch) -> None:
         raw = _json_response([_code()])
         mock = AsyncMock(return_value=raw)

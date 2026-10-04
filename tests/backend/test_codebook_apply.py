@@ -103,17 +103,15 @@ class TestClassifyPosts:
         assert "qualitative data coder" in system_prompt
         assert coverage == {"batches_processed": 1, "batches_total": 1, "error": None}
 
-    async def test_output_that_cannot_be_parsed_yields_no_entries_for_that_batch(self, monkeypatch) -> None:
+    async def test_output_that_cannot_be_parsed_is_a_failure_not_an_empty_result(self, monkeypatch) -> None:
+        """An unparseable reply used to count as a successful batch with no
+        codings -- the job reported full success while coding nothing.
+        """
         raw = "  some unstructured free-form text, not JSON at all  "
         monkeypatch.setattr("backend.scripts.codebook_apply.json_chat_completion", AsyncMock(return_value=raw))
 
-        entries, _, _, coverage = await classify_posts("CB", "POSTS", "", "sk-key")
-
-        assert entries == []
-        # The batch call itself still succeeded (no exception) -- only the
-        # JSON parse of its content failed -- so coverage reports full
-        # success, just with zero usable entries.
-        assert coverage == {"batches_processed": 1, "batches_total": 1, "error": None}
+        with pytest.raises(ValueError, match="wasn't valid JSON"):
+            await classify_posts("CB", "POSTS", "", "sk-key")
 
     async def test_uses_explicit_model_when_given(self, monkeypatch) -> None:
         mock = AsyncMock(return_value=_json_response([{"item_id": "p1", "code": "A", "quotes": ["x"]}]))
@@ -131,7 +129,7 @@ class TestClassifyPosts:
         # disjoint across batches by construction.
         monkeypatch.setattr(
             "backend.scripts.codebook_apply.context_window.max_prompt_chars",
-            lambda model, **kwargs: 40,
+            lambda model, **kwargs: 50,
         )
         responses = [
             _json_response([{"item_id": "p1", "code": "A", "quotes": ["x"]}]),
@@ -155,29 +153,31 @@ class TestClassifyPosts:
         # Regression test: batching used to join/split on "\n\n", but
         # Reddit selftext/body routinely contains blank lines -- so a
         # single multi-paragraph item could be torn across a batch
-        # boundary. ITEM_SEPARATOR is a sentinel that can't occur in
-        # source text, so even under a tiny budget a single item stays
-        # whole in one batch rather than being split.
+        # boundary. ITEM_SEPARATOR keeps a multi-paragraph item whole
+        # while another item forces a separate batch.
         monkeypatch.setattr(
             "backend.scripts.codebook_apply.context_window.max_prompt_chars",
-            lambda model, **kwargs: 10,
+            lambda model, **kwargs: 100,
         )
-        mock = AsyncMock(return_value=_json_response([{"item_id": "p1", "code": "A", "quotes": ["para one"]}]))
+        mock = AsyncMock(side_effect=[
+            _json_response([{"item_id": "p1", "code": "A", "quotes": ["para one"]}]),
+            _json_response([{"item_id": "p2", "code": "A", "quotes": ["other"]}]),
+        ])
         monkeypatch.setattr("backend.scripts.codebook_apply.json_chat_completion", mock)
 
         multi_paragraph_item = "POST_ID: p1\nTYPE: post\nCONTENT: para one\n\npara two\n\npara three"
-        entries, _, last_user_prompt, _ = await classify_posts("CB", multi_paragraph_item, "", "sk-key")
+        entries, _, _, _ = await classify_posts(
+            "CB", ITEM_SEPARATOR.join([multi_paragraph_item, "POST_ID: p2\nCONTENT: " + "other " * 10]), "", "sk-key"
+        )
 
-        # Never split: exactly one call, and the whole item (both blank
-        # lines intact) reached the model in a single batch.
-        assert mock.await_count == 1
-        assert "para one\n\npara two\n\npara three" in last_user_prompt
-        assert entries == [{"item_id": "p1", "code": "A", "quotes": ["para one"]}]
+        assert mock.await_count == 2
+        assert "para one\n\npara two\n\npara three" in mock.call_args_list[0].kwargs["user_prompt"]
+        assert {entry["item_id"] for entry in entries} == {"p1", "p2"}
 
     async def test_reports_progress_once_per_batch(self, monkeypatch) -> None:
         monkeypatch.setattr(
             "backend.scripts.codebook_apply.context_window.max_prompt_chars",
-            lambda model, **kwargs: 40,
+            lambda model, **kwargs: 50,
         )
         responses = [
             _json_response([{"item_id": "p1", "code": "A", "quotes": ["x"]}]),
@@ -225,7 +225,7 @@ class TestClassifyPosts:
         # must now return the batches that DID succeed instead.
         monkeypatch.setattr(
             "backend.scripts.codebook_apply.context_window.max_prompt_chars",
-            lambda model, **kwargs: 40,
+            lambda model, **kwargs: 50,
         )
         monkeypatch.setattr(
             "backend.scripts.codebook_apply.json_chat_completion",

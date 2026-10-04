@@ -15,7 +15,12 @@ from typing import Any, Awaitable, Callable, TypeVar
 from openai import AsyncOpenAI
 
 from backend.app.core.logging import get_logger
-from backend.app.external.errors import ExternalServiceError, extract_http_error_code, is_retryable_error
+from backend.app.external.errors import (
+    ExternalServiceError,
+    TruncatedResponseError,
+    extract_http_error_code,
+    is_retryable_error,
+)
 from backend.app.jobs.progress import get_current_accounting_tracker
 
 logger = get_logger(__name__)
@@ -117,7 +122,13 @@ async def chat_completion(
             except Exception:
                 logger.warning("Failed to flush accounting for job %s", tracker.job_id, exc_info=True)
 
-        content = response.choices[0].message.content
+        choice = response.choices[0]
+        if getattr(choice, "finish_reason", None) == "length":
+            raise TruncatedResponseError(
+                "The model's reply was cut off at its output limit, so it is incomplete. "
+                "Try fewer items per run, or a model with a larger output limit."
+            )
+        content = choice.message.content
         if not content:
             raise ExternalServiceError("OpenRouter returned an empty completion")
         return content
@@ -169,6 +180,11 @@ async def json_chat_completion(
                 on_retry=on_retry,
             )
         except Exception as e:  # noqa: BLE001 - fall through to the next tier
+            # A looser response format can't fix a bad key, missing
+            # credits, or a reply too long for the output limit -- stop
+            # rather than pay for the same failure twice more.
+            if isinstance(e, TruncatedResponseError) or getattr(e, "code", 0) in (401, 402, 403):
+                raise
             last_error = e
 
     assert last_error is not None

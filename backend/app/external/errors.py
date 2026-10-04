@@ -19,6 +19,13 @@ class ExternalServiceError(Exception):
         self.code = code
 
 
+class TruncatedResponseError(ExternalServiceError):
+    """The model stopped at its output-token limit, so its reply is cut
+    off mid-way -- for a JSON contract, unparseable. Never retried: the
+    same request truncates the same way, at full cost each time.
+    """
+
+
 def extract_http_error_code(error: Exception) -> int:
     """Best-effort HTTP status code from an OpenAI/OpenRouter SDK exception."""
     error_str = str(error)
@@ -48,6 +55,8 @@ def is_retryable_error(error: Exception) -> bool:
     (408/429/502/503, network errors, empty completions with no code at
     all), which are presumed transient.
     """
+    if isinstance(error, TruncatedResponseError):
+        return False
     return extract_http_error_code(error) not in NON_RETRYABLE_HTTP_CODES
 
 

@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from backend.app.external.errors import ExternalServiceError
+from backend.app.external.errors import ExternalServiceError, TruncatedResponseError
 from backend.app.external.openrouter_client import (
     chat_completion,
     get_openrouter_client,
@@ -221,6 +221,32 @@ class TestChatCompletion:
 
         kwargs = client.chat.completions.create.call_args.kwargs
         assert kwargs["timeout"] == 30.0
+
+
+class TestTruncatedReplies:
+    async def test_a_reply_cut_off_at_the_output_limit_raises_without_retrying(self, monkeypatch) -> None:
+        client = _fake_client('{"codings": [{"item_id": "p1", "co')
+        client.chat.completions.create.return_value.choices[0].finish_reason = "length"
+        monkeypatch.setattr("backend.app.external.openrouter_client.get_openrouter_client", lambda api_key: client)
+
+        with pytest.raises(TruncatedResponseError):
+            await chat_completion(system_prompt="s", user_prompt="u", api_key="k", model="m")
+        client.chat.completions.create.assert_awaited_once()
+
+    @pytest.mark.parametrize(
+        "error",
+        [TruncatedResponseError("cut off"), ExternalServiceError("no credits", code=402)],
+        ids=["truncated", "no credits"],
+    )
+    async def test_json_ladder_stops_on_errors_a_looser_format_cannot_fix(self, monkeypatch, error) -> None:
+        mock = AsyncMock(side_effect=[error, "ok", "ok"])
+        monkeypatch.setattr("backend.app.external.openrouter_client.chat_completion", mock)
+
+        with pytest.raises(ExternalServiceError):
+            await json_chat_completion(
+                system_prompt="s", user_prompt="u", api_key="k", model="m", json_schema={"type": "object"}
+            )
+        assert mock.await_count == 1
 
 
 class TestJsonChatCompletion:

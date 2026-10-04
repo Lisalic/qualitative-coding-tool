@@ -273,6 +273,9 @@ async def generate_codebook_map_reduce(
         draft, _, _ = await generate_codebook(
             batch, api_key, custom_prompt, MODEL=MODEL, existing_codes=existing_codes
         )
+        parsed = parse_json_object(draft)
+        if not isinstance(parsed.get("codes"), list):
+            raise ValueError(f"Batch {i+1}/{len(batches)}: the model's reply has no codes array")
         return draft
 
     drafts, map_coverage = await context_window.run_sequential_batches(batches, _run_one_draft, progress=progress)
@@ -290,7 +293,7 @@ async def generate_codebook_map_reduce(
         consolidated = await _json_client(
             _CONSOLIDATE_SYSTEM_PROMPT, reduce_user_prompt, api_key, MODEL, json_schema=CODEBOOK_JSON_SCHEMA
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - preserve map drafts if the reduce call fails
         if progress is not None:
             await progress.advance()
         fallback_text = merge_codebook_json_drafts(drafts)

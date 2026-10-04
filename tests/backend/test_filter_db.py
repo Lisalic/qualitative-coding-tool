@@ -255,6 +255,13 @@ class TestWrapInPythonArray:
 
 
 class TestParseDecisionObject:
+    def test_truncated_object_never_promotes_excluded_ids(self) -> None:
+        """A reply cut off mid-way doesn't parse; the fallback used to
+        scrape every quoted id, so excluded posts came back as includes.
+        """
+        include_ids, _ = parse_decision_object('{"include": ["a", "b"], "exclude": ["c", "d')
+        assert include_ids == ["a", "b"]
+
     def test_json_object(self) -> None:
         include_ids, exclude_ids = parse_decision_object('{"include": ["a"], "exclude": ["b"]}')
         assert include_ids == ["a"]

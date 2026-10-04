@@ -41,7 +41,7 @@ def build_aggregated_coding_data(code_summaries: list[dict]) -> str:
         if quotes:
             block += f"\nSample evidence:\n{quotes}"
         blocks.append(block)
-    return "\n\n".join(blocks)
+    return context_window.ITEM_SEPARATOR.join(blocks)
 
 
 def _build_user_prompt(coding_data: str, extra_instructions: str) -> str:
@@ -104,7 +104,9 @@ async def summarize_coding(
         # covers -- a fixed reserve, not a proportional one.
         output_reserve_tokens=context_window.BOUNDED_OUTPUT_TOKENS,
     )
-    batches = context_window.batch_by_separator(coding_data, max_content_chars, separator="\n\n")
+    batches = context_window.batch_by_separator(
+        coding_data, max_content_chars, separator=context_window.ITEM_SEPARATOR
+    )
 
     if len(batches) == 1:
         try:
@@ -139,7 +141,7 @@ async def summarize_coding(
     reduce_prompt = _build_reduce_user_prompt(partial_summaries, user_prompt)
     try:
         summary = await get_client(_REDUCE_SYSTEM_PROMPT, reduce_prompt, api_key, chosen_model)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - return completed map summaries on reduce failure
         if progress is not None:
             await progress.advance()
         coverage = {

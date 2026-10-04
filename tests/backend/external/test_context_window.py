@@ -117,6 +117,10 @@ class TestBatchBySeparator:
         batches = context_window.batch_by_separator(content, max_chars=50, separator="\n\n")
         assert len(batches) == 2
 
+    def test_one_oversized_item_is_rejected_before_model_call(self) -> None:
+        with pytest.raises(context_window.ContextBudgetError, match="One input item is too large"):
+            context_window.batch_by_separator("x" * 51, max_chars=50)
+
 
 class TestRunSequentialBatches:
     async def test_all_succeed(self) -> None:

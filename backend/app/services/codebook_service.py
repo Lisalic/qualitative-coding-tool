@@ -742,8 +742,13 @@ async def start_compare_codebooks_job(
     if not name or not name.strip():
         raise ValidationAppError("name is required")
 
-    file_id_a = await file_repo.resolve_file_id(session, schema_a, user_id)
-    file_id_b = await file_repo.resolve_file_id(session, schema_b, user_id)
+    file_id_a = await file_repo.resolve_file_id(session, schema_a, user_id, file_types=("codebook",))
+    file_id_b = await file_repo.resolve_file_id(session, schema_b, user_id, file_types=("codebook",))
+
+    # Before enqueueing: a foreign or missing project used to surface only
+    # after the paid model call, losing its output.
+    if project_id is not None:
+        await project_repo.get_owned_project(session, project_id, user_id)
 
     return await enqueue_job(
         session,

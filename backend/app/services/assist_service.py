@@ -72,7 +72,10 @@ async def _validated_job(
         raise ValidationAppError(
             f"Job {job_id} is a {job.job_type!r} job, not {expected_type!r} -- cannot record it as a {stage} assist"
         )
-    if job.status != "succeeded":
+    # "partial" counts: some batches failed, but the proposals the editor
+    # shows (and the researcher accepted) came from the ones that ran,
+    # stored in ``result`` exactly as for a full success.
+    if job.status not in ("succeeded", "partial"):
         raise ValidationAppError(f"Job {job_id} has not succeeded (status={job.status!r})")
 
     payload = job.payload or {}

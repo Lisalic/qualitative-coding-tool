@@ -1270,6 +1270,11 @@ async def start_compare_codings_job(
     file_id_a = await file_repo.resolve_file_id(session, schema_a, user_id, file_types=_CODING_FILE_TYPES)
     file_id_b = await file_repo.resolve_file_id(session, schema_b, user_id, file_types=_CODING_FILE_TYPES)
 
+    # Before enqueueing: a foreign or missing project used to surface only
+    # after the paid model call, losing its output.
+    if project_id is not None:
+        await project_repo.get_owned_project(session, project_id, user_id)
+
     return await enqueue_job(
         session,
         user_id=user_id,
@@ -1456,6 +1461,11 @@ async def start_summarize_coding_job(
         raise ValidationAppError("name is required")
 
     source_file_id = await file_repo.resolve_file_id(session, schema, user_id, file_types=_CODING_FILE_TYPES)
+
+    # Before enqueueing: a foreign or missing project used to surface only
+    # after the paid model call, losing its output.
+    if project_id is not None:
+        await project_repo.get_owned_project(session, project_id, user_id)
 
     return await enqueue_job(
         session,

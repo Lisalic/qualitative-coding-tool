@@ -102,7 +102,7 @@ async def _fetch_expansion_json(system_prompt: str, user_message: str, api_key: 
             response_format={"type": "json_object"},
             max_retries=1,
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 - JSON-mode rejection falls back to plain completion
         content = await chat_completion(
             system_prompt=system_prompt,
             user_prompt=user_message,
@@ -172,8 +172,10 @@ async def expand_tags_via_openrouter(
     expanded_raw = data.get("expanded_terms")
     if not isinstance(expanded_raw, list):
         expanded_raw = []
+    # The researcher's own tags first: the cap keeps the first N terms, so
+    # a long model list used to crowd out the very tags it was expanding.
     merged = normalize_and_cap_terms(
-        [str(x) for x in expanded_raw] + user_tags,
+        user_tags + [str(x) for x in expanded_raw],
         cap=MAX_EXPANDED_TERMS,
     )
     if not merged:

@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from backend.app.external import context_window
 from backend.scripts.summarize_coding import (
     build_aggregated_coding_data,
     summarize_coding,
@@ -38,8 +39,17 @@ class TestBuildAggregatedCodingData:
             {"code": "CODE_B", "count": 2, "sample_evidence": []},
         ]
         text = build_aggregated_coding_data(code_summaries)
-        assert "CODE_A" in text.split("\n\n")[0]
-        assert "CODE_B" in text.split("\n\n")[1]
+        assert "CODE_A" in text.split("<<<ITEM>>>")[0]
+        assert "CODE_B" in text.split("<<<ITEM>>>")[1]
+
+    def test_quote_paragraphs_stay_inside_code_block(self) -> None:
+        text = build_aggregated_coding_data([
+            {"code": "CODE_A", "count": 1, "sample_evidence": ["first paragraph\n\nsecond paragraph"]},
+            {"code": "CODE_B", "count": 1, "sample_evidence": ["another quote"]},
+        ])
+        batches = context_window.batch_by_separator(text, 85, separator=context_window.ITEM_SEPARATOR)
+        assert len(batches) == 2
+        assert "first paragraph\n\nsecond paragraph" in batches[0]
 
     def test_empty_list_returns_empty_string(self) -> None:
         assert build_aggregated_coding_data([]) == ""
@@ -86,7 +96,7 @@ class TestSummarizeCoding:
         mock = AsyncMock(side_effect=responses)
         monkeypatch.setattr("backend.scripts.codebook_generator.chat_completion", mock)
 
-        coding_data = "\n\n".join(["x" * 40, "y" * 40])
+        coding_data = context_window.ITEM_SEPARATOR.join(["x" * 40, "y" * 40])
         result, coverage = await summarize_coding(coding_data, api_key="sk-key")
 
         assert mock.await_count == 3
@@ -124,7 +134,7 @@ class TestSummarizeCoding:
         progress.advance = AsyncMock()
         progress.add_total = AsyncMock()
 
-        coding_data = "\n\n".join(["x" * 40, "y" * 40])
+        coding_data = context_window.ITEM_SEPARATOR.join(["x" * 40, "y" * 40])
         await summarize_coding(coding_data, api_key="sk-key", progress=progress)
 
         # 2 map batches + 1 reduce call = 3 total units of progress.
@@ -152,7 +162,7 @@ class TestSummarizeCoding:
             ),
         )
 
-        coding_data = "\n\n".join(["x" * 40, "y" * 40])
+        coding_data = context_window.ITEM_SEPARATOR.join(["x" * 40, "y" * 40])
         result, coverage = await summarize_coding(coding_data, api_key="sk-key")
 
         assert result == "partial summary one"
@@ -178,7 +188,7 @@ class TestSummarizeCoding:
             ),
         )
 
-        coding_data = "\n\n".join(["x" * 40, "y" * 40])
+        coding_data = context_window.ITEM_SEPARATOR.join(["x" * 40, "y" * 40])
         result, coverage = await summarize_coding(coding_data, api_key="sk-key")
 
         assert "partial summary one" in result

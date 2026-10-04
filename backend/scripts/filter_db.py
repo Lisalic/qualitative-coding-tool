@@ -1,6 +1,6 @@
 import ast
-import datetime
 import json
+import logging
 import re
 
 from backend.app.ai_models import is_paid_model
@@ -14,6 +14,7 @@ from backend.scripts.openrouter_http import openrouter_user_message
 MAX_RETRIES = 2
 
 MAX_BATCHES_FOR_FREE = 3
+logger = logging.getLogger(__name__)
 
 
 class AIFilterError(Exception):
@@ -25,13 +26,11 @@ class AIFilterError(Exception):
 
 def _log_ai(stage: str, message: str, data: dict = None):
     """Human-readable logging for AI operations."""
-    timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-    prefix = f"[{timestamp}] AI_FILTER | {stage}"
     if data:
         details = " | ".join(f"{k}={v}" for k, v in data.items())
-        print(f"{prefix} | {message} | {details}")
+        logger.info("AI_FILTER | %s | %s | %s", stage, message, details)
     else:
-        print(f"{prefix} | {message}")
+        logger.info("AI_FILTER | %s | %s", stage, message)
 
 
 def _preview_response(response: str, max_len: int = 500) -> str:
@@ -227,7 +226,7 @@ async def _run_batched_filter(
         response = await get_client(system_prompt, user_prompts[i], api_key, chosen_model)
 
         _log_ai("RESPONSE", f"Batch {i+1} response ({len(response)} chars):")
-        print(f"    {_preview_response(response, 300)}")
+        logger.debug("AI response preview: %s", _preview_response(response, 300))
 
         include_ids, exclude_ids = parse_decision_object(response)
         valid_ids = _ids_in_batch(batch)
@@ -333,7 +332,7 @@ def wrap_in_python_array(content) -> list:
             result = [str(x) for x in obj if x is not None]
             _log_ai("PARSE", f"Parsed {len(result)} IDs via ast.literal_eval")
             return result
-    except Exception as e:
+    except (ValueError, SyntaxError, TypeError, RecursionError, MemoryError) as e:
         _log_ai("PARSE_WARN", f"ast.literal_eval failed: {e}, falling back to regex")
 
     # Fallback: extract quoted strings
@@ -360,10 +359,10 @@ def parse_decision_object(content: str) -> tuple[list, list]:
 
     try:
         obj = json.loads(stripped)
-    except Exception:
+    except json.JSONDecodeError:
         try:
             obj = ast.literal_eval(stripped)
-        except Exception:
+        except (ValueError, SyntaxError, TypeError, RecursionError, MemoryError):
             obj = None
 
     if isinstance(obj, dict):
@@ -375,6 +374,14 @@ def parse_decision_object(content: str) -> tuple[list, list]:
     if isinstance(obj, list):
         _log_ai("PARSE_WARN", "Response was a bare array, not a decision object -- treating as include-only")
         return wrap_in_python_array(obj), []
+
+    # A decision object that didn't parse (usually cut off mid-way): read
+    # ids only from inside its "include" array. Scraping every quoted id
+    # from the whole text turned the model's *excluded* ids into includes.
+    include_section = re.search(r"[\"']include[\"']\s*:\s*\[([^\]]*)", stripped)
+    if include_section:
+        _log_ai("PARSE_WARN", "Decision object didn't parse; reading only its include list")
+        return wrap_in_python_array(f"[{include_section.group(1)}]"), []
 
     _log_ai("PARSE_WARN", "Response was neither a JSON object nor an array, falling back to regex array extraction")
     return wrap_in_python_array(stripped), []

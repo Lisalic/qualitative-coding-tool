@@ -136,11 +136,17 @@ def batch_by_separator(content: str, max_chars: int, separator: str = DEFAULT_SE
     current_size = 0
 
     for entry in entries:
-        entry_size = len(entry) + len(separator)
+        if len(entry) > max_chars:
+            raise ContextBudgetError(
+                f"One input item is too large for this model's context window "
+                f"({len(entry):,} characters; limit {max_chars:,}). "
+                "Choose a larger-context model or shorten the item."
+            )
+        entry_size = len(entry) + (len(separator) if current_batch else 0)
         if current_size + entry_size > max_chars and current_batch:
             batches.append(separator.join(current_batch))
             current_batch = [entry]
-            current_size = entry_size
+            current_size = len(entry)
         else:
             current_batch.append(entry)
             current_size += entry_size
