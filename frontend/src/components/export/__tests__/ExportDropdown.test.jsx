@@ -43,7 +43,12 @@ describe("ExportDropdown", () => {
     const menu = container.querySelector('[role="menu"]');
     expect(menu).not.toBeNull();
     const items = [...menu.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent);
-    expect(items).toEqual([".qdc", ".csv"]);
+    expect(items).toEqual([
+      "Word document (.docx)",
+      "Excel workbook (.xlsx)",
+      "REFI-QDA codebook (.qdc)",
+      "CSV (.csv)",
+    ]);
   });
 
   it("sends the coding privacy flags only when ticked", async () => {
@@ -58,19 +63,53 @@ describe("ExportDropdown", () => {
     });
 
     const items = [...container.querySelectorAll('[role="menuitem"]')];
-    expect(items.map((el) => el.textContent)).toEqual([".csv", ".csv (matrix)", ".json"]);
+    expect(items.map((el) => el.textContent)).toEqual([
+      "Excel workbook (.xlsx)",
+      "Word document (.docx)",
+      "CSV – one row per quote",
+      "CSV – matrix",
+      "JSON (.json)",
+    ]);
 
     const [sourceText] = container.querySelectorAll('input[type="checkbox"]');
     act(() => {
       sourceText.click();
     });
     await act(async () => {
-      items[1].click();
+      items[3].click();
     });
 
     expect(api.apiFetch).toHaveBeenCalledWith(
       "/api/export/proj_abc/coding?format=csv&layout=wide&include_source_text=true",
     );
+  });
+
+  it("requests the coding workbook without a layout", async () => {
+    vi.spyOn(api, "apiFetch").mockResolvedValue({ ok: false, status: 500 });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    act(() => {
+      root.render(<ExportDropdown fileId={9} artifactType="coding" />);
+    });
+    act(() => {
+      container.querySelector("button").click();
+    });
+    await act(async () => {
+      container.querySelector('[role="menuitem"]').click();
+    });
+
+    expect(api.apiFetch).toHaveBeenCalledWith("/api/export/9/coding?format=xlsx");
+  });
+
+  it("opens a menu for a summary, now that it has more than one format", () => {
+    act(() => {
+      root.render(<ExportDropdown fileId={1} artifactType="summary" />);
+    });
+    act(() => {
+      container.querySelector("button").click();
+    });
+    const items = [...container.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent);
+    expect(items).toEqual(["Word document (.docx)", "Excel workbook (.xlsx)", "Markdown (.md)"]);
   });
 
   it("displays accessible error state with role='alert' when export fails", async () => {

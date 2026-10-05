@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { apiFetch } from "../../api";
-import { buildProjectBundlePath, slugify } from "../export/exportHelpers";
+import ProjectDownloadModal from "./ProjectDownloadModal";
 
 import Panel from "../shell/Panel";
 import { btn, input } from "../../lib/uiClasses";
+import { formatDate } from "../../lib/formatDate";
+import ErrorDisplay from "../feedback/ErrorDisplay";
 
 const tabBtn = btn;
 const inputClasses = input;
@@ -13,41 +15,13 @@ export default function ProjectHeaderSection({ project, onRefreshProject }) {
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [saving, setSaving] = useState(false);
-  const [bundleError, setBundleError] = useState(null);
-  const [bundling, setBundling] = useState(false);
-
-  const downloadBundle = async () => {
-    if (!project) return;
-    setBundleError(null);
-    setBundling(true);
-    try {
-      const res = await apiFetch(buildProjectBundlePath(project.id));
-      if (!res.ok) throw new Error("Download failed");
-
-      const disposition = res.headers.get("content-disposition");
-      let filename = `${slugify(project.projectname, `project_${project.id}`)}_project_bundle.zip`;
-      const match = disposition?.match(/filename="?([^"]+)"?/);
-      if (match?.[1]) filename = match[1];
-
-      const blob = await res.blob();
-      const downloadUrl = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = downloadUrl;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(downloadUrl);
-    } catch (err) {
-      setBundleError(err?.message || "Download failed. Please try again.");
-    } finally {
-      setBundling(false);
-    }
-  };
+  const [saveError, setSaveError] = useState("");
+  const [downloadOpen, setDownloadOpen] = useState(false);
 
   const startEdit = () => {
     setEditName(project?.projectname || "");
     setEditDescription(project?.description || "");
+    setSaveError("");
     setEditing(true);
   };
 
@@ -60,7 +34,12 @@ export default function ProjectHeaderSection({ project, onRefreshProject }) {
   const saveEdit = async (e) => {
     e?.preventDefault();
     if (!project) return;
+    if (!editName.trim()) {
+      setSaveError("Enter a project name.");
+      return;
+    }
     setSaving(true);
+    setSaveError("");
     try {
       const form = new FormData();
       form.append("project_id", String(project.id));
@@ -75,6 +54,7 @@ export default function ProjectHeaderSection({ project, onRefreshProject }) {
       setEditing(false);
     } catch (err) {
       console.error("Failed to update project:", err);
+      setSaveError("Couldn't save the project. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -87,8 +67,8 @@ export default function ProjectHeaderSection({ project, onRefreshProject }) {
       actions={
         !editing ? (
           <div className="flex items-center gap-2">
-            <button type="button" className={tabBtn} onClick={downloadBundle} disabled={bundling}>
-              {bundling ? "Preparing download..." : "Download"}
+            <button type="button" className={tabBtn} onClick={() => setDownloadOpen(true)}>
+              Download
             </button>
             <button type="button" className={tabBtn} onClick={startEdit}>
               Edit
@@ -99,17 +79,12 @@ export default function ProjectHeaderSection({ project, onRefreshProject }) {
     >
       {!editing ? (
         <>
-          {bundleError && (
-            <div role="alert" aria-live="assertive" className="mb-2 border border-error bg-error/10 px-3 py-2 text-sm text-error">
-              {bundleError}
-            </div>
-          )}
           {project.description && (
             <p className="mb-2 leading-relaxed text-paper/70">{project.description}</p>
           )}
           {project.created_at && (
             <div className="text-sm text-paper/50">
-              Created: {new Date(project.created_at).toLocaleString()}
+              Created: {formatDate(project.created_at)}
             </div>
           )}
         </>
@@ -121,9 +96,11 @@ export default function ProjectHeaderSection({ project, onRefreshProject }) {
               value={editName}
               onChange={(e) => setEditName(e.target.value)}
               placeholder="Project name"
+              aria-label="Project name"
+              autoFocus
             />
             <button type="submit" className={tabBtn} disabled={saving}>
-              Save
+              {saving ? "Saving…" : "Save"}
             </button>
             <button type="button" className={tabBtn} onClick={cancelEdit}>
               Cancel
@@ -133,10 +110,13 @@ export default function ProjectHeaderSection({ project, onRefreshProject }) {
             className={`${inputClasses} min-h-[80px] resize-y`}
             value={editDescription}
             onChange={(e) => setEditDescription(e.target.value)}
-            placeholder="Project description..."
+            placeholder="Project description…"
+            aria-label="Project description"
           />
+          <ErrorDisplay message={saveError} variant="alert" />
         </form>
       )}
+      {downloadOpen && <ProjectDownloadModal project={project} onClose={() => setDownloadOpen(false)} />}
     </Panel>
   );
 }

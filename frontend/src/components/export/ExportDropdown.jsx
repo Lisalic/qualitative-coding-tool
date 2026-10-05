@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { apiFetch } from "../../api";
 import { btn } from "../../lib/uiClasses";
-import { buildExportPath, getExportOptions } from "./exportHelpers";
+import { buildExportPath, filenameFromDisposition, getExportOptions } from "./exportHelpers";
 
 /** Opt-in coding export columns -- both off by default (de-identification). */
 const CODING_PRIVACY_OPTIONS = [
@@ -11,12 +11,13 @@ const CODING_PRIVACY_OPTIONS = [
 
 /**
  * Dropdown trigger for exporting codebooks, coding entries, memos, or summaries.
- * Strictly adheres to black & white palette, square corners (rounded-none),
- * and hover-invert styling per documentation/style-guide.md.
+ * A black menu with hover-invert items, like every other menu in the app
+ * (documentation/style-guide.md). Escape closes it and returns focus to
+ * the trigger; arrow keys move between formats. While a download is being
+ * prepared the trigger says so, since a large export can take a moment.
  *
- * When `getExportOptions` has only one option for this artifact type
- * (summary's case: markdown only), there is nothing to choose between: the
- * trigger downloads directly instead of opening a one-item menu.
+ * Every artifact type offers Word/Excel first plus the interchange formats
+ * (see `getExportOptions`), so the trigger always opens a menu.
  */
 export default function ExportDropdown({
   fileId,
@@ -28,7 +29,9 @@ export default function ExportDropdown({
   const [open, setOpen] = useState(false);
   const [error, setError] = useState(null);
   const [codingFlags, setCodingFlags] = useState({});
+  const [exporting, setExporting] = useState(false);
   const menuRef = useRef(null);
+  const triggerRef = useRef(null);
 
   useEffect(() => {
     function handleClickOutside(event) {
@@ -40,9 +43,26 @@ export default function ExportDropdown({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  const handleMenuKeyDown = (event) => {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      setOpen(false);
+      triggerRef.current?.focus();
+      return;
+    }
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    const items = [...(menuRef.current?.querySelectorAll('[role="menuitem"]') || [])];
+    if (items.length === 0) return;
+    event.preventDefault();
+    const at = items.indexOf(document.activeElement);
+    const next = event.key === "ArrowDown" ? (at + 1) % items.length : (at - 1 + items.length) % items.length;
+    items[next].focus();
+  };
+
   const handleDownload = async (targetType, format, extraParams) => {
     setError(null);
     setOpen(false);
+    setExporting(true);
     const flags = targetType === "coding"
       ? Object.fromEntries(Object.entries(codingFlags).filter(([, on]) => on))
       : {};
@@ -52,12 +72,10 @@ export default function ExportDropdown({
       const res = await apiFetch(path);
       if (!res.ok) throw new Error("Export failed");
 
-      const disposition = res.headers.get("content-disposition");
-      let filename = `${targetType}_export.${format}`;
-      if (disposition) {
-        const match = disposition.match(/filename="?([^"]+)"?/);
-        if (match && match[1]) filename = match[1];
-      }
+      const filename = filenameFromDisposition(
+        res.headers.get("content-disposition"),
+        `${targetType}_export.${format}`,
+      );
 
       const blob = await res.blob();
       const downloadUrl = window.URL.createObjectURL(blob);
@@ -76,48 +94,20 @@ export default function ExportDropdown({
     } catch (err) {
       console.error("Download failed:", err);
       setError(err?.message || "Export failed. Please try again.");
+    } finally {
+      setExporting(false);
     }
   };
 
   const options = getExportOptions(artifactType);
-  const singleOption = options.length === 1 ? options[0] : null;
-
-  if (singleOption) {
-    return (
-      <div className="relative inline-block text-left" ref={menuRef}>
-        <button
-          type="button"
-          className={triggerClassName || `${btn} rounded-none`}
-          onClick={() => handleDownload(singleOption.target, singleOption.format, singleOption.extraParams)}
-        >
-          {label}
-        </button>
-        {error && (
-          <div
-            role="alert"
-            aria-live="assertive"
-            className="absolute right-0 mt-1 w-64 border border-line bg-paper text-ink p-2 text-xs z-50 rounded-none shadow-none flex items-center justify-between gap-2"
-          >
-            <span className="flex-1">{error}</span>
-            <button
-              type="button"
-              className="text-xs font-bold px-1 hover:bg-ink hover:text-paper"
-              onClick={() => setError(null)}
-              aria-label="Dismiss error"
-            >
-              ✕
-            </button>
-          </div>
-        )}
-      </div>
-    );
-  }
 
   return (
-    <div className="relative inline-block text-left" ref={menuRef}>
+    <div className="relative inline-block text-left" ref={menuRef} onKeyDown={handleMenuKeyDown}>
       <button
+        ref={triggerRef}
         type="button"
-        className={triggerClassName || `${btn} rounded-none`}
+        className={triggerClassName || btn}
+        disabled={exporting}
         onClick={() => {
           setError(null);
           setOpen((prev) => !prev);
@@ -125,17 +115,19 @@ export default function ExportDropdown({
         aria-expanded={open}
         aria-haspopup="true"
       >
-        <span>{label}</span>
-        <span className="ml-1 text-xs">▼</span>
+        <span>{exporting ? "Exporting…" : label}</span>
+        <span className="ml-1 text-xs" aria-hidden="true">
+          ▼
+        </span>
       </button>
 
       {open && (
         <div
-          className="absolute right-0 mt-1 w-48 border border-line bg-paper text-ink z-50 rounded-none shadow-none"
+          className="absolute right-0 z-50 mt-1 w-64 border border-line bg-ink text-paper"
           role="menu"
         >
           <div className="border-b border-line px-3 py-1.5 text-xs uppercase tracking-wider font-semibold text-paper/70 bg-ink">
-            Export Format
+            Export format
           </div>
           {artifactType === "coding" && (
             <div className="border-b border-line px-3 py-2 space-y-1">
@@ -143,7 +135,7 @@ export default function ExportDropdown({
                 <label key={param} className="flex items-center gap-2 text-xs cursor-pointer">
                   <input
                     type="checkbox"
-                    className="rounded-none accent-ink"
+                    className="accent-paper"
                     checked={Boolean(codingFlags[param])}
                     onChange={(e) =>
                       setCodingFlags((prev) => ({ ...prev, [param]: e.target.checked }))
@@ -158,7 +150,7 @@ export default function ExportDropdown({
             <button
               key={opt.label}
               type="button"
-              className={`w-full text-left px-3 py-2 text-sm hover:bg-ink hover:text-paper rounded-none transition-colors duration-150 ${
+              className={`w-full px-3 py-2 text-left text-sm transition-colors duration-150 hover:bg-paper hover:text-ink focus:bg-paper focus:text-ink ${
                 idx > 0 ? "border-t border-line" : ""
               }`}
               role="menuitem"
