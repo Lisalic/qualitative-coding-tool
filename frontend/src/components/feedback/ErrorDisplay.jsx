@@ -1,9 +1,16 @@
+import { btnSm } from "../../lib/uiClasses";
+
+// Error and success are the palette's only two colors; a "warning" is a
+// notice, so it shares the neutral info treatment rather than adding an
+// off-palette amber.
 const TONE_CLASSES = {
   error: "text-error border-error bg-error/10",
-  warning: "text-amber-300 border-amber-400/40 bg-amber-400/10",
+  warning: "text-paper/80 border-line bg-surface-raised",
   success: "text-success border-success bg-success/10",
-  info: "text-paper/70 border-paper/20 bg-white/5",
+  info: "text-paper/70 border-line bg-surface-raised",
 };
+
+const retryBtn = `${btnSm} border-current`;
 
 export default function ErrorDisplay({
   message,
@@ -15,10 +22,12 @@ export default function ErrorDisplay({
 }) {
   if (!message) return null;
   const tone = TONE_CLASSES[type] || TONE_CLASSES.error;
+  // Errors interrupt (role="alert"); everything else is announced politely.
+  const role = type === "error" ? "alert" : "status";
 
   if (variant === "message") {
     return (
-      <div className={`border px-4 py-3 text-sm font-medium ${tone}`}>
+      <div role={role} className={`border px-4 py-3 text-sm font-medium ${tone}`}>
         <p className="text-center">{message}</p>
         {details && <p className="mt-1 text-xs opacity-80">{details}</p>}
         {onRetry && (
@@ -26,7 +35,7 @@ export default function ErrorDisplay({
             <button
               type="button"
               onClick={onRetry}
-              className="border border-current px-3 py-1 text-xs uppercase tracking-wider hover:opacity-80"
+              className={retryBtn}
             >
               Retry
             </button>
@@ -38,14 +47,14 @@ export default function ErrorDisplay({
 
   if (variant === "alert") {
     return (
-      <div className={`border px-4 py-3 text-sm ${tone}`}>
+      <div role={role} className={`border px-4 py-3 text-sm ${tone}`}>
         <p>{message}</p>
         {details && <p className="mt-1 text-xs opacity-80">{details}</p>}
         {onRetry && (
           <button
             type="button"
             onClick={onRetry}
-            className="mt-2 border border-current px-3 py-1 text-xs uppercase tracking-wider hover:opacity-80"
+            className={`mt-2 ${retryBtn}`}
           >
             Retry
           </button>
@@ -56,7 +65,7 @@ export default function ErrorDisplay({
 
   return (
     <div
-      role="alert"
+      role={role}
       className={`flex items-center justify-between gap-3 border px-4 py-3 text-sm ${tone}`}
     >
       <div className="flex-1">
@@ -68,7 +77,7 @@ export default function ErrorDisplay({
           <button
             type="button"
             onClick={onRetry}
-            className="border border-current px-2.5 py-0.5 text-xs uppercase tracking-wider hover:opacity-80"
+            className={retryBtn}
           >
             Retry
           </button>
@@ -78,7 +87,7 @@ export default function ErrorDisplay({
             type="button"
             onClick={onDismiss}
             aria-label="Dismiss message"
-            className="shrink-0 text-lg leading-none hover:opacity-70"
+            className="shrink-0 px-1.5 text-lg leading-none hover:opacity-70"
           >
             ×
           </button>

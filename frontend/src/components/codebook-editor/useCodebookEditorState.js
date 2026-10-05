@@ -95,6 +95,13 @@ export function useCodebookEditorState(storageKey) {
     }
   }, [storageKey]);
 
+  const snapshot = useCallback(() => stateRef.current, []);
+  const clearDraftIfUnchanged = useCallback((savedState) => {
+    if (stateRef.current !== savedState) return false;
+    clearDraft();
+    return true;
+  }, [clearDraft]);
+
   const updateDraft = useCallback((tree) => commit((prev) => setDraft(prev, tree)), [commit]);
 
   /**
@@ -157,5 +164,7 @@ export function useCodebookEditorState(storageKey) {
     dismissEvery,
     copyCode,
     clearDraft,
+    snapshot,
+    clearDraftIfUnchanged,
   };
 }

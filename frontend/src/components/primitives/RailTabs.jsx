@@ -3,11 +3,12 @@
  * shared by View Coding's rail (Codebook / AI Coding / Coverage) and the
  * integrate workspace's rail (Code / Comparison). `tabs` is
  * `[{ value, label, count }]`; a positive `count` renders as a compact
- * badge. Wraps rather than clipping when the rail is narrow.
+ * badge. Always one line -- callers keep the header line free of other
+ * controls (see `CodingCodebookSidebar`'s Edit row) so the tabs fit.
  */
 export default function RailTabs({ tabs, activeTab, onChange }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1" role="tablist">
+    <div className="flex items-center gap-x-2.5 whitespace-nowrap" role="tablist">
       {tabs.map(({ value, label, count }) => {
         const isActive = value === activeTab;
         return (

@@ -42,6 +42,14 @@ describe("DialogHost", () => {
     expect(container.querySelector('[role="alertdialog"]')).toBeNull();
   });
 
+  it("opens a destructive confirm on Cancel so Enter can't confirm it", () => {
+    act(() => {
+      DialogService.confirm("Delete it?", { confirmLabel: "Delete", danger: true });
+    });
+    expect(document.activeElement?.textContent).toBe("Cancel");
+    act(() => DialogService.resolveCurrent(false));
+  });
+
   it("confirm resolves false on Cancel and on Escape", async () => {
     let first;
     act(() => {

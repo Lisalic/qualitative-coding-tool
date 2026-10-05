@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { inputSm, btnSm, btnPrimary } from "../../../lib/uiClasses";
+import ToastService from "../../feedback/ToastService";
 
 /**
  * Forks a whole coding artifact -- its codebook snapshot, its own rows,
@@ -39,6 +40,7 @@ export default function CodingDuplicateControl({ defaultName, onDuplicate, disab
     }
     setOpen(false);
     setStatus({ state: "idle", message: "" });
+    ToastService.show(`Duplicated as "${trimmed}".`, "success");
   };
 
   if (!open) {
@@ -57,6 +59,7 @@ export default function CodingDuplicateControl({ defaultName, onDuplicate, disab
         value={name}
         onChange={(e) => setName(e.target.value)}
         placeholder="New coding name"
+        aria-label="New coding name"
         disabled={status.state === "saving"}
         autoFocus
       />
@@ -67,7 +70,7 @@ export default function CodingDuplicateControl({ defaultName, onDuplicate, disab
           onClick={confirm}
           disabled={status.state === "saving"}
         >
-          {status.state === "saving" ? "Duplicating..." : "Confirm"}
+          {status.state === "saving" ? "Duplicating…" : "Confirm"}
         </button>
         <button type="button" className={btnSm} onClick={cancel} disabled={status.state === "saving"}>
           Cancel

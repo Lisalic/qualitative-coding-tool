@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import ToastHost from "../ToastHost";
-import ToastService, { TOAST_DURATION_MS } from "../ToastService";
+import ToastService, { MAX_TOASTS, SHORT_TOAST_DURATION_MS, TOAST_DURATION_MS } from "../ToastService";
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -26,17 +26,34 @@ describe("ToastHost", () => {
     vi.useRealTimers();
   });
 
-  it("shows a toast with a countdown and removes it after the duration", () => {
-    act(() => ToastService.show("API Key saved!", "success"));
-    expect(container.textContent).toContain("API Key saved!");
-    expect(container.textContent).toContain("Success");
+  it("shows an error toast with a countdown and removes it after the duration", () => {
+    act(() => ToastService.show("Upload failed", "error"));
+    expect(container.textContent).toContain("Upload failed");
+    expect(container.textContent).toContain("Error");
     expect(container.textContent).toContain("15s");
 
     act(() => vi.advanceTimersByTime(5000));
     expect(container.textContent).toContain("10s");
 
     act(() => vi.advanceTimersByTime(TOAST_DURATION_MS));
+    expect(container.textContent).not.toContain("Upload failed");
+  });
+
+  it("dismisses success notices sooner than errors", () => {
+    act(() => ToastService.show("API Key saved!", "success"));
+    expect(container.textContent).toContain("Success");
+    expect(container.textContent).toContain(`${SHORT_TOAST_DURATION_MS / 1000}s`);
+    act(() => vi.advanceTimersByTime(SHORT_TOAST_DURATION_MS));
     expect(container.textContent).not.toContain("API Key saved!");
+  });
+
+  it("keeps only the newest few toasts", () => {
+    act(() => {
+      for (let i = 0; i < MAX_TOASTS + 2; i += 1) ToastService.show(`Toast ${i}`);
+    });
+    expect(container.querySelectorAll('[role="status"]')).toHaveLength(MAX_TOASTS);
+    expect(container.textContent).not.toContain("Toast 0");
+    expect(container.textContent).toContain(`Toast ${MAX_TOASTS + 1}`);
   });
 
   it("dismisses on the × button", () => {

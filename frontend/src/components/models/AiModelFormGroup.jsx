@@ -8,7 +8,7 @@ import {
 } from "../../lib/aiModelCatalog";
 import AiLabel from "../forms/AiLabel";
 import Dropdown from "../primitives/Dropdown";
-import { select } from "../../lib/uiClasses";
+import { btnActive, btnSm, select } from "../../lib/uiClasses";
 
 const SEGMENTS = [
   { mode: "all", label: "All" },
@@ -34,7 +34,7 @@ export default function AiModelFormGroup({
   onModelChange,
   disabled = false,
   id = "model",
-  label = "AI Model",
+  label = "AI model",
   selectPlaceholder = "dash",
   className = "flex flex-col gap-1.5",
   labelClassName,
@@ -44,16 +44,22 @@ export default function AiModelFormGroup({
   const [priceFilter, setPriceFilter] = useState("all");
   const { models, loading: modelsLoading, error: modelsError } = useAiModels();
   const selectedModel = getAiModelByValue(models, model);
-  const filteredModels = useMemo(
-    () => filterAiModelsByPaid(models, priceFilter),
-    [models, priceFilter],
-  );
+  // The Free/Paid filter narrows what's offered, but never silently drops
+  // the model already chosen -- it stays listed (and selected) until the
+  // user picks another one.
+  const filteredModels = useMemo(() => {
+    const list = filterAiModelsByPaid(models, priceFilter);
+    if (selectedModel && !list.some((m) => m.value === selectedModel.value)) {
+      return [selectedModel, ...list];
+    }
+    return list;
+  }, [models, priceFilter, selectedModel]);
 
+  // A model that has left the catalog altogether can't be run.
   useEffect(() => {
-    if (!model || modelsLoading) return;
-    const ok = filteredModels.some((m) => m.value === model);
-    if (!ok) onModelChange("");
-  }, [model, filteredModels, modelsLoading, onModelChange]);
+    if (!model || modelsLoading || models.length === 0) return;
+    if (!models.some((m) => m.value === model)) onModelChange("");
+  }, [model, models, modelsLoading, onModelChange]);
 
   const isDisabled = disabled || modelsLoading;
 
@@ -75,11 +81,7 @@ export default function AiModelFormGroup({
             <button
               key={mode}
               type="button"
-              className={`border px-2 py-0.5 text-xs transition-colors ${
-                priceFilter === mode
-                  ? "border-paper bg-paper text-ink"
-                  : "border-paper/30 text-paper/70 hover:border-paper hover:text-paper"
-              }`}
+              className={`${btnSm} py-0.5 ${priceFilter === mode ? btnActive : ""}`}
               aria-pressed={priceFilter === mode}
               disabled={isDisabled}
               onClick={() => setPriceFilter(mode)}
@@ -100,11 +102,14 @@ export default function AiModelFormGroup({
         triggerClassName={`w-full ${selectClassName}`}
         searchPlaceholder="Search models…"
         emptyMessage="No models match that search."
+        noOptionsMessage={priceFilter === "all" ? "No models available." : `No ${priceFilter} models available.`}
         listLabel="AI models"
         renderOptionMeta={formatAiModelOptionMeta}
       />
       {modelsError ? (
-        <p className="mt-1.5 text-sm leading-snug text-error">{modelsError}</p>
+        <p role="alert" className="mt-1.5 text-sm leading-snug text-error">
+          {modelsError} Refresh the page to try again.
+        </p>
       ) : selectedModel?.paid ? (
         <p className="mt-1.5 text-sm leading-snug text-paper/70">
           {formatPaidModelPricingLine(selectedModel)}

@@ -1,4 +1,4 @@
-import { btnPrimary } from "../../lib/uiClasses";
+import { btnPrimary, meta } from "../../lib/uiClasses";
 import ErrorDisplay from "../feedback/ErrorDisplay";
 
 /**
@@ -16,6 +16,9 @@ import ErrorDisplay from "../feedback/ErrorDisplay";
  * decides the label -- otherwise a required-fields gate reads the button
  * as "in progress" the instant something is missing, before the user has
  * clicked anything.
+ *
+ * `submitButton.hint` is shown beside a disabled button to say what is
+ * still missing -- a greyed-out button alone doesn't say why.
  */
 export default function FormShell({
   children,
@@ -40,7 +43,7 @@ export default function FormShell({
           children
         )}
         {submitButton && (
-          <div className={columns ? "flex justify-center" : undefined}>
+          <div className={`flex flex-col gap-1.5 ${columns ? "items-center" : "items-start"}`}>
             <button
               type="submit"
               disabled={submitButton.disabled}
@@ -48,6 +51,9 @@ export default function FormShell({
             >
               {submitButton.loading ? submitButton.loadingText : submitButton.text}
             </button>
+            {submitButton.disabled && !submitButton.loading && submitButton.hint ? (
+              <p className={meta}>{submitButton.hint}</p>
+            ) : null}
           </div>
         )}
       </form>

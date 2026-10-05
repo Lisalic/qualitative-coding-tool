@@ -2,7 +2,7 @@ import { useState } from "react";
 import HighlightedContent from "../HighlightedContent";
 import Panel from "../../shell/Panel";
 import MemoEditor from "../../data/MemoEditor";
-import { badge, btnSm } from "../../../lib/uiClasses";
+import { badge, btnSm, inputSm } from "../../../lib/uiClasses";
 import { rollUpCoder } from "../../../lib/codingUtils";
 
 function AppliedCodeRow({ entry, getCodeColor, onRemove, onUpdateNotes, readOnly }) {
@@ -37,7 +37,7 @@ function AppliedCodeRow({ entry, getCodeColor, onRemove, onUpdateNotes, readOnly
         {!readOnly && (
           <button
             type="button"
-            className="shrink-0 text-paper/50 hover:text-error"
+            className="-my-1 -mr-1.5 shrink-0 px-2 py-1 text-paper/50 hover:text-error"
             onClick={onRemove}
             aria-label={`Remove ${entry.code}`}
             title="Remove code"
@@ -62,8 +62,9 @@ function AppliedCodeRow({ entry, getCodeColor, onRemove, onUpdateNotes, readOnly
               setEditingNotes(false);
             }
           }}
-          placeholder="Add a note..."
-          className="border border-paper bg-surface-raised px-2 py-1 text-xs text-paper placeholder:text-paper/40 focus:outline-none focus:ring-1 focus:ring-paper"
+          placeholder="Add a note…"
+          aria-label={`Note on ${entry.code}`}
+          className={inputSm}
         />
       ) : (
         <button
@@ -138,7 +139,7 @@ export default function CodingReaderPane({
         </div>
         {!readOnly && (
           <button type="button" className={`${btnSm} shrink-0`} onClick={onRecodeThisDocument}>
-            Code with AI
+            Select for AI coding
           </button>
         )}
       </div>

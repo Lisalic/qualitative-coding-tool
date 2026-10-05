@@ -1,6 +1,7 @@
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useRef, useSyncExternalStore } from "react";
 import { btn, btnDanger, btnPrimary } from "../../lib/uiClasses";
 import DialogService from "./DialogService";
+import { useModalBehavior } from "./useModalBehavior";
 
 /**
  * Renders whichever DialogService confirm is at the head of the queue, using
@@ -9,41 +10,33 @@ import DialogService from "./DialogService";
  */
 export default function DialogHost() {
   const dialog = useSyncExternalStore(DialogService.subscribe, DialogService.getSnapshot);
-  const primaryRef = useRef(null);
-
-  useEffect(() => {
-    if (!dialog) return undefined;
-    const previouslyFocused = document.activeElement;
-    primaryRef.current?.focus();
-
-    const onKeyDown = (event) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        DialogService.resolveCurrent(false);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus();
-    };
-  }, [dialog]);
-
   if (!dialog) return null;
+  return <ConfirmDialog key={dialog.id} dialog={dialog} />;
+}
 
+function ConfirmDialog({ dialog }) {
   const { options } = dialog;
+  const cancelRef = useRef(null);
+  const primaryRef = useRef(null);
+  const cancel = () => DialogService.resolveCurrent(false);
+  // A destructive confirm opens on Cancel, so a reflexive Enter can't
+  // delete anything; an ordinary one opens on its primary action.
+  const dialogRef = useModalBehavior(cancel, {
+    initialFocusRef: options.danger ? cancelRef : primaryRef,
+  });
+
   const titleId = `app-dialog-title-${dialog.id}`;
   const bodyId = `app-dialog-body-${dialog.id}`;
-  const cancel = () => DialogService.resolveCurrent(false);
 
   return (
     <div className="fixed inset-0 z-[20000] flex items-center justify-center bg-black/80 p-4" onClick={cancel}>
       <div
+        ref={dialogRef}
         role="alertdialog"
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={bodyId}
-        className="flex max-h-[90vh] w-full max-w-[480px] flex-col border-2 border-paper bg-ink text-paper shadow-2xl"
+        className="flex max-h-[90vh] w-full max-w-[480px] flex-col border-2 border-paper bg-ink text-paper"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-paper px-5 py-3.5">
@@ -65,7 +58,7 @@ export default function DialogHost() {
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-paper px-5 py-3.5">
-          <button type="button" className={btn} onClick={cancel}>
+          <button ref={cancelRef} type="button" className={btn} onClick={cancel}>
             {options.cancelLabel || "Cancel"}
           </button>
           <button

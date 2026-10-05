@@ -50,10 +50,12 @@ export default function IntegrateSourcePicker({ codebooks, selected, onToggle, l
               key={ref}
               className="inline-flex max-w-full items-center gap-1 border border-paper bg-paper px-2 py-0.5 text-xs text-ink"
             >
-              <span className="max-w-[12rem] truncate">{nameByRef[ref] || ref}</span>
+              <span className="max-w-[12rem] truncate" title={nameByRef[ref] || ref}>
+                {nameByRef[ref] || ref}
+              </span>
               <button
                 type="button"
-                className="shrink-0 leading-none text-ink/60 hover:text-ink"
+                className="-my-0.5 -mr-1.5 shrink-0 px-1.5 py-0.5 leading-none text-ink/60 hover:text-ink"
                 onClick={() => onToggle(ref)}
                 disabled={disabled}
                 aria-label={`Remove ${nameByRef[ref] || ref} from the selection`}
@@ -71,6 +73,7 @@ export default function IntegrateSourcePicker({ codebooks, selected, onToggle, l
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search codebooks…"
+          aria-label="Search codebooks"
           className={inputSm}
           disabled={disabled}
         />
@@ -95,11 +98,16 @@ export default function IntegrateSourcePicker({ codebooks, selected, onToggle, l
                 } ${disabled ? "opacity-50" : ""}`}
               >
                 <div className="flex w-full items-center justify-between gap-2">
-                  <span className="min-w-0 truncate font-medium">{option.name}</span>
+                  <span className="min-w-0 truncate font-medium" title={option.name}>
+                    {option.name}
+                  </span>
                   {checked && <span className="shrink-0">✓</span>}
                 </div>
                 {option.description ? (
-                  <span className={`truncate text-xs ${checked ? "text-ink/70" : "text-paper/50"}`}>
+                  <span
+                    className={`w-full truncate text-xs ${checked ? "text-ink/70" : "text-paper/50"}`}
+                    title={option.description}
+                  >
                     {option.description}
                   </span>
                 ) : null}

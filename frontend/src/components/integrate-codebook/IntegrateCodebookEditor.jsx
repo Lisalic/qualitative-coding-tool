@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { requestJson } from "../../api";
 import ArtifactCreatedMessage from "../feedback/ArtifactCreatedMessage";
 import ErrorDisplay from "../feedback/ErrorDisplay";
+import DialogService from "../feedback/DialogService";
+import ToastService from "../feedback/ToastService";
 import PageShell from "../shell/PageShell";
 import { useInitialProjectId } from "../tool-panels/useInitialProjectId";
 import { useToolPanelData } from "../tool-panels/useToolPanelData";
@@ -15,6 +17,7 @@ import { flattenTreeToCodes } from "../../lib/codingUtils";
 import { btn } from "../../lib/uiClasses";
 import { useCodebookEditorState } from "../codebook-editor/useCodebookEditorState";
 import EditorSetupStep from "../editor-shell/EditorSetupStep";
+import { missingHint } from "../../lib/formHints";
 import EditorOutputFields from "../editor-shell/EditorOutputFields";
 import EditorWorkspace from "../editor-shell/EditorWorkspace";
 import EditorActionBar from "../editor-shell/EditorActionBar";
@@ -115,18 +118,42 @@ export default function IntegrateCodebookEditor() {
   const { comparisons, loading: comparisonsLoading } = useSourceComparisons(started ? selectedRefs : []);
 
   // Open on the newest comparison when there is one -- reading it is the
-  // natural first step of a merge. Re-evaluated whenever the source set
-  // (and therefore the comparison list) changes.
+  // natural first step of a merge. Re-evaluated whenever the comparison
+  // list changes, but without undoing the researcher's own choices: a
+  // still-listed comparison stays selected, the "use in AI" opt-out is
+  // left alone, and the rail tab only moves until they've picked one.
+  const railTouchedRef = useRef(false);
   useEffect(() => {
     const best = comparisons[0] || null;
-    setSelectedComparison(best?.ref || null);
-    setUseComparisonInAi(true);
-    setRailTab(best ? "comparison" : "code");
+    setSelectedComparison((prev) =>
+      prev && comparisons.some((c) => c.ref === prev) ? prev : best?.ref || null,
+    );
+    if (!railTouchedRef.current) setRailTab(best ? "comparison" : "code");
   }, [comparisons]);
+
+  const changeRailTab = (tab) => {
+    railTouchedRef.current = true;
+    setRailTab(tab);
+  };
 
   const selectCode = (code) => {
     setActiveCode(code);
-    setRailTab("code");
+    changeRailTab("code");
+  };
+
+  const copyCode = (code) => {
+    const before = editor.snapshot();
+    if (editor.copyCode(code) === before) {
+      ToastService.show(`"${code.name}" is already in your draft.`, "info");
+    }
+  };
+
+  const handleClear = async () => {
+    const confirmed = await DialogService.confirm(
+      "Clear every code and proposal in this merged draft? This cannot be undone.",
+      { title: "Clear draft", confirmLabel: "Clear", danger: true },
+    );
+    if (confirmed) editor.clearDraft();
   };
 
   const toggleRef = (ref) => {
@@ -134,6 +161,8 @@ export default function IntegrateCodebookEditor() {
   };
 
   const handleSubmit = async () => {
+    if (submitting) return;
+    const submittedState = editor.snapshot();
     setSubmitting(true);
     setSubmitError("");
     setCreatedFile(null);
@@ -151,7 +180,7 @@ export default function IntegrateCodebookEditor() {
         });
       } catch (err) {
         if (err instanceof MissingFieldsError) {
-          setSubmitError(err.message);
+          setSubmitError(err.userMessage);
           return;
         }
         throw err;
@@ -169,7 +198,7 @@ export default function IntegrateCodebookEditor() {
       setCreatedFile(data?.file || null);
       // The draft has become an artifact -- starting the next merge from
       // the same selection would otherwise inherit every code just saved.
-      editor.clearDraft();
+      editor.clearDraftIfUnchanged(submittedState);
     } catch (err) {
       setSubmitError(err?.message || "Failed to save the codebook");
     } finally {
@@ -199,7 +228,7 @@ export default function IntegrateCodebookEditor() {
                 disabled={false}
               />
               {selectedRefs.length < 2 && (
-                <p className="text-sm text-paper/50">Select 2 or more codebooks to continue.</p>
+                <p className="text-sm text-paper/50">Select 2 or more codebooks.</p>
               )}
             </>
           }
@@ -225,6 +254,11 @@ export default function IntegrateCodebookEditor() {
           submitLabel="Continue"
           submitLoadingLabel="Continue"
           submitDisabled={!canContinue}
+          submitHint={missingHint([
+            ["2 or more codebooks", selectedRefs.length < 2],
+            ["a name", !name.trim()],
+            ["a project", !selectedProject],
+          ])}
           error={panelDataError}
         />
       </PageShell>
@@ -268,7 +302,7 @@ export default function IntegrateCodebookEditor() {
             activeKey={activeCode?.key}
             onSelectCode={selectCode}
             draftCount={draftCount}
-            onCopyCode={editor.copyCode}
+            onCopyCode={copyCode}
             disabled={submitting}
           />
         }
@@ -276,7 +310,7 @@ export default function IntegrateCodebookEditor() {
         rail={
           <IntegrateRail
             tab={railTab}
-            onTabChange={setRailTab}
+            onTabChange={changeRailTab}
             comparisons={comparisons}
             comparisonsLoading={comparisonsLoading}
             selectedComparison={selectedComparison}
@@ -301,13 +335,14 @@ export default function IntegrateCodebookEditor() {
               </>
             }
             secondaryLabel="Clear"
-            onSecondary={editor.clearDraft}
+            onSecondary={handleClear}
             secondaryDisabled={submitting || (draftCount === 0 && proposed === 0)}
             primaryLabel="Create codebook"
-            primaryLoadingLabel="Saving..."
+            primaryLoadingLabel="Creating…"
             primaryLoading={submitting}
             onPrimary={handleSubmit}
             primaryDisabled={!canSubmit}
+            primaryHint={draftCount === 0 ? "Add at least one code to create the codebook." : ""}
             errorMessage={submitError}
           />
         }

@@ -23,6 +23,7 @@ export default function EditorSetupStep({
   submitLoadingLabel,
   submitDisabled,
   submitLoading = false,
+  submitHint,
   error,
 }) {
   return (
@@ -34,6 +35,7 @@ export default function EditorSetupStep({
         loadingText: submitLoadingLabel,
         disabled: submitDisabled,
         loading: submitLoading,
+        hint: submitHint,
       }}
       error={error}
     >

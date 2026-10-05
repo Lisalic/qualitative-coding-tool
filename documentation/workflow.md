@@ -182,8 +182,9 @@ User-facing behavior:
   `j`/`k` step through it.
 - Workspace center pane: the selected row's full text, Keep/Skip for it, and
   its memo editor.
-- Workspace right rail: the AI assist tool (the output fields from setup are
-  already settled, so this rail holds nothing else).
+- Workspace right rail: the AI assist tool, as the rail panel's "AI Assist"
+  mode (the output fields from setup are already settled, so this rail holds
+  nothing else).
 - The AI filter proposes rows from the undecided pool only; accepted
   suggestions are badged `(added by AI)` and it can be re-run as often as
   the user likes without re-litigating rows already decided. Nothing is
@@ -293,8 +294,9 @@ User-facing behavior:
   workspace runs the shared 3-pane frame with `emphasis="builder"`: the
   **center pane** is the wide one, holding the draft codebook (`CodeLegend`,
   always in edit mode here) with any AI proposal tray above it. The right
-  rail holds the reference material instead -- the selected row's full text
-  and its memo, plus the AI assist tool pinned at the foot.
+  rail holds the reference material instead, as two tabbed modes -- "Row"
+  (the selected row's full text and its memo) and "AI Assist" (the codebook
+  generator).
 - The generator is available *inside* the workspace as an assistant: it proposes codes
   into the **review tray**, one card per code showing every field it produced, and each
   is accepted or dismissed individually. Nothing enters the codebook without an
@@ -579,5 +581,5 @@ Main backend endpoints by domain:
 - Codebook: `/api/codebook-preview/`, `/api/codebook/manual`, `/api/codebook`, `/api/codebook/{ref}` (PUT), `/api/list-codebooks`, `/api/compare-codebooks/`, `/api/integrate-codebook-preview/`, `/api/codebook/integrate`
 - Coding and summarization: `/api/coding/manual`, `/api/coding/{ref}`, `/api/coding/{ref}/rows`, `/api/coding/{ref}/text`, `/api/coding/{ref}/revision` (PUT), `/api/coding/{ref}` (PATCH), `/api/coding/{ref}/duplicate`, `/api/coding/{ref}/recode`, `/api/coding-comparison`, `/api/compare-codings/`, `/api/summarize-coding/`, `/api/save-summary/`, `/api/summary/{summary_id}`
 - Versioning (deterministic, no LLM): `/api/artifacts/{ref}/versions`, `/api/artifacts/{ref}/diff`, `/api/artifacts/{ref}/lineage`, `/api/artifacts/{ref}/assists`
-- Export: `/api/export/{ref}/codebook`, `/api/export/{ref}/coding`, `/api/export/{ref}/summary`, `/api/export/{ref}/memos`, `/api/export/projects/{project_id}/bundle`
+- Export (Word/Excel by default; see [api-reference.md](api-reference.md#export--backendappapiexport_routespy)): `/api/export/{ref}/codebook`, `/api/export/{ref}/coding`, `/api/export/{ref}/summary`, `/api/export/{ref}/memos`, `/api/export/{ref}/document`, `/api/export/projects/{project_id}/bundle`
 

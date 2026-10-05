@@ -39,6 +39,7 @@ export default function CodebookSourceReader({
       loadingMessage="Loading rows..."
       isEmpty={rows.length === 0}
       emptyMessage="No rows on this page."
+      activeKey={activeKey}
       footer={
         <>
           <button type="button" className={btnSm} onClick={onPrevPage} disabled={page === 0}>
@@ -69,21 +70,27 @@ export default function CodebookSourceReader({
           const isActive = key === activeKey;
           const memo = getMemo(row.rowType, row.id);
           return (
-            <li
-              key={key}
-              className={`cursor-pointer border-b border-line-soft px-3 py-2.5 transition-colors ${
-                isActive ? "bg-paper text-ink" : "hover:bg-white/5"
-              }`}
-              onClick={() => onSelectRow(row)}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className={`truncate text-xs uppercase tracking-wide ${isActive ? "text-ink/60" : "text-paper/50"}`}>
-                  {row.rowType === "submission" ? "Post" : "Comment"}
-                  {row.author ? ` · ${row.author}` : ""}
-                </span>
-                {memo ? <MemoIndicator memo={memo} /> : null}
-              </div>
-              <div className="mt-0.5 truncate text-sm font-medium">{preview(row)}</div>
+            <li key={key} className="border-b border-line-soft">
+              <button
+                type="button"
+                aria-current={isActive || undefined}
+                data-active-row={isActive || undefined}
+                className={`block w-full px-3 py-2.5 text-left transition-colors ${
+                  isActive ? "bg-paper text-ink" : "hover:bg-white/5"
+                }`}
+                onClick={() => onSelectRow(row)}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className={`truncate text-xs uppercase tracking-wide ${isActive ? "text-ink/60" : "text-paper/50"}`}>
+                    {row.rowType === "submission" ? "Post" : "Comment"}
+                    {row.author ? ` · ${row.author}` : ""}
+                  </span>
+                  {memo ? <MemoIndicator memo={memo} /> : null}
+                </div>
+                <div className="mt-0.5 truncate text-sm font-medium" title={preview(row)}>
+                  {preview(row)}
+                </div>
+              </button>
             </li>
           );
         })}

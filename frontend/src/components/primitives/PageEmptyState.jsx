@@ -9,8 +9,10 @@
  *
  * Copy convention, so the app names things the same way everywhere:
  * "Select a <noun> to view <what you get>" -- a database, a codebook, a
- * coding, a summary, a comparison, an artifact. Never "file", never
- * "project file", never "coded data".
+ * coding, a summary, a codebook/coding comparison, and "a file" on the
+ * type-agnostic pages (lineage, version history). Never "project file",
+ * never "coded data", and never "artifact" -- that is the backend's word;
+ * the user picks a file. (See documentation/style-guide.md.)
  */
 const DEFAULT_CLASSES =
   "mx-auto flex min-h-32 w-full max-w-2xl items-center justify-center border border-line bg-surface px-6 py-8 text-center italic text-paper/70";

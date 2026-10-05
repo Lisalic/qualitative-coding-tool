@@ -1,9 +1,11 @@
 import { useCallback, useState, useEffect } from "react";
 import { apiFetch } from "../../api";
 import MemoEditor from "./MemoEditor";
+import { formatDate } from "../../lib/formatDate";
+import { useModalBehavior } from "../feedback/useModalBehavior";
+import { btn } from "../../lib/uiClasses";
 
-const navBtn =
-  "border border-paper px-3 py-1.5 text-sm transition-colors hover:bg-paper hover:text-ink disabled:opacity-40";
+const navBtn = btn;
 
 /**
  * `memo`/`onSaveMemo` are optional: every caller that renders rows from a
@@ -12,6 +14,9 @@ const navBtn =
  * the filter editor all open this same modal, wiring the memo editor here
  * once is what makes "add a memo to any row" true everywhere rather than
  * on one screen.
+ *
+ * Keyboard: Escape closes, Tab stays inside, and ←/→ step to the previous
+ * or next row (except while typing in the memo).
  */
 export default function EntryModal({
   entry,
@@ -53,12 +58,30 @@ export default function EntryModal({
     }
   }, [isOpen, entry, fetchComments]);
 
-  if (!isOpen || !entry) return null;
+  const open = Boolean(isOpen && entry);
+  const dialogRef = useModalBehavior(onClose, { enabled: open });
 
-  const formatDate = (timestamp) => {
-    if (!timestamp) return "N/A";
-    return new Date(timestamp * 1000).toLocaleString();
-  };
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKeyDown = (event) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const tag = event.target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || event.target?.isContentEditable) return;
+      if (event.key === "ArrowLeft" && hasPrev) {
+        event.preventDefault();
+        onPrev?.();
+      } else if (event.key === "ArrowRight" && hasNext) {
+        event.preventDefault();
+        onNext?.();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, hasPrev, hasNext, onPrev, onNext]);
+
+  if (!open) return null;
+
+  const formatEntryDate = (timestamp) => (timestamp ? formatDate(timestamp * 1000) || "N/A" : "N/A");
 
   return (
     <div
@@ -66,31 +89,41 @@ export default function EntryModal({
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="entryModalTitle"
         className="max-h-[85vh] w-[85%] max-w-[1100px] overflow-y-auto border-2 border-paper bg-ink"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between gap-2 border-b border-paper px-6 py-4">
+        <div className="flex items-center justify-between gap-2 border-b border-paper px-5 py-3.5">
           <div className="flex items-center gap-2">
-            <button type="button" onClick={onPrev} className={navBtn} disabled={!hasPrev}>
+            <button
+              type="button"
+              onClick={onPrev}
+              className={navBtn}
+              disabled={!hasPrev}
+              title="Previous row (←)"
+            >
               Previous
             </button>
-            <button type="button" onClick={onNext} className={navBtn} disabled={!hasNext}>
+            <button type="button" onClick={onNext} className={navBtn} disabled={!hasNext} title="Next row (→)">
               Next
             </button>
           </div>
-          <h2 className="text-xl font-semibold">
-            {entry.type === "submission" ? "Post" : "Comment"} Details
+          <h2 id="entryModalTitle" className="text-sm font-semibold uppercase tracking-wide">
+            {entry.type === "submission" ? "Post" : "Comment"} details
           </h2>
           <button
             type="button"
-            className="flex h-9 w-9 items-center justify-center text-xl transition-colors hover:bg-white/10"
+            className="flex h-7 w-7 items-center justify-center text-lg transition-colors hover:bg-white/10"
             onClick={onClose}
             aria-label="Close"
           >
             ×
           </button>
         </div>
-        <div className="p-6">
+        <div className="p-5">
           {entry.type === "submission" ? (
             <>
               <div className="mb-3">
@@ -124,7 +157,7 @@ export default function EntryModal({
               )}
               {entry.created_utc && (
                 <div className="mb-3">
-                  <strong>Created:</strong> {formatDate(entry.created_utc)}
+                  <strong>Created:</strong> {formatEntryDate(entry.created_utc)}
                 </div>
               )}
               {entry.num_comments !== undefined && (
@@ -145,7 +178,7 @@ export default function EntryModal({
                         <div key={comment.id} className="border border-paper/20 p-3">
                           <div className="text-sm text-paper/70">
                             <strong>{comment.author}</strong> •{" "}
-                            {formatDate(comment.created_utc)}
+                            {formatEntryDate(comment.created_utc)}
                           </div>
                           <div className="mt-1 whitespace-pre-wrap">{comment.body}</div>
                           <div className="mt-1 text-xs text-paper/50">
@@ -180,7 +213,7 @@ export default function EntryModal({
               </div>
               {entry.created_utc && (
                 <div className="mb-3">
-                  <strong>Created:</strong> {formatDate(entry.created_utc)}
+                  <strong>Created:</strong> {formatEntryDate(entry.created_utc)}
                 </div>
               )}
               {entry.link_id && (

@@ -1,10 +1,11 @@
 import Panel from "../shell/Panel";
+import DialogService from "../feedback/DialogService";
 import { btnSm } from "../../lib/uiClasses";
 
 const FIELDS = [
   ["definition", "Definition"],
-  ["inclusion", "Use when"],
-  ["exclusion", "Don't use when"],
+  ["inclusion", "Inclusion"],
+  ["exclusion", "Exclusion"],
   ["keywords", "Keywords"],
   ["example", "Example"],
 ];
@@ -28,12 +29,22 @@ export default function CodebookProposalTray({
   onDismissAll,
   disabled,
 }) {
+  // Dismissals are remembered (a later run won't re-offer them), so
+  // dismissing a whole tray is worth a second look.
+  const confirmDismissAll = async () => {
+    const confirmed = await DialogService.confirm(
+      `Dismiss all ${proposals.length} proposed codes? Dismissed proposals won't be offered again.`,
+      { title: "Dismiss all", confirmLabel: "Dismiss all", danger: true },
+    );
+    if (confirmed) onDismissAll();
+  };
+
   return (
     <Panel
       title={`Proposed codes (${proposals.length})`}
       actions={
         <>
-          <button type="button" className={btnSm} onClick={onDismissAll} disabled={disabled}>
+          <button type="button" className={btnSm} onClick={confirmDismissAll} disabled={disabled}>
             Dismiss all
           </button>
           <button type="button" className={btnSm} onClick={onAcceptAll} disabled={disabled}>
@@ -44,7 +55,7 @@ export default function CodebookProposalTray({
       bodyClassName="flex flex-col gap-2"
     >
       {proposals.map((proposal) => (
-        <article key={proposal.key} className="border border-line bg-white/5 p-3">
+        <article key={proposal.key} className="border border-line bg-surface-raised p-3">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               {proposal.family_name ? (
@@ -52,7 +63,9 @@ export default function CodebookProposalTray({
                   {proposal.family_name}
                 </div>
               ) : null}
-              <h3 className="truncate text-sm font-semibold">{proposal.name}</h3>
+              <h3 className="truncate text-sm font-semibold" title={proposal.name}>
+                {proposal.name}
+              </h3>
             </div>
             <div className="flex shrink-0 gap-2">
               <button

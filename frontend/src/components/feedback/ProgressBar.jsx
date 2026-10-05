@@ -21,7 +21,7 @@ export default function ProgressBar({ current = 0, total = 0, label = "batches" 
           {percent}% ({clampedCurrent}/{total} {label} processed)
         </span>
       </div>
-      <div className="h-2 w-full border border-paper bg-white/5">
+      <div className="h-2 w-full border border-paper bg-surface-raised">
         <div
           className="h-full bg-paper transition-[width] duration-300 ease-out"
           style={{ width: `${percent}%` }}

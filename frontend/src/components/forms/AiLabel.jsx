@@ -32,8 +32,10 @@ export default function AiLabel({
           >
             <path d={ICON_PATH} />
           </svg>
+          {/* Visual-only: the sr-only copy below is what assistive tech
+              reads, so it isn't announced twice. */}
           <span
-            role="tooltip"
+            aria-hidden="true"
             className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 translate-y-1 whitespace-nowrap border border-paper bg-ink px-2 py-1 text-xs text-paper opacity-0 transition-all group-hover:translate-y-0 group-hover:opacity-100"
           >
             {title}

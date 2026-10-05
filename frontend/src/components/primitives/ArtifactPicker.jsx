@@ -35,6 +35,7 @@ export default function ArtifactPicker({
   onProjectChange,
   showProjectFilter = false,
   emptyMessage = "No items available",
+  loading = false,
   placeholder = "Select…",
   searchPlaceholder = "Search by name…",
 }) {
@@ -52,7 +53,7 @@ export default function ArtifactPicker({
 
   const projectOptions = useMemo(
     () => [
-      { value: "", label: "All Projects" },
+      { value: "", label: "All projects" },
       ...projects.map((project) => ({ value: String(project.id), label: projectLabel(project) })),
     ],
     [projects],
@@ -63,7 +64,7 @@ export default function ArtifactPicker({
       value={selectedProject ? String(selectedProject) : ""}
       options={projectOptions}
       onChange={(v) => onProjectChange?.(v)}
-      placeholder="All Projects"
+      placeholder="All projects"
       triggerClassName={`w-full ${inputSm}`}
       listLabel="Filter by project"
       searchPlaceholder="Search projects…"
@@ -84,7 +85,9 @@ export default function ArtifactPicker({
       placeholder={placeholder}
       triggerClassName={`${btn} max-w-[18rem]`}
       searchPlaceholder={searchPlaceholder}
-      emptyMessage={options.length === 0 ? emptyMessage : "No files match that search."}
+      emptyMessage="No files match that search."
+      noOptionsMessage={emptyMessage}
+      loadingLabel={loading ? "Loading…" : undefined}
       listLabel="Files"
       renderOptionMeta={(opt) => opt.meta || null}
       header={header}

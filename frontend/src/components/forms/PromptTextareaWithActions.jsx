@@ -3,9 +3,9 @@ import PromptManager from "./PromptManager";
 import { savePromptToLibrary } from "../../lib/savePromptToLibrary";
 import ToastService from "../feedback/ToastService";
 import AiLabel from "./AiLabel";
+import { btnSm, textarea } from "../../lib/uiClasses";
 
-const linkBtn =
-  "border border-paper px-3 py-1.5 text-xs transition-colors hover:bg-paper hover:text-ink disabled:opacity-40";
+const linkBtn = btnSm;
 
 export default function PromptTextareaWithActions({
   id,
@@ -20,9 +20,13 @@ export default function PromptTextareaWithActions({
   onSaveFeedback,
 }) {
   const [isPromptManagerOpen, setIsPromptManagerOpen] = useState(false);
+  // A caller may show save results itself; otherwise they go to a toast,
+  // so "Save prompt" never succeeds or fails silently.
   const emitSaveFeedback = (payload) => {
     if (typeof onSaveFeedback === "function") {
       onSaveFeedback(payload);
+    } else {
+      ToastService.show(payload.message, payload.type);
     }
   };
 
@@ -36,7 +40,7 @@ export default function PromptTextareaWithActions({
         promptType,
         value,
       );
-      emitSaveFeedback({ type: "success", message: `Saved: ${savedLabel}` });
+      emitSaveFeedback({ type: "success", message: `Saved to your prompt library as "${savedLabel}".` });
       try {
         window.dispatchEvent(new Event("promptSaved"));
       } catch {
@@ -48,11 +52,9 @@ export default function PromptTextareaWithActions({
         return;
       }
       console.error("Failed to save prompt:", err);
-      const msg =
-        err?.response?.data?.detail ||
-        err?.message ||
-        "Failed to save prompt";
-      emitSaveFeedback({ type: "error", message: String(msg) });
+      const detail = err?.response?.data?.detail || err?.response?.data?.error;
+      const msg = typeof detail === "string" ? detail : "Couldn't save the prompt. Please try again.";
+      emitSaveFeedback({ type: "error", message: msg });
     }
   };
 
@@ -85,7 +87,7 @@ export default function PromptTextareaWithActions({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         rows={rows}
-        className="border border-paper bg-white/5 px-3 py-2.5 text-paper placeholder:text-paper/40 focus:outline-none focus:ring-2 focus:ring-paper disabled:opacity-50"
+        className={textarea}
         disabled={disabled}
       />
       <PromptManager

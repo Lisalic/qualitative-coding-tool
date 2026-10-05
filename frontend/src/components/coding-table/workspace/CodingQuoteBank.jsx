@@ -11,8 +11,11 @@ import {
   meta,
 } from "../../../lib/uiClasses";
 import { getCodeColor } from "../../../lib/codingUtils";
+import { sliceByCodePoints } from "../../../lib/textOffsets";
 import { formatCitation, DEFAULT_CITATION_OPTIONS } from "../../../lib/citationHelpers";
 import PageEmptyState from "../../primitives/PageEmptyState";
+import ToastService from "../../feedback/ToastService";
+import { useModalBehavior } from "../../feedback/useModalBehavior";
 
 const PAGE_SIZE = 25;
 
@@ -35,7 +38,6 @@ export default function CodingQuoteBank({ schema, availableCodes = [], refreshKe
   const [inspectQuote, setInspectQuote] = useState(null);
   const [citationModalQuote, setCitationModalQuote] = useState(null);
   const [citationOptions, setCitationOptions] = useState(DEFAULT_CITATION_OPTIONS);
-  const [copiedNotification, setCopiedNotification] = useState(false);
 
   // Note editing state: entry_id -> string draft
   const [editingNoteId, setEditingNoteId] = useState(null);
@@ -174,10 +176,9 @@ export default function CodingQuoteBank({ schema, availableCodes = [], refreshKe
     const text = formatCitation(quote, customOpts || citationOptions);
     try {
       await navigator.clipboard.writeText(text);
-      setCopiedNotification(true);
-      setTimeout(() => setCopiedNotification(false), 2000);
-    } catch (err) {
-      console.error("Failed to copy citation:", err);
+      ToastService.show("Citation copied to clipboard.", "success");
+    } catch {
+      ToastService.show("Couldn't copy to the clipboard. Select the citation text and copy it by hand.", "error");
     }
   };
 
@@ -189,9 +190,19 @@ export default function CodingQuoteBank({ schema, availableCodes = [], refreshKe
     rowRefs.current[selectedIndex]?.focus();
   }, [selectedIndex]);
 
+  // Escape, focus and Tab containment for the two modals; while either is
+  // open the list shortcuts below stand down.
+  const inspectDialogRef = useModalBehavior(() => setInspectQuote(null), { enabled: Boolean(inspectQuote) });
+  const citationDialogRef = useModalBehavior(() => setCitationModalQuote(null), {
+    enabled: Boolean(citationModalQuote),
+  });
+
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e) => {
+      // Cmd/Ctrl+C on a selected quote is a copy, not "open citation".
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (inspectQuote || citationModalQuote) return;
       // Do nothing if typing inside input, textarea, or select
       const tag = e.target?.tagName ? e.target.tagName.toLowerCase() : "";
       if (tag === "input" || tag === "textarea" || tag === "select") {
@@ -203,14 +214,6 @@ export default function CodingQuoteBank({ schema, availableCodes = [], refreshKe
       // A focused button/link keeps its native Enter/Space activation, and
       // the single-letter shortcuts don't fire from it either.
       if (e.target?.closest?.("button, a, [contenteditable='true']")) return;
-
-      if (inspectQuote || citationModalQuote) {
-        if (e.key === "Escape") {
-          setInspectQuote(null);
-          setCitationModalQuote(null);
-        }
-        return;
-      }
 
       if (quotes.length === 0) return;
 
@@ -249,17 +252,6 @@ export default function CodingQuoteBank({ schema, availableCodes = [], refreshKe
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-ink text-paper">
-      {/* Toast notification */}
-      {copiedNotification && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="fixed top-4 right-4 z-50 border border-success bg-ink px-3 py-1.5 text-xs font-semibold text-success shadow-md"
-        >
-          ✓ Citation copied to clipboard
-        </div>
-      )}
-
       {/* Filter Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-surface p-3 shrink-0">
         <div className="flex flex-wrap items-center gap-2">
@@ -377,7 +369,7 @@ export default function CodingQuoteBank({ schema, availableCodes = [], refreshKe
                 tabIndex={0}
                 onFocus={() => setSelectedIndex(idx)}
                 onClick={() => setSelectedIndex(idx)}
-                className={`border p-4 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-paper ${
+                className={`border p-4 transition-colors ${
                   isSelected
                     ? "border-paper bg-surface-raised"
                     : "border-line bg-surface hover:border-line-soft"
@@ -465,7 +457,7 @@ export default function CodingQuoteBank({ schema, availableCodes = [], refreshKe
 
                 {/* Document context title snippet */}
                 {q.title && (
-                  <div className="mb-2 text-xs text-paper/60 truncate">
+                  <div className="mb-2 text-xs text-paper/60 truncate" title={q.title}>
                     From: <span className="font-medium text-paper/80">{q.title}</span>
                   </div>
                 )}
@@ -479,7 +471,7 @@ export default function CodingQuoteBank({ schema, availableCodes = [], refreshKe
                         onChange={(e) => setNoteDraft(e.target.value)}
                         placeholder="Attach note for writing draft..."
                         rows={2}
-                        className="w-full border border-paper bg-surface-raised p-2 text-xs text-paper focus:outline-none focus:ring-1 focus:ring-paper"
+                        className={`${inputSm} w-full`}
                         autoFocus
                       />
                       <div className="flex gap-2">
@@ -536,11 +528,12 @@ export default function CodingQuoteBank({ schema, availableCodes = [], refreshKe
           role="dialog"
           aria-modal="true"
           aria-labelledby="inspect-dialog-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/80 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
           onClick={() => setInspectQuote(null)}
         >
           <div
-            className="flex max-h-[85vh] w-full max-w-3xl flex-col border border-paper bg-ink shadow-2xl"
+            ref={inspectDialogRef}
+            className="flex max-h-[85vh] w-full max-w-3xl flex-col border-2 border-paper bg-ink"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
@@ -594,15 +587,12 @@ export default function CodingQuoteBank({ schema, availableCodes = [], refreshKe
             <div className="flex-1 overflow-y-auto p-4 text-sm leading-relaxed whitespace-pre-wrap font-sans">
               {inspectQuote.content ? (
                 <>
-                  {inspectQuote.content.slice(0, inspectQuote.start_offset)}
+                  {sliceByCodePoints(inspectQuote.content, 0, inspectQuote.start_offset)}
                   <mark className="bg-paper text-ink font-semibold px-0.5">
                     {inspectQuote.quote ||
-                      inspectQuote.content.slice(
-                        inspectQuote.start_offset,
-                        inspectQuote.end_offset
-                      )}
+                      sliceByCodePoints(inspectQuote.content, inspectQuote.start_offset, inspectQuote.end_offset)}
                   </mark>
-                  {inspectQuote.content.slice(inspectQuote.end_offset)}
+                  {sliceByCodePoints(inspectQuote.content, inspectQuote.end_offset)}
                 </>
               ) : (
                 <div className="text-paper/60 italic">
@@ -648,11 +638,12 @@ export default function CodingQuoteBank({ schema, availableCodes = [], refreshKe
           role="dialog"
           aria-modal="true"
           aria-labelledby="citation-dialog-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/80 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
           onClick={() => setCitationModalQuote(null)}
         >
           <div
-            className="w-full max-w-lg border border-paper bg-ink p-5 shadow-2xl space-y-4"
+            ref={citationDialogRef}
+            className="w-full max-w-lg border-2 border-paper bg-ink p-5 space-y-4"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-line pb-2">

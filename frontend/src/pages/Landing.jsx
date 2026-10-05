@@ -1,7 +1,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import PageHeading from "../components/primitives/PageHeading";
-import { btnPrimary } from "../lib/uiClasses";
+import { btn, btnPrimary } from "../lib/uiClasses";
 
 const Landing = () => {
   return (
@@ -11,16 +11,12 @@ const Landing = () => {
         className="text-4xl font-bold sm:text-5xl"
       />
       <section className="flex gap-4">
-        <Link
-          to="/login"
-          className={btnPrimary}
-        >
-          Login
+        {/* Same box for both, so the pair lines up; the primary one is
+            set apart by weight and its 2px border alone. */}
+        <Link to="/login" className={`${btnPrimary} px-6 py-2.5 text-base hover:text-ink`}>
+          Log in
         </Link>
-        <Link
-          to="/register"
-          className="border border-paper px-6 py-3 transition-colors hover:bg-paper hover:text-ink"
-        >
+        <Link to="/register" className={`${btn} px-6 py-2.5 text-base hover:text-ink`}>
           Register
         </Link>
       </section>

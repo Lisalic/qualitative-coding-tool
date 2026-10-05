@@ -1,3 +1,5 @@
+import { pillRadioInput, pillRadioLabel } from "../../lib/uiClasses";
+
 // Shared "which content types to sample" control for Filter Data,
 // Generate Codebook, and Apply Codebook -- mirrors backend/app/api/
 // schemas.py's ContentScope ("both" | "posts" | "comments") field these
@@ -6,8 +8,8 @@
 // databases.
 const OPTIONS = [
   { value: "both", label: "Posts + Comments" },
-  { value: "posts", label: "Posts Only" },
-  { value: "comments", label: "Comments Only" },
+  { value: "posts", label: "Posts only" },
+  { value: "comments", label: "Comments only" },
 ];
 
 export default function ContentScopeFormGroup({
@@ -26,8 +28,8 @@ export default function ContentScopeFormGroup({
   };
 
   return (
-    <div className="flex flex-col gap-1.5">
-      <label className="text-sm">Content to Sample</label>
+    <fieldset className="min-w-0">
+      <legend className="mb-1.5 text-sm">Content to sample</legend>
       <div className="flex w-full gap-2">
         {OPTIONS.map((opt) => (
           <div key={opt.value} className="flex-1">
@@ -39,17 +41,14 @@ export default function ContentScopeFormGroup({
               checked={contentScope === opt.value}
               onChange={() => onContentScopeChange(opt.value)}
               disabled={isDisabled(opt.value)}
-              className="peer hidden"
+              className={pillRadioInput}
             />
-            <label
-              htmlFor={`${radioName}-${opt.value}`}
-              className="block cursor-pointer border border-paper px-3 py-2 text-center text-sm transition-colors hover:bg-paper hover:text-ink peer-checked:bg-paper peer-checked:text-ink peer-disabled:cursor-not-allowed peer-disabled:opacity-40 peer-disabled:hover:bg-transparent peer-disabled:hover:text-paper"
-            >
+            <label htmlFor={`${radioName}-${opt.value}`} className={pillRadioLabel}>
               {opt.label}
             </label>
           </div>
         ))}
       </div>
-    </div>
+    </fieldset>
   );
 }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { btn, textarea } from "../../lib/uiClasses";
+import { formatDate } from "../../lib/formatDate";
 
 /**
  * The memo on one row: a free-text analytic note the researcher writes
@@ -71,7 +72,7 @@ export default function MemoEditor({ memo, onSave, compact = false }) {
         )}
         {memo?.updated_at && !dirty && (
           <span className="text-xs text-paper/50">
-            Last edited {new Date(memo.updated_at).toLocaleString()}
+            Last edited {formatDate(memo.updated_at)}
           </span>
         )}
         {status && <span className="text-xs text-paper/70">{status}</span>}

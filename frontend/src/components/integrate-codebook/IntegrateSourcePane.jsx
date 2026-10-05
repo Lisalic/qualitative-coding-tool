@@ -41,6 +41,8 @@ export default function IntegrateSourcePane({
       loadingMessage="Loading source codebooks..."
       isEmpty={sources.length === 0}
       emptyMessage="No source codebooks loaded."
+      activeKey={activeKey}
+      shortcutHint={null}
       header={<span className="text-xs text-paper/70">{sources.length} codebooks · {totalCodes} codes</span>}
       footer={
         <span className="text-xs text-paper/60">
@@ -50,7 +52,10 @@ export default function IntegrateSourcePane({
     >
       {sources.map((source) => (
         <div key={source.ref} className="border-b border-line-soft">
-          <div className="bg-white/5 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-paper/70">
+          <div
+            className="truncate bg-surface-raised px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-paper/70"
+            title={codebookNames[source.ref] || source.ref}
+          >
             {codebookNames[source.ref] || source.ref}
           </div>
           {source.tree.map((family) => (
@@ -67,6 +72,7 @@ export default function IntegrateSourcePane({
                   return (
                     <li
                       key={key}
+                      data-active-row={isActive || undefined}
                       className={`flex items-center justify-between gap-2 px-3 py-1.5 transition-colors ${
                         isActive ? "bg-paper text-ink" : "hover:bg-white/5"
                       }`}
@@ -74,6 +80,8 @@ export default function IntegrateSourcePane({
                       <button
                         type="button"
                         className="min-w-0 flex-1 truncate text-left text-sm"
+                        title={code.name}
+                        aria-current={isActive || undefined}
                         onClick={() => onSelectCode({ key, source, family, code })}
                       >
                         {code.name}

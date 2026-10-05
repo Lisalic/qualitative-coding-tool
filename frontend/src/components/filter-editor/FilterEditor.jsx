@@ -4,16 +4,19 @@ import { requestJson } from "../../api";
 import { useRowMemos } from "../data/useRowMemos";
 import ArtifactCreatedMessage from "../feedback/ArtifactCreatedMessage";
 import ErrorDisplay from "../feedback/ErrorDisplay";
+import DialogService from "../feedback/DialogService";
 import { useToolPanelData } from "../tool-panels/useToolPanelData";
 import { useInitialProjectId } from "../tool-panels/useInitialProjectId";
 import { MissingFieldsError, buildManualFilterPayload } from "../../lib/apiContracts";
 import FilterRowList from "./FilterRowList";
+import { filterRowsByStatus } from "../../lib/filterEditorState";
 import FilterReaderPane from "./FilterReaderPane";
 import FilterDecisionsRail from "./FilterDecisionsRail";
 import { useFilterEditorState } from "./useFilterEditorState";
 import { useEditorRows, rowKey } from "../editor-shell/useEditorRows";
 import { useEditorShortcuts } from "../editor-shell/useEditorShortcuts";
 import EditorSetupStep from "../editor-shell/EditorSetupStep";
+import { missingHint } from "../../lib/formHints";
 import EditorOutputFields from "../editor-shell/EditorOutputFields";
 import EditorWorkspace from "../editor-shell/EditorWorkspace";
 import EditorActionBar from "../editor-shell/EditorActionBar";
@@ -83,14 +86,27 @@ export default function FilterEditor() {
     },
     { enabled: started },
   );
+  // Steps through the rows the status filter leaves visible, so j/k never
+  // lands on a row the list is hiding.
   function stepRow(delta) {
-    if (rows.length === 0) return;
-    const currentIndex = rows.findIndex((r) => rowKey(r) === activeKey);
-    const nextIndex = currentIndex === -1 ? 0 : Math.min(rows.length - 1, Math.max(0, currentIndex + delta));
-    if (rows[nextIndex]) setActiveKey(rowKey(rows[nextIndex]));
+    const visible = filterRowsByStatus(rows, statusFilter, editor);
+    if (visible.length === 0) return;
+    const currentIndex = visible.findIndex((r) => rowKey(r) === activeKey);
+    const nextIndex = currentIndex === -1 ? 0 : Math.min(visible.length - 1, Math.max(0, currentIndex + delta));
+    if (visible[nextIndex]) setActiveKey(rowKey(visible[nextIndex]));
   }
 
+  const handleClear = async () => {
+    const confirmed = await DialogService.confirm(
+      "Clear every Keep/Skip decision in this draft? This cannot be undone.",
+      { title: "Clear decisions", confirmLabel: "Clear", danger: true },
+    );
+    if (confirmed) editor.clearDraft();
+  };
+
   const handleSubmit = async () => {
+    if (submitting) return;
+    const submittedSelection = editor.snapshot();
     setSubmitting(true);
     setSubmitError("");
     setCreatedFile(null);
@@ -108,7 +124,7 @@ export default function FilterEditor() {
         });
       } catch (err) {
         if (err instanceof MissingFieldsError) {
-          setSubmitError(err.message);
+          setSubmitError(err.userMessage);
           return;
         }
         throw err;
@@ -127,7 +143,7 @@ export default function FilterEditor() {
       // The draft has become an artifact -- starting the next filter of the
       // same source from the set that was just materialized would silently
       // re-add every one of those rows.
-      editor.clearDraft();
+      editor.clearDraftIfUnchanged(submittedSelection);
     } catch (err) {
       setSubmitError(err?.message || "Failed to create the filtered database");
     } finally {
@@ -179,6 +195,11 @@ export default function FilterEditor() {
           submitLabel="Continue"
           submitLoadingLabel="Continue"
           submitDisabled={!database || !name.trim() || !selectedProject}
+          submitHint={missingHint([
+            ["a source database", !database],
+            ["a name", !name.trim()],
+            ["a project", !selectedProject],
+          ])}
           error={panelDataError}
         />
       </PageShell>
@@ -207,7 +228,6 @@ export default function FilterEditor() {
                 name={createdFile.filename}
                 viewPath="/filtered-data"
                 viewState={{ selectedDatabase: createdFile.schema_name }}
-                neutral
               />
             </div>
           )}
@@ -263,13 +283,14 @@ export default function FilterEditor() {
             </>
           }
           secondaryLabel="Clear"
-          onSecondary={editor.clearDraft}
+          onSecondary={handleClear}
           secondaryDisabled={submitting || included + excluded === 0}
           primaryLabel="Save"
           primaryLoadingLabel="Saving..."
           primaryLoading={submitting}
           onPrimary={handleSubmit}
           primaryDisabled={submitting || included === 0}
+          primaryHint="Keep at least one row to save."
           errorMessage={submitError}
         />
       }

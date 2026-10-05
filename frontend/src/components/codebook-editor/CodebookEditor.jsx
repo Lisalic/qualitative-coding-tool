@@ -4,6 +4,7 @@ import { requestJson } from "../../api";
 import { useRowMemos } from "../data/useRowMemos";
 import ArtifactCreatedMessage from "../feedback/ArtifactCreatedMessage";
 import ErrorDisplay from "../feedback/ErrorDisplay";
+import DialogService from "../feedback/DialogService";
 import PageShell from "../shell/PageShell";
 import { useInitialProjectId } from "../tool-panels/useInitialProjectId";
 import { useToolPanelData } from "../tool-panels/useToolPanelData";
@@ -18,6 +19,7 @@ import { btn, btnActive, select } from "../../lib/uiClasses";
 import { useEditorRows, rowKey } from "../editor-shell/useEditorRows";
 import { useEditorShortcuts } from "../editor-shell/useEditorShortcuts";
 import EditorSetupStep from "../editor-shell/EditorSetupStep";
+import { missingHint } from "../../lib/formHints";
 import EditorOutputFields from "../editor-shell/EditorOutputFields";
 import EditorWorkspace from "../editor-shell/EditorWorkspace";
 import EditorActionBar from "../editor-shell/EditorActionBar";
@@ -74,6 +76,7 @@ export default function CodebookEditor() {
   const [submitError, setSubmitError] = useState("");
   const [createdFile, setCreatedFile] = useState(null);
   const [savedMessage, setSavedMessage] = useState("");
+  const [railTab, setRailTab] = useState("row");
 
   const refineRef = mode === "refine" ? targetCodebook : "";
   // Empty string (not draftStorageKey("", "")) when no source is picked
@@ -215,10 +218,32 @@ export default function CodebookEditor() {
     if (rows.length === 0) return;
     const currentIndex = rows.findIndex((r) => rowKey(r) === activeKey);
     const nextIndex = currentIndex === -1 ? 0 : Math.min(rows.length - 1, Math.max(0, currentIndex + delta));
-    if (rows[nextIndex]) setActiveKey(rowKey(rows[nextIndex]));
+    if (rows[nextIndex]) selectRow(rows[nextIndex]);
+  }
+  function selectRow(row) {
+    setActiveKey(rowKey(row));
+    setRailTab("row");
   }
 
+  // Refine's Clear is a reset: forgetting the seeded key lets the effect
+  // above reload the codebook's saved codes into the emptied draft,
+  // instead of leaving an empty draft that can't be saved or recovered.
+  const handleClear = async () => {
+    const refine = mode === "refine";
+    const confirmed = await DialogService.confirm(
+      refine
+        ? "Discard your unsaved edits and reload this codebook's saved codes?"
+        : "Clear every code and proposal in this draft? This cannot be undone.",
+      { title: refine ? "Reset to saved" : "Clear draft", confirmLabel: refine ? "Reset" : "Clear", danger: true },
+    );
+    if (!confirmed) return;
+    if (refine) seededRef.current.delete(`${database}::${targetCodebook}`);
+    editor.clearDraft();
+  };
+
   const handleSubmit = async () => {
+    if (submitting) return;
+    const submittedState = editor.snapshot();
     setSubmitting(true);
     setSubmitError("");
     setCreatedFile(null);
@@ -262,7 +287,7 @@ export default function CodebookEditor() {
         });
       } catch (err) {
         if (err instanceof MissingFieldsError) {
-          setSubmitError(err.message);
+          setSubmitError(err.userMessage);
           return;
         }
         throw err;
@@ -280,7 +305,9 @@ export default function CodebookEditor() {
       setCreatedFile(data?.file || null);
       // The draft has become an artifact -- starting the next codebook from
       // the same source would otherwise inherit every code just saved.
-      editor.clearDraft();
+      if (!editor.clearDraftIfUnchanged(submittedState)) {
+        setSavedMessage("Saved. New edits remain in your draft.");
+      }
     } catch (err) {
       setSubmitError(err?.message || "Failed to save the codebook");
     } finally {
@@ -294,7 +321,23 @@ export default function CodebookEditor() {
       ? Boolean(targetCodebook)
       : Boolean(name.trim()) && Boolean(selectedProject);
   const canSubmit = !submitting && draftCount > 0 && Boolean(database) && outputReady;
-  const canContinue = Boolean(database) && outputReady;
+  // In refine mode, wait for the lineage lookup: until it lands,
+  // `database` may still be the previous mode's (or codebook's) source.
+  const canContinue =
+    Boolean(database) && outputReady && !(mode === "refine" && !sourceOverride && autoSource.loading);
+  const setupHint = missingHint(
+    mode === "refine"
+      ? [
+          ["a codebook to refine", !targetCodebook],
+          ["a source database", Boolean(targetCodebook) && !database && !autoSource.loading],
+        ]
+      : [
+          ["a source database", !database],
+          ["a name", !name.trim()],
+          ["a project", !selectedProject],
+        ],
+  );
+  const pageTitle = mode === "refine" ? "Refine Codebook" : "Create Codebook";
 
   const showSourcePicker = mode !== "refine" || sourceOverride;
   const sourceLabel =
@@ -302,14 +345,14 @@ export default function CodebookEditor() {
 
   if (!started) {
     return (
-      <PageShell title="Create Codebook" width="wide">
+      <PageShell title={pageTitle} width="wide">
         <EditorSetupStep
           sourceTitle="Source data"
           sourceFields={
             <>
               <div className="flex flex-col gap-1.5">
-                <label className="text-sm">Mode</label>
-                <div className="flex gap-2" role="group" aria-label="Editor mode">
+                <span id="codebookEditorModeLabel" className="text-sm">Mode</span>
+                <div className="flex gap-2" role="group" aria-labelledby="codebookEditorModeLabel">
                   <button
                     type="button"
                     className={`flex-1 ${btn} ${mode === "new" ? btnActive : ""}`}
@@ -371,7 +414,7 @@ export default function CodebookEditor() {
                 </div>
               ) : (
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-sm">Source database</label>
+                  <span className="text-sm">Source database</span>
                   <p className="text-sm text-paper/60">
                     {!targetCodebook
                       ? "—"
@@ -413,7 +456,8 @@ export default function CodebookEditor() {
           submitLabel="Continue"
           submitLoadingLabel="Continue"
           submitDisabled={!canContinue}
-          error={panelDataError}
+          submitHint={setupHint}
+          error={panelDataError || submitError}
         />
       </PageShell>
     );
@@ -421,7 +465,7 @@ export default function CodebookEditor() {
 
   return (
     <EditorWorkspace
-      title="Create Codebook"
+      title={pageTitle}
       emphasis="builder"
       subtitle={
         mode === "refine"
@@ -460,7 +504,7 @@ export default function CodebookEditor() {
         <CodebookSourceReader
           rows={rows}
           activeKey={activeKey}
-          onSelectRow={(row) => setActiveKey(rowKey(row))}
+          onSelectRow={selectRow}
           loading={loading}
           page={page}
           limit={limit}
@@ -474,6 +518,8 @@ export default function CodebookEditor() {
       reader={<CodebookBuilderPane editor={editor} disabled={submitting} />}
       rail={
         <CodebookReferenceRail
+          tab={railTab}
+          onTabChange={setRailTab}
           activeRow={activeRow}
           memo={activeRow ? getMemo(activeRow.rowType, activeRow.id) : null}
           onSaveMemo={saveMemo}
@@ -492,14 +538,15 @@ export default function CodebookEditor() {
               {aiAccepted > 0 ? ` · ${aiAccepted} from AI` : ""}
             </>
           }
-          secondaryLabel="Clear"
-          onSecondary={editor.clearDraft}
+          secondaryLabel={mode === "refine" ? "Reset to saved" : "Clear"}
+          onSecondary={handleClear}
           secondaryDisabled={submitting || (draftCount === 0 && proposed === 0)}
-          primaryLabel="Save"
-          primaryLoadingLabel="Saving..."
+          primaryLabel={mode === "refine" ? "Save version" : "Create codebook"}
+          primaryLoadingLabel={mode === "refine" ? "Saving…" : "Creating…"}
           primaryLoading={submitting}
           onPrimary={handleSubmit}
           primaryDisabled={!canSubmit}
+          primaryHint={draftCount === 0 ? "Add at least one code to save." : ""}
           errorMessage={submitError}
         />
       }

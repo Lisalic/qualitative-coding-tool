@@ -39,7 +39,7 @@ export default function Panel({
       className={`flex min-h-0 min-w-0 flex-col border border-line bg-surface ${className}`}
     >
       {hasHeader ? (
-        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-line px-3 py-2">
+        <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-line px-3 py-2">
           {title ? (
             <h2 className="min-w-0 truncate text-sm font-semibold uppercase tracking-wide">
               {title}
@@ -48,7 +48,10 @@ export default function Panel({
             <span />
           )}
           {actions ? (
-            <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>
+            // `min-w-0` + wrap, not `shrink-0`: on a narrow screen a long
+            // action strip (the project's file tabs) wraps onto a second
+            // line instead of running off the panel's edge.
+            <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">{actions}</div>
           ) : null}
         </header>
       ) : null}

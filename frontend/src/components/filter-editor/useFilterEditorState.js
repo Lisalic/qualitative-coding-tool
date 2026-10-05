@@ -83,6 +83,13 @@ export function useFilterEditorState(sourceDatabase) {
     }
   }, [sourceDatabase]);
 
+  const snapshot = useCallback(() => selectionRef.current, []);
+  const clearDraftIfUnchanged = useCallback((savedSelection) => {
+    if (selectionRef.current !== savedSelection) return false;
+    clearDraft();
+    return true;
+  }, [clearDraft]);
+
   const include = useCallback(
     (rowType, id) => commit((prev) => toggleInclude(prev, rowType, id)),
     [commit],
@@ -123,6 +130,8 @@ export function useFilterEditorState(sourceDatabase) {
     assistRuns: useMemo(() => buildAssistRunsForSubmit(selection), [selection]),
     include,
     exclude,
+    snapshot,
+    clearDraftIfUnchanged,
     acceptAiSuggestions,
     clearDraft,
   };

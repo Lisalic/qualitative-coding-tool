@@ -44,6 +44,10 @@ export default function Dropdown({
   triggerClassName = `w-full ${select}`,
   searchPlaceholder = "Search…",
   emptyMessage = "No matches.",
+  // Shown instead of `emptyMessage` when there is nothing to pick at all,
+  // as opposed to nothing matching the search -- "No matches" for an
+  // empty list reads as if the user had typed something wrong.
+  noOptionsMessage = "Nothing available yet.",
   renderOptionMeta,
   header,
   searchable,
@@ -218,11 +222,12 @@ export default function Dropdown({
           id={listboxId}
           role="listbox"
           aria-label={listLabel}
-          aria-activedescendant={filtered.length ? optionId(activeIndex) : undefined}
           className={`flex min-h-0 flex-col overflow-y-auto ${header ? "mt-1.5" : ""}`}
         >
           {filtered.length === 0 ? (
-            <p className="px-2 py-1.5 text-xs text-paper/50">{emptyMessage}</p>
+            <p className="px-2 py-1.5 text-xs text-paper/50">
+              {loadingLabel ? loadingLabel : options.length === 0 ? noOptionsMessage : emptyMessage}
+            </p>
           ) : (
             filtered.map((opt, index) => {
               const isSelected = Object.is(opt.value, value);
@@ -242,7 +247,9 @@ export default function Dropdown({
                     isSelected ? "bg-paper text-ink" : isActive ? "bg-white/10" : ""
                   }`}
                 >
-                  <span className="w-full truncate text-sm">{opt.label}</span>
+                  <span className="w-full truncate text-sm" title={String(opt.label ?? "")}>
+                    {opt.label}
+                  </span>
                   {renderOptionMeta ? (
                     <span
                       className={`w-full truncate text-[11px] ${
@@ -270,6 +277,7 @@ export default function Dropdown({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? listboxId : undefined}
+        aria-activedescendant={open && filtered.length ? optionId(activeIndex) : undefined}
         aria-autocomplete="list"
         disabled={disabled}
         value={mergedValue}
@@ -291,6 +299,7 @@ export default function Dropdown({
           setOpen(true);
         }}
         onKeyDown={handleKeyDown}
+        title={!open && selected ? String(selected.label ?? "") : undefined}
         className={`truncate pr-6 ${triggerClassName}`}
       />
       <span aria-hidden="true" className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-paper/60">
@@ -306,12 +315,16 @@ export default function Dropdown({
       aria-haspopup="listbox"
       aria-expanded={open}
       aria-controls={open ? listboxId : undefined}
+      aria-activedescendant={open && filtered.length ? optionId(activeIndex) : undefined}
       disabled={disabled}
       onClick={() => setOpen((v) => !v)}
       onKeyDown={handleKeyDown}
       className={`flex items-center justify-between gap-2 text-left ${triggerClassName}`}
     >
-      <span className={`truncate ${selected || loadingLabel ? "" : "text-paper/40"}`}>
+      <span
+        className={`truncate ${selected || loadingLabel ? "" : "text-paper/40"}`}
+        title={selected ? String(selected.label ?? "") : undefined}
+      >
         {triggerLabel}
       </span>
       <span aria-hidden="true" className="shrink-0 text-paper/60">

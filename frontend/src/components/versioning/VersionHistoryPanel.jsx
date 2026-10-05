@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import VersionContentViewer from "./VersionContentViewer";
+import { formatDate } from "../../lib/formatDate";
+import { btnSm } from "../../lib/uiClasses";
+import ToastService from "../feedback/ToastService";
 
-const btnSmall =
-  "border border-paper px-2 py-1 text-xs transition-colors hover:bg-paper hover:text-ink disabled:opacity-40";
+const btnSmall = btnSm;
 const linkSmall = "text-xs text-paper/50 underline decoration-dotted hover:text-paper";
 
 function originLabel(origin) {
@@ -21,12 +23,7 @@ function originLabel(origin) {
 }
 
 function formatTimestamp(iso) {
-  if (!iso) return "";
-  try {
-    return new Date(iso).toLocaleString();
-  } catch {
-    return iso;
-  }
+  return formatDate(iso) || iso || "";
 }
 
 const CODEBOOK_DIFF_SECTIONS = [
@@ -87,7 +84,7 @@ function CodebookDiffList({ sectionKey, label, tone, entries }) {
         {entries.map((entry, idx) => (
           <div
             key={idx}
-            className="border-b border-line-soft px-4 py-2.5 transition-colors last:border-b-0 hover:bg-white/[0.03]"
+            className="border-b border-line-soft px-4 py-2.5 transition-colors last:border-b-0 hover:bg-surface"
           >
             <CodebookDiffEntry section={sectionKey} entry={entry} />
           </div>
@@ -243,7 +240,7 @@ function CodingChangeList({ title, entries }) {
         {entries.map((entry, index) => (
           <div
             key={`${entry.row_type}:${entry.post_id}:${entry.code_uid}:${entry.text}:${index}`}
-            className="grid min-w-0 gap-3 border-b border-line-soft px-4 py-3 transition-colors last:border-b-0 hover:bg-white/[0.03] sm:grid-cols-[minmax(0,2fr)_minmax(240px,1fr)] sm:gap-0 sm:px-0 sm:py-0"
+            className="grid min-w-0 gap-3 border-b border-line-soft px-4 py-3 transition-colors last:border-b-0 hover:bg-surface sm:grid-cols-[minmax(0,2fr)_minmax(240px,1fr)] sm:gap-0 sm:px-0 sm:py-0"
           >
             <div className="min-w-0 sm:px-4 sm:py-3">
               <span className="mb-0.5 block text-[11px] uppercase tracking-wide text-paper/50 sm:hidden">
@@ -425,6 +422,7 @@ export default function VersionHistoryPanel({ history, fileType, onDuplicateFrom
     }
     setDuplicating(null);
     setDuplicateState({ status: "idle", message: "" });
+    ToastService.show(`Created "${trimmed}" from v${versionNo}.`, "success");
   };
 
   // Re-fetch (and drop any stale selection/diff/viewed-version) whenever
@@ -532,7 +530,11 @@ export default function VersionHistoryPanel({ history, fileType, onDuplicateFrom
                         <span className="font-semibold">v{v.version_no}</span>{" "}
                         <span className="text-xs text-paper/60">{originLabel(v.origin)}</span>{" "}
                         <span className="text-xs text-paper/40">{formatTimestamp(v.created_at)}</span>
-                        {v.message && <div className="truncate text-xs text-paper/50">{v.message}</div>}
+                        {v.message && (
+                          <div className="truncate text-xs text-paper/50" title={v.message}>
+                            {v.message}
+                          </div>
+                        )}
                       </div>
                     </label>
                     <div className="flex shrink-0 items-center gap-2.5">

@@ -48,7 +48,8 @@ export function useAiModels() {
       })
       .catch((err) => {
         if (!cancelled) {
-          setState({ models: [], loading: false, error: err?.message || "Failed to load AI models" });
+          console.warn("Failed to load AI models:", err);
+          setState({ models: [], loading: false, error: "Couldn't load the list of AI models." });
         }
       });
     return () => {

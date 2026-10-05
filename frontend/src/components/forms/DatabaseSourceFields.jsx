@@ -1,5 +1,5 @@
 import Dropdown from "../primitives/Dropdown";
-import { select } from "../../lib/uiClasses";
+import { pillRadioInput, pillRadioLabel, select } from "../../lib/uiClasses";
 
 /**
  * Database type + database picker, shared by whichever editor's setup
@@ -18,8 +18,8 @@ export default function DatabaseSourceFields({
 }) {
   return (
     <>
-      <div className="flex flex-col gap-1.5">
-        <label className="text-sm">Database Type</label>
+      <fieldset className="min-w-0">
+        <legend className="mb-1.5 text-sm">Database type</legend>
         <div className="flex w-full gap-2">
           {[
             { value: "unfiltered", label: "Unfiltered Databases" },
@@ -34,25 +34,22 @@ export default function DatabaseSourceFields({
                 checked={databaseType === opt.value}
                 onChange={() => onDatabaseTypeChange(opt.value)}
                 disabled={disabled}
-                className="peer hidden"
+                className={pillRadioInput}
               />
-              <label
-                htmlFor={`${radioName}-${opt.value}`}
-                className="block cursor-pointer border border-paper px-3 py-2 text-center text-sm transition-colors hover:bg-paper hover:text-ink peer-checked:bg-paper peer-checked:text-ink"
-              >
+              <label htmlFor={`${radioName}-${opt.value}`} className={pillRadioLabel}>
                 {opt.label}
               </label>
             </div>
           ))}
         </div>
-      </div>
+      </fieldset>
 
       <div className="flex flex-col gap-1.5">
-        <label htmlFor="database" className="text-sm">
-          Select Database
+        <label htmlFor={`${radioName}-database`} className="text-sm">
+          Database
         </label>
         <Dropdown
-          id="database"
+          id={`${radioName}-database`}
           value={database}
           options={databaseOptions}
           onChange={onDatabaseChange}
@@ -62,6 +59,7 @@ export default function DatabaseSourceFields({
           listLabel="Database"
           searchPlaceholder="Search databases…"
           emptyMessage="No databases match that search."
+          noOptionsMessage="No databases yet. Import data first."
         />
       </div>
     </>

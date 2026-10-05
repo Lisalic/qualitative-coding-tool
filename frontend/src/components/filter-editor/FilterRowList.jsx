@@ -3,6 +3,7 @@ import EditorListPane from "../editor-shell/EditorListPane";
 import Dropdown from "../primitives/Dropdown";
 import { select, btnSm } from "../../lib/uiClasses";
 import { PAGE_SIZE_OPTIONS } from "../../lib/pageSizes";
+import { filterRowsByStatus } from "../../lib/filterEditorState";
 
 const STATUS_OPTIONS = [
   { value: "all", label: "All rows" },
@@ -52,15 +53,13 @@ export default function FilterRowList({
   loading,
 }) {
   const { included, excluded } = editor.counts;
-  const visibleRows = rows.filter((row) => {
-    if (statusFilter === "all") return true;
-    return editor.stateOf(row.rowType, row.id) === statusFilter;
-  });
+  const visibleRows = filterRowsByStatus(rows, statusFilter, editor);
 
   return (
     <EditorListPane
       loading={loading}
       isEmpty={visibleRows.length === 0}
+      activeKey={activeKey}
       footer={
         <>
           <button type="button" className={btnSm} onClick={onPrevPage} disabled={page === 0}>
@@ -106,10 +105,20 @@ export default function FilterRowList({
           return (
             <li
               key={key}
+              tabIndex={0}
+              aria-current={isActive || undefined}
+              data-active-row={isActive || undefined}
               className={`flex cursor-pointer items-start gap-2 border-b border-line-soft px-3 py-2.5 transition-colors ${
                 isActive ? "bg-paper text-ink" : "hover:bg-white/5"
               }`}
               onClick={() => onSelectRow(row)}
+              onKeyDown={(e) => {
+                if (e.target !== e.currentTarget) return;
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onSelectRow(row);
+                }
+              }}
             >
               <span
                 className={`mt-0.5 shrink-0 font-semibold ${isActive ? "text-ink" : mark.className}`}
@@ -118,8 +127,10 @@ export default function FilterRowList({
                 {mark.symbol}
               </span>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-medium">
-                  {rowPreview(row)}
+                <div className="flex min-w-0 items-center gap-1 text-sm font-medium">
+                  <span className="truncate" title={rowPreview(row)}>
+                    {rowPreview(row)}
+                  </span>
                   {memo && <MemoIndicator memo={memo} />}
                 </div>
                 <div className={`mt-0.5 text-xs ${isActive ? "text-ink/60" : "text-paper/50"}`}>

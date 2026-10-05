@@ -272,3 +272,14 @@ export function deserializeDraft(raw) {
     : [];
   return { included, excluded, aiDecided, assistRuns };
 }
+
+/**
+ * The rows a status filter ("all"/"undecided"/"included"/"excluded")
+ * leaves visible -- also what the editor's j/k steps through, so it never
+ * lands on a row the list is hiding. `editor` is `useFilterEditorState`'s
+ * return value (anything with `stateOf(rowType, id)`).
+ */
+export function filterRowsByStatus(rows, statusFilter, editor) {
+  if (statusFilter === "all") return rows;
+  return rows.filter((row) => editor.stateOf(row.rowType, row.id) === statusFilter);
+}

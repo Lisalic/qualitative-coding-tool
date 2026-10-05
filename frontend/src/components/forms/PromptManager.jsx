@@ -1,10 +1,18 @@
 import { useCallback, useState, useEffect } from "react";
 import { api } from "../../api";
+import DialogService from "../feedback/DialogService";
+import { useModalBehavior } from "../feedback/useModalBehavior";
+import { btn, btnDanger, input, textarea } from "../../lib/uiClasses";
 
-const inputClasses =
-  "border border-paper bg-white/5 px-3 py-2.5 text-paper placeholder:text-paper/40 focus:outline-none focus:ring-2 focus:ring-paper";
-const actionBtn =
-  "border border-paper px-3 py-1.5 text-sm transition-colors hover:bg-paper hover:text-ink";
+const inputClasses = input;
+const actionBtn = btn;
+
+/** A readable message from an axios error -- never "[object Object]". */
+function errorText(err, fallback) {
+  const data = err?.response?.data;
+  const detail = data?.detail ?? data?.error ?? data;
+  return typeof detail === "string" && detail.trim() ? detail : fallback;
+}
 
 export default function PromptManager({
   isOpen = true,
@@ -27,24 +35,16 @@ export default function PromptManager({
         const prompts = (res.data && res.data.prompts) || [];
         const mapped = prompts.map((p) => ({
           id: p.id,
-          name:
-            p.promptname ||
-            p.display_name ||
-            `Prompt ${Math.random().toString(36).slice(2, 6)}`,
+          name: p.promptname || p.display_name || `Prompt ${p.id}`,
           prompt: p.prompt,
-          createdAt: new Date().toISOString(),
         }));
         setSavedPrompts(mapped);
       })
       .catch((err) => {
         setSavedPrompts([]);
-        const msg =
-          err?.response?.data?.detail ||
-          err?.response?.data ||
-          err?.message ||
-          "Failed to load prompts";
-        // do not show error as a blocking message on load, but log for debugging
-        console.warn("Failed to load prompts:", msg);
+        console.warn("Failed to load prompts:", err);
+        setMessage(errorText(err, "Couldn't load your saved prompts. Close this and try again."));
+        setMessageType("error");
       });
   }, [promptType]);
 
@@ -85,8 +85,12 @@ export default function PromptManager({
       showMessage("Please enter prompt content", "error");
       return;
     }
+    if (editName !== null && !editName.trim()) {
+      showMessage("Please enter a prompt name", "error");
+      return;
+    }
     const form = new FormData();
-    if (editName !== null) form.append("promptname", editName);
+    if (editName !== null) form.append("promptname", editName.trim());
     form.append("prompt", editContent.trim());
     form.append("type", promptType);
 
@@ -97,15 +101,10 @@ export default function PromptManager({
         setEditingId(null);
         setEditName("");
         setEditContent("");
-        showMessage("Prompt updated successfully!");
+        showMessage("Prompt updated.");
       })
       .catch((err) => {
-        const msg =
-          err?.response?.data?.detail ||
-          err?.response?.data ||
-          err?.message ||
-          "Failed to update prompt";
-        showMessage(String(msg), "error");
+        showMessage(errorText(err, "Couldn't update the prompt. Please try again."), "error");
       });
   };
 
@@ -114,24 +113,67 @@ export default function PromptManager({
     if (onClose) onClose();
   };
 
-  const deletePrompt = (id) => {
+  const deletePrompt = async (prompt) => {
+    const confirmed = await DialogService.confirm(
+      `Delete the saved prompt "${prompt.name}"? This cannot be undone.`,
+      { title: "Delete prompt", confirmLabel: "Delete", danger: true },
+    );
+    if (!confirmed) return;
+    const { id } = prompt;
     api
       .delete(`/api/prompts/${id}`)
       .then(() => {
         loadSavedPrompts();
-        showMessage("Prompt deleted successfully!");
+        showMessage("Prompt deleted.");
       })
       .catch((err) => {
-        const msg =
-          err?.response?.data?.detail ||
-          err?.response?.data ||
-          err?.message ||
-          "Failed to delete prompt";
-        showMessage(String(msg), "error");
+        showMessage(errorText(err, "Couldn't delete the prompt. Please try again."), "error");
       });
   };
 
-  if (!isOpen) return null;
+  return isOpen ? (
+    <PromptManagerDialog
+      onClose={onClose}
+      examplePrompt={examplePrompt}
+      savedPrompts={savedPrompts}
+      message={message}
+      messageType={messageType}
+      clearMessage={clearMessage}
+      editingId={editingId}
+      editName={editName}
+      setEditName={setEditName}
+      editContent={editContent}
+      setEditContent={setEditContent}
+      saveEdit={saveEdit}
+      cancelEdit={cancelEdit}
+      startEdit={startEdit}
+      loadPrompt={loadPrompt}
+      deletePrompt={deletePrompt}
+    />
+  ) : null;
+}
+
+/** The open dialog -- its own component so Escape/focus handling mounts
+ * and unmounts with it. */
+function PromptManagerDialog({
+  onClose,
+  examplePrompt,
+  savedPrompts,
+  message,
+  messageType,
+  clearMessage,
+  editingId,
+  editName,
+  setEditName,
+  editContent,
+  setEditContent,
+  saveEdit,
+  cancelEdit,
+  startEdit,
+  loadPrompt,
+  deletePrompt,
+}) {
+  const dialogRef = useModalBehavior(onClose);
 
   const promptItems = [];
   if (examplePrompt && examplePrompt.trim()) {
@@ -139,7 +181,6 @@ export default function PromptManager({
       id: "__example_prompt__",
       name: "Example prompt",
       prompt: examplePrompt,
-      createdAt: null,
       isExample: true,
     });
   }
@@ -147,15 +188,21 @@ export default function PromptManager({
 
   return (
     <div
-      className="fixed inset-0 z-[999] flex items-center justify-center bg-black/70 p-4"
+      className="fixed inset-0 z-[999] flex items-center justify-center bg-black/80 p-4"
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="promptManagerTitle"
         className="max-h-[90vh] w-full max-w-3xl overflow-y-auto border-2 border-paper bg-ink p-4"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between gap-3">
-          <h3 className="text-lg font-semibold">Saved Prompts</h3>
+          <h3 id="promptManagerTitle" className="text-lg font-semibold">
+            Saved prompts
+          </h3>
           <button
             type="button"
             onClick={onClose}
@@ -168,6 +215,7 @@ export default function PromptManager({
         <div className="mt-5">
           {message && (
             <div
+              role={messageType === "error" ? "alert" : "status"}
               className={`mb-4 flex items-center justify-between gap-3 border px-4 py-3 text-sm ${
                 messageType === "error"
                   ? "border-error bg-error/10 text-error"
@@ -194,13 +242,16 @@ export default function PromptManager({
                 {promptItems.map((prompt) => (
                   <div
                     key={prompt.id}
-                    className="flex items-start justify-between gap-4 border border-paper/20 p-4"
+                    className="flex items-start justify-between gap-4 border border-line p-4"
                   >
                     {!prompt.isExample && editingId === prompt.id ? (
                       <div className="flex flex-1 flex-col gap-3">
                         <div className="flex flex-col gap-1.5">
-                          <label className="text-sm">Edit name</label>
+                          <label htmlFor={`promptName-${prompt.id}`} className="text-sm">
+                            Name
+                          </label>
                           <input
+                            id={`promptName-${prompt.id}`}
                             type="text"
                             className={inputClasses}
                             value={editName}
@@ -208,9 +259,12 @@ export default function PromptManager({
                           />
                         </div>
                         <div className="flex flex-col gap-1.5">
-                          <label className="text-sm">Edit prompt</label>
+                          <label htmlFor={`promptText-${prompt.id}`} className="text-sm">
+                            Prompt
+                          </label>
                           <textarea
-                            className={`${inputClasses} resize-y`}
+                            id={`promptText-${prompt.id}`}
+                            className={textarea}
                             rows={4}
                             value={editContent}
                             onChange={(e) => setEditContent(e.target.value)}
@@ -235,16 +289,12 @@ export default function PromptManager({
                           <h4 className="font-semibold">{prompt.name}</h4>
                           <p className="mt-1.5 text-sm text-paper/70">
                             {prompt.prompt.length > 100
-                              ? `${prompt.prompt.substring(0, 100)}...`
+                              ? `${prompt.prompt.substring(0, 100)}…`
                               : prompt.prompt}
                           </p>
                           {prompt.isExample ? (
                             <small className="mt-1.5 block text-xs text-paper/50">Built-in</small>
-                          ) : (
-                            <small className="mt-1.5 block text-xs text-paper/50">
-                              Saved: {new Date(prompt.createdAt).toLocaleDateString()}
-                            </small>
-                          )}
+                          ) : null}
                         </div>
                         <div className="flex shrink-0 gap-2">
                           <button
@@ -265,8 +315,8 @@ export default function PromptManager({
                               </button>
                               <button
                                 type="button"
-                                onClick={() => deletePrompt(prompt.id)}
-                                className="border border-error px-3 py-1.5 text-sm text-error transition-colors hover:bg-error hover:text-paper"
+                                onClick={() => deletePrompt(prompt)}
+                                className={btnDanger}
                               >
                                 Delete
                               </button>

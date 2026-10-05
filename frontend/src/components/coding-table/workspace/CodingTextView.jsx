@@ -9,7 +9,7 @@ import PageEmptyState from "../../primitives/PageEmptyState";
  * any more: every edit goes through the structured table, which is what
  * actually gets saved.
  */
-export default function CodingTextView({ schema, refreshKey }) {
+export default function CodingTextView({ schema, refreshKey, showingSaved = false }) {
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -24,7 +24,7 @@ export default function CodingTextView({ schema, refreshKey }) {
     setError(null);
     apiFetch(`/api/coding/${encodeURIComponent(schema)}/text`)
       .then((response) => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) throw new Error(`Couldn't load the coding text (HTTP ${response.status}).`);
         return response.json();
       })
       .then((data) => {
@@ -45,8 +45,8 @@ export default function CodingTextView({ schema, refreshKey }) {
 
   if (loading) {
     return (
-      <div className="border border-paper/20 bg-white/5 px-4 py-3 text-sm text-paper/70">
-        Loading...
+      <div className="border border-line bg-surface-raised px-4 py-3 text-sm text-paper/70">
+        Loading…
       </div>
     );
   }
@@ -57,13 +57,27 @@ export default function CodingTextView({ schema, refreshKey }) {
     );
   }
 
+  const savedNote = showingSaved ? (
+    <p className="shrink-0 text-xs text-paper/50">
+      Showing the last saved version. Save to include your unsaved changes.
+    </p>
+  ) : null;
+
   if (!text) {
-    return <PageEmptyState message="Nothing has been coded yet." />;
+    return (
+      <div className="flex flex-col gap-2">
+        {savedNote}
+        <PageEmptyState message={showingSaved ? "Nothing has been saved as coded yet." : "Nothing has been coded yet."} />
+      </div>
+    );
   }
 
   return (
-    <pre className="h-full min-h-0 overflow-auto whitespace-pre-wrap break-words border border-line bg-surface-raised p-3 font-mono text-sm text-paper">
+    <div className="flex h-full min-h-0 flex-col gap-2">
+      {savedNote}
+      <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words border border-line bg-surface-raised p-3 font-mono text-sm text-paper">
       {text}
-    </pre>
+      </pre>
+    </div>
   );
 }

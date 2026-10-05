@@ -30,7 +30,7 @@ export default function FilterReaderPane({ activeRow, state, isAiDecided, onIncl
             {rowType === "submission" ? "Post" : "Comment"} &middot; {id}
             {isAiDecided && (
               <span className={`ml-2 ${badge}`}>
-                {state === "excluded" ? "AI excluded" : "AI included"}
+                {state === "excluded" ? "Skipped by AI" : "Kept by AI"}
               </span>
             )}
           </div>

@@ -7,9 +7,11 @@ import { useNavigate } from "react-router-dom";
  *
  * Renders "{name} has been created." followed by a clickable "view" action
  * that navigates to the artifact's view page with it pre-selected via
- * `location.state`.
+ * `location.state`. `note` adds a second line (e.g. that a run only
+ * partly finished), and a partial result passes `neutral` so it doesn't
+ * read as an unqualified success.
  */
-export default function ArtifactCreatedMessage({ name, viewPath, viewState, neutral = false }) {
+export default function ArtifactCreatedMessage({ name, viewPath, viewState, neutral = false, note = "" }) {
   const navigate = useNavigate();
 
   if (!name) return null;
@@ -29,8 +31,9 @@ export default function ArtifactCreatedMessage({ name, viewPath, viewState, neut
         onClick={() => navigate(viewPath, { state: viewState })}
         className="underline underline-offset-2 hover:opacity-70"
       >
-        view
+        View it
       </button>
+      {note ? <span className="mt-1 block text-xs font-normal">{note}</span> : null}
     </p>
   );
 }

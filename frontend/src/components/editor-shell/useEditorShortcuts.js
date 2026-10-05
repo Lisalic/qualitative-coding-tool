@@ -19,7 +19,12 @@ import { useEffect, useRef } from "react";
  * a search box that autofocuses the instant the shortcut becomes
  * relevant (e.g. the code-picker popup's "Search codes..." input) --
  * swallowing the key there would make the shortcut impossible to use at
- * the moment someone would actually reach for it.
+ * the moment someone would actually reach for it. Only the digit
+ * shortcuts (1-9, "apply code N") get through such an input -- letters
+ * are what the user is typing into it, so j/k there must stay text.
+ *
+ * Keys pressed with Cmd/Ctrl/Alt are never shortcuts: Cmd+1 switches
+ * browser tabs, it shouldn't also apply code 1.
  */
 export function useEditorShortcuts(handlers, { enabled = true } = {}) {
   const handlersRef = useRef(handlers);
@@ -28,11 +33,14 @@ export function useEditorShortcuts(handlers, { enabled = true } = {}) {
   useEffect(() => {
     if (!enabled) return undefined;
     const onKeyDown = (e) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
       const handler = handlersRef.current?.[e.key];
       if (!handler) return;
       const tag = e.target?.tagName;
       const isShortcutInput = e.target?.dataset?.shortcutInput === "true";
-      if (!isShortcutInput && (tag === "INPUT" || tag === "TEXTAREA" || e.target?.isContentEditable)) {
+      if (isShortcutInput) {
+        if (!/^[1-9]$/.test(e.key)) return;
+      } else if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || e.target?.isContentEditable) {
         return;
       }
       handler(e);

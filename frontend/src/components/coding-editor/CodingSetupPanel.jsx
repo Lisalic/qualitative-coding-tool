@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { requestJson } from "../../api";
 import EditorSetupStep from "../editor-shell/EditorSetupStep";
+import { missingHint } from "../../lib/formHints";
 import EditorOutputFields from "../editor-shell/EditorOutputFields";
 import DatabaseSourceFields from "../forms/DatabaseSourceFields";
 import ContentScopeFormGroup from "../tool-panels/ContentScopeFormGroup";
@@ -72,7 +73,7 @@ export default function CodingSetupPanel({ onCreated }) {
         });
       } catch (err) {
         if (err instanceof MissingFieldsError) {
-          setError(err.message);
+          setError(err.userMessage);
           return;
         }
         throw err;
@@ -167,7 +168,7 @@ export default function CodingSetupPanel({ onCreated }) {
 
           <div className="flex flex-col gap-1.5">
             <label htmlFor="codebook" className="text-sm">
-              Select Codebook
+              Codebook
             </label>
             <Dropdown
               id="codebook"
@@ -179,11 +180,8 @@ export default function CodingSetupPanel({ onCreated }) {
               triggerClassName={`w-full ${select}`}
               listLabel="Codebook"
               searchPlaceholder="Search codebooks…"
-              emptyMessage={
-                codebooks.length === 0
-                  ? "No codebooks available."
-                  : "No codebooks match that search."
-              }
+              emptyMessage="No codebooks match that search."
+              noOptionsMessage="No codebooks yet. Create one first."
             />
           </div>
 
@@ -203,8 +201,8 @@ export default function CodingSetupPanel({ onCreated }) {
             idPrefix="codingSetup"
             name={reportName}
             onNameChange={setReportName}
-            namePlaceholder="Enter report name..."
-            nameLabel="Report Name"
+            namePlaceholder="my-coding"
+            nameLabel="Coding name"
             description={description}
             onDescriptionChange={setDescription}
             selectedProject={selectedProject}
@@ -216,8 +214,14 @@ export default function CodingSetupPanel({ onCreated }) {
       }
       onSubmit={handleSubmit}
       submitLabel="Create coding"
-      submitLoadingLabel="Creating..."
+      submitLoadingLabel="Creating…"
       submitDisabled={!canSubmit}
+      submitHint={missingHint([
+        ["a database", !database],
+        ["a codebook", !codebook],
+        ["a name", !reportName.trim()],
+        ["a project", !selectedProject],
+      ])}
       submitLoading={loading}
       error={displayError}
     />

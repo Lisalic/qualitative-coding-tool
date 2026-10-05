@@ -6,12 +6,15 @@ import RailTabs from "../primitives/RailTabs";
 import Panel from "../shell/Panel";
 
 /**
- * Right rail of the integrate workspace: a tabbed reference panel -- the
- * active source code's full text ("Code") or a Compare Codebook report of
- * the sources ("Comparison") -- with the AI merge assistant pinned at the
- * foot, same shape as `CodebookReferenceRail`. Compare-then-integrate is
- * the intended workflow, so the comparison sits beside the draft rather
- * than on another page, and can be handed to the assistant as guidance.
+ * Right rail of the integrate workspace: a tabbed panel -- the active
+ * source code's full text ("Code"), a Compare Codebook report of the
+ * sources ("Comparison"), or the AI merge assistant ("AI Assist") -- same
+ * shape as `CodebookReferenceRail`. Compare-then-integrate is the
+ * intended workflow, so the comparison sits beside the draft rather than
+ * on another page, and can be handed to the assistant as guidance.
+ *
+ * The AI tab stays mounted while hidden, so a run in flight keeps its
+ * progress and the typed prompt/model survive a tab switch.
  */
 export default function IntegrateRail({
   tab,
@@ -33,6 +36,7 @@ export default function IntegrateRail({
   const tabs = [
     { value: "code", label: "Code" },
     { value: "comparison", label: "Comparison", count: comparisonCount },
+    { value: "ai", label: "AI Assist" },
   ];
 
   return (
@@ -52,20 +56,19 @@ export default function IntegrateRail({
             firstSourceRef={codebooks[0]}
             disabled={disabled}
           />
-        ) : (
+        ) : tab === "code" ? (
           <IntegrateSourceDetail active={active} codebookName={codebookName} />
-        )}
+        ) : null}
+        <div className={tab === "ai" ? "" : "hidden"}>
+          <IntegrateAiPanel
+            codebooks={codebooks}
+            existingCodes={existingCodes}
+            onProposals={onProposals}
+            comparison={useComparisonInAi ? comparisons.find((c) => c.ref === selectedComparison) || null : null}
+            disabled={disabled}
+          />
+        </div>
       </Panel>
-
-      <div className="shrink-0">
-        <IntegrateAiPanel
-          codebooks={codebooks}
-          existingCodes={existingCodes}
-          onProposals={onProposals}
-          comparison={useComparisonInAi ? comparisons.find((c) => c.ref === selectedComparison) || null : null}
-          disabled={disabled}
-        />
-      </div>
     </EditorRail>
   );
 }

@@ -1,4 +1,4 @@
-import React from "react";
+import { useId } from "react";
 
 /**
  * A standalone "(?)" hover affordance -- for explaining a control's
@@ -9,23 +9,32 @@ import React from "react";
  * but `w-64 whitespace-normal` instead of `whitespace-nowrap` -- a help
  * sentence is longer than "AI-use involved" and would run off-screen
  * without wrapping.
+ *
+ * Focusable, so keyboard users get the same tooltip on focus that mouse
+ * users get on hover; the text is also tied to it via aria-describedby.
  */
 export default function HelpTip({ text, className = "" }) {
+  const tipId = useId();
   return (
-    <span className={`group relative inline-flex cursor-help items-center ${className}`}>
+    <span
+      tabIndex={0}
+      aria-label="Help"
+      aria-describedby={tipId}
+      className={`group relative inline-flex cursor-help items-center ${className}`}
+    >
       <span
         aria-hidden="true"
-        className="flex h-3.5 w-3.5 items-center justify-center rounded-full border border-current text-[10px] leading-none text-paper/70"
+        className="flex h-3.5 w-3.5 items-center justify-center border border-current text-[10px] leading-none text-paper/70"
       >
         ?
       </span>
       <span
+        id={tipId}
         role="tooltip"
-        className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 w-64 -translate-x-1/2 translate-y-1 whitespace-normal border border-paper bg-ink px-2 py-1.5 text-xs text-paper opacity-0 transition-all group-hover:translate-y-0 group-hover:opacity-100"
+        className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 w-64 -translate-x-1/2 translate-y-1 whitespace-normal border border-paper bg-ink px-2 py-1.5 text-xs text-paper opacity-0 transition-all group-hover:translate-y-0 group-hover:opacity-100 group-focus:translate-y-0 group-focus:opacity-100"
       >
         {text}
       </span>
-      <span className="sr-only">{text}</span>
     </span>
   );
 }

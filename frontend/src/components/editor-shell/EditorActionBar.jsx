@@ -1,4 +1,4 @@
-import { btn, btnPrimary } from "../../lib/uiClasses";
+import { btnDanger, btnPrimary, meta } from "../../lib/uiClasses";
 
 /**
  * The pinned action bar at the foot of every editor workspace: a summary
@@ -11,6 +11,10 @@ import { btn, btnPrimary } from "../../lib/uiClasses";
  * centered treatment -- appropriate when the bar only appears once a
  * session is actually dirty. Filter/Codebook's bar is always visible, so
  * it keeps the plainer bordered strip instead.
+ *
+ * The secondary action is always destructive (Clear/Discard), so it is
+ * styled as one; callers confirm before running it. `primaryHint` says
+ * why a disabled primary button can't be pressed yet.
  */
 export default function EditorActionBar({
   summary,
@@ -22,6 +26,7 @@ export default function EditorActionBar({
   onPrimary,
   primaryDisabled,
   primaryLoading,
+  primaryHint,
   errorMessage,
   emphasized = false,
 }) {
@@ -34,7 +39,7 @@ export default function EditorActionBar({
       {secondaryLabel ? (
         <button
           type="button"
-          className={emphasized ? `${btn} text-paper/70` : btn}
+          className={btnDanger}
           onClick={onSecondary}
           disabled={secondaryDisabled}
         >
@@ -56,6 +61,9 @@ export default function EditorActionBar({
     <div className={`flex shrink-0 flex-wrap items-center gap-3 px-4 py-2 ${toneClasses}`}>
       <span className="text-sm">{summary}</span>
       {errorMessage ? <span className="text-sm text-error">{errorMessage}</span> : null}
+      {!errorMessage && primaryDisabled && !primaryLoading && primaryHint ? (
+        <span className={meta}>{primaryHint}</span>
+      ) : null}
       <div className={`flex items-center gap-2 ${emphasized ? "" : "ml-auto"}`}>{buttons}</div>
     </div>
   );

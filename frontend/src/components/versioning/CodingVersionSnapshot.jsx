@@ -3,10 +3,10 @@ import { apiFetch } from "../../api";
 import { flattenCodebookCodes, getCodeColor } from "../../lib/codingUtils";
 import CodeLegend from "../coding-table/CodeLegend";
 import CodingReaderPane from "../coding-table/workspace/CodingReaderPane";
+import { btnSm } from "../../lib/uiClasses";
 
 const PAGE_SIZE = 25;
-const btnSmall =
-  "border border-paper px-2 py-1 text-xs transition-colors hover:bg-paper hover:text-ink disabled:opacity-40";
+const btnSmall = btnSm;
 
 function rowPreview(row) {
   if (row.title) return row.title;
@@ -67,12 +67,12 @@ export default function CodingVersionSnapshot({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="grid grid-cols-3 border border-paper/30 text-center text-xs uppercase tracking-wide">
-        <div className="border-r border-paper/30 px-2 py-2">
+      <div className="grid grid-cols-3 border border-line text-center text-xs uppercase tracking-wide">
+        <div className="border-r border-line px-2 py-2">
           <strong className="block text-lg text-paper">{totalRows}</strong>
           <span className="text-paper/50">Total rows</span>
         </div>
-        <div className="border-r border-paper/30 px-2 py-2">
+        <div className="border-r border-line px-2 py-2">
           <strong className="block text-lg text-paper">{totalCoded}</strong>
           <span className="text-paper/50">Coded rows</span>
         </div>
@@ -87,7 +87,7 @@ export default function CodingVersionSnapshot({
       ) : (
         <div className="grid min-h-[560px] grid-cols-1 gap-3 xl:grid-cols-[200px_minmax(280px,1fr)_220px]">
           <div className="flex min-h-0 flex-col border border-paper">
-            <div className="border-b border-paper/30 px-3 py-2">
+            <div className="border-b border-line px-3 py-2">
               <h3 className="text-sm font-semibold">Documents</h3>
               <p className="text-xs text-paper/50">{totalCoded} of {totalRows} coded in v{versionNo}</p>
             </div>
@@ -121,7 +121,7 @@ export default function CodingVersionSnapshot({
                 </ul>
               )}
             </div>
-            <div className="flex items-center justify-between border-t border-paper/30 p-2">
+            <div className="flex items-center justify-between border-t border-line p-2">
               <button type="button" className={btnSmall} onClick={() => setPage((value) => value - 1)} disabled={rowsState.loading || page === 0}>
                 Prev
               </button>

@@ -87,9 +87,14 @@ one shared layer, `components/editor-shell/`:
    `PageShell` for a Text View mode that isn't 3-pane at all, but shares the
    same `EDITOR_GRID_CLASSES`). A compact row/document list on the left
    (`EditorListPane`), one item's full content in the center, and a
-   non-scrolling right rail (`EditorRail`) holding whatever that stage
-   works with (decisions' AI assist for Filter, the codebook sidebar for
-   Apply Codebook) plus its AI-assist tool pinned at the rail's foot.
+   non-scrolling right rail (`EditorRail`) holding one tabbed `Panel`
+   (`RailTabs` in its header) whose modes are whatever that stage works
+   with -- AI assist is always one of those modes, never a disclosure
+   pinned at the rail's foot (Filter: AI Assist; Create Codebook: Row /
+   AI Assist; Integrate: Code / Comparison / AI Assist; Apply Codebook:
+   Codebook / AI Coding / Coverage). The tabs own the header line alone so
+   they never wrap; a mode's own controls (the codebook's Edit/Done) sit on
+   a row just below it.
    `EditorActionBar` is the pinned Clear/Discard-then-primary strip at the
    bottom.
 
@@ -140,14 +145,14 @@ row-list and j/k-navigation behavior all three editors share.
 
 The dominant interactive pattern is **hover-invert**: an element with a white border on black background swaps to a solid white background with black text/icon on hover (and often on active/selected state, e.g. selected tab, selected list item). Reserve non-inverting hover styles (white-alpha background tint) for dense/table contexts where a full invert per-row would be too loud.
 
-Focus states use a visible white outline (`outline: 2px solid white; outline-offset: 2px`) — never remove focus outlines without replacing them with an equally visible alternative.
+Focus states use a visible white outline (`outline: 2px solid white; outline-offset: 2px`), applied app-wide by the `:focus-visible` rule in `index.css` — never remove focus outlines without replacing them with an equally visible alternative (`uiClasses`' `input` swaps it for `focus:ring-2`).
 
 ## Components
 
 - **Buttons:** three semantic variants — primary (2px border, bold), secondary (1px border, transparent), danger (error-red fill). Two size variants (small/default; a large variant exists for prominent single actions). All hover-invert except danger, which darkens.
 - **Tabs / pill selectors:** bordered pill, selected state is solid white/black invert. Used for view-mode switches, project tabs, database selector strips.
 - **Tables:** bordered cells (white/white-alpha), a `sticky` header row with a heavier bottom border, hover row tint via white-alpha (not invert — inverting whole rows is too loud), truncating cells with ellipsis, and per-code color badges (black text over the code's hashed HSL color) with a hover tooltip for badges carrying notes. Columns are **not** resizable; a table lives in a `padded={false}` Panel that owns the scroll.
-- **Forms:** label above input, white-bordered input on a near-black field background (`#1a1a1a`/`bg-white/5`, kept slightly off pure black so fields read as distinct from the page), placeholder text in white-alpha. Radio groups render as pill buttons (hidden native radio, `sibling:checked` invert styling) rather than native radio dots. Sliders use a white thumb/track with white-alpha rail.
+- **Forms:** label above input, white-bordered input on a near-black field background (`#1a1a1a`/`bg-white/5`, kept slightly off pure black so fields read as distinct from the page), placeholder text in white-alpha. Radio groups render as pill buttons (`pillRadioInput`/`pillRadioLabel` in `uiClasses.js`: a visually hidden — `sr-only`, never `hidden`, so it stays in the tab order — native radio, `peer-checked` invert styling) rather than native radio dots, inside a `fieldset`/`legend`. Sliders use a white thumb/track with white-alpha rail.
 - **Alerts / messages:** three variants (error/success/info), each a bordered box tinted with the variant color, or a plain centered message line for lighter-weight inline feedback.
 - **Empty state (`PageEmptyState`):** every view page opens in this state, so it
   gets one size and one style regardless of the page's `width` — a centered
@@ -158,7 +163,7 @@ Focus states use a visible white outline (`outline: 2px solid white; outline-off
   history). Never "project file" or "coded data", and never "artifact" in UI
   copy — `artifact` is the backend's word for the version spine and stays in
   code and docs, but the user picks a **file**.
-- **Modals:** centered panel, 2px white border, dark translucent black backdrop (`black/80`). One modal pattern reused everywhere — the app previously had a second, near-duplicate modal implementation for the data table's entry viewer; that's being collapsed into the single shared pattern. Yes/no confirmations never use the browser's native `window.confirm`: call `DialogService.confirm` (`components/feedback/DialogService.js`), which `components/feedback/DialogHost.jsx` (mounted once in `App.jsx`) renders in this same pattern — pass `danger: true` for destructive confirms. Non-blocking notices never use `window.alert` either: call `ToastService.show(message, type)` (`components/feedback/ToastService.js`), rendered by `ToastHost.jsx` as a small bottom-right toast (1px border tinted by type, seconds-left counter and shrinking bar) that fades out after 15s, pauses while hovered, and can be dismissed with ×. The one exception is the `beforeunload` tab-close warning, which browsers only allow as their own native prompt.
+- **Modals:** centered panel, 2px white border, dark translucent black backdrop (`black/80`). One modal pattern reused everywhere — the app previously had a second, near-duplicate modal implementation for the data table's entry viewer; that's being collapsed into the single shared pattern. Yes/no confirmations never use the browser's native `window.confirm`: call `DialogService.confirm` (`components/feedback/DialogService.js`), which `components/feedback/DialogHost.jsx` (mounted once in `App.jsx`) renders in this same pattern — pass `danger: true` for destructive confirms. Non-blocking notices never use `window.alert` either: call `ToastService.show(message, type)` (`components/feedback/ToastService.js`), rendered by `ToastHost.jsx` as a small bottom-right toast (1px border tinted by type, seconds-left counter and shrinking bar) that fades out (errors after 15s, success/info notices after 6s; at most 3 on screen), pauses while hovered, and can be dismissed with ×. The one exception is the `beforeunload` tab-close warning, which browsers only allow as their own native prompt. Every modal gets the same keyboard behavior from `components/feedback/useModalBehavior.js` (Escape closes, focus moves in and is kept inside, and returns on close); a destructive `DialogService.confirm` opens with Cancel focused. A page holding unsaved work calls `useLeaveGuard(dirty)` (`components/feedback/LeaveGuard.js`), and app-level navigation (sidebar, navbar, workspace Tools links) awaits `confirmLeave()` before leaving.
 - **Tree/accordion views** (codebook tree, code legend): hierarchy is communicated through indentation, connector lines, borders, and font-weight — not background color steps. This is the area most affected by the black/white cleanup, since the old implementation leaned on a multi-step gray ramp instead.
 - **Tooltip:** small bordered black box, appears on hover/focus, used for the "AI-use involved" label icon and code-badge notes.
 

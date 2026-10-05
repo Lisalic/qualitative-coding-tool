@@ -1,5 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
-import ToastService, { TOAST_DURATION_MS } from "./ToastService";
+import ToastService, { toastDuration } from "./ToastService";
 
 const TICK_MS = 100;
 const FADE_MS = 500;
@@ -11,11 +11,12 @@ const TYPE_STYLES = {
 };
 
 /**
- * One toast: counts down from TOAST_DURATION_MS (paused while hovered),
+ * One toast: counts down from its type's duration (paused while hovered),
  * showing the seconds left and a shrinking bar, then fades and dismisses.
  */
 function Toast({ toast }) {
-  const [remaining, setRemaining] = useState(TOAST_DURATION_MS);
+  const duration = toastDuration(toast.type);
+  const [remaining, setRemaining] = useState(duration);
   const [paused, setPaused] = useState(false);
 
   useEffect(() => {
@@ -36,7 +37,7 @@ function Toast({ toast }) {
   return (
     <div
       role={toast.type === "error" ? "alert" : "status"}
-      className={`pointer-events-auto w-full border bg-ink text-paper shadow-2xl transition-opacity duration-500 ${style.border} ${
+      className={`pointer-events-auto w-full border bg-ink text-paper transition-opacity duration-500 ${style.border} ${
         fading ? "opacity-0" : "opacity-100"
       }`}
       onMouseEnter={() => setPaused(true)}
@@ -57,23 +58,27 @@ function Toast({ toast }) {
           ×
         </button>
       </div>
-      <div className="h-0.5 w-full bg-white/10">
+      <div className="h-0.5 w-full bg-surface-raised">
         <div
           className={`h-full ${style.bar}`}
-          style={{ width: `${(remaining / TOAST_DURATION_MS) * 100}%` }}
+          style={{ width: `${(remaining / duration) * 100}%` }}
         />
       </div>
     </div>
   );
 }
 
-/** Bottom-right stack of live toasts. Mounted once in App.jsx. */
+/**
+ * Bottom-right stack of live toasts. Mounted once in App.jsx. Sits above
+ * the editors' pinned action bar (`bottom-16`) so a toast never covers
+ * the Save button it is reporting on.
+ */
 export default function ToastHost() {
   const toasts = useSyncExternalStore(ToastService.subscribe, ToastService.getSnapshot);
   if (!toasts.length) return null;
 
   return (
-    <div className="pointer-events-none fixed right-4 bottom-4 left-4 z-[19000] flex flex-col items-end gap-2 sm:left-auto sm:w-[360px]">
+    <div className="pointer-events-none fixed right-4 bottom-16 left-4 z-[19000] flex flex-col items-end gap-2 sm:left-auto sm:w-[360px]">
       {toasts.map((toast) => (
         <Toast key={toast.id} toast={toast} />
       ))}

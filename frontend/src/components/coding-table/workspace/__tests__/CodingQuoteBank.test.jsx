@@ -4,6 +4,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import CodingQuoteBank from "../CodingQuoteBank";
 import * as api from "../../../../api";
+import ToastService from "../../../feedback/ToastService";
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -369,6 +370,10 @@ describe("CodingQuoteBank (QC-008)", () => {
     });
 
     expect(navigator.clipboard.writeText).toHaveBeenCalled();
-    expect(container.textContent).toContain("Citation copied to clipboard");
+    // Confirmed through the app's shared toast, not an in-component banner.
+    expect(ToastService.getSnapshot().map((toast) => toast.message)).toContain(
+      "Citation copied to clipboard.",
+    );
+    ToastService.getSnapshot().forEach((toast) => ToastService.dismiss(toast.id));
   });
 });
