@@ -198,10 +198,16 @@ function _sleepOrAbort(ms, signal) {
  * hasn't reported any yet) -- callers can feed this straight into a
  * progress-bar component.
  */
+const MAX_POLL_FAILURES = 5;
+
 async function _pollJob(jobId, {
   intervalMs = 2000, timeoutMs = 600000, onStatusChange, onProgress, signal,
 } = {}) {
   const deadline = Date.now() + timeoutMs;
+  // The job keeps running server-side whatever happens to one poll, so a
+  // dropped connection or a brief 5xx shouldn't end the wait -- giving up
+  // there sent people to start (and pay for) the same job again.
+  let consecutiveFailures = 0;
 
   for (;;) {
     if (signal?.aborted) {
@@ -212,11 +218,19 @@ async function _pollJob(jobId, {
     try {
       response = await apiFetch(`/api/jobs/${jobId}`);
     } catch (err) {
+      if (++consecutiveFailures < MAX_POLL_FAILURES && Date.now() < deadline) {
+        await _sleepOrAbort(intervalMs, signal);
+        continue;
+      }
+      // The job was accepted and may well still be running -- say so,
+      // rather than inviting a second (paid) run.
       return {
         ok: false,
         status: 0,
         data: null,
-        error: err?.message || "Network error",
+        error:
+          "Lost contact with the server while waiting for the result. The job may still be running; " +
+          "check your project before running it again.",
       };
     }
 
@@ -229,9 +243,15 @@ async function _pollJob(jobId, {
     }
 
     if (!response.ok) {
-      const error = (job && typeof job.error === "string" && job.error) || `HTTP error ${response.status}`;
+      const transient = response.status >= 500 || response.status === 429;
+      if (transient && ++consecutiveFailures < MAX_POLL_FAILURES && Date.now() < deadline) {
+        await _sleepOrAbort(intervalMs, signal);
+        continue;
+      }
+      const error = (job && typeof job.error === "string" && job.error) || genericHttpError(response.status);
       return { ok: false, status: response.status, data: null, error };
     }
+    consecutiveFailures = 0;
 
     const status = job?.status;
     onStatusChange?.(status);
@@ -289,7 +309,11 @@ async function _pollJob(jobId, {
         ok: false,
         status: 0,
         data: null,
-        error: `Timed out waiting for job ${jobId} to complete`,
+        // The job is still running server-side -- say so, or the natural
+        // reaction is to start (and pay for) a second run.
+        error:
+          "This is taking longer than expected. It's still running in the background; " +
+          "check your project in a few minutes before running it again.",
       };
     }
 

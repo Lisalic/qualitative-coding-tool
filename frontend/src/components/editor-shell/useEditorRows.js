@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "../../api";
 import { PROJ_SCHEMA_RE } from "../../lib/schemaGuards";
 
@@ -30,6 +30,10 @@ export function useEditorRows(database) {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [activeKey, setActiveKey] = useState(null);
+  // Only the most recent request may write state: a fast Next/Next or a
+  // page-size change otherwise lets an older, slower response land last
+  // and show the wrong page.
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
     setPage(0);
@@ -42,8 +46,10 @@ export function useEditorRows(database) {
   }, []);
 
   const fetchEntries = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
     if (!database || !PROJ_SCHEMA_RE.test(String(database))) {
       setEntries(null);
+      setLoading(false);
       return;
     }
     setLoading(true);
@@ -55,12 +61,15 @@ export function useEditorRows(database) {
         )}`,
       );
       if (!response.ok) throw new Error("Failed to load rows");
-      setEntries(await response.json());
+      const data = await response.json();
+      if (requestId !== requestIdRef.current) return;
+      setEntries(data);
     } catch (err) {
+      if (requestId !== requestIdRef.current) return;
       setLoadError(err?.message || "Failed to load rows");
       setEntries(null);
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) setLoading(false);
     }
   }, [database, limit, page]);
 

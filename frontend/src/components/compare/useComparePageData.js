@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { apiFetch, postFormAndPoll } from "../../api";
+import { apiFetch, postFormAndPoll, MISSING_API_KEY_MESSAGE } from "../../api";
+import { useUnmountSignal } from "../primitives/useUnmountSignal";
 
 export default function useComparePageData({
   fileType,
@@ -16,6 +17,13 @@ export default function useComparePageData({
   const [comparison, setComparison] = useState("");
   const [createdFile, setCreatedFile] = useState(null);
   const [error, setError] = useState("");
+  // Validation messages keyed by field, shown next to the field itself.
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [progress, setProgress] = useState(null);
+  const [partialNote, setPartialNote] = useState("");
+  const [listError, setListError] = useState("");
+  // Leaving the page stops job polling (the job itself keeps running).
+  const pollSignal = useUnmountSignal();
   const [model, setModel] = useState("");
   const [name, setName] = useState("");
   const [additionalPrompt, setAdditionalPrompt] = useState("");
@@ -37,6 +45,7 @@ export default function useComparePageData({
           label: project.display_name || project.schema_name,
         }));
         setItems(list);
+        setListError("");
         if (initialA) {
           const availableForB = list.filter((item) => item.value !== initialA);
           if (availableForB.length > 0) {
@@ -44,7 +53,9 @@ export default function useComparePageData({
           }
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        if (mounted) setListError("Couldn't load the files to compare. Check your connection and refresh.");
+      });
 
     return () => {
       mounted = false;
@@ -77,30 +88,21 @@ export default function useComparePageData({
     setComparison("");
     setCreatedFile(null);
     setError("");
+    setPartialNote("");
 
-    if (!a || !b) {
-      setError(validationMessage);
-      return;
-    }
-
-    if (!name.trim()) {
-      setError("Enter a name for the comparison");
-      return;
-    }
-
-    if (!selectedProject) {
-      setError("Select a project");
-      return;
-    }
-
-    if (!model) {
-      setError("Select an AI model");
-      return;
-    }
+    const nextFieldErrors = {};
+    if (!a) nextFieldErrors.a = validationMessage;
+    if (!b) nextFieldErrors.b = validationMessage;
+    if (a && b && a === b) nextFieldErrors.b = "Pick a different file from A.";
+    if (!name.trim()) nextFieldErrors.name = "Enter a name for the comparison.";
+    if (!selectedProject) nextFieldErrors.project = "Choose a project.";
+    if (!model) nextFieldErrors.model = "Choose an AI model.";
+    setFieldErrors(nextFieldErrors);
+    if (Object.keys(nextFieldErrors).length > 0) return;
 
     const apiKey = localStorage.getItem("apiKey");
     if (!apiKey) {
-      setError("Set your API key in the navbar first");
+      setError(MISSING_API_KEY_MESSAGE);
       return;
     }
 
@@ -115,18 +117,30 @@ export default function useComparePageData({
 
     try {
       setLoading(true);
+      setProgress(null);
 
-      const { ok, data, error: pollError } = await postFormAndPoll(compareEndpoint, form);
+      const {
+        ok,
+        data,
+        error: pollError,
+        isPartial,
+      } = await postFormAndPoll(compareEndpoint, form, { signal: pollSignal(), onProgress: setProgress });
       if (!ok) {
-        setError(pollError || "Comparison failed");
+        setError(pollError || "The comparison failed. Please try again.");
       } else {
         setComparison((data && data.comparison) || "");
         setCreatedFile((data && data.file) || null);
+        if (isPartial) {
+          setPartialNote(
+            `Only part of the comparison finished${pollError ? ` (${pollError})` : ""}. What finished was saved.`,
+          );
+        }
       }
     } catch (err) {
-      setError(err.message);
+      setError(err?.message || "The comparison failed. Please try again.");
     } finally {
       setLoading(false);
+      setProgress(null);
     }
   };
 
@@ -140,6 +154,10 @@ export default function useComparePageData({
     comparison,
     createdFile,
     error,
+    fieldErrors,
+    progress,
+    partialNote,
+    listError,
     model,
     setModel,
     name,

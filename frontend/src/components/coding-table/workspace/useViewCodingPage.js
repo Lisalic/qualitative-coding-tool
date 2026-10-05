@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { apiFetch, postJsonAndPoll, requestJson } from "../../../api";
+import { apiFetch, postJsonAndPoll, requestJson, MISSING_API_KEY_MESSAGE } from "../../../api";
 import { buildRecodeItemsPayload, MissingFieldsError } from "../../../lib/apiContracts";
 import { cloneCodebookTree, flattenTreeToCodes, groupCodesByFamily, rollUpCoder } from "../../../lib/codingUtils";
 import { normalizeCodingRowEdits } from "../../../lib/codingViewHelpers";
 import DialogService from "../../feedback/DialogService";
+import ToastService from "../../feedback/ToastService";
+import { useLeaveGuard } from "../../feedback/LeaveGuard";
+import { useUnmountSignal } from "../../primitives/useUnmountSignal";
+import { useRefParam } from "../../primitives/useRefParam";
 
 const ROWS_PER_PAGE = 25;
 const SEARCH_DEBOUNCE_MS = 400;
@@ -61,10 +65,16 @@ export default function useViewCodingPage({
   const [renamedName, setRenamedName] = useState(null);
   const selectedCodedData = isPinned ? pinnedRef : pickedCodedData;
   const selectedCodedDataName = isPinned ? renamedName ?? pinnedName : pickedCodedDataName;
+  // The picked coding lives in the URL (`?ref=`) so refresh and Back keep
+  // it; a pinned workspace (Apply Codebook) has no picker and no URL ref.
+  const urlRef = useRefParam(pickedCodedData, { enabled: !isPinned });
+  const preselectedRef = location?.state?.selectedCodedData || (isPinned ? null : urlRef);
   const [refreshKey, setRefreshKey] = useState(0);
   const [projectsList, setProjectsList] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
   const appliedPreselectRef = useRef(null);
+  const [listError, setListError] = useState("");
+  const [listLoading, setListLoading] = useState(false);
 
   // Artifact metadata: GET /api/coding/{ref}
   const [systemPrompt, setSystemPrompt] = useState("");
@@ -96,11 +106,17 @@ export default function useViewCodingPage({
   const [isCodebookEditMode, setIsCodebookEditMode] = useState(false);
   const [codebookDraft, setCodebookDraft] = useState([]);
   const [isCodebookDirty, setIsCodebookDirty] = useState(false);
+  // The draft as of the latest render, so a save's refresh can tell
+  // whether the researcher kept editing while it was in flight.
+  const codebookDraftRef = useRef(codebookDraft);
+  codebookDraftRef.current = codebookDraft;
 
   const [recodeModel, setRecodeModel] = useState("");
   const [recodeMethodology, setRecodeMethodology] = useState("");
   const [recodeLoading, setRecodeLoading] = useState(false);
   const [recodeProgress, setRecodeProgress] = useState(null);
+  // Leaving the page stops job polling (the job itself keeps running).
+  const pollSignal = useUnmountSignal();
   const [recodeError, setRecodeError] = useState(null);
   const [recodeSummary, setRecodeSummary] = useState("");
 
@@ -116,6 +132,8 @@ export default function useViewCodingPage({
   }, []);
 
   const fetchAvailableCodedData = useCallback(async () => {
+    setListError("");
+    setListLoading(true);
     try {
       if (projectsList.length > 0 && selectedProject) {
         const projectObj = projectsList.find(
@@ -134,7 +152,7 @@ export default function useViewCodingPage({
           }));
         setAvailableCodedData(codingFiles);
 
-        const preselected = location?.state?.selectedCodedData;
+        const preselected = preselectedRef;
         if (preselected && appliedPreselectRef.current !== preselected) {
           const match = codingFiles.find(
             (item) =>
@@ -155,6 +173,7 @@ export default function useViewCodingPage({
         setAvailableCodedData([]);
         setSelectedCodedData(null);
         setSelectedCodedDataName("");
+        setListError("Couldn't load your codings. Please refresh to try again.");
         return;
       }
 
@@ -169,7 +188,7 @@ export default function useViewCodingPage({
       }));
       setAvailableCodedData(items);
 
-      const preselected = location?.state?.selectedCodedData;
+      const preselected = preselectedRef;
       if (!preselected || appliedPreselectRef.current === preselected) return;
       const match = items.find((item) => item.id === preselected);
       if (!match) return;
@@ -178,8 +197,11 @@ export default function useViewCodingPage({
       setSelectedCodedDataName(match?.display_name || match?.name || match?.id || "");
     } catch (error) {
       console.error("Error fetching coded data list:", error);
+      setListError("Couldn't reach the server to load your codings. Check your connection and refresh.");
+    } finally {
+      setListLoading(false);
     }
-  }, [location?.state?.selectedCodedData, projectsList, selectedProject]);
+  }, [preselectedRef, projectsList, selectedProject]);
 
   const getSelectedCodingSchema = useCallback(
     (codedId = selectedCodedData) => {
@@ -192,7 +214,7 @@ export default function useViewCodingPage({
     [availableCodedData, selectedCodedData],
   );
 
-  const fetchCodingArtifact = useCallback(async (schema) => {
+  const fetchCodingArtifact = useCallback(async (schema, { savedDraft } = {}) => {
     setArtifactLoading(true);
     const result = await requestJson(`/api/coding/${encodeURIComponent(schema)}`, { method: "GET" });
     setArtifactLoading(false);
@@ -209,12 +231,14 @@ export default function useViewCodingPage({
     }
     const grouped = groupCodesByFamily(result.data.codes);
     setCodebookTree(grouped);
-    // The draft always tracks the server's codebook as its baseline --
-    // on first load AND after a successful save (this same function is
-    // re-called then, see saveSession) -- so a save leaves nothing
-    // "still dirty" behind.
-    setCodebookDraft(cloneCodebookTree(grouped));
-    setIsCodebookDirty(false);
+    // The draft tracks the server's codebook as its baseline -- on first
+    // load AND after a successful save (see saveSession) -- unless the
+    // draft changed after `savedDraft` was sent: those newer edits stay,
+    // still unsaved.
+    if (savedDraft === undefined || codebookDraftRef.current === savedDraft) {
+      setCodebookDraft(cloneCodebookTree(grouped));
+      setIsCodebookDirty(false);
+    }
     setSystemPrompt(result.data.file?.systemprompt || "");
     setInstructions(result.data.file?.instructions || "");
     setPromptMeta(result.data.file?.prompt_meta || null);
@@ -222,8 +246,12 @@ export default function useViewCodingPage({
     setTotalCoded(result.data.total_coded || 0);
   }, []);
 
+  // Page, search and filter changes can overlap; only the newest request
+  // may fill the list, never an older, slower one.
+  const latestRowsRequest = useRef(0);
   const fetchCodingRows = useCallback(
     async (schema, { page: pageArg, only, q, code } = {}) => {
+      const requestId = ++latestRowsRequest.current;
       setRowsLoading(true);
       const params = new URLSearchParams({
         limit: String(ROWS_PER_PAGE),
@@ -235,6 +263,7 @@ export default function useViewCodingPage({
       const result = await requestJson(`/api/coding/${encodeURIComponent(schema)}/rows?${params}`, {
         method: "GET",
       });
+      if (requestId !== latestRowsRequest.current) return;
       setRowsLoading(false);
       if (!result.ok) {
         setRows([]);
@@ -362,6 +391,10 @@ export default function useViewCodingPage({
     const schema = getSelectedCodingSchema();
     if (!schema || !isSessionDirty) return;
 
+    // Snapshot of what this save sends: tagging continues while it's in
+    // flight, and only edits that actually went out may be cleared.
+    const sentRowEdits = pendingRowEdits;
+    const sentCodebookDraft = codebookDraft;
     let normalizedRows = null;
     if (pendingRowEdits.size > 0) {
       const draft = Array.from(pendingRowEdits.entries()).map(([itemId, codes]) => ({ itemId, codes }));
@@ -388,14 +421,23 @@ export default function useViewCodingPage({
       setSessionSaveState({ status: "error", message: result.error || "Failed to save." });
       return;
     }
-    setPendingRowEdits(new Map());
+    setPendingRowEdits((current) => {
+      const unsent = new Map();
+      current.forEach((codes, itemId) => {
+        if (sentRowEdits.get(itemId) !== codes) unsent.set(itemId, codes);
+      });
+      return unsent;
+    });
     setRecodeRuns([]);
-    humanEditedItemIds.current = new Set();
+    sentRowEdits.forEach((_codes, itemId) => humanEditedItemIds.current.delete(itemId));
     setSessionSaveState({ status: "success", message: "Saved." });
+    // The action bar disappears the moment the session is clean, taking
+    // any inline "Saved." with it -- so confirm the save as a toast.
+    ToastService.show("Changes saved as a new version.", "success");
     setRefreshKey((key) => key + 1);
     // Also resets codebookDraft/isCodebookDirty from the freshly saved
-    // tree -- see fetchCodingArtifact.
-    fetchCodingArtifact(schema);
+    // tree, unless it was edited during the save -- see fetchCodingArtifact.
+    fetchCodingArtifact(schema, { savedDraft: sentCodebookDraft });
   }, [
     buildRecodeAssistRuns,
     codebookDraft,
@@ -602,7 +644,10 @@ export default function useViewCodingPage({
         method: "GET",
       });
       setSelectAllLoading(false);
-      if (!result.ok) return;
+      if (!result.ok) {
+        ToastService.show(result.error || "Couldn't select the matching rows. Please try again.", "error");
+        return;
+      }
       const matchedIds = (Array.isArray(result.data.rows) ? result.data.rows : []).map(
         (row) => row.item_id,
       );
@@ -644,7 +689,7 @@ export default function useViewCodingPage({
     }
     const apiKey = localStorage.getItem("apiKey");
     if (!apiKey) {
-      setRecodeError("Please set your API key in the navbar first.");
+      setRecodeError(MISSING_API_KEY_MESSAGE);
       return;
     }
 
@@ -657,7 +702,7 @@ export default function useViewCodingPage({
         methodology: recodeMethodology,
       });
     } catch (err) {
-      setRecodeError(err instanceof MissingFieldsError ? err.message : String(err));
+      setRecodeError(err instanceof MissingFieldsError ? err.userMessage : err?.message || "Couldn't start AI coding.");
       return;
     }
 
@@ -669,7 +714,7 @@ export default function useViewCodingPage({
     const result = await postJsonAndPoll(
       `/api/coding/${encodeURIComponent(schema)}/recode`,
       payload,
-      { onProgress: setRecodeProgress },
+      { onProgress: setRecodeProgress, signal: pollSignal() },
     );
 
     setRecodeLoading(false);
@@ -680,7 +725,10 @@ export default function useViewCodingPage({
 
     const data = result.data || {};
     const rejectedTotal =
-      (data.rejected_unknown_item || 0) + (data.rejected_unknown_code || 0) + (data.rejected_quote_not_found || 0);
+      (data.rejected_unknown_item || 0) +
+      (data.rejected_unknown_code || 0) +
+      (data.rejected_ambiguous_code || 0) +
+      (data.rejected_quote_not_found || 0);
     if (rejectedTotal > 0) {
       setRecodeSummary(
         `${data.accepted || 0} coding${data.accepted === 1 ? "" : "s"} proposed. ` +
@@ -753,6 +801,7 @@ export default function useViewCodingPage({
     clearSelection();
   }, [
     clearSelection,
+    pollSignal,
     getSelectedCodingSchema,
     recodeMethodology,
     recodeModel,
@@ -778,16 +827,9 @@ export default function useViewCodingPage({
     [availableCodedData, isSessionDirty],
   );
 
-  // Warn on tab close/reload while the editing session hasn't been saved.
-  useEffect(() => {
-    if (!isSessionDirty) return undefined;
-    const handler = (event) => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [isSessionDirty]);
+  // Warn before an unsaved editing session is lost -- on tab close/reload,
+  // and on in-app navigation from the sidebar/navbar (see LeaveGuard).
+  useLeaveGuard(isSessionDirty);
 
   // Both lists exist only to feed the picker, so a pinned workspace skips
   // them -- Apply Codebook already knows which artifact it is showing.
@@ -868,6 +910,16 @@ export default function useViewCodingPage({
     setPendingSelection(null);
   }, [activeItemId]);
 
+  // The row filter is keyed on code_uid; this is its current name, for display.
+  const activeFilterCodeName = useMemo(() => {
+    if (!activeFilterCode) return null;
+    for (const family of codebookTree) {
+      const match = (family.codes || []).find((code) => code.code_uid === activeFilterCode);
+      if (match) return match.name;
+    }
+    return null;
+  }, [activeFilterCode, codebookTree]);
+
   const toggleFilterCode = useCallback((code) => {
     setPage(0);
     setActiveFilterCode((prev) => (prev === code ? null : code));
@@ -904,6 +956,7 @@ export default function useViewCodingPage({
     searchInput,
     setSearchInput,
     activeFilterCode,
+    activeFilterCodeName,
     toggleFilterCode,
     onPrevPage: () => setPage((p) => Math.max(0, p - 1)),
     onNextPage: () => setPage((p) => Math.min(pageCount - 1, p + 1)),
@@ -930,6 +983,8 @@ export default function useViewCodingPage({
     selectedItemIds,
     toggleItemSelected,
     clearSelection,
+    listError,
+    listLoading,
     selectAllMatching,
     selectUncodedMatching,
     selectAllLoading,

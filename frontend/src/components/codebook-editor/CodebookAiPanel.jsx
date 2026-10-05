@@ -1,6 +1,7 @@
 import { postJsonAndPoll } from "../../api";
 import AiAssistPanel from "../forms/AiAssistPanel";
 import { EXAMPLE_PROMPTS, MissingFieldsError, buildCodebookPreviewPayload } from "../../lib/apiContracts";
+import { useUnmountSignal } from "../primitives/useUnmountSignal";
 
 /**
  * The codebook generator, as an assistive tool inside the editor.
@@ -13,6 +14,8 @@ import { EXAMPLE_PROMPTS, MissingFieldsError, buildCodebookPreviewPayload } from
  * already exists.
  */
 export default function CodebookAiPanel({ database, existingCodes, onProposals, disabled }) {
+  // Leaving the page stops job polling (the job itself keeps running).
+  const pollSignal = useUnmountSignal();
   const handleRun = async ({ apiKey, model, prompt, samplePercentage, contentScope, setProgress }) => {
     let payload;
     try {
@@ -26,14 +29,14 @@ export default function CodebookAiPanel({ database, existingCodes, onProposals, 
         existingCodes,
       });
     } catch (err) {
-      if (err instanceof MissingFieldsError) return { error: err.message };
+      if (err instanceof MissingFieldsError) return { error: err.userMessage };
       throw err;
     }
 
     const { ok, data, jobId, error: runError } = await postJsonAndPoll(
       "/api/codebook-preview/",
       payload,
-      { onProgress: setProgress },
+      { onProgress: setProgress, signal: pollSignal() },
     );
     if (!ok) return { error: runError || "AI codebook assistant failed" };
 

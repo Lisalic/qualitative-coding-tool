@@ -1,6 +1,7 @@
 import { postJsonAndPoll } from "../../api";
 import AiAssistPanel from "../forms/AiAssistPanel";
 import { EXAMPLE_PROMPTS, MissingFieldsError, buildIntegratePreviewPayload } from "../../lib/apiContracts";
+import { useUnmountSignal } from "../primitives/useUnmountSignal";
 
 /**
  * The merge assistant, as an assistive tool inside the integrate editor
@@ -21,6 +22,8 @@ import { EXAMPLE_PROMPTS, MissingFieldsError, buildIntegratePreviewPayload } fro
  * prompt box carries the researcher's own suggestions on top of that.
  */
 export default function IntegrateAiPanel({ codebooks, existingCodes, onProposals, comparison, disabled }) {
+  // Leaving the page stops job polling (the job itself keeps running).
+  const pollSignal = useUnmountSignal();
   const handleRun = async ({ apiKey, model, prompt, setProgress }) => {
     let payload;
     try {
@@ -33,14 +36,14 @@ export default function IntegrateAiPanel({ codebooks, existingCodes, onProposals
         comparisons: comparison ? [comparison.ref] : [],
       });
     } catch (err) {
-      if (err instanceof MissingFieldsError) return { error: err.message };
+      if (err instanceof MissingFieldsError) return { error: err.userMessage };
       throw err;
     }
 
     const { ok, data, jobId, error: runError } = await postJsonAndPoll(
       "/api/integrate-codebook-preview/",
       payload,
-      { onProgress: setProgress },
+      { onProgress: setProgress, signal: pollSignal() },
     );
     if (!ok) return { error: runError || "AI integrate assistant failed" };
 

@@ -1,6 +1,14 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { BASE_URL, apiFetch, postForm, postFormAndPoll, requestJson, postJsonAndPoll } from "../api";
+import {
+  BASE_URL,
+  NETWORK_ERROR_MESSAGE,
+  apiFetch,
+  postForm,
+  postFormAndPoll,
+  requestJson,
+  postJsonAndPoll,
+} from "../api";
 
 function mockResponse({ ok, status, body }) {
   const rawText = typeof body === "string" ? body : body === undefined ? "" : JSON.stringify(body);
@@ -17,6 +25,30 @@ afterEach(() => {
 });
 
 describe("apiFetch", () => {
+  it("ends the session when a request carrying a token gets a 401", async () => {
+    localStorage.setItem("access_token", "expired");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockResponse({ ok: false, status: 401 })));
+    const onAuthChanged = vi.fn();
+    window.addEventListener("auth-changed", onAuthChanged);
+
+    await apiFetch("/api/projects/");
+
+    window.removeEventListener("auth-changed", onAuthChanged);
+    expect(localStorage.getItem("access_token")).toBeNull();
+    expect(onAuthChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves auth alone on a 401 for a request without a token", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockResponse({ ok: false, status: 401 })));
+    const onAuthChanged = vi.fn();
+    window.addEventListener("auth-changed", onAuthChanged);
+
+    await apiFetch("/api/me/");
+
+    window.removeEventListener("auth-changed", onAuthChanged);
+    expect(onAuthChanged).not.toHaveBeenCalled();
+  });
+
   it("passes an absolute URL straight through to fetch, unjoined", async () => {
     const fetchMock = vi.fn().mockResolvedValue(mockResponse({ ok: true, status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
@@ -145,19 +177,19 @@ describe("postForm", () => {
     expect(opts.credentials).toBe("include");
   });
 
-  it("network throw with a message -> status 0, error is the message", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("boom")));
+  it("network throw -> status 0 with a plain-language connection message", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Failed to fetch")));
     const result = await postForm("/api/x", new FormData());
-    expect(result).toEqual({ ok: false, status: 0, data: null, error: "boom" });
+    expect(result).toEqual({ ok: false, status: 0, data: null, error: NETWORK_ERROR_MESSAGE });
   });
 
-  it("network throw with no message (e.g. a thrown string) -> generic 'Network error'", async () => {
+  it("network throw with no message (e.g. a thrown string) -> the same connection message", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation(() => Promise.reject("boom-string")),
     );
     const result = await postForm("/api/x", new FormData());
-    expect(result).toEqual({ ok: false, status: 0, data: null, error: "Network error" });
+    expect(result).toEqual({ ok: false, status: 0, data: null, error: NETWORK_ERROR_MESSAGE });
   });
 
   it("success with an empty body -> data: null, ok: true", async () => {
@@ -221,13 +253,13 @@ describe("postForm", () => {
     expect(result.error).toBe("just a message");
   });
 
-  it("array detail: empty array falls back to the generic HTTP error string", async () => {
+  it("array detail: empty array falls back to the generic server-error string", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(mockResponse({ ok: false, status: 500, body: { detail: [] } })),
     );
     const result = await postForm("/api/x", new FormData());
-    expect(result.error).toBe("HTTP error 500");
+    expect(result.error).toBe("Server error (HTTP 500). Please try again.");
   });
 
   it("error without a JSON body but with raw text -> error is the raw text verbatim", async () => {
@@ -239,10 +271,10 @@ describe("postForm", () => {
     expect(result.error).toBe("plain text error");
   });
 
-  it("error with an empty body -> generic 'HTTP error <status>'", async () => {
+  it("error with an empty body -> generic server-error string", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockResponse({ ok: false, status: 500, body: "" })));
     const result = await postForm("/api/x", new FormData());
-    expect(result.error).toBe("HTTP error 500");
+    expect(result.error).toBe("Server error (HTTP 500). Please try again.");
   });
 
   it("preserves the parsed data on a failure response", async () => {
@@ -277,10 +309,10 @@ describe("requestJson", () => {
     expect(opts.method).toBe("PUT");
   });
 
-  it("network throw -> status 0, error is the message", async () => {
+  it("network throw -> status 0 with the plain-language connection message", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("boom")));
     const result = await requestJson("/api/x", { body: {} });
-    expect(result).toEqual({ ok: false, status: 0, data: null, error: "boom" });
+    expect(result).toEqual({ ok: false, status: 0, data: null, error: NETWORK_ERROR_MESSAGE });
   });
 
   it("error response flattens FastAPI 422 detail the same way postForm does", async () => {
@@ -399,7 +431,7 @@ describe("postFormAndPoll", () => {
     const result = await postFormAndPoll("/api/x", new FormData(), { intervalMs: 5, timeoutMs: 20 });
 
     expect(result.ok).toBe(false);
-    expect(result.error).toMatch(/timed out/i);
+    expect(result.error).toMatch(/still running in the background/i);
   });
 
   it("stops early and resolves an aborted result when the AbortSignal fires mid-poll", async () => {
@@ -423,15 +455,46 @@ describe("postFormAndPoll", () => {
     expect(result).toEqual({ ok: false, status: 0, data: null, error: "Aborted" });
   });
 
-  it("returns a network-error result if a poll request itself throws", async () => {
+  it("returns a network-error result once polling keeps failing", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockResponse({ ok: true, status: 202, body: { job_id: 1, status: "pending" } }))
-      .mockRejectedValueOnce(new Error("network down"));
+      .mockRejectedValue(new Error("network down"));
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await postFormAndPoll("/api/x", new FormData(), { intervalMs: 1 });
 
-    expect(result).toEqual({ ok: false, status: 0, data: null, error: "network down" });
+    expect(result).toMatchObject({ ok: false, status: 0, data: null });
+    expect(result.error).toMatch(/may still be running/);
+    // The kickoff plus five failed polls: one blip is not the end of the job.
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+  });
+
+  it("keeps waiting through a dropped poll or a brief 5xx", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockResponse({ ok: true, status: 202, body: { job_id: 1, status: "pending" } }))
+      .mockRejectedValueOnce(new Error("network down"))
+      .mockResolvedValueOnce(mockResponse({ ok: false, status: 503, body: { error: "busy" } }))
+      .mockResolvedValueOnce(mockResponse({ ok: true, status: 200, body: { status: "succeeded", result: { n: 1 } } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await postFormAndPoll("/api/x", new FormData(), { intervalMs: 1 });
+
+    expect(result.ok).toBe(true);
+    expect(result.data).toEqual({ n: 1 });
+  });
+
+  it("stops at once on a non-transient error such as 404", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockResponse({ ok: true, status: 202, body: { job_id: 1, status: "pending" } }))
+      .mockResolvedValue(mockResponse({ ok: false, status: 404, body: { error: "Job not found" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await postFormAndPoll("/api/x", new FormData(), { intervalMs: 1 });
+
+    expect(result).toEqual({ ok: false, status: 404, data: null, error: "Job not found" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

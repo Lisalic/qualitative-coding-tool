@@ -4,14 +4,15 @@ import AiAssistPanel from "../forms/AiAssistPanel";
 import AiLabel from "../forms/AiLabel";
 import SliderField from "../forms/SliderField";
 import { EXAMPLE_PROMPTS, MissingFieldsError, buildFilterPreviewPayload } from "../../lib/apiContracts";
-import { textarea } from "../../lib/uiClasses";
+import { pillRadioInput, pillRadioLabel, textarea } from "../../lib/uiClasses";
+import { useUnmountSignal } from "../primitives/useUnmountSignal";
 
 const AUTOFILL_HELP =
   "Prompts the AI to give decisions on entries by making decisions similar to those already made in this file.";
 
 const MODES = [
-  { value: "include", label: "Include" },
-  { value: "exclude", label: "Exclude" },
+  { value: "include", label: "Keep" },
+  { value: "exclude", label: "Skip" },
 ];
 
 /**
@@ -44,6 +45,8 @@ const MODES = [
  *     active mode -- same no-cross-direction rule applies.
  */
 export default function FilterAiPanel({ database, included, excluded, onAccept, disabled }) {
+  // Leaving the page stops job polling (the job itself keeps running).
+  const pollSignal = useUnmountSignal();
   const [mode, setMode] = useState("include");
   const [includePrompt, setIncludePrompt] = useState("");
   const [excludePrompt, setExcludePrompt] = useState("");
@@ -82,7 +85,7 @@ export default function FilterAiPanel({ database, included, excluded, onAccept, 
     const { ok, data, jobId, error: runError } = await postJsonAndPoll(
       "/api/filter-preview/",
       payload,
-      { onProgress: setProgress },
+      { onProgress: setProgress, signal: pollSignal() },
     );
     if (!ok) return { error: runError || "AI filter failed" };
 
@@ -103,7 +106,7 @@ export default function FilterAiPanel({ database, included, excluded, onAccept, 
     const proposed =
       includePostIds.length + includeCommentIds.length + excludePostIds.length + excludeCommentIds.length;
     const parts = [
-      `AI proposed ${proposed} row${proposed === 1 ? "" : "s"}: ${includedCount} newly included, ${excludedCount} newly excluded.`,
+      `AI proposed ${proposed} row${proposed === 1 ? "" : "s"}: ${includedCount} newly kept, ${excludedCount} newly skipped.`,
     ];
     if (data?.partial) {
       parts.push(
@@ -119,7 +122,7 @@ export default function FilterAiPanel({ database, included, excluded, onAccept, 
     try {
       return await runFilter({ ...values, useExamples: false });
     } catch (err) {
-      if (err instanceof MissingFieldsError) return { error: err.message };
+      if (err instanceof MissingFieldsError) return { error: err.userMessage };
       throw err;
     }
   };
@@ -128,7 +131,7 @@ export default function FilterAiPanel({ database, included, excluded, onAccept, 
     try {
       return await runFilter({ ...values, useExamples: true });
     } catch (err) {
-      if (err instanceof MissingFieldsError) return { error: err.message };
+      if (err instanceof MissingFieldsError) return { error: err.userMessage };
       throw err;
     }
   };
@@ -136,9 +139,9 @@ export default function FilterAiPanel({ database, included, excluded, onAccept, 
   return (
     <AiAssistPanel
       promptType={mode === "include" ? "filter_include" : "filter_exclude"}
-      promptLabel={mode === "include" ? "Include criteria" : "Exclude criteria"}
+      promptLabel={mode === "include" ? "Keep criteria" : "Skip criteria"}
       promptPlaceholder={
-        mode === "include" ? "Enter your include criteria..." : "Enter your exclude criteria..."
+        mode === "include" ? "Describe the rows to keep…" : "Describe the rows to skip…"
       }
       exampleText={mode === "include" ? EXAMPLE_PROMPTS.filterInclude : EXAMPLE_PROMPTS.filterExclude}
       promptValue={mode === "include" ? includePrompt : excludePrompt}
@@ -155,12 +158,9 @@ export default function FilterAiPanel({ database, included, excluded, onAccept, 
                 checked={mode === opt.value}
                 onChange={() => setMode(opt.value)}
                 disabled={fieldsDisabled}
-                className="peer hidden"
+                className={pillRadioInput}
               />
-              <label
-                htmlFor={`filter-ai-mode-${opt.value}`}
-                className="block cursor-pointer border border-paper px-3 py-2 text-center text-sm transition-colors hover:bg-paper hover:text-ink peer-checked:bg-paper peer-checked:text-ink peer-disabled:cursor-not-allowed peer-disabled:opacity-40 peer-disabled:hover:bg-transparent peer-disabled:hover:text-paper"
-              >
+              <label htmlFor={`filter-ai-mode-${opt.value}`} className={pillRadioLabel}>
                 {opt.label}
               </label>
             </div>
@@ -168,7 +168,7 @@ export default function FilterAiPanel({ database, included, excluded, onAccept, 
         </div>
       )}
       runLabel="Run AI filter"
-      runningLabel="Running AI filter..."
+      runningLabel="Running AI filter…"
       contentScopeRadioName="filter-ai-content-scope"
       disabled={disabled}
       onRun={handleRun}

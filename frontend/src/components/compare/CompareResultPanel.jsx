@@ -6,15 +6,18 @@ export default function CompareResultPanel({
   createdFile,
   viewPath,
   viewStateKey,
+  partialNote = "",
 }) {
   if (comparison === "" || !createdFile) return null;
 
   return (
-    <div className="mt-4">
+    <div>
       <ArtifactCreatedMessage
         name={createdFile.filename}
         viewPath={viewPath}
         viewState={{ [viewStateKey]: createdFile.schema_name }}
+        neutral={Boolean(partialNote)}
+        note={partialNote}
       />
     </div>
   );

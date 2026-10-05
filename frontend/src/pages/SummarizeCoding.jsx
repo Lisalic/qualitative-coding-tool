@@ -19,6 +19,8 @@ export default function SummarizeCoding() {
     summary,
     createdFile,
     error,
+    fieldErrors,
+    listError,
     name,
     setName,
     model,
@@ -46,17 +48,19 @@ export default function SummarizeCoding() {
         onAdditionalPromptChange={setAdditionalPrompt}
         loading={loading}
         onSubmit={submitSummarize}
+        errors={fieldErrors}
       />
-      <ErrorDisplay message={error} variant="message" />
+      <ErrorDisplay message={listError} variant="alert" />
+      <ErrorDisplay message={error} variant="alert" />
       {loading && progress && (
         <ProgressBar current={progress.current} total={progress.total} label={progress.label} />
       )}
       {partialWarning && (
-        <div className="border border-paper bg-surface-raised px-3 py-2 text-center text-sm text-paper">
+        <div role="status" className="border border-line bg-surface-raised px-3 py-2 text-center text-sm text-paper">
           {partialWarning}
         </div>
       )}
-      <SummaryOutputSection summary={summary} createdFile={createdFile} />
+      <SummaryOutputSection summary={summary} createdFile={createdFile} partial={Boolean(partialWarning)} />
     </PageShell>
   );
 }

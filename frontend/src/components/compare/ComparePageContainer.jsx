@@ -1,8 +1,10 @@
 import CompareDualSelectPanel from "./CompareDualSelectPanel";
 import CompareModelPromptPanel from "./CompareModelPromptPanel";
 import PageShell from "../shell/PageShell";
-import { btnPrimary } from "../../lib/uiClasses";
+import { btnPrimary, meta } from "../../lib/uiClasses";
 import CompareResultPanel from "./CompareResultPanel";
+import ErrorDisplay from "../feedback/ErrorDisplay";
+import ProgressBar from "../feedback/ProgressBar";
 import useComparePageData from "./useComparePageData";
 
 const CONFIG_BY_MODE = {
@@ -18,7 +20,7 @@ const CONFIG_BY_MODE = {
     compareEndpoint: "/api/compare-codebooks/",
     fieldAName: "codebook_a",
     fieldBName: "codebook_b",
-    validationMessage: "Select two codebooks to compare",
+    validationMessage: "Choose a codebook.",
     viewPath: "/codebook-comparison-view",
     viewStateKey: "selected",
   },
@@ -34,7 +36,7 @@ const CONFIG_BY_MODE = {
     compareEndpoint: "/api/compare-codings/",
     fieldAName: "coding_a",
     fieldBName: "coding_b",
-    validationMessage: "Select two codings to compare",
+    validationMessage: "Choose a coding.",
     viewPath: "/coding-comparison-view",
     viewStateKey: "selectedCodedData",
   },
@@ -56,6 +58,10 @@ export default function ComparePageContainer({
     comparison,
     createdFile,
     error,
+    fieldErrors,
+    progress,
+    partialNote,
+    listError,
     model,
     setModel,
     name,
@@ -92,13 +98,12 @@ export default function ComparePageContainer({
           valueB={b}
           onChangeA={setA}
           onChangeB={setB}
+          errors={fieldErrors}
         />
+        <ErrorDisplay message={listError} variant="alert" />
       </div>
 
-      <form onSubmit={submitCompare} className="mt-2 border-t border-line pt-4">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-paper/70">
-          AI Comparison
-        </div>
+      <form onSubmit={submitCompare} className="flex flex-col gap-3">
         <CompareModelPromptPanel
           model={model}
           onModelChange={setModel}
@@ -110,26 +115,34 @@ export default function ComparePageContainer({
           additionalPrompt={additionalPrompt}
           onAdditionalPromptChange={setAdditionalPrompt}
           examplePromptText={config.examplePromptText}
+          errors={fieldErrors}
         />
 
-        <div className="mt-3 flex justify-center">
+        <div className="flex flex-col items-center gap-1.5">
           <button className={btnPrimary} type="submit" disabled={loading}>
-            {loading ? "Generating AI Comparison..." : "Generate AI Comparison"}
+            {loading ? "Comparing…" : "Compare"}
           </button>
+          {loading ? (
+            <p className={meta}>
+              This can take a few minutes. If you leave, it keeps running and the comparison will
+              appear in your project.
+            </p>
+          ) : null}
         </div>
       </form>
 
-      {error && (
-        <div className="border border-error bg-error/10 px-3 py-2 text-sm text-error">
-          {error}
-        </div>
-      )}
+      {loading && progress ? (
+        <ProgressBar current={progress.current} total={progress.total} label={progress.label} />
+      ) : null}
+
+      <ErrorDisplay message={error} variant="alert" />
 
       <CompareResultPanel
         comparison={comparison}
         createdFile={createdFile}
         viewPath={config.viewPath}
         viewStateKey={config.viewStateKey}
+        partialNote={partialNote}
       />
     </PageShell>
   );

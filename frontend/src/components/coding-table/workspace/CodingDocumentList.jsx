@@ -1,6 +1,6 @@
 import EditorListPane from "../../editor-shell/EditorListPane";
 import Dropdown from "../../primitives/Dropdown";
-import { select, btnSm } from "../../../lib/uiClasses";
+import { input, select, btnSm } from "../../../lib/uiClasses";
 import { rollUpCoder } from "../../../lib/codingUtils";
 
 const ONLY_OPTIONS = [
@@ -40,6 +40,7 @@ export default function CodingDocumentList({
   onPrevPage,
   onNextPage,
   activeFilterCode,
+  activeFilterCodeName,
   onClearFilterCode,
   totalRows,
   totalCoded,
@@ -52,11 +53,16 @@ export default function CodingDocumentList({
 }) {
   const allMatchingSelected = matchingCount > 0 && selectedItemIds?.size >= matchingCount;
   const uncodedCount = Math.max(0, (totalRows || 0) - (totalCoded || 0));
+  // The uncoded total covers the whole coding; once a search or code
+  // filter narrows the list, the selection does too, so a total would
+  // overstate what the button is about to select.
+  const narrowed = Boolean(String(searchInput || "").trim() || activeFilterCode);
 
   return (
     <EditorListPane
       loading={loading}
       isEmpty={rows.length === 0}
+      activeKey={activeItemId}
       footer={
         <>
           <button type="button" className={btnSm} onClick={onPrevPage} disabled={disabled || page <= 0}>
@@ -88,7 +94,7 @@ export default function CodingDocumentList({
                 onClick={onSelectUncoded}
                 disabled={disabled || selectAllLoading || uncodedCount === 0}
               >
-                {`Uncoded${uncodedCount ? ` (${uncodedCount})` : ""}`}
+                {`Select uncoded${uncodedCount && !narrowed ? ` (${uncodedCount})` : ""}`}
               </button>
               <button
                 type="button"
@@ -107,8 +113,9 @@ export default function CodingDocumentList({
             type="search"
             value={searchInput}
             onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search..."
-            className={select}
+            placeholder="Search…"
+            aria-label="Search rows"
+            className={input}
             disabled={disabled}
           />
           <Dropdown
@@ -121,10 +128,15 @@ export default function CodingDocumentList({
           />
           {activeFilterCode && (
             <div className="flex items-center justify-between gap-2 border border-line bg-surface-raised px-2 py-1 text-xs">
-              <span className="truncate">
-                Code: <strong>{activeFilterCode}</strong>
+              <span className="truncate" title={activeFilterCodeName || activeFilterCode}>
+                Code: <strong>{activeFilterCodeName || activeFilterCode}</strong>
               </span>
-              <button type="button" className="shrink-0 text-paper/60 hover:text-paper" onClick={onClearFilterCode}>
+              <button
+                type="button"
+                className="-my-1 -mr-1.5 shrink-0 px-2 py-1 text-paper/60 hover:text-paper"
+                aria-label="Clear code filter"
+                onClick={onClearFilterCode}
+              >
                 ×
               </button>
             </div>
@@ -143,6 +155,16 @@ export default function CodingDocumentList({
           return (
             <li
               key={row.item_id}
+              tabIndex={0}
+              aria-current={isActive || undefined}
+              data-active-row={isActive || undefined}
+              onKeyDown={(e) => {
+                if (e.target !== e.currentTarget) return;
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onSelectItem(row.item_id);
+                }
+              }}
               className={`flex cursor-pointer items-start gap-2 border-b border-line-soft px-3 py-2.5 transition-colors ${
                 isActive ? "bg-paper text-ink" : "hover:bg-white/5"
               }`}
@@ -157,7 +179,9 @@ export default function CodingDocumentList({
                 aria-label={`Select ${row.item_id} for recode`}
               />
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-medium">{rowPreview(row)}</div>
+                <div className="truncate text-sm font-medium" title={rowPreview(row)}>
+                  {rowPreview(row)}
+                </div>
                 <div className={`mt-0.5 text-xs ${isActive ? "text-ink/60" : "text-paper/50"}`}>
                   {codeCount > 0 ? `${codeCount} code${codeCount === 1 ? "" : "s"}` : "Not coded"}
                   {(coderMark === "ai" || coderMark === "both") &&

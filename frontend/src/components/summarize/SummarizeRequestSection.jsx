@@ -1,6 +1,6 @@
 import SummarizeCodingPanel from "./SummarizeCodingPanel";
 import SummarizeModelPromptPanel from "./SummarizeModelPromptPanel";
-import { btnPrimary } from "../../lib/uiClasses";
+import { btnPrimary, meta } from "../../lib/uiClasses";
 
 export default function SummarizeRequestSection({
   codings,
@@ -17,6 +17,7 @@ export default function SummarizeRequestSection({
   onAdditionalPromptChange,
   loading,
   onSubmit,
+  errors = {},
 }) {
   return (
     <form onSubmit={onSubmit}>
@@ -25,6 +26,7 @@ export default function SummarizeRequestSection({
           codings={codings}
           selectedCoding={selectedCoding}
           onCodingChange={onCodingChange}
+          error={errors.coding}
         />
 
         <SummarizeModelPromptPanel
@@ -37,13 +39,20 @@ export default function SummarizeRequestSection({
           onProjectChange={onProjectChange}
           additionalPrompt={additionalPrompt}
           onAdditionalPromptChange={onAdditionalPromptChange}
+          errors={errors}
         />
       </div>
 
-      <div className="mt-3 flex justify-center">
+      <div className="mt-3 flex flex-col items-center gap-1.5">
         <button type="submit" className={btnPrimary} disabled={loading}>
-          {loading ? "Summarizing..." : "Summarize"}
+          {loading ? "Summarizing…" : "Summarize"}
         </button>
+        {loading ? (
+          <p className={meta}>
+            This can take a few minutes. If you leave, it keeps running and the summary will appear
+            in your project.
+          </p>
+        ) : null}
       </div>
     </form>
   );

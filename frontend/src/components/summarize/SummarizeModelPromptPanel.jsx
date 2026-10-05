@@ -18,6 +18,7 @@ export default function SummarizeModelPromptPanel({
   onProjectChange,
   additionalPrompt,
   onAdditionalPromptChange,
+  errors = {},
 }) {
   return (
     <Panel title="Model & instructions" className="flex-1" scroll={false}>
@@ -33,6 +34,7 @@ export default function SummarizeModelPromptPanel({
           placeholder="Enter a name for the summary"
           className={inputClasses}
         />
+        {errors.name ? <p className="text-xs text-error">{errors.name}</p> : null}
       </div>
 
       <div className="mb-3 flex flex-col gap-1.5">
@@ -49,7 +51,9 @@ export default function SummarizeModelPromptPanel({
           listLabel="Project"
           searchPlaceholder="Search projects…"
           emptyMessage="No projects match that search."
+          noOptionsMessage="No projects yet. Create one from Home first."
         />
+        {errors.project ? <p className="text-xs text-error">{errors.project}</p> : null}
       </div>
 
       <AiModelFormGroup
@@ -61,6 +65,7 @@ export default function SummarizeModelPromptPanel({
         selectPlaceholder="compare"
         selectClassName={selectClasses}
       />
+      {errors.model ? <p className="-mt-2 mb-3 text-xs text-error">{errors.model}</p> : null}
 
       <PromptEditorSection
         value={additionalPrompt}

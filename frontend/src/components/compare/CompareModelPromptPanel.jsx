@@ -19,6 +19,7 @@ export default function CompareModelPromptPanel({
   additionalPrompt,
   onAdditionalPromptChange,
   examplePromptText,
+  errors = {},
 }) {
   return (
     <Panel title="Model & instructions" className="flex-1" scroll={false}>
@@ -34,6 +35,7 @@ export default function CompareModelPromptPanel({
           placeholder="Enter a name for the comparison"
           className={inputClasses}
         />
+        {errors.name ? <p className="text-xs text-error">{errors.name}</p> : null}
       </div>
 
       <div className="mb-3 flex flex-col gap-1.5">
@@ -50,7 +52,9 @@ export default function CompareModelPromptPanel({
           listLabel="Project"
           searchPlaceholder="Search projects…"
           emptyMessage="No projects match that search."
+          noOptionsMessage="No projects yet. Create one from Home first."
         />
+        {errors.project ? <p className="text-xs text-error">{errors.project}</p> : null}
       </div>
 
       <AiModelFormGroup
@@ -62,22 +66,24 @@ export default function CompareModelPromptPanel({
         selectPlaceholder="compare"
         selectClassName={`w-full ${select}`}
       />
+      {errors.model ? <p className="-mt-2 mb-3 text-xs text-error">{errors.model}</p> : null}
 
       <div className="mb-3">
         <div className="mb-1 flex items-center justify-between">
-          <AiLabel text="Prompt (optional)" />
+          <AiLabel htmlFor="compare-prompt" text="Prompt (optional)" />
           <button
             className={btnSm}
             type="button"
             onClick={() => onAdditionalPromptChange(examplePromptText)}
           >
-            Load Example Prompt
+            Load example prompt
           </button>
         </div>
         <textarea
+          id="compare-prompt"
           value={additionalPrompt}
           onChange={(e) => onAdditionalPromptChange(e.target.value)}
-          placeholder="Enter any specific instructions for the comparison..."
+          placeholder="Enter any specific instructions for the comparison…"
           className={`${textarea} min-h-[96px]`}
         />
       </div>

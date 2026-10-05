@@ -1,6 +1,6 @@
 import ArtifactCreatedMessage from "../feedback/ArtifactCreatedMessage";
 
-export default function SummaryOutputSection({ summary, createdFile }) {
+export default function SummaryOutputSection({ summary, createdFile, partial = false }) {
   if (summary === "" || !createdFile) return null;
 
   return (
@@ -9,6 +9,7 @@ export default function SummaryOutputSection({ summary, createdFile }) {
         name={createdFile.filename}
         viewPath="/summaryview"
         viewState={{ selectedSummary: createdFile.schema_name }}
+        neutral={partial}
       />
     </div>
   );
