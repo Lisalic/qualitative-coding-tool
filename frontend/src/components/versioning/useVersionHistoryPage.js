@@ -36,7 +36,10 @@ const DUPLICATE_ENDPOINT_BY_TYPE = {
 export default function useVersionHistoryPage() {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [ref, setRef] = useState(searchParams.get("ref") || location.state?.ref || "");
+  // Read from the URL on every render rather than copied into state once:
+  // Back/Forward change `?ref=` without remounting this page, and a copy
+  // went stale -- the address bar moved but the page stayed put.
+  const ref = searchParams.get("ref") || location.state?.ref || "";
   const [projectsList, setProjectsList] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
 
@@ -74,14 +77,18 @@ export default function useVersionHistoryPage() {
     if (!ref || available.length === 0) return;
     const match = available.find((item) => item.id === ref || item.fileId === String(ref));
     if (match && match.id !== ref) {
-      setRef(match.id);
-      setSearchParams({ ref: match.id });
+      setSearchParams({ ref: match.id }, { replace: true });
     }
   }, [available, ref, setSearchParams]);
 
+  // A ref that arrived only as `location.state` is written into the URL
+  // (in place, not as a new history entry) so a refresh keeps it.
+  useEffect(() => {
+    if (ref && !searchParams.get("ref")) setSearchParams({ ref }, { replace: true });
+  }, [ref, searchParams, setSearchParams]);
+
   const navigateTo = useCallback(
     (nextRef) => {
-      setRef(nextRef);
       setSearchParams({ ref: nextRef });
     },
     [setSearchParams],
@@ -91,10 +98,10 @@ export default function useVersionHistoryPage() {
 
   const duplicateFrom = useCallback(
     async (versionNo, displayName) => {
-      if (!ref) return { ok: false, error: "No artifact selected." };
+      if (!ref) return { ok: false, error: "No file selected." };
       const buildPath = selectedArtifact && DUPLICATE_ENDPOINT_BY_TYPE[selectedArtifact.file_type];
       if (!buildPath) {
-        return { ok: false, error: "This artifact type can't be duplicated from history." };
+        return { ok: false, error: "This kind of file can't be duplicated from its history." };
       }
       const result = await requestJson(buildPath(ref), {
         method: "POST",

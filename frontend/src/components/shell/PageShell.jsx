@@ -27,6 +27,10 @@
  *              Use with width="full" for viewport-height workspaces.
  */
 
+import { useEffect } from "react";
+
+const APP_NAME = "Qualitative Coding Tool";
+
 const WIDTHS = {
   full: "w-full",
   wide: "mx-auto w-full max-w-[1600px]",
@@ -45,15 +49,32 @@ export default function PageShell({
   const isFill = scroll === "fill";
   const widthClass = WIDTHS[width] || WIDTHS.full;
 
+  // Name the browser tab after the page, so several open tabs (and the
+  // history menu) say which file or tool each one is.
+  const tabTitle = typeof title === "string" && title.trim() ? `${title.trim()} · ${APP_NAME}` : APP_NAME;
+  useEffect(() => {
+    document.title = tabTitle;
+  }, [tabTitle]);
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {title || actions ? (
         <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-4 py-2">
           {title ? (
             <div className="flex min-w-0 items-baseline gap-2">
-              <h1 className="truncate text-base font-semibold">{title}</h1>
+              <h1
+                className="truncate text-base font-semibold"
+                title={typeof title === "string" ? title : undefined}
+              >
+                {title}
+              </h1>
               {subtitle ? (
-                <span className="truncate text-sm text-paper/60">{subtitle}</span>
+                <span
+                  className="truncate text-sm text-paper/60"
+                  title={typeof subtitle === "string" ? subtitle : undefined}
+                >
+                  {subtitle}
+                </span>
               ) : null}
             </div>
           ) : null}

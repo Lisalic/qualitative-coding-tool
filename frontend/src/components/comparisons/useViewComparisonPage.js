@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { apiFetch } from "../../api";
+import { useRefParam } from "../primitives/useRefParam";
 
 /**
  * Shared read-only "pick one, view its content" hook behind the codebook-
@@ -16,12 +17,16 @@ export default function useViewComparisonPage({
   contentField,
 }) {
   const location = useLocation();
-  const preselect = location?.state?.[preselectStateKey] || null;
-
   const [available, setAvailable] = useState([]);
   const [projectsList, setProjectsList] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
-  const [selected, setSelectedRaw] = useState(preselect);
+  const [selected, setSelectedRaw] = useState(null);
+  // The open comparison lives in the URL as `?ref=` (refresh and Back
+  // keep it); a link's `location.state` still wins.
+  const urlRef = useRefParam(selected);
+  const preselect = location?.state?.[preselectStateKey] || urlRef || null;
+  const [listError, setListError] = useState("");
+  const [listLoading, setListLoading] = useState(false);
   const [selectedName, setSelectedName] = useState("");
   const [selectedDescription, setSelectedDescription] = useState("");
   const [content, setContent] = useState("");
@@ -48,6 +53,8 @@ export default function useViewComparisonPage({
   }, []);
 
   const fetchAvailable = useCallback(async () => {
+    setListError("");
+    setListLoading(true);
     try {
       if (projectsList.length > 0 && selectedProject) {
         const projectObj = projectsList.find(
@@ -75,7 +82,10 @@ export default function useViewComparisonPage({
       }
 
       const response = await apiFetch(`/api/my-files/?file_type=${fileType}`);
-      if (!response.ok) return;
+      if (!response.ok) {
+        setListError("Couldn't load your comparisons. Please refresh to try again.");
+        return;
+      }
       const data = await response.json();
       const items = (data.projects || []).map((project) => ({
         id: project.schema_name || project.id,
@@ -94,6 +104,9 @@ export default function useViewComparisonPage({
       }
     } catch (fetchError) {
       console.error("Error fetching comparisons:", fetchError);
+      setListError("Couldn't reach the server to load your comparisons. Check your connection and refresh.");
+    } finally {
+      setListLoading(false);
     }
   }, [fileType, preselect, projectsList, selectedProject]);
 
@@ -128,7 +141,13 @@ export default function useViewComparisonPage({
     apiFetch(contentUrl(selected))
       .then((response) => {
         if (!mounted) return null;
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) {
+          throw new Error(
+            response.status === 404
+              ? "This comparison no longer exists."
+              : `Couldn't load this comparison (HTTP ${response.status}).`,
+          );
+        }
         return response.json();
       })
       .then((data) => {
@@ -158,6 +177,8 @@ export default function useViewComparisonPage({
     setSelected,
     selectedName,
     selectedDescription,
+    listError,
+    listLoading,
     content,
     loading,
     error,

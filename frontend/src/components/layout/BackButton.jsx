@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { confirmLeave } from "../feedback/LeaveGuard";
+import { btn } from "../../lib/uiClasses";
 
-const btnClasses =
-  "border border-paper px-2.5 py-1.5 text-sm hover:bg-paper hover:text-ink transition-colors";
+const btnClasses = `${btn} px-2.5`;
 
 /**
  * Global "back" affordance, rendered in the Navbar so it's available on
@@ -34,7 +35,9 @@ export default function BackButton() {
       type="button"
       className={btnClasses}
       aria-label="Go back"
-      onClick={() => navigate(-1)}
+      onClick={async () => {
+        if (await confirmLeave()) navigate(-1);
+      }}
     >
       &lsaquo; Back
     </button>

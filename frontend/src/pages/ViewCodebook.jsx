@@ -14,6 +14,8 @@ export default function ViewCodebook() {
     selectedCodebookName,
     loading,
     error,
+    listError,
+    listLoading,
     systemPrompt,
     instructions,
     promptMeta,
@@ -38,6 +40,7 @@ export default function ViewCodebook() {
           selectedId={selectedCodebook}
           onSelect={setSelectedCodebook}
           emptyMessage="No codebooks available"
+          loading={listLoading}
           placeholder="Select codebook…"
         />
       }
@@ -49,6 +52,7 @@ export default function ViewCodebook() {
       codebookTree={codebookTree}
       loading={loading}
       error={error}
+      listError={listError}
       isEditMode={isEditMode}
       codebookDraft={codebookDraft}
       setCodebookDraft={setCodebookDraft}

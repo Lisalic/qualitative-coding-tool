@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import ExportDropdown from "../../export/ExportDropdown";
+import DialogService from "../../feedback/DialogService";
+import { confirmLeave } from "../../feedback/LeaveGuard";
 import { useRowMemos } from "../../data/useRowMemos";
 import CodingDuplicateControl from "./CodingDuplicateControl";
 import CodingTextView from "./CodingTextView";
@@ -11,6 +13,7 @@ import CodingCodebookSidebar from "./CodingCodebookSidebar";
 import CodingAiPanel from "./CodingAiPanel";
 import ViewModeTabs from "../../primitives/ViewModeTabs";
 import PageEmptyState from "../../primitives/PageEmptyState";
+import ErrorDisplay from "../../feedback/ErrorDisplay";
 import PromptPanel from "../../primitives/PromptPanel";
 import ToolsMenu, { toolsMenuItem } from "../../primitives/ToolsMenu";
 import PageShell from "../../shell/PageShell";
@@ -69,7 +72,7 @@ export default function CodingWorkspaceSection({
   page,
   leadingActions = null,
   emptyTitle = "View Coding",
-  emptyMessage = "Select a coding to view",
+  emptyMessage = "Select a coding to view its coded rows",
 }) {
   const [showPrompt, setShowPrompt] = useState(false);
   const [railTab, setRailTab] = useState("codebook");
@@ -111,10 +114,26 @@ export default function CodingWorkspaceSection({
     if (rows[nextIndex]) page.setActiveItemId(rows[nextIndex].item_id);
   }
 
+  const handleDiscard = async () => {
+    const confirmed = await DialogService.confirm(
+      `Discard ${sessionSummary(page).toLowerCase()}? This cannot be undone.`,
+      { title: "Discard changes", confirmLabel: "Discard", danger: true },
+    );
+    if (confirmed) page.discardSession();
+  };
+
+  const leaveTo = async (to) => {
+    if (await confirmLeave()) navigate(to);
+  };
+
   if (!selectedCodedData) {
     return (
       <PageShell title={emptyTitle} actions={leadingActions} width="wide">
-        <PageEmptyState message={emptyMessage} />
+        {page.listError ? (
+          <ErrorDisplay message={page.listError} variant="alert" />
+        ) : (
+          <PageEmptyState message={emptyMessage} />
+        )}
       </PageShell>
     );
   }
@@ -139,8 +158,8 @@ export default function CodingWorkspaceSection({
               type="button"
               className={toolsMenuItem}
               onClick={() => {
-                navigate(`/versions?ref=${encodeURIComponent(page.selectedCodingSchema)}`);
                 close();
+                leaveTo(`/versions?ref=${encodeURIComponent(page.selectedCodingSchema)}`);
               }}
             >
               History
@@ -149,8 +168,8 @@ export default function CodingWorkspaceSection({
               type="button"
               className={toolsMenuItem}
               onClick={() => {
-                navigate("/lineage", { state: { ref: page.selectedCodingSchema } });
                 close();
+                leaveTo(`/lineage?ref=${encodeURIComponent(page.selectedCodingSchema)}`);
               }}
             >
               Lineage
@@ -215,7 +234,11 @@ export default function CodingWorkspaceSection({
 
       {viewMode === "text" ? (
         <div className="min-h-0 flex-1">
-          <CodingTextView schema={page.selectedCodingSchema} refreshKey={page.refreshKey} />
+          <CodingTextView
+            schema={page.selectedCodingSchema}
+            refreshKey={page.refreshKey}
+            showingSaved={page.isSessionDirty}
+          />
         </div>
       ) : viewMode === "quotes" ? (
         <div className="min-h-0 flex-1">
@@ -242,6 +265,7 @@ export default function CodingWorkspaceSection({
             onPrevPage={page.onPrevPage}
             onNextPage={page.onNextPage}
             activeFilterCode={page.activeFilterCode}
+            activeFilterCodeName={page.activeFilterCodeName}
             onClearFilterCode={() => page.toggleFilterCode(page.activeFilterCode)}
             totalRows={page.totalRows}
             totalCoded={page.totalCoded}
@@ -298,6 +322,7 @@ export default function CodingWorkspaceSection({
               }
               schema={page.selectedCodingSchema}
               refreshKey={page.refreshKey}
+              showingSaved={page.isSessionDirty}
               codebookTree={page.codebookDraft}
               getCodeColor={getCodeColor}
               pendingSelection={page.pendingSelection}
@@ -324,10 +349,10 @@ export default function CodingWorkspaceSection({
           emphasized
           summary={sessionSummary(page)}
           secondaryLabel="Discard"
-          onSecondary={page.discardSession}
+          onSecondary={handleDiscard}
           secondaryDisabled={page.sessionSaveState.status === "saving"}
           primaryLabel="Save"
-          primaryLoadingLabel="Saving..."
+          primaryLoadingLabel="Saving…"
           primaryLoading={page.sessionSaveState.status === "saving"}
           onPrimary={page.saveSession}
           primaryDisabled={page.sessionSaveState.status === "saving"}

@@ -1,13 +1,17 @@
 import React, { useEffect, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/useAuth";
+import { confirmLeave } from "../feedback/LeaveGuard";
 
-const navBtn =
-  "w-full px-3 py-1.5 text-left text-sm transition-colors hover:bg-white/10";
-const navBtnActive = "bg-paper text-ink hover:bg-paper";
+const navBtn = "block w-full px-3 py-1.5 text-left text-sm transition-colors";
+// Text color is set per state rather than in `navBtn`: these are links,
+// and two competing text utilities on one element resolve by stylesheet
+// order, not class order -- the active item's text vanished white-on-white.
+const navBtnInactive = "text-paper hover:bg-white/10 hover:text-paper";
+const navBtnActive = "bg-paper text-ink hover:bg-paper hover:text-ink";
 
 const AUTH_ITEMS = [
-  ["Home", "/"],
+  ["Projects", "/"],
   ["Import Data", "/import"],
   ["Filter Data", "/filter"],
   ["Create Codebook", "/codebook"],
@@ -22,16 +26,16 @@ const VIEW_ITEMS = [
   ["View Data", "/data"],
   ["View Filtered Data", "/filtered-data"],
   ["View Codebook", "/codebook-view"],
-  ["View Codebook Comparisons", "/codebook-comparison-view"],
+  ["View Codebook Comparison", "/codebook-comparison-view"],
   ["View Coding", "/coding-view"],
-  ["View Coding Comparisons", "/coding-comparison-view"],
+  ["View Coding Comparison", "/coding-comparison-view"],
   ["View Summary", "/summaryview"],
   ["View Lineage", "/lineage"],
   ["Version History", "/versions"],
 ];
 
 const ANON_ITEMS = [
-  ["Login", "/login"],
+  ["Log in", "/login"],
   ["Register", "/register"],
 ];
 
@@ -85,21 +89,37 @@ export default function Sidebar() {
   // matched "/codebook-apply", "/filter" matched "/filtered-data" -- so
   // two entries read as the current page at once.
   const isActive = (path) =>
-    location.pathname === path || location.pathname.startsWith(`${path}/`);
+    location.pathname === path ||
+    location.pathname.startsWith(`${path}/`) ||
+    // A project's own page sits under the project list.
+    (path === "/" && location.pathname.startsWith("/project/"));
+
+  // Real links (middle-click / open in new tab work), but a plain click
+  // still checks for unsaved editor work first, and on a narrow screen
+  // closes the sidebar so the page it opened is visible.
+  const handleNavClick = async (event, path) => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+      return;
+    }
+    event.preventDefault();
+    if (!(await confirmLeave())) return;
+    navigate(path);
+    if (typeof window !== "undefined" && window.innerWidth < 768) collapse();
+  };
 
   if (collapsed) return null;
 
   const renderGroup = (entries) =>
     entries.map(([label, path]) => (
-      <button
+      <Link
         key={path}
-        type="button"
+        to={path}
         aria-current={isActive(path) ? "page" : undefined}
-        className={`${navBtn} ${isActive(path) ? navBtnActive : ""}`}
-        onClick={() => navigate(path)}
+        className={`${navBtn} ${isActive(path) ? navBtnActive : navBtnInactive}`}
+        onClick={(event) => handleNavClick(event, path)}
       >
         {label}
-      </button>
+      </Link>
     ));
 
   return (
@@ -107,7 +127,7 @@ export default function Sidebar() {
       <div className="flex justify-end p-1.5">
         <button
           type="button"
-          className="px-2 py-1 text-sm transition-colors hover:bg-white/10"
+          className="px-2.5 py-1.5 text-sm transition-colors hover:bg-white/10"
           aria-label="Collapse sidebar"
           onClick={collapse}
         >

@@ -2,6 +2,7 @@ import { useNavigate } from "react-router-dom";
 import DataTable from "./DataTable";
 import ArtifactPicker from "../primitives/ArtifactPicker";
 import PageEmptyState from "../primitives/PageEmptyState";
+import ErrorDisplay from "../feedback/ErrorDisplay";
 import PageShell from "../shell/PageShell";
 import { btn } from "../../lib/uiClasses";
 
@@ -32,6 +33,8 @@ export default function DataBrowserPage({ page, pageTitle }) {
     title,
     displayName,
     tableProps = {},
+    listError,
+    listLoading,
   } = page;
 
   const { noProjectFilesMessage, noDatabaseMessage } = selectionProps;
@@ -55,6 +58,7 @@ export default function DataBrowserPage({ page, pageTitle }) {
             : noDatabaseMessage || "No databases available"
         }
         placeholder="Select database…"
+        loading={listLoading}
       />
       {hasDatabase ? (
         <>
@@ -86,7 +90,11 @@ export default function DataBrowserPage({ page, pageTitle }) {
   return (
     <PageShell
       title={hasDatabase ? displayName || title : pageTitle}
-      subtitle={hasDatabase ? selectedDescription : undefined}
+      // Once the file's name takes the title, the subtitle keeps saying
+      // which browser this is (raw vs filtered).
+      subtitle={
+        hasDatabase ? [pageTitle, selectedDescription].filter(Boolean).join(" · ") : undefined
+      }
       actions={actions}
       width="full"
       bodyClassName="flex flex-col gap-3"
@@ -97,6 +105,8 @@ export default function DataBrowserPage({ page, pageTitle }) {
           isFilteredView={isFilteredView}
           metadata={selectedMetadata}
         />
+      ) : listError ? (
+        <ErrorDisplay message={listError} variant="alert" />
       ) : (
         <PageEmptyState message={emptyMessage} />
       )}

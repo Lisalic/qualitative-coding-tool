@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import React, { Suspense } from "react";
 import ProtectedRoute from "./components/auth/ProtectedRoute";
 import Sidebar from "./components/layout/Sidebar";
@@ -59,7 +59,7 @@ function App() {
             <Suspense
               fallback={
                 <div className="flex min-h-0 flex-1 items-center justify-center text-paper/70">
-                  <span>Loading...</span>
+                  <span role="status">Loading…</span>
                 </div>
               }
             >
@@ -213,7 +213,9 @@ function App() {
                     </ProtectedRoute>
                   }
                 />
-                <Route path="*" element={<AuthGate />} />
+                {/* An unknown URL goes Home rather than rendering Home under
+                    the bad address (with nothing in the sidebar lit up). */}
+                <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </Suspense>
           </div>

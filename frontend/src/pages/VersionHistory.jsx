@@ -27,7 +27,11 @@ export default function VersionHistory() {
   return (
     <PageShell
       title={selectedArtifact?.display_name || "Version History"}
-      subtitle={selectedArtifact?.description}
+      subtitle={
+        selectedArtifact
+          ? ["Version History", selectedArtifact.description].filter(Boolean).join(" · ")
+          : undefined
+      }
       width="full"
       actions={
         <ArtifactPicker

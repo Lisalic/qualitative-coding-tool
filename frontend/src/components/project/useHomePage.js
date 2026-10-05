@@ -9,6 +9,8 @@ export default function useHomePage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [message, setMessage] = useState("");
+  const [messageIsError, setMessageIsError] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   const fetchProjects = useCallback(async () => {
     setLoading(true);
@@ -54,12 +56,15 @@ export default function useHomePage() {
   const handleCreateProject = useCallback(
     async (event) => {
       event.preventDefault();
+      if (creating) return; // a second click while the first is in flight
       setMessage("");
       if (!name || !name.trim()) {
         setMessage("Name is required");
+        setMessageIsError(true);
         return;
       }
 
+      setCreating(true);
       try {
         const form = new FormData();
         form.append("name", name.trim());
@@ -76,15 +81,19 @@ export default function useHomePage() {
 
         const data = await resp.json();
         setMessage(`Project "${data.project.projectname}" created`);
+        setMessageIsError(false);
         setShowForm(false);
         setName("");
         setDescription("");
         await fetchProjects();
       } catch (err) {
         setMessage(`Error: ${err.message}`);
+        setMessageIsError(true);
+      } finally {
+        setCreating(false);
       }
     },
-    [description, fetchProjects, name],
+    [creating, description, fetchProjects, name],
   );
 
   return {
@@ -98,6 +107,8 @@ export default function useHomePage() {
     description,
     setDescription,
     message,
+    messageIsError,
+    creating,
     handleCreateClick,
     handleCancel,
     handleCreateProject,

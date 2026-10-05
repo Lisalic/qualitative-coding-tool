@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import CodeLegend from "../coding-table/CodeLegend";
 import ExportDropdown from "../export/ExportDropdown";
+import ErrorDisplay from "../feedback/ErrorDisplay";
+import { confirmLeave } from "../feedback/LeaveGuard";
 import PageEmptyState from "../primitives/PageEmptyState";
 import PromptPanel from "../primitives/PromptPanel";
 import ToolsMenu, { toolsMenuItem } from "../primitives/ToolsMenu";
@@ -15,15 +17,14 @@ const btnClasses = btn;
 const btnPrimary = btnPrimaryClasses;
 const inputClasses = input;
 
-const noop = () => {};
-
 /**
  * A codebook file's content is structured code rows (see
  * lib/codingUtils.js), rendered/edited via the same `CodeLegend` tree
  * component the coding workspace uses for a coding artifact's own
  * snapshot -- one editor, not two. Filtering (`onCodeToggle` outside
- * edit mode) has no meaning on this standalone page, so it's a no-op
- * here; only the coding workspace wires it to a row filter.
+ * edit mode) has no meaning on this standalone page, so none is passed
+ * and the code rows render as plain, non-clickable text; only the coding
+ * workspace wires it to a row filter.
  *
  * `picker` is the artifact selector; it and the per-codebook actions live in
  * the PageShell toolbar. This section used to render its own centred <h1>
@@ -40,6 +41,7 @@ export default function CodebookWorkspaceSection({
   codebookTree,
   loading,
   error,
+  listError,
   isEditMode,
   codebookDraft,
   setCodebookDraft,
@@ -57,10 +59,19 @@ export default function CodebookWorkspaceSection({
   if (!selectedCodebook) {
     return (
       <PageShell title="View Codebook" actions={picker} width="wide">
-        <PageEmptyState message="Select a codebook to view" />
+        {listError ? (
+          <ErrorDisplay message={listError} variant="alert" />
+        ) : (
+          <PageEmptyState message="Select a codebook to view its codes" />
+        )}
       </PageShell>
     );
   }
+
+  // Leaving edit mode for another page discards the draft -- ask first.
+  const leaveTo = async (to, options) => {
+    if (await confirmLeave()) navigate(to, options);
+  };
 
   const actions = (
     <>
@@ -72,8 +83,8 @@ export default function CodebookWorkspaceSection({
               type="button"
               className={toolsMenuItem}
               onClick={() => {
-                navigate("/compare-codebook", { state: { codebookA: selectedCodebook } });
                 close();
+                leaveTo("/compare-codebook", { state: { codebookA: selectedCodebook } });
               }}
             >
               Compare
@@ -82,8 +93,8 @@ export default function CodebookWorkspaceSection({
               type="button"
               className={toolsMenuItem}
               onClick={() => {
-                navigate("/integrate-codebook", { state: { codebookA: selectedCodebook } });
                 close();
+                leaveTo("/integrate-codebook", { state: { codebookA: selectedCodebook } });
               }}
             >
               Integrate
@@ -92,8 +103,8 @@ export default function CodebookWorkspaceSection({
               type="button"
               className={toolsMenuItem}
               onClick={() => {
-                navigate(`/versions?ref=${encodeURIComponent(selectedCodebook)}`);
                 close();
+                leaveTo(`/versions?ref=${encodeURIComponent(selectedCodebook)}`);
               }}
             >
               History
@@ -102,8 +113,8 @@ export default function CodebookWorkspaceSection({
               type="button"
               className={toolsMenuItem}
               onClick={() => {
-                navigate("/lineage", { state: { ref: selectedCodebook } });
                 close();
+                leaveTo(`/lineage?ref=${encodeURIComponent(selectedCodebook)}`);
               }}
             >
               Lineage
@@ -174,25 +185,26 @@ export default function CodebookWorkspaceSection({
         <PromptPanel {...promptInfo} />
       )}
       {saveState?.status === "error" && saveState.message && (
-        <div className="border border-line bg-paper px-3 py-2 text-sm text-ink font-mono">
-          {saveState.message}
-        </div>
+        <ErrorDisplay message={saveState.message} variant="alert" />
       )}
-      {error && (
-        <div className="border border-line bg-paper px-3 py-2 text-sm text-ink font-mono">
-          {error}
-        </div>
+      {saveState?.status === "success" && saveState.message && (
+        <ErrorDisplay message="Saved as a new version." type="success" variant="alert" />
       )}
-      <Panel title={isEditMode ? "Edit Codebook" : "Codebook Contents"}>
+      <ErrorDisplay message={error} variant="alert" />
+      <Panel title={isEditMode ? "Edit codebook" : "Codebook contents"}>
         {loading ? (
           <div className="text-sm text-paper/60 py-4">Loading codebook…</div>
         ) : isEditMode ? (
           <div className="flex flex-col gap-3">
             <div>
-              <label className="block text-xs uppercase tracking-wider text-paper/60 font-semibold mb-1">
-                Codebook Name
+              <label
+                htmlFor="viewCodebookName"
+                className="block text-xs uppercase tracking-wider text-paper/60 font-semibold mb-1"
+              >
+                Codebook name
               </label>
               <input
+                id="viewCodebookName"
                 type="text"
                 className={inputClasses}
                 value={nameDraft}
@@ -206,7 +218,6 @@ export default function CodebookWorkspaceSection({
               onDraftTreeChange={setCodebookDraft}
               disabled={isSaving}
               selectedFilterCodes={[]}
-              onCodeToggle={noop}
               getCodeColor={getCodeColor}
               showDetails
             />
@@ -215,7 +226,6 @@ export default function CodebookWorkspaceSection({
           <CodeLegend
             codebookTree={codebookTree}
             selectedFilterCodes={[]}
-            onCodeToggle={noop}
             getCodeColor={getCodeColor}
             showDetails
           />

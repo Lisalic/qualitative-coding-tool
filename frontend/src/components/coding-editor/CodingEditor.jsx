@@ -1,4 +1,7 @@
 import { useState } from "react";
+import { confirmLeave } from "../feedback/LeaveGuard";
+import ToastService from "../feedback/ToastService";
+import { btn } from "../../lib/uiClasses";
 import CodingSetupPanel from "./CodingSetupPanel";
 import CodingWorkspaceSection from "../coding-table/workspace/CodingWorkspaceSection";
 import useViewCodingPage from "../coding-table/workspace/useViewCodingPage";
@@ -35,6 +38,18 @@ export default function CodingEditor() {
   const handleCreated = (file) => {
     if (!file?.schema_name) return;
     setArtifact(file);
+    ToastService.show(
+      `Created "${file.filename || "coding"}". It's also listed under View Coding.`,
+      "success",
+    );
+  };
+
+  // Back to setup to start another coding. The created one is already
+  // saved, so only unsaved edits made in this workspace are at stake.
+  const backToSetup = async () => {
+    if (!(await confirmLeave())) return;
+    if (page.isSessionDirty) page.discardSession();
+    setArtifact(null);
   };
 
   if (!artifact) {
@@ -45,5 +60,14 @@ export default function CodingEditor() {
     );
   }
 
-  return <CodingWorkspaceSection page={page} />;
+  return (
+    <CodingWorkspaceSection
+      page={page}
+      leadingActions={
+        <button type="button" className={btn} onClick={backToSetup}>
+          New coding
+        </button>
+      }
+    />
+  );
 }

@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { apiFetch, requestJson } from "../../api";
 import { cloneCodebookTree, flattenTreeToCodes, groupCodesByFamily } from "../../lib/codingUtils";
+import DialogService from "../feedback/DialogService";
+import { useLeaveGuard } from "../feedback/LeaveGuard";
+import { useRefParam } from "../primitives/useRefParam";
 
 function matchesPreselection(item, value) {
   return (
@@ -16,6 +19,8 @@ export default function useViewCodebookPage() {
   const location = useLocation();
   const [availableCodebooks, setAvailableCodebooks] = useState([]);
   const [selectedCodebook, setSelectedCodebook] = useState(null);
+  const selectedCodebookRef = useRef(selectedCodebook);
+  selectedCodebookRef.current = selectedCodebook;
   const [projectsList, setProjectsList] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
   const [codebookTree, setCodebookTree] = useState([]);
@@ -37,6 +42,19 @@ export default function useViewCodebookPage() {
   // preselect value has already been applied so it's only ever consumed
   // once per distinct navigation, not once per refetch.
   const appliedPreselectRef = useRef(null);
+  const [listError, setListError] = useState("");
+  const [listLoading, setListLoading] = useState(false);
+
+  // The open codebook lives in the URL as `?ref=<schema>` (refresh and
+  // Back keep it); a link's `location.state.selected` still wins.
+  const selectedSchema =
+    availableCodebooks.find((codebook) => String(codebook.id) === String(selectedCodebook))?.metadata
+      ?.schema || null;
+  const urlRef = useRefParam(selectedSchema);
+  const preselected = location?.state?.selected || urlRef;
+
+  // Edit mode holds an unsaved draft of the whole codebook.
+  useLeaveGuard(isEditMode);
 
   const fetchProjects = useCallback(async () => {
     try {
@@ -50,6 +68,8 @@ export default function useViewCodebookPage() {
   }, []);
 
   const fetchAvailableCodebooks = useCallback(async () => {
+    setListError("");
+    setListLoading(true);
     try {
       if (projectsList.length > 0 && selectedProject) {
         const projectObj = projectsList.find(
@@ -66,7 +86,6 @@ export default function useViewCodebookPage() {
           }));
         setAvailableCodebooks(codebookFiles);
 
-        const preselected = location?.state?.selected;
         if (!preselected || appliedPreselectRef.current === preselected) return;
         const match = codebookFiles.find((item) => matchesPreselection(item, preselected));
         if (!match) return;
@@ -84,7 +103,6 @@ export default function useViewCodebookPage() {
       setAvailableCodebooks(codebooks);
       if (codebooks.length === 0) return;
 
-      const preselected = location?.state?.selected;
       if (preselected && appliedPreselectRef.current !== preselected) {
         const selected = codebooks.find((cb) => matchesPreselection(cb, preselected));
         if (selected) {
@@ -93,43 +111,39 @@ export default function useViewCodebookPage() {
           setSelectedCodebookName(
             selected?.display_name || selected?.name || selected?.id || "",
           );
-          return;
-        }
-      }
-
-      if (appliedPreselectRef.current !== null) return;
-      const urlParams = new URLSearchParams(window.location.search);
-      const selectedFromUrl = urlParams.get("selected");
-      if (selectedFromUrl) {
-        const selected = codebooks.find((cb) => matchesPreselection(cb, selectedFromUrl));
-        if (selected) {
-          appliedPreselectRef.current = selectedFromUrl;
-          setSelectedCodebook(String(selected.id));
-          setSelectedCodebookName(
-            selected?.display_name || selected?.name || selected?.id || "",
-          );
         }
       }
     } catch (fetchError) {
       console.error("Error fetching codebooks list:", fetchError);
+      setListError("Couldn't load your codebooks. Check your connection and refresh to try again.");
+    } finally {
+      setListLoading(false);
     }
-  }, [location?.state?.selected, projectsList, selectedProject]);
+  }, [preselected, projectsList, selectedProject]);
 
+  // Switching codebooks quickly can leave an older request in flight; only
+  // the newest may fill the tree, or editing and saving the codebook on
+  // screen would write the previous codebook's codes into it.
+  const latestCodebookRequest = useRef(0);
   const fetchCodebook = useCallback(async (codebookId) => {
+    const requestId = ++latestCodebookRequest.current;
+    const isCurrent = () =>
+      requestId === latestCodebookRequest.current && String(codebookId) === String(selectedCodebookRef.current);
     try {
       setLoading(true);
       setError(null);
       const response = await apiFetch(`/api/codebook?codebook_id=${codebookId}`);
       if (!response.ok) throw new Error("Failed to fetch codebook");
       const data = await response.json();
+      if (!isCurrent()) return;
       setCodebookTree(groupCodesByFamily(data.codes));
       setSystemPrompt(data.systemprompt || "");
       setInstructions(data.instructions || "");
       setPromptMeta(data.prompt_meta || null);
     } catch (fetchError) {
-      setError(fetchError.message);
+      if (isCurrent()) setError(fetchError.message);
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, []);
 
@@ -145,18 +159,37 @@ export default function useViewCodebookPage() {
     setSaveState({ status: "idle", message: "" });
   }, []);
 
+  const changeSelectedCodebook = useCallback(async (codebookId) => {
+    if (
+      isEditMode &&
+      !(await DialogService.confirm("You have unsaved codebook edits. Switch codebooks and discard them?", {
+        title: "Unsaved changes",
+        confirmLabel: "Discard edits",
+        danger: true,
+      }))
+    ) {
+      return;
+    }
+    selectedCodebookRef.current = codebookId;
+    setSelectedCodebook(codebookId);
+    setIsEditMode(false);
+    setCodebookDraft([]);
+    setSaveState({ status: "idle", message: "" });
+  }, [isEditMode]);
+
   const saveEdit = useCallback(
     async (displayName) => {
       if (!selectedCodebook) {
         setSaveState({ status: "error", message: "No codebook selected." });
         return;
       }
-      setSaveState({ status: "saving", message: "Saving..." });
+      setSaveState({ status: "saving", message: "Saving…" });
       const codes = flattenTreeToCodes(codebookDraft);
       const result = await requestJson(`/api/codebook/${encodeURIComponent(selectedCodebook)}`, {
         method: "PUT",
         body: { codes, display_name: displayName },
       });
+      if (String(selectedCodebookRef.current) !== String(selectedCodebook)) return;
       if (!result.ok) {
         setSaveState({ status: "error", message: result.error || "Failed to save codebook." });
         return;
@@ -197,7 +230,7 @@ export default function useViewCodebookPage() {
   return {
     availableCodebooks,
     selectedCodebook,
-    setSelectedCodebook,
+    setSelectedCodebook: changeSelectedCodebook,
     projectsList,
     selectedProject,
     setSelectedProject,
@@ -205,6 +238,8 @@ export default function useViewCodebookPage() {
     selectedCodebookName,
     loading,
     error,
+    listError,
+    listLoading,
     systemPrompt,
     instructions,
     promptMeta,

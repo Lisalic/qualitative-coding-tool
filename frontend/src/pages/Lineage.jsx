@@ -51,7 +51,9 @@ function NeighborCard({ neighbor, onNavigate, direction }) {
         className="flex w-full flex-col items-start gap-1 text-left transition-colors hover:opacity-80"
       >
         <div className="flex w-full items-center justify-between gap-2">
-          <span className="truncate font-semibold">{neighbor.filename}</span>
+          <span className="truncate font-semibold" title={neighbor.filename}>
+            {neighbor.filename}
+          </span>
           <span className="shrink-0 border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-paper/60">
             {typeLabel(neighbor.file_type)}
           </span>
@@ -95,8 +97,8 @@ export default function Lineage() {
 
   return (
     <PageShell
-      title={lineage ? lineage.file.filename : "File Lineage"}
-      subtitle={lineage ? `${typeLabel(lineage.file.file_type)} \u00b7 ${lineage.file.schema_name}` : undefined}
+      title={lineage ? lineage.file.filename : "View Lineage"}
+      subtitle={lineage ? `View Lineage \u00b7 ${typeLabel(lineage.file.file_type)}` : undefined}
       width="wide"
       bodyClassName="flex flex-col gap-3"
       actions={

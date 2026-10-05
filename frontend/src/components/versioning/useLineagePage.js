@@ -60,7 +60,10 @@ export function artifactsFromProjects(projects, selectedProject) {
 export default function useLineagePage() {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [ref, setRef] = useState(searchParams.get("ref") || location.state?.ref || "");
+  // Read from the URL on every render rather than copied into state once:
+  // Back/Forward change `?ref=` without remounting this page, and a copy
+  // went stale -- the address bar moved but the page stayed put.
+  const ref = searchParams.get("ref") || location.state?.ref || "";
   const [lineage, setLineage] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -117,14 +120,18 @@ export default function useLineagePage() {
     if (!ref || available.length === 0) return;
     const match = available.find((item) => item.id === ref || item.fileId === String(ref));
     if (match && match.id !== ref) {
-      setRef(match.id);
-      setSearchParams({ ref: match.id });
+      setSearchParams({ ref: match.id }, { replace: true });
     }
   }, [available, ref, setSearchParams]);
 
+  // A ref that arrived only as `location.state` is written into the URL
+  // (in place, not as a new history entry) so a refresh keeps it.
+  useEffect(() => {
+    if (ref && !searchParams.get("ref")) setSearchParams({ ref }, { replace: true });
+  }, [ref, searchParams, setSearchParams]);
+
   const navigateTo = useCallback(
     (nextRef) => {
-      setRef(nextRef);
       setSearchParams({ ref: nextRef });
     },
     [setSearchParams],

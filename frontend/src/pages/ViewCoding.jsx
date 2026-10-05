@@ -17,7 +17,8 @@ export default function ViewCoding() {
           items={page.availableCodedData}
           selectedId={page.selectedCodedData}
           onSelect={page.handleCodedDataChange}
-          emptyMessage="No coded data available"
+          emptyMessage="No codings available"
+          loading={page.listLoading}
           placeholder="Select coding…"
         />
       }

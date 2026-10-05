@@ -20,6 +20,8 @@ export default function ViewSummary() {
     content,
     loading,
     error,
+    listError,
+    listLoading,
   } = useViewSummaryPage();
 
   return (
@@ -38,6 +40,7 @@ export default function ViewSummary() {
             selectedId={selected}
             onSelect={setSelected}
             emptyMessage="No summaries available"
+            loading={listLoading}
             placeholder="Select summary…"
           />
           {selected && (
@@ -48,18 +51,18 @@ export default function ViewSummary() {
     >
       {loading ? (
         <div className="border border-line bg-surface-raised px-3 py-2 text-sm text-paper/70">
-          Loading...
+          Loading…
         </div>
       ) : null}
 
-      {error ? <ErrorDisplay error={error} /> : null}
+      <ErrorDisplay message={error || (!selected ? listError : null)} variant="alert" />
 
-      {!loading && !selected ? (
-        <PageEmptyState message="Select a summary to view" />
+      {!loading && !selected && !listError ? (
+        <PageEmptyState message="Select a summary to view its text" />
       ) : null}
 
       {!loading && selected && content ? (
-        <Panel title="Summary Output" scroll="page" bodyClassName="p-4">
+        <Panel title="Summary" bodyClassName="p-4">
           <MarkdownDisplay content={content} />
         </Panel>
       ) : null}

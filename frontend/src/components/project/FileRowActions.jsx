@@ -1,28 +1,47 @@
-const tabBtn =
-  "border border-paper px-3.5 py-2 text-sm font-medium transition-colors hover:bg-paper hover:text-ink disabled:opacity-50";
+import { Link } from "react-router-dom";
+import { btn, btnDanger } from "../../lib/uiClasses";
 
+/**
+ * A project file row's actions. View and History are real links (they
+ * open in a new tab like any link); Rename and Delete act in place.
+ */
 export default function FileRowActions({
   file,
-  onView,
+  viewTo,
+  historyTo,
   onRename,
   onDelete,
-  onHistory,
   disabled = false,
 }) {
+  const name = file?.display_name || file?.filename || "file";
   return (
-    <div className="flex shrink-0 gap-2">
-      <button type="button" className={tabBtn} onClick={() => onView?.(file)} disabled={disabled}>
-        View
-      </button>
-      {onHistory && (
-        <button type="button" className={tabBtn} onClick={() => onHistory(file)} disabled={disabled}>
+    <div className="flex shrink-0 flex-wrap gap-2">
+      {viewTo ? (
+        <Link to={viewTo} className={`${btn} hover:text-ink`} aria-label={`View ${name}`}>
+          View
+        </Link>
+      ) : null}
+      {historyTo ? (
+        <Link to={historyTo} className={`${btn} hover:text-ink`} aria-label={`History of ${name}`}>
           History
-        </button>
-      )}
-      <button type="button" className={tabBtn} onClick={() => onRename?.(file)} disabled={disabled}>
-        Edit
+        </Link>
+      ) : null}
+      <button
+        type="button"
+        className={btn}
+        onClick={() => onRename?.(file)}
+        disabled={disabled}
+        aria-label={`Rename ${name}`}
+      >
+        Rename
       </button>
-      <button type="button" className={tabBtn} onClick={() => onDelete?.(file)} disabled={disabled}>
+      <button
+        type="button"
+        className={btnDanger}
+        onClick={() => onDelete?.(file)}
+        disabled={disabled}
+        aria-label={`Delete ${name}`}
+      >
         Delete
       </button>
     </div>

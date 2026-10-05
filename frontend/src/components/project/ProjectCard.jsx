@@ -1,6 +1,8 @@
+import { Link } from "react-router-dom";
 import { btnPrimary } from "../../lib/uiClasses";
+import { formatDate } from "../../lib/formatDate";
 
-export default function ProjectCard({ project, onViewProject }) {
+export default function ProjectCard({ project }) {
   return (
     <div className="border border-line bg-surface p-4">
       <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -11,7 +13,7 @@ export default function ProjectCard({ project, onViewProject }) {
           )}
           <div className="mt-2 flex flex-wrap gap-4 text-sm text-paper/50">
             {project.created_at && (
-              <div>Created: {new Date(project.created_at).toLocaleString()}</div>
+              <div>Created: {formatDate(project.created_at)}</div>
             )}
             <div>
               {Array.isArray(project.files)
@@ -20,14 +22,13 @@ export default function ProjectCard({ project, onViewProject }) {
             </div>
           </div>
         </div>
-        <button
-          type="button"
-          className={`shrink-0 ${btnPrimary}`}
-          onClick={() => onViewProject(project.id)}
+        <Link
+          to={`/project/${project.id}`}
+          className={`shrink-0 ${btnPrimary} hover:text-ink`}
           aria-label={`View project ${project.projectname}`}
         >
-          View Project
-        </button>
+          View project
+        </Link>
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from "react";
 import { useLocation } from "react-router-dom";
 import useProjectScopedFiles from "./useProjectScopedFiles";
+import { useRefParam } from "../primitives/useRefParam";
 
 const MODE_CONFIG = {
   raw: {
@@ -11,7 +12,7 @@ const MODE_CONFIG = {
     },
     table: {
       isFilteredView: false,
-      emptyMessage: "Select a database to view raw data",
+      emptyMessage: "Select a database to view its rows",
     },
   },
   filtered: {
@@ -22,7 +23,7 @@ const MODE_CONFIG = {
     },
     table: {
       isFilteredView: true,
-      emptyMessage: "Select a database to view filtered data",
+      emptyMessage: "Select a database to view its rows",
     },
   },
 };
@@ -32,14 +33,17 @@ export default function useDataBrowserPage({ mode = "raw" } = {}) {
   const config = MODE_CONFIG[mode] || MODE_CONFIG.raw;
   const scoped = useProjectScopedFiles(config.fileType);
   const { setSelectedDatabase } = scoped;
+  // The open database lives in the URL as `?ref=` so refresh and Back keep
+  // it; a link's `location.state.selectedDatabase` still wins.
+  const urlRef = useRefParam(scoped.selectedDatabase);
 
   useEffect(() => {
-    if (!location.state?.selectedDatabase) return;
-    const selected = location.state.selectedDatabase;
+    const selected = location.state?.selectedDatabase || urlRef;
+    if (!selected) return;
     const selectedId =
       typeof selected === "string" ? selected : selected?.name || selected?.id || "";
-    setSelectedDatabase(selectedId);
-  }, [location.state, setSelectedDatabase]);
+    setSelectedDatabase((prev) => (prev === selectedId ? prev : selectedId));
+  }, [location.state, urlRef, setSelectedDatabase]);
 
   const projects = useMemo(
     () => (scoped.projectsList.length > 0 ? scoped.projectsList : scoped.userProjects || []),
@@ -65,6 +69,8 @@ export default function useDataBrowserPage({ mode = "raw" } = {}) {
     selectedDescription: scoped.selectedDescription,
     title: scoped.getTitle(),
     displayName: scoped.getDisplayName(),
+    listError: scoped.listError,
+    listLoading: scoped.listLoading,
     selectionProps: config.selection,
     tableProps: config.table,
   };

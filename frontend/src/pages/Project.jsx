@@ -4,6 +4,7 @@ import ProjectFilesSection from "../components/project/ProjectFilesSection";
 import PageEmptyState from "../components/primitives/PageEmptyState";
 import useProjectPage from "../components/project/useProjectPage";
 import PageShell from "../components/shell/PageShell";
+import ErrorDisplay from "../components/feedback/ErrorDisplay";
 
 export default function Project() {
   const { projectId } = useParams();
@@ -11,15 +12,21 @@ export default function Project() {
 
   if (page.loading) {
     return (
-      <PageShell title="Project" width="prose">
-        <PageEmptyState message="Loading project..." />
+      <PageShell title="Project" width="wide">
+        <p role="status" className="text-sm text-paper/70">
+          Loading project…
+        </p>
       </PageShell>
     );
   }
   if (!page.project) {
     return (
       <PageShell title="Project" width="prose">
-        <PageEmptyState message="Project not found" />
+        {page.error ? (
+          <ErrorDisplay message={page.error} variant="alert" />
+        ) : (
+          <PageEmptyState message="This project doesn't exist, or you don't have access to it." />
+        )}
       </PageShell>
     );
   }

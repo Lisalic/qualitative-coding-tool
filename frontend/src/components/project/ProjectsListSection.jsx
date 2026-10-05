@@ -5,18 +5,17 @@ export default function ProjectsListSection({
   projects,
   loading,
   error,
-  onViewProject,
 }) {
   return (
     <div className="flex flex-col gap-3">
       {loading && (
         <div className="border border-line bg-surface-raised px-3 py-2 text-center text-sm text-paper/70">
-          Loading projects...
+          Loading projects…
         </div>
       )}
       {error && (
-        <div className="border border-error bg-error/10 px-3 py-2 text-center text-sm text-error">
-          Error: {error}
+        <div role="alert" className="border border-error bg-error/10 px-3 py-2 text-center text-sm text-error">
+          {error}
         </div>
       )}
 
@@ -27,7 +26,7 @@ export default function ProjectsListSection({
       {!loading && projects.length > 0 && (
         <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
           {projects.map((project) => (
-            <ProjectCard key={project.id} project={project} onViewProject={onViewProject} />
+            <ProjectCard key={project.id} project={project} />
           ))}
         </div>
       )}

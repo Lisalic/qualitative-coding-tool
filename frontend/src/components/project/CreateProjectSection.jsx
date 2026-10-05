@@ -1,12 +1,14 @@
-import { btnPrimary } from "../../lib/uiClasses";
-const inputClasses =
-  "border border-paper bg-white/5 px-3 py-2.5 text-paper placeholder:text-paper/40 focus:outline-none focus:ring-2 focus:ring-paper";
+import { btn, btnPrimary, input } from "../../lib/uiClasses";
+
+const inputClasses = `${input} py-2.5`;
 
 export default function CreateProjectSection({
   showForm,
   name,
   description,
   message,
+  messageIsError,
+  creating,
   onCreateClick,
   onNameChange,
   onDescriptionChange,
@@ -20,23 +22,26 @@ export default function CreateProjectSection({
           type="button"
           className={btnPrimary}
           onClick={onCreateClick}
-          aria-label="Create New Project"
         >
-          Create New Project
+          Create new project
         </button>
       </div>
     );
   }
 
-  const isError = message.toLowerCase().includes("error");
 
   return (
     <div className="border border-line bg-surface p-3">
-      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide">Create New Project</h2>
+      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide">Create new project</h2>
       <form onSubmit={onSubmit} className="flex flex-col gap-4">
         <div className="flex flex-col gap-1.5">
-          <label className="text-sm">Project Name *</label>
+          <label htmlFor="newProjectName" className="text-sm">
+            Project name
+          </label>
           <input
+            id="newProjectName"
+            autoFocus
+            required
             className={inputClasses}
             value={name}
             onChange={(event) => onNameChange(event.target.value)}
@@ -44,33 +49,34 @@ export default function CreateProjectSection({
           />
         </div>
         <div className="flex flex-col gap-1.5">
-          <label className="text-sm">Description</label>
+          <label htmlFor="newProjectDescription" className="text-sm">
+            Description (optional)
+          </label>
           <textarea
+            id="newProjectDescription"
             className={`${inputClasses} min-h-[100px] resize-y`}
             value={description}
             onChange={(event) => onDescriptionChange(event.target.value)}
-            placeholder="Enter project description (optional)"
+            placeholder="What this project is about…"
           />
         </div>
         <div className="flex items-center gap-3">
           <button
             type="submit"
             className={btnPrimary}
+            disabled={creating}
           >
-            Create Project
+            {creating ? "Creating…" : "Create project"}
           </button>
-          <button
-            type="button"
-            className="border border-paper px-6 py-3 text-base transition-colors hover:bg-paper hover:text-ink"
-            onClick={onCancel}
-          >
+          <button type="button" className={btn} onClick={onCancel}>
             Cancel
           </button>
         </div>
         {message && (
           <div
+            role={messageIsError ? "alert" : "status"}
             className={`border px-4 py-3 text-sm ${
-              isError
+              messageIsError
                 ? "border-error bg-error/10 text-error"
                 : "border-success bg-success/10 text-success"
             }`}

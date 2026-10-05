@@ -3,13 +3,13 @@ import ComparisonViewPageContainer from "../components/comparisons/ComparisonVie
 export default function ViewCodebookComparisons() {
   return (
     <ComparisonViewPageContainer
-      title="View Codebook Comparisons"
+      title="View Codebook Comparison"
       fileType="codebook_comparison"
       preselectStateKey="selected"
       contentUrl={(id) => `/api/codebook?codebook_id=${encodeURIComponent(id)}`}
       contentField="codebook_comparison"
       emptyMessage="No codebook comparisons available"
-      placeholderMessage="Select a codebook comparison to view"
+      placeholderMessage="Select a codebook comparison to view its differences"
       pickerPlaceholder="Select codebook comparison…"
     />
   );

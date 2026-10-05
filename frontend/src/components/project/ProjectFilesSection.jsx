@@ -5,12 +5,43 @@ import DialogService from "../feedback/DialogService";
 import ToastService from "../feedback/ToastService";
 import FileRowActions from "./FileRowActions";
 import Panel from "../shell/Panel";
+import { formatDate } from "../../lib/formatDate";
+import ErrorDisplay from "../feedback/ErrorDisplay";
+import { btn, btnActive, btnSm, input, meta } from "../../lib/uiClasses";
 
-const tabBtn =
-  "border border-paper px-3.5 py-2 text-sm font-medium transition-colors hover:bg-paper hover:text-ink";
-const tabBtnSelected = "bg-paper text-ink";
-const inputClasses =
-  "border border-paper bg-white/5 px-3 py-2.5 text-paper placeholder:text-paper/40 focus:outline-none focus:ring-2 focus:ring-paper";
+const tabBtn = btn;
+const tabBtnSelected = btnActive;
+const inputClasses = input;
+
+const TABS = [
+  ["database", "Databases"],
+  ["filtered", "Filtered"],
+  ["codebook", "Codebooks"],
+  ["coding", "Codings"],
+  ["summary", "Summaries"],
+];
+
+// Where each file type is viewed. Every view page reads `?ref=`, so a
+// plain link works -- including open-in-new-tab.
+const VIEW_PATH_BY_TYPE = {
+  raw_data: "/data",
+  filtered_data: "/filtered-data",
+  codebook: "/codebook-view",
+  codebook_comparison: "/codebook-comparison-view",
+  coding: "/coding-view",
+  coding_comparison: "/coding-comparison-view",
+  summary: "/summaryview",
+};
+
+function viewPathFor(file) {
+  const base = VIEW_PATH_BY_TYPE[file.file_type];
+  return base && file.schema_name ? `${base}?ref=${encodeURIComponent(file.schema_name)}` : null;
+}
+
+/** One line under a tab that has no files of its kind yet. */
+function EmptyTabLine({ children }) {
+  return <p className="text-sm text-paper/60">{children}</p>;
+}
 
 export default function ProjectFilesSection({ project, onRefreshProject }) {
   const navigate = useNavigate();
@@ -23,6 +54,8 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
   const [mergeLoading, setMergeLoading] = useState(false);
   const [mergeError, setMergeError] = useState("");
   const [mergeSuccess, setMergeSuccess] = useState("");
+  const [renameError, setRenameError] = useState("");
+  const [renaming, setRenaming] = useState(false);
   const [codebookFilter, setCodebookFilter] = useState("all");
   const [codingFilter, setCodingFilter] = useState("all");
 
@@ -73,12 +106,14 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
   }, [codingFilter, codingFiles]);
 
   const startRenameFile = (file) => {
+    setRenameError("");
     setRenamingFile(file.schema_name);
     setNewFileName(file.display_name || file.filename || file.schema_name);
     setNewFileDescription(file.description || "");
   };
 
   const cancelRenameFile = () => {
+    setRenameError("");
     setRenamingFile(null);
     setNewFileName("");
     setNewFileDescription("");
@@ -86,7 +121,12 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
 
   const saveRenameFile = async (e) => {
     e?.preventDefault();
-    if (!newFileName.trim()) return;
+    if (!newFileName.trim()) {
+      setRenameError("Enter a name.");
+      return;
+    }
+    setRenaming(true);
+    setRenameError("");
     try {
       const form = new FormData();
       form.append("schema_name", renamingFile);
@@ -101,6 +141,9 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
       cancelRenameFile();
     } catch (err) {
       console.error("Rename error:", err);
+      setRenameError("Couldn't rename the file. Please try again.");
+    } finally {
+      setRenaming(false);
     }
   };
 
@@ -162,11 +205,11 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
   const handleMergeDatabases = async () => {
     if (!project) return;
     if (selectedDatabases.length < 2) {
-      setMergeError("Please select at least 2 databases to merge");
+      setMergeError("Select at least 2 databases to merge.");
       return;
     }
     if (!mergeName.trim()) {
-      setMergeError("Please enter a name for the merged database");
+      setMergeError("Enter a name for the merged database.");
       return;
     }
     const confirmed = await DialogService.confirm(
@@ -187,18 +230,19 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
         body: formData,
       });
       if (!response.ok) throw new Error("Failed to merge databases");
-      setMergeSuccess("Databases merged successfully!");
+      setMergeSuccess(`Merged into "${mergeName.trim()}".`);
       setSelectedDatabases([]);
       setMergeName("");
       await onRefreshProject?.();
     } catch (err) {
-      setMergeError(err.message || "Failed to merge databases");
+      console.error("Merge error:", err);
+      setMergeError("Couldn't merge the databases. Please try again.");
     } finally {
       setMergeLoading(false);
     }
   };
 
-  const renderFileRow = (f, onView, allowMergeCheckbox = false) => (
+  const renderFileRow = (f, allowMergeCheckbox = false) => (
     <div
       key={f.id}
       className="flex items-start gap-3 border border-line-soft p-3"
@@ -209,6 +253,7 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
           checked={selectedDatabases.includes(f.schema_name)}
           onChange={() => handleSelectDatabase(f.schema_name)}
           className="mt-1 accent-paper"
+          aria-label={`Select ${f.display_name || f.schema_name} to merge`}
         />
       )}
       <div className="flex-1">
@@ -218,43 +263,46 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
               className={inputClasses}
               value={newFileName}
               onChange={(e) => setNewFileName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") cancelRenameFile();
+              }}
               placeholder="File name"
+              aria-label="File name"
+              autoFocus
             />
             <textarea
               className={`${inputClasses} resize-y`}
               value={newFileDescription}
               onChange={(e) => setNewFileDescription(e.target.value)}
               placeholder="Description (optional)"
+              aria-label="Description"
               rows={2}
             />
             <div className="flex gap-2">
-              <button type="submit" className={tabBtn}>
-                Save
+              <button type="submit" className={tabBtn} disabled={renaming}>
+                {renaming ? "Saving…" : "Save"}
               </button>
               <button type="button" className={tabBtn} onClick={cancelRenameFile}>
                 Cancel
               </button>
             </div>
+            <ErrorDisplay message={renameError} variant="alert" />
           </form>
         ) : (
           <>
-            <div className="text-base font-semibold">
-              {f.display_name || f.schema_name}
-            </div>
+            <div className="text-base font-semibold">{f.display_name || "Untitled file"}</div>
             {f.description && (
               <div className="mt-1 text-paper/70">{f.description}</div>
             )}
-            <div className="mt-1.5 text-xs text-paper/50">
-              {f.created_at ? new Date(f.created_at).toLocaleString() : ""}
-            </div>
+            <div className={`mt-1.5 ${meta}`}>{formatDate(f.created_at)}</div>
           </>
         )}
       </div>
       {renamingFile !== f.schema_name && (
         <FileRowActions
           file={f}
-          onView={onView}
-          onHistory={(file) => navigate(`/versions?ref=${encodeURIComponent(file.schema_name)}`)}
+          viewTo={viewPathFor(f)}
+          historyTo={`/versions?ref=${encodeURIComponent(f.schema_name)}`}
           onRename={startRenameFile}
           onDelete={handleDeleteFile}
         />
@@ -268,171 +316,167 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
       <Panel
         title="Project files"
         scroll={false}
-        actions={["database", "filtered", "codebook", "coding", "summary"].map((tab) => (
+        actions={TABS.map(([tab, label]) => (
           <button
             key={tab}
             type="button"
+            aria-pressed={activeTab === tab}
             className={`${tabBtn} ${activeTab === tab ? tabBtnSelected : ""}`}
             onClick={() => setActiveTab(tab)}
           >
-            {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            {label}
           </button>
         ))}
       >
         {activeTab === "database" && (
           <>
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Database Files</h2>
+              <h2 className="text-lg font-semibold">Databases</h2>
               <button type="button" className={tabBtn} onClick={() => navigate("/import")}>
-                Add Database
+                Import data
               </button>
             </div>
-            <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
-              {dbFiles.map((f) =>
-                renderFileRow(
-                  f,
-                  () => navigate("/data", { state: { selectedDatabase: f.schema_name } }),
-                  true,
-                ),
-              )}
-            </div>
+            {dbFiles.length === 0 ? (
+              <EmptyTabLine>No databases yet. Import data to add one.</EmptyTabLine>
+            ) : (
+              <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
+                {dbFiles.map((f) => renderFileRow(f, true))}
+              </div>
+            )}
           </>
         )}
 
         {activeTab === "filtered" && (
           <>
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Filtered Files</h2>
+              <h2 className="text-lg font-semibold">Filtered databases</h2>
               <button
                 type="button"
                 className={tabBtn}
                 onClick={() => navigate("/filter", { state: { projectId: project.id } })}
               >
-                Add Filtered
+                Filter data
               </button>
             </div>
-            <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
-              {filteredFiles.map((f) =>
-                renderFileRow(
-                  f,
-                  () =>
-                    navigate("/filtered-data", {
-                      state: { selectedDatabase: f.schema_name },
-                    }),
-                  true,
-                ),
-              )}
-            </div>
+            {filteredFiles.length === 0 ? (
+              <EmptyTabLine>No filtered databases yet.</EmptyTabLine>
+            ) : (
+              <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
+                {filteredFiles.map((f) => renderFileRow(f, true))}
+              </div>
+            )}
           </>
         )}
 
         {activeTab === "codebook" && (
           <>
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Codebook Files</h2>
+              <h2 className="text-lg font-semibold">Codebooks</h2>
               <button
                 type="button"
                 className={tabBtn}
                 onClick={() => navigate("/codebook", { state: { projectId: project.id } })}
               >
-                Add Codebook
+                Create codebook
               </button>
             </div>
-            <div className="mb-3 flex gap-2">
-              {["codebook", "comparisons", "all"].map((f) => (
+            <div className="mb-3 flex gap-2" role="group" aria-label="Show">
+              {[
+                ["all", "All"],
+                ["codebook", "Codebooks"],
+                ["comparisons", "Comparisons"],
+              ].map(([f, label]) => (
                 <button
                   key={f}
                   type="button"
-                  className={`${tabBtn} ${codebookFilter === f ? tabBtnSelected : ""}`}
+                  aria-pressed={codebookFilter === f}
+                  className={`${btnSm} ${codebookFilter === f ? btnActive : ""}`}
                   onClick={() => setCodebookFilter(f)}
                 >
-                  {f === "all" ? "Show All" : `Show ${f}`}
+                  {label}
                 </button>
               ))}
             </div>
-            <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
-              {shownCodebooks.map((f) =>
-                renderFileRow(f, () =>
-                  f.file_type === "codebook_comparison"
-                    ? navigate("/codebook-comparison-view", {
-                        state: { selected: f.schema_name },
-                      })
-                    : navigate("/codebook-view", { state: { selected: String(f.id) } }),
-                ),
-              )}
-            </div>
+            {shownCodebooks.length === 0 ? (
+              <EmptyTabLine>Nothing here yet.</EmptyTabLine>
+            ) : (
+              <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
+                {shownCodebooks.map((f) => renderFileRow(f))}
+              </div>
+            )}
           </>
         )}
 
         {activeTab === "coding" && (
           <>
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Coding Files</h2>
+              <h2 className="text-lg font-semibold">Codings</h2>
               <button
                 type="button"
                 className={tabBtn}
                 onClick={() => navigate("/codebook-apply", { state: { projectId: project.id } })}
               >
-                Add Coding
+                Apply codebook
               </button>
             </div>
-            <div className="mb-3 flex gap-2">
-              {["coding", "comparisons", "all"].map((f) => (
+            <div className="mb-3 flex gap-2" role="group" aria-label="Show">
+              {[
+                ["all", "All"],
+                ["coding", "Codings"],
+                ["comparisons", "Comparisons"],
+              ].map(([f, label]) => (
                 <button
                   key={f}
                   type="button"
-                  className={`${tabBtn} ${codingFilter === f ? tabBtnSelected : ""}`}
+                  aria-pressed={codingFilter === f}
+                  className={`${btnSm} ${codingFilter === f ? btnActive : ""}`}
                   onClick={() => setCodingFilter(f)}
                 >
-                  {f === "all" ? "Show All" : `Show ${f}`}
+                  {label}
                 </button>
               ))}
             </div>
-            <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
-              {shownCodings.map((f) =>
-                renderFileRow(f, () =>
-                  navigate(
-                    f.file_type === "coding_comparison"
-                      ? "/coding-comparison-view"
-                      : "/coding-view",
-                    { state: { selectedCodedData: f.schema_name } },
-                  ),
-                ),
-              )}
-            </div>
+            {shownCodings.length === 0 ? (
+              <EmptyTabLine>Nothing here yet.</EmptyTabLine>
+            ) : (
+              <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
+                {shownCodings.map((f) => renderFileRow(f))}
+              </div>
+            )}
           </>
         )}
 
         {activeTab === "summary" && (
           <>
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Summary Files</h2>
+              <h2 className="text-lg font-semibold">Summaries</h2>
               <button
                 type="button"
                 className={tabBtn}
-                onClick={() => navigate("/summarize-coding")}
+                onClick={() => navigate("/summarize-coding", { state: { projectId: project.id } })}
               >
-                Add Summary
+                Summarize coding
               </button>
             </div>
-            <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
-              {summaryFiles.map((f) =>
-                renderFileRow(f, () =>
-                  navigate("/summaryview", {
-                    state: { selectedSummary: f.schema_name || f.display_name || f.id },
-                  }),
-                ),
-              )}
-            </div>
+            {summaryFiles.length === 0 ? (
+              <EmptyTabLine>No summaries yet.</EmptyTabLine>
+            ) : (
+              <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
+                {summaryFiles.map((f) => renderFileRow(f))}
+              </div>
+            )}
           </>
         )}
 
-        {(activeTab === "database" || activeTab === "filtered") &&
-          (dbFiles.length > 0 || filteredFiles.length > 0) && (
+        {/* Merging needs two files to pick from on this tab. */}
+        {((activeTab === "database" && dbFiles.length >= 2) ||
+          (activeTab === "filtered" && filteredFiles.length >= 2)) && (
             <div className="mt-5 text-center">
+              <p className={`mb-2 ${meta}`}>Tick two or more databases above to merge them into a new one.</p>
               <input
                 type="text"
-                placeholder="Enter merged database name..."
+                aria-label="Merged database name"
+                placeholder="Merged database name…"
                 value={mergeName}
                 onChange={(e) => setMergeName(e.target.value)}
                 disabled={mergeLoading}
@@ -448,12 +492,20 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
                   }
                 >
                   {mergeLoading
-                    ? "Merging..."
+                    ? "Merging…"
                     : `Merge ${selectedDatabases.length} Database${selectedDatabases.length !== 1 ? "s" : ""}`}
                 </button>
               </div>
-              {mergeError && <div className="mt-2 text-error">{mergeError}</div>}
-              {mergeSuccess && <div className="mt-2 text-success">{mergeSuccess}</div>}
+              {mergeError && (
+                <div role="alert" className="mt-2 text-error">
+                  {mergeError}
+                </div>
+              )}
+              {mergeSuccess && (
+                <div role="status" className="mt-2 text-success">
+                  {mergeSuccess}
+                </div>
+              )}
             </div>
           )}
       </Panel>

@@ -26,6 +26,8 @@ export default function useProjectScopedFiles(fileType) {
   const [projectsList, setProjectsList] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
   const [selectedDatabase, setSelectedDatabase] = useState("");
+  const [listError, setListError] = useState("");
+  const [listLoading, setListLoading] = useState(true);
 
   useEffect(() => {
     const fetchProjects = async () => {
@@ -49,6 +51,8 @@ export default function useProjectScopedFiles(fileType) {
     const controller = new AbortController();
 
     const fetchDatabases = async () => {
+      setListError("");
+      setListLoading(true);
       try {
         const meResp = await apiFetch("/api/me/", { signal: controller.signal });
         if (meResp.ok) {
@@ -62,7 +66,7 @@ export default function useProjectScopedFiles(fileType) {
         }
 
         const fallbackResp = await apiFetch(`/api/my-files/?file_type=${fileType}`, { signal: controller.signal });
-        if (!fallbackResp.ok) return;
+        if (!fallbackResp.ok) throw new Error("Failed to fetch user projects");
         const fallbackData = await fallbackResp.json();
         const projects = fallbackData.projects || [];
         setUserProjects(projects);
@@ -70,6 +74,9 @@ export default function useProjectScopedFiles(fileType) {
       } catch (error) {
         if (error?.name === "AbortError") return;
         console.error("Error fetching scoped files:", error);
+        setListError("Couldn't load your databases. Check your connection and refresh to try again.");
+      } finally {
+        if (!controller.signal.aborted) setListLoading(false);
       }
     };
 
@@ -112,10 +119,11 @@ export default function useProjectScopedFiles(fileType) {
     return (databases || []).find((database) => database && database.name === id);
   }, [databases, selectedDatabase]);
 
+  // Never the internal `proj_…` schema name -- that's an identifier, not
+  // something the user named.
   const getTitle = () => {
-    if (!selectedDatabase) return "Select a Database";
-    const baseName = String(selectedDatabase).replace(".db", "");
-    return `Database: ${selectedDatabaseObj?.display_name || baseName}`;
+    if (!selectedDatabase) return "Select a database";
+    return selectedDatabaseObj?.display_name || "Untitled database";
   };
 
   const getDisplayName = () => selectedDatabaseObj?.display_name || null;
@@ -135,5 +143,7 @@ export default function useProjectScopedFiles(fileType) {
     selectedDescription: selectedDatabaseObj?.description,
     getTitle,
     getDisplayName,
+    listError,
+    listLoading,
   };
 }

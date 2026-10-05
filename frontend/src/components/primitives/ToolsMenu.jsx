@@ -24,6 +24,7 @@ export const toolsMenuItem =
 export default function ToolsMenu({ label = "Tools", children }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
+  const triggerRef = useRef(null);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -31,7 +32,10 @@ export default function ToolsMenu({ label = "Tools", children }) {
       if (ref.current && !ref.current.contains(event.target)) setOpen(false);
     }
     function handleKeyDown(event) {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      // Escape from inside the panel would otherwise drop focus to <body>.
+      if (ref.current?.contains(document.activeElement)) triggerRef.current?.focus();
     }
     document.addEventListener("mousedown", handlePointerDown);
     document.addEventListener("keydown", handleKeyDown);
@@ -46,19 +50,22 @@ export default function ToolsMenu({ label = "Tools", children }) {
   return (
     <div className="relative inline-block text-left" ref={ref}>
       <button
+        ref={triggerRef}
         type="button"
         className={btn}
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        aria-haspopup="true"
       >
-        {label} <span className="ml-1 text-xs">&#9662;</span>
+        {label}{" "}
+        <span className="ml-1 text-xs" aria-hidden="true">
+          &#9662;
+        </span>
       </button>
+      {/* A plain disclosure panel of ordinary buttons (not an ARIA menu,
+          whose arrow-key contract these mixed items don't follow); Tab
+          moves through them. */}
       {open && (
-        <div
-          className="absolute right-0 z-50 mt-1 flex w-56 flex-col border border-line bg-ink"
-          role="menu"
-        >
+        <div className="absolute right-0 z-50 mt-1 flex w-56 flex-col border border-line bg-ink">
           {typeof children === "function" ? children({ close }) : children}
         </div>
       )}

@@ -29,6 +29,8 @@ export default function ComparisonViewPageContainer({
     content,
     loading,
     error,
+    listError,
+    listLoading,
   } = useViewComparisonPage({ fileType, preselectStateKey, contentUrl, contentField });
 
   return (
@@ -48,6 +50,7 @@ export default function ComparisonViewPageContainer({
             selectedId={selected}
             onSelect={setSelected}
             emptyMessage={emptyMessage}
+            loading={listLoading}
             placeholder={pickerPlaceholder}
           />
           {selected && <ExportDropdown fileId={selected} artifactType="document" />}
@@ -56,10 +59,10 @@ export default function ComparisonViewPageContainer({
     >
       {loading ? (
         <div className="border border-line bg-surface-raised px-3 py-2 text-sm text-paper/70">
-          Loading...
+          Loading…
         </div>
       ) : null}
-      <ErrorDisplay message={error} type="error" variant="alert" />
+      <ErrorDisplay message={error || (!selected ? listError : null)} type="error" variant="alert" />
 
       {content ? (
         <Panel scroll={false}>
@@ -67,7 +70,7 @@ export default function ComparisonViewPageContainer({
               can use the page's full width. */}
           <MarkdownDisplay content={content} className="text-paper" />
         </Panel>
-      ) : loading || error ? null : (
+      ) : loading || error || (!selected && listError) ? null : (
         <PageEmptyState message={placeholderMessage} />
       )}
     </PageShell>
