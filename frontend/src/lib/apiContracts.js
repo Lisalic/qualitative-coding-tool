@@ -24,12 +24,46 @@ export const EXAMPLE_PROMPTS = {
     "Merge codes describing the same concept even if named differently, picking the clearer name and combining their definitions. Keep genuinely distinct codes separate, and carry through a code that appears in only one codebook rather than dropping it.",
 };
 
+// What to tell the user for each missing field, keyed on the field's
+// leading word (entries like "database (must match proj_<id>)" carry a
+// developer note after it). Anything unlisted is shown as written.
+const FIELD_HINTS = {
+  apiKey: "Set your OpenRouter API key (Set API Key, top right).",
+  model: "Choose an AI model.",
+  database: "Choose a source database.",
+  codebook: "Choose a codebook.",
+  codebooks: "Choose at least 2 codebooks.",
+  comparisons: "Choose a valid comparison.",
+  name: "Enter a name.",
+  reportName: "Enter a name.",
+  projectId: "Choose a project.",
+  itemIds: "Select at least one row.",
+  rows: "Keep at least one row.",
+  codes: "Add at least one code.",
+  "include or exclude criteria": "Describe which rows to keep or skip.",
+  "at least one included or excluded row": "Keep or skip at least one row first.",
+};
+
+function hintFor(entry) {
+  const text = String(entry);
+  if (FIELD_HINTS[text]) return FIELD_HINTS[text];
+  const head = text.split(/[\s(]/, 1)[0];
+  if (FIELD_HINTS[head]) return FIELD_HINTS[head];
+  return `${text.charAt(0).toUpperCase()}${text.slice(1)}${/[.!?]$/.test(text) ? "" : "."}`;
+}
+
 export class MissingFieldsError extends Error {
   constructor(missing, flow) {
     super(`Missing required fields for ${flow}: ${missing.join(", ")}`);
     this.name = "MissingFieldsError";
     this.missing = missing;
     this.flow = flow;
+  }
+
+  /** The same problem in the user's terms -- what to do, not which field
+   * name the request builder rejected. Show this; `message` is for logs. */
+  get userMessage() {
+    return [...new Set(this.missing.map(hintFor))].join(" ");
   }
 }
 
@@ -205,7 +239,7 @@ export function buildFilterPreviewPayload({
   if (!isBlank(contentScope)) payload.content_scope = contentScope;
 
   const mw = Number(minWords);
-  if (Number.isFinite(mw) && mw > 0) payload.min_words = mw;
+  if (Number.isFinite(mw) && mw > 0) payload.min_words = Math.ceil(mw);
 
   return payload;
 }
@@ -484,3 +518,6 @@ export function buildManualCodingPayload({
   payload.project_id = Number(projectId);
   return payload;
 }
+
+/** Mirrors `NewPassword` in backend/app/api/schemas.py (register and reset). */
+export const MIN_PASSWORD_LENGTH = 8;

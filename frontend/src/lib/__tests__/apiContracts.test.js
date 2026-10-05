@@ -20,6 +20,17 @@ describe("MissingFieldsError", () => {
     expect(err.message).toBe("Missing required fields for some-flow: a, b");
     expect(err).toBeInstanceOf(Error);
   });
+
+  it("phrases the missing fields as instructions for the user", () => {
+    const err = new MissingFieldsError(["model", "database (must match proj_<id>)", "name", "reportName"], "x");
+    expect(err.userMessage).toBe("Choose an AI model. Choose a source database. Enter a name.");
+  });
+
+  it("passes through entries it has no wording for, as a sentence", () => {
+    expect(new MissingFieldsError(["2 code(s) still need a name"], "x").userMessage).toBe(
+      "2 code(s) still need a name.",
+    );
+  });
 });
 
 describe("buildRecodeItemsPayload", () => {
@@ -140,6 +151,10 @@ describe("buildFilterPreviewPayload", () => {
     expect(payload.filter_tags).toBe("a, b");
     expect(payload.min_words).toBe(25);
     expect(payload.content_scope).toBe("posts");
+  });
+
+  it("rounds fractional minimum words up to a valid integer", () => {
+    expect(buildFilterPreviewPayload({ ...base, minWords: 1.5 }).min_words).toBe(2);
   });
 
   it("clamps sample_percentage into range", () => {

@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "../../api";
 
 export default function useLoginPage() {
@@ -7,16 +7,24 @@ export default function useLoginPage() {
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
+  // ProtectedRoute sends a signed-out visitor here with the page they
+  // asked for; go back there after signing in, not always to Home.
+  const fromPath = location.state?.from?.pathname || "/";
+  const returnTo = fromPath === "/login" ? "/" : `${fromPath}${location.state?.from?.search || ""}`;
 
   const handleSubmit = useCallback(
     async (event) => {
       event.preventDefault();
       if (!email || !password) {
-        setMessage("Please fill in all fields");
+        setMessage("Enter your email and password.");
         setMessageType("error");
         return;
       }
+      setSubmitting(true);
+      setMessage("");
 
       try {
         const res = await api.post("/api/login/", { email, password });
@@ -37,7 +45,7 @@ export default function useLoginPage() {
         } catch {
           // Non-browser environment -- nothing listening for the event.
         }
-        setTimeout(() => navigate("/"), 500);
+        navigate(returnTo, { replace: true });
       } catch (err) {
         const msg =
           (err &&
@@ -48,9 +56,11 @@ export default function useLoginPage() {
           "Login failed";
         setMessage(msg);
         setMessageType("error");
+      } finally {
+        setSubmitting(false);
       }
     },
-    [email, navigate, password],
+    [email, navigate, password, returnTo],
   );
 
   return {
@@ -58,6 +68,7 @@ export default function useLoginPage() {
     setEmail,
     password,
     setPassword,
+    submitting,
     message,
     messageType,
     handleSubmit,

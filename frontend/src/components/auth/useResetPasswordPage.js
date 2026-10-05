@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { requestJson } from "../../api";
+import { MIN_PASSWORD_LENGTH } from "../../lib/apiContracts";
 
 export default function useResetPasswordPage() {
   const [searchParams] = useSearchParams();
@@ -24,6 +25,11 @@ export default function useResetPasswordPage() {
       }
       if (password !== confirmPassword) {
         setMessage("Passwords do not match");
+        setMessageType("error");
+        return;
+      }
+      if (password.length < MIN_PASSWORD_LENGTH) {
+        setMessage(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
         setMessageType("error");
         return;
       }

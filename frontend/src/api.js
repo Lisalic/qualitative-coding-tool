@@ -2,9 +2,54 @@ import axios from "axios";
 
 export const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
+/** The one wording for "an AI action needs a key you haven't set". */
+export const MISSING_API_KEY_MESSAGE =
+  "Set your OpenRouter API key first (Set API Key, top right).";
+
+/** Shown when the request never reached the server at all. */
+export const NETWORK_ERROR_MESSAGE = "Can't reach the server. Check your connection and try again.";
+
+/** Fallback when a failed response carries no message of its own. */
+function genericHttpError(status) {
+  if (status >= 500) return `Server error (HTTP ${status}). Please try again.`;
+  return `Request failed (HTTP ${status}).`;
+}
+
 export const api = axios.create({
   baseURL: BASE_URL,
   withCredentials: true,
+});
+
+function readStoredToken() {
+  try {
+    return typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+  } catch {
+    return null; // storage blocked -- behave as signed out
+  }
+}
+
+/**
+ * A 401 on a request that carried a token means the session ended (the
+ * token expired, or was revoked): drop it and let `useAuth` re-check, which
+ * sends protected pages to the login screen instead of leaving every action
+ * failing with "HTTP error 401". The re-check carries no token, so this
+ * can't loop.
+ */
+function handleExpiredSession(status, hadToken) {
+  if (status !== 401 || !hadToken) return;
+  try {
+    localStorage.removeItem("access_token");
+  } catch {
+    // storage blocked -- nothing stored to clear
+  }
+  delete api.defaults.headers.common["Authorization"];
+  window.dispatchEvent(new Event("auth-changed"));
+}
+
+api.interceptors.response.use(undefined, (error) => {
+  const sentToken = Boolean(error?.config?.headers?.Authorization);
+  handleExpiredSession(error?.response?.status, sentToken);
+  return Promise.reject(error);
 });
 
 export async function apiFetch(path, options = {}) {
@@ -18,22 +63,17 @@ export async function apiFetch(path, options = {}) {
   const rel = String(path).replace(/^\/+/g, "");
   const url = `${base}/${rel}`;
   const opts = { credentials: "include", ...options };
-  const token =
-    typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+  const token = readStoredToken();
   const headers = Object.assign({}, opts.headers || {});
   if (token) headers["Authorization"] = `Bearer ${token}`;
   opts.headers = headers;
-  return fetch(url, opts);
+  const response = await fetch(url, opts);
+  handleExpiredSession(response?.status, Boolean(token));
+  return response;
 }
 
-try {
-  if (typeof window !== "undefined") {
-    const t = localStorage.getItem("access_token");
-    if (t) api.defaults.headers.common["Authorization"] = `Bearer ${t}`;
-  }
-} catch {
-  // localStorage unavailable (private mode / blocked) -- stay unauthenticated.
-}
+const initialToken = readStoredToken();
+if (initialToken) api.defaults.headers.common["Authorization"] = `Bearer ${initialToken}`;
 
 // Normalizes a fetch Response into `{ ok, status, data, error }`, shared by
 // `postForm` and `requestJson`. `error` is a human-readable string when
@@ -52,7 +92,7 @@ async function _normalizeJsonResponse(response) {
     return { ok: true, status: response.status, data: parsed, error: null };
   }
 
-  let error = `HTTP error ${response.status}`;
+  let error = genericHttpError(response.status);
   if (parsed) {
     if (typeof parsed.error === "string") {
       error = parsed.error;
@@ -67,7 +107,9 @@ async function _normalizeJsonResponse(response) {
         .filter(Boolean)
         .join("; ") || error;
     }
-  } else if (rawText) {
+  } else if (rawText && !rawText.trimStart().startsWith("<")) {
+    // A plain-text body is the server's own message; an HTML body (a
+    // proxy or gateway error page) is not something to show a user.
     error = rawText;
   }
 
@@ -88,7 +130,7 @@ export async function postForm(path, formData) {
       ok: false,
       status: 0,
       data: null,
-      error: err?.message || "Network error",
+      error: NETWORK_ERROR_MESSAGE,
     };
   }
   return _normalizeJsonResponse(response);
@@ -114,7 +156,7 @@ export async function requestJson(path, { method = "POST", body } = {}) {
       ok: false,
       status: 0,
       data: null,
-      error: err?.message || "Network error",
+      error: NETWORK_ERROR_MESSAGE,
     };
   }
   return _normalizeJsonResponse(response);

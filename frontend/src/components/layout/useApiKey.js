@@ -14,14 +14,17 @@ export function useApiKey() {
   });
 
   useEffect(() => {
-    try {
-      const savedKey = localStorage.getItem("apiKey");
-      if (savedKey) {
-        setApiKey(savedKey);
+    // Re-read on login/logout too: logout clears the stored key.
+    const loadKey = () => {
+      try {
+        setApiKey(localStorage.getItem("apiKey") || "");
+      } catch {
+        // ignore storage errors
       }
-    } catch {
-      // ignore storage errors
-    }
+    };
+    loadKey();
+    window.addEventListener("auth-changed", loadKey);
+    return () => window.removeEventListener("auth-changed", loadKey);
   }, []);
 
   useEffect(() => {
@@ -38,12 +41,24 @@ export function useApiKey() {
   }, []);
 
   const saveApiKey = (value) => {
+    const trimmed = String(value || "").trim();
     try {
-      localStorage.setItem("apiKey", value);
+      localStorage.setItem("apiKey", trimmed);
     } catch {
       // ignore storage errors
     }
-    setApiKey(value);
+    setApiKey(trimmed);
+    setShowApiInput(false);
+  };
+
+  // Cancel discards whatever was typed: the field shares state with the
+  // "API Key Set" button label, which must reflect what's actually stored.
+  const cancelApiKeyEdit = () => {
+    try {
+      setApiKey(localStorage.getItem("apiKey") || "");
+    } catch {
+      setApiKey("");
+    }
     setShowApiInput(false);
   };
 
@@ -66,6 +81,7 @@ export function useApiKey() {
     showApiInput,
     setShowApiInput,
     saveApiKey,
+    cancelApiKeyEdit,
     sidebarCollapsed,
     toggleSidebar,
   };

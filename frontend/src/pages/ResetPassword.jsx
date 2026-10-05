@@ -1,4 +1,3 @@
-import ErrorDisplay from "../components/feedback/ErrorDisplay";
 import AuthLinksSection from "../components/auth/AuthLinksSection";
 import AuthFormSection from "../components/auth/AuthFormSection";
 import PageHeading from "../components/primitives/PageHeading";
@@ -20,6 +19,9 @@ const ResetPassword = () => {
         onPasswordChange={page.setPassword}
         onConfirmPasswordChange={page.setConfirmPassword}
         onSubmit={page.handleSubmit}
+        busy={page.submitting}
+        message={page.message}
+        messageType={page.messageType}
         disabled={page.submitting || !page.token}
       />
       <AuthLinksSection
@@ -27,7 +29,6 @@ const ResetPassword = () => {
         linkTo="/forgot-password"
         linkLabel="Request a new one"
       />
-      <ErrorDisplay message={page.message} type={page.messageType} variant="message" />
     </div>
   );
 };

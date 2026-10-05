@@ -1,5 +1,4 @@
 import { Link } from "react-router-dom";
-import ErrorDisplay from "../components/feedback/ErrorDisplay";
 import AuthLinksSection from "../components/auth/AuthLinksSection";
 import AuthFormSection from "../components/auth/AuthFormSection";
 import PageHeading from "../components/primitives/PageHeading";
@@ -21,6 +20,9 @@ const Login = () => {
         onEmailChange={page.setEmail}
         onPasswordChange={page.setPassword}
         onSubmit={page.handleSubmit}
+        busy={page.submitting}
+        message={page.message}
+        messageType={page.messageType}
       />
       <Link
         to="/forgot-password"
@@ -33,7 +35,6 @@ const Login = () => {
         linkTo="/register"
         linkLabel="Register here"
       />
-      <ErrorDisplay message={page.message} type={page.messageType} variant="message" />
     </div>
   );
 };

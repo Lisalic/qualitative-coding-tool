@@ -1,4 +1,3 @@
-import ErrorDisplay from "../components/feedback/ErrorDisplay";
 import AuthLinksSection from "../components/auth/AuthLinksSection";
 import AuthFormSection from "../components/auth/AuthFormSection";
 import PageHeading from "../components/primitives/PageHeading";
@@ -18,6 +17,9 @@ const ForgotPassword = () => {
         email={page.email}
         onEmailChange={page.setEmail}
         onSubmit={page.handleSubmit}
+        busy={page.submitting}
+        message={page.message}
+        messageType={page.messageType}
         disabled={page.submitting}
       />
       <AuthLinksSection
@@ -25,7 +27,6 @@ const ForgotPassword = () => {
         linkTo="/login"
         linkLabel="Back to login"
       />
-      <ErrorDisplay message={page.message} type={page.messageType} variant="message" />
     </div>
   );
 };

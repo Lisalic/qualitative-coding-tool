@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../api";
+import { MIN_PASSWORD_LENGTH } from "../../lib/apiContracts";
 
 export default function useRegisterPage() {
   const [email, setEmail] = useState("");
@@ -8,21 +9,29 @@ export default function useRegisterPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
 
   const handleSubmit = useCallback(
     async (event) => {
       event.preventDefault();
       if (!email || !password || !confirmPassword) {
-        setMessage("Please fill in all fields");
+        setMessage("Fill in every field.");
         setMessageType("error");
         return;
       }
       if (password !== confirmPassword) {
-        setMessage("Passwords do not match");
+        setMessage("The two passwords don't match.");
         setMessageType("error");
         return;
       }
+      if (password.length < MIN_PASSWORD_LENGTH) {
+        setMessage(`Use a password of at least ${MIN_PASSWORD_LENGTH} characters.`);
+        setMessageType("error");
+        return;
+      }
+      setSubmitting(true);
+      setMessage("");
 
       try {
         const res = await api.post("/api/register/", { email, password });
@@ -43,7 +52,7 @@ export default function useRegisterPage() {
         } catch {
           // Non-browser environment -- nothing listening for the event.
         }
-        setTimeout(() => navigate("/"), 1000);
+        navigate("/", { replace: true });
       } catch (err) {
         const msg =
           (err &&
@@ -54,6 +63,8 @@ export default function useRegisterPage() {
           "Registration failed";
         setMessage(msg);
         setMessageType("error");
+      } finally {
+        setSubmitting(false);
       }
     },
     [confirmPassword, email, navigate, password],
@@ -68,6 +79,7 @@ export default function useRegisterPage() {
     setConfirmPassword,
     message,
     messageType,
+    submitting,
     handleSubmit,
   };
 }

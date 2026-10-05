@@ -1,4 +1,3 @@
-import ErrorDisplay from "../components/feedback/ErrorDisplay";
 import AuthLinksSection from "../components/auth/AuthLinksSection";
 import AuthFormSection from "../components/auth/AuthFormSection";
 import PageHeading from "../components/primitives/PageHeading";
@@ -22,13 +21,15 @@ const Register = () => {
         onPasswordChange={page.setPassword}
         onConfirmPasswordChange={page.setConfirmPassword}
         onSubmit={page.handleSubmit}
+        busy={page.submitting}
+        message={page.message}
+        messageType={page.messageType}
       />
       <AuthLinksSection
         promptText="Already have an account?"
         linkTo="/login"
-        linkLabel="Login here"
+        linkLabel="Log in"
       />
-      <ErrorDisplay message={page.message} type={page.messageType} variant="message" />
     </div>
   );
 };

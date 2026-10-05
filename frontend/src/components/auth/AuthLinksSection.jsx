@@ -13,7 +13,7 @@ export default function AuthLinksSection({ promptText, linkTo, linkLabel }) {
       </p>
       <p>
         <Link to="/" className={linkClasses}>
-          Back
+          Back to home
         </Link>
       </p>
     </div>
