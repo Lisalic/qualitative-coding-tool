@@ -1,6 +1,5 @@
 """Tests for QC-005: model pricing, accounting tracking, missing metadata fallbacks, and batch estimation."""
 
-import pytest
 from backend.app.external.pricing import calculate_cost, estimate_batch_cost, get_model_pricing
 from backend.app.jobs.progress import JobAccountingTracker
 

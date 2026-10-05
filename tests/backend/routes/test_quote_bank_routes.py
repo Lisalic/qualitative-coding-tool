@@ -320,7 +320,6 @@ class TestQuoteBankRoutes:
         user2 = await _make_user(db_session_factory, email="user_b@test.com")
 
         headers1 = _auth_headers(make_token, sub=str(user1.id))
-        headers2 = _auth_headers(make_token, sub=str(user2.id))
 
         # User 1 stars e1
         resp = client.put(

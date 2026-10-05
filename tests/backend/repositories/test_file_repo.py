@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 import pytest
 
 from backend.app.core.exceptions import NotFoundError
-from backend.app.database import File, FileTable, User
+from backend.app.database import File, FileTable
 from backend.app.repositories.file_repo import (
     filter_owned_ids,
     get_owned_file,

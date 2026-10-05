@@ -6,7 +6,6 @@ exercise, since `CREATE SCHEMA` and Postgres's catalog functions
 (`to_regclass`) have no SQLite equivalent.
 """
 
-import pytest
 from sqlalchemy import text
 
 

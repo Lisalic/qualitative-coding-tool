@@ -24,7 +24,6 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from dotenv import load_dotenv
-import uuid
 
 # Load .env from backend/ if present so running scripts picks up DATABASE_URL
 env_path = Path(__file__).resolve().parents[1] / ".env"

@@ -1,6 +1,5 @@
 """Tests for GET /api/models -- exposes the in-memory OpenRouter catalog."""
 
-import pytest
 
 from backend.app import ai_models
 

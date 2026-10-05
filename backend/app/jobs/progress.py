@@ -19,10 +19,10 @@ from sqlalchemy import update
 
 from backend.app.core.logging import get_logger
 from backend.app.database import AsyncSessionLocal
-
-logger = get_logger(__name__)
 from backend.app.external.pricing import calculate_cost
 from backend.app.jobs.models import Job
+
+logger = get_logger(__name__)
 
 
 _active_tracker_var: ContextVar[JobAccountingTracker | None] = ContextVar(
