@@ -76,3 +76,6 @@ AGENTS.md
 # Planning/process notes (roadmap audits, ticket status, campaign
 # verification) — working notes, not product docs; keep them local
 documentation/research/
+
+# Generated reports (local deliverables, not source)
+technical-report*.docx
