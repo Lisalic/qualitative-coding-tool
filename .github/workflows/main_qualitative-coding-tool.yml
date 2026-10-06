@@ -16,6 +16,22 @@ jobs:
     permissions:
       contents: read #This is required for actions/checkout
 
+    # Real Postgres for the integration suite: the unit suite runs on SQLite,
+    # which can't see Postgres-only behaviour (generated columns, the
+    # migration chain, case-sensitive LIKE).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - uses: actions/checkout@v4
 
@@ -27,8 +43,18 @@ jobs:
       - name: Install backend test dependencies
         run: pip install -r backend/requirements-dev.txt
 
+      - name: Lint Python
+        run: python -m ruff check backend tests
+
       - name: Run backend test suite
         run: python -m pytest -q
+
+      - name: Run backend integration suite against Postgres
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+          # Fail, don't skip, if the Postgres service is unreachable.
+          REQUIRE_INTEGRATION_DB: "1"
+        run: python -m pytest -q -m integration
 
       # Send the repo root to Azure so the `backend/` package exists on disk for `from backend.app...` imports.
       # Dependency install is handled by Azure Oryx (SCM_DO_BUILD_DURING_DEPLOYMENT) on the server, not in this job.
@@ -48,9 +74,29 @@ jobs:
       # 2. Refer to sample workflows for alternative deployment strategies: https://github.com/Azure/actions-workflow-samples/tree/master/AppService
 
 
+  frontend:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run test:run
+
   deploy:
     runs-on: ubuntu-latest
-    needs: build
+    needs: [build, frontend]
     permissions:
       id-token: write #This is required for requesting the JWT
       contents: read #This is required for actions/checkout
