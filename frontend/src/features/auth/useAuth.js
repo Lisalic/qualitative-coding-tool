@@ -14,6 +14,9 @@ import { apiFetch } from "../../api/client";
 
 let status = "loading";
 let inFlight = null;
+// Bumped on every `auth-changed`: a check sent with the previous
+// credentials must not decide the status once they have changed.
+let generation = 0;
 const listeners = new Set();
 
 function publish(next) {
@@ -24,8 +27,10 @@ function publish(next) {
 
 function checkAuth() {
   if (inFlight) return inFlight;
-  inFlight = apiFetch("/api/me/")
+  const gen = generation;
+  const request = apiFetch("/api/me/")
     .then((response) => {
+      if (gen !== generation) return;
       if (response.ok) {
         publish("auth");
       } else if (response.status === 401 || status === "loading") {
@@ -36,16 +41,25 @@ function checkAuth() {
       }
     })
     .catch(() => {
+      if (gen !== generation) return;
       if (status === "loading") publish("unauth");
     })
     .finally(() => {
-      inFlight = null;
+      if (inFlight === request) inFlight = null;
     });
-  return inFlight;
+  inFlight = request;
+  return request;
 }
 
 if (typeof window !== "undefined") {
   window.addEventListener("auth-changed", () => {
+    generation += 1;
+    inFlight = null;
+    // A login navigates straight to a guarded page: left at "unauth" until
+    // this check lands, the guard would bounce it back to /login. "loading"
+    // makes it wait. A signed-in session keeps "auth" until the check says
+    // otherwise, so logging out doesn't flash a loading screen.
+    if (status !== "auth") publish("loading");
     checkAuth();
   });
 }
