@@ -70,7 +70,13 @@ function AppliedCodeRow({ entry, getCodeColor, onRemove, onUpdateNotes, readOnly
         <button
           type="button"
           className="self-start text-xs text-paper/50 underline decoration-dotted hover:text-paper"
-          onClick={() => setEditingNotes(true)}
+          onClick={() => {
+            // Start from the entry's CURRENT note, not whatever this row's
+            // state held when it mounted -- after a removal or a recode the
+            // same slot can hold a different entry.
+            setNotesDraft(entry.notes || "");
+            setEditingNotes(true);
+          }}
         >
           {entry.notes ? entry.notes : "+ note"}
         </button>
@@ -168,7 +174,11 @@ export default function CodingReaderPane({
           <div className="flex flex-col gap-1.5">
             {codes.map((entry, index) => (
               <AppliedCodeRow
-                key={`${entry.code_uid}-${index}`}
+                // Keyed on the quote's identity (code + span), not its list
+                // index: removing entry 0 used to hand entry 1's slot the
+                // removed entry's local note draft, which a blur then saved
+                // over the survivor's own note.
+                key={`${entry.code_uid}-${entry.start_offset}-${entry.end_offset}-${index}`}
                 entry={entry}
                 getCodeColor={getCodeColor}
                 onRemove={() => onRemoveEntry(index)}

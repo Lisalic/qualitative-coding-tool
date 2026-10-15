@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { btn, textarea } from "../../lib/uiClasses";
 import { formatDate } from "../../lib/formatDate";
 
@@ -25,11 +25,16 @@ export default function MemoEditor({ memo, onSave, compact = false }) {
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState("");
 
-  useEffect(() => {
-    setDraft(memo?.body || "");
-  }, [memo]);
-
   const dirty = draft.trim() !== (memo?.body || "").trim();
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+
+  // Follow the stored memo (a late load, a save's response) only while the
+  // box isn't being edited: a memo arriving after the modal opened used to
+  // replace text already typed into it.
+  useEffect(() => {
+    if (!dirtyRef.current) setDraft(memo?.body || "");
+  }, [memo]);
 
   const handleSave = async () => {
     setSaving(true);

@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { api } from "../../api";
+import { api, describeApiError } from "../../api";
 
 export default function useLoginPage() {
   const [email, setEmail] = useState("");
@@ -47,13 +47,9 @@ export default function useLoginPage() {
         }
         navigate(returnTo, { replace: true });
       } catch (err) {
-        const msg =
-          (err &&
-            err.response &&
-            err.response.data &&
-            err.response.data.detail) ||
-          err.message ||
-          "Login failed";
+        // A 422 carries `detail` as an array; it must be flattened to text
+        // before it reaches the message element.
+        const msg = describeApiError(err?.response?.data, err?.message || "Login failed");
         setMessage(msg);
         setMessageType("error");
       } finally {

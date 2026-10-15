@@ -206,7 +206,12 @@ async def _execute_job(job_id: int, job_type: str, payload: dict[str, Any]) -> N
             # back in an auth-failure message.
             api_key = payload.get("api_key")
             err_str = redact_secret(str(exc), api_key)
-            err_code = getattr(exc, "code", None)
+            # ``jobs.error_code`` is an integer column. Only our own external
+            # errors carry an HTTP code there; a SQLAlchemy exception's
+            # ``.code`` is a short string ("gkpj"), and writing it would
+            # fail THIS update -- leaving the job "running" forever.
+            raw_code = getattr(exc, "code", None)
+            err_code = raw_code if isinstance(raw_code, int) and not isinstance(raw_code, bool) else None
             logger.exception("Job %s (%s) failed", job_id, job_type)
 
             salvaged = getattr(exc, "salvaged_output", None)

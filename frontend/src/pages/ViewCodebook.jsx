@@ -6,6 +6,7 @@ export default function ViewCodebook() {
   const {
     availableCodebooks,
     selectedCodebook,
+    selectedSchema,
     setSelectedCodebook,
     projectsList,
     selectedProject,
@@ -45,6 +46,7 @@ export default function ViewCodebook() {
         />
       }
       selectedCodebook={selectedCodebook}
+      selectedSchema={selectedSchema}
       selectedCodebookName={selectedCodebookName}
       systemPrompt={systemPrompt}
       instructions={instructions}

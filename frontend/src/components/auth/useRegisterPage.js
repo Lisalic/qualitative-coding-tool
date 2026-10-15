@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api } from "../../api";
+import { api, describeApiError } from "../../api";
 import { MIN_PASSWORD_LENGTH } from "../../lib/apiContracts";
 
 export default function useRegisterPage() {
@@ -54,13 +54,10 @@ export default function useRegisterPage() {
         }
         navigate("/", { replace: true });
       } catch (err) {
-        const msg =
-          (err &&
-            err.response &&
-            err.response.data &&
-            err.response.data.detail) ||
-          err.message ||
-          "Registration failed";
+        // A 422 (e.g. "user@localhost" passes the browser's email check but
+        // not the server's) carries `detail` as an array of objects; rendering
+        // that as a React child crashed the whole page.
+        const msg = describeApiError(err?.response?.data, err?.message || "Registration failed");
         setMessage(msg);
         setMessageType("error");
       } finally {

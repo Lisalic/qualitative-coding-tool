@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 import { apiFetch, requestJson } from "../../api";
 
@@ -76,7 +76,12 @@ export default function useLineagePage() {
     [projectsList, selectedProject],
   );
 
+  // Only the newest request may write: clicking neighbour X then Y (or
+  // Back/Forward) used to let X's slower response land last and show X's
+  // graph under Y's ref.
+  const latestRequest = useRef(0);
   const fetchLineage = useCallback(async (targetRef) => {
+    const requestId = ++latestRequest.current;
     if (!targetRef) {
       setLineage(null);
       return;
@@ -86,6 +91,7 @@ export default function useLineagePage() {
     const result = await requestJson(`/api/artifacts/${encodeURIComponent(targetRef)}/lineage`, {
       method: "GET",
     });
+    if (requestId !== latestRequest.current) return;
     setLoading(false);
     if (!result.ok) {
       setError(result.error || "Failed to load lineage.");

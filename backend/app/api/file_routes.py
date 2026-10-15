@@ -33,8 +33,6 @@ async def upload_zst_file(
         raise HTTPException(status_code=400, detail="data_type must be 'posts' or 'comments'")
     import_data_type = "submissions" if data_type == "posts" else data_type
 
-    content = await file.read()
-
     # Manual auth check (not `Depends(require_user_id)`): the guard
     # clauses above must fire before auth, which only holds if auth is
     # checked in the function body, since FastAPI resolves all `Depends`
@@ -42,13 +40,19 @@ async def upload_zst_file(
     if not user_id:
         raise HTTPException(status_code=401, detail="Unauthenticated")
 
+    # The upload is handed over as a file object, not `await file.read()`:
+    # Starlette already spooled it to disk past a small threshold, and
+    # reading a multi-GB Reddit dump into one bytes object per request
+    # was the single biggest memory spike in the app.
+    await file.seek(0)
+
     # No catch-all around service calls in this module: an unexpected
     # error is FastAPI's plain 500 (logged with its traceback), never a
     # response echoing the exception's text -- SQL, paths, row values.
     file_rec, result = await file_service.upload_zst(
         db,
         user_id,
-        file_content=content,
+        file_content=file.file,
         filename=file.filename,
         data_type=import_data_type,
         name=name,

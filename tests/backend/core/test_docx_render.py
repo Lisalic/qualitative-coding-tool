@@ -91,3 +91,11 @@ def test_output_is_byte_identical_across_builds() -> None:
         return docx_render.to_bytes(doc)
 
     assert build() == build()
+
+
+def test_heading_keeps_a_trailing_hash_that_is_part_of_the_text() -> None:
+    doc = _render("## Using C#\n\n### F# ##\n")
+    assert [(s, t) for s, t in _styled(doc) if s.startswith("Heading")] == [
+        ("Heading 2", "Using C#"),
+        ("Heading 3", "F#"),
+    ]

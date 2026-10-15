@@ -51,7 +51,14 @@ export default function CodingDocumentList({
   selectAllLoading,
   loading,
 }) {
-  const allMatchingSelected = matchingCount > 0 && selectedItemIds?.size >= matchingCount;
+  // The selection can hold ids from an earlier filter or page, so its size
+  // alone overstated coverage (25 selected under one filter disabled
+  // "Select all" for a new filter with 10 unselected matches). Require the
+  // visible matches to actually be selected as well.
+  const allMatchingSelected =
+    matchingCount > 0 &&
+    selectedItemIds?.size >= matchingCount &&
+    rows.every((row) => selectedItemIds.has(row.item_id));
   const uncodedCount = Math.max(0, (totalRows || 0) - (totalCoded || 0));
   // The uncoded total covers the whole coding; once a search or code
   // filter narrows the list, the selection does too, so a total would

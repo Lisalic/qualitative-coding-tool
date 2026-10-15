@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import ExportDropdown from "../../export/ExportDropdown";
 import DialogService from "../../feedback/DialogService";
@@ -89,8 +89,10 @@ export default function CodingWorkspaceSection({
   const viewMode = page.viewMode;
   // Read from the DRAFT, not the last-saved codebookTree -- a code
   // created this session (client-minted uid, see CodeLegend's addCode)
-  // must be immediately taggable, not just after a Save.
-  const availableCodes = flattenCodebookCodes(page.codebookDraft);
+  // must be immediately taggable, not just after a Save. Memoized so the
+  // reader pane's popover/shortcut lists keep a stable input across the
+  // many renders a selection or tooltip produces.
+  const availableCodes = useMemo(() => flattenCodebookCodes(page.codebookDraft), [page.codebookDraft]);
 
   // j/k step through the document list without leaving the keyboard,
   // mirroring the reader pane's 1-9 code shortcuts. Reader mode only --
@@ -246,6 +248,7 @@ export default function CodingWorkspaceSection({
             schema={page.selectedCodingSchema}
             availableCodes={availableCodes}
             refreshKey={page.refreshKey}
+            onServerChange={page.refreshCurrent}
           />
         </div>
       ) : (

@@ -21,9 +21,9 @@ describe("savePromptToLibrary", () => {
     await expect(savePromptToLibrary("filter", "")).rejects.toThrow("EMPTY_PROMPT");
   });
 
-  it("swallows a failing /api/me/ call and proceeds without user_id", async () => {
+  it("never calls /api/me/ -- the server owns the prompt by session", async () => {
     api.get.mockImplementation((url) => {
-      if (url === "/api/me/") return Promise.reject(new Error("unauthorized"));
+      if (url === "/api/me/") return Promise.reject(new Error("should not be called"));
       return Promise.resolve({ data: { prompts: [] } });
     });
     api.post.mockResolvedValue({ data: { promptname: "Prompt 1" } });
@@ -31,32 +31,9 @@ describe("savePromptToLibrary", () => {
     const result = await savePromptToLibrary("filter", "some prompt text");
     expect(result).toEqual({ label: "Prompt 1" });
 
+    expect(api.get.mock.calls.map(([url]) => url)).not.toContain("/api/me/");
     const postedForm = api.post.mock.calls[0][1];
     expect(postedForm.has("user_id")).toBe(false);
-  });
-
-  it("includes user_id when /api/me/ succeeds", async () => {
-    api.get.mockImplementation((url) => {
-      if (url === "/api/me/") return Promise.resolve({ data: { id: "42" } });
-      return Promise.resolve({ data: { prompts: [] } });
-    });
-    api.post.mockResolvedValue({ data: { promptname: "Prompt 1" } });
-
-    await savePromptToLibrary("filter", "text");
-    const postedForm = api.post.mock.calls[0][1];
-    expect(postedForm.get("user_id")).toBe("42");
-  });
-
-  it("falls back to sub when id is absent on /api/me/", async () => {
-    api.get.mockImplementation((url) => {
-      if (url === "/api/me/") return Promise.resolve({ data: { sub: "7" } });
-      return Promise.resolve({ data: { prompts: [] } });
-    });
-    api.post.mockResolvedValue({ data: {} });
-
-    await savePromptToLibrary("filter", "text");
-    const postedForm = api.post.mock.calls[0][1];
-    expect(postedForm.get("user_id")).toBe("7");
   });
 
   it("names the prompt by count+1 when the prompt list succeeds", async () => {

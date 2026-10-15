@@ -13,6 +13,12 @@ export default function useViewSummaryPage() {
   // it); a link's `location.state.selectedSummary` still wins.
   const urlRef = useRefParam(selected);
   const preselect = location?.state?.selectedSummary || urlRef || null;
+  // Read through a ref inside the list fetch: picking a summary writes
+  // `?ref=`, which changes `preselect`, and having it as a dependency
+  // refetched the list on every pick (and let a fetch started for pick A
+  // snap the selection back after pick B).
+  const preselectRef = useRef(preselect);
+  preselectRef.current = preselect;
   const [listError, setListError] = useState("");
   const [listLoading, setListLoading] = useState(false);
   const [selectedName, setSelectedName] = useState("");
@@ -58,11 +64,12 @@ export default function useViewSummaryPage() {
           }));
         setAvailable(items);
 
-        if (!preselect || appliedPreselectRef.current === preselect) return;
-        const match = items.find((item) => item.id === preselect);
+        const wanted = preselectRef.current;
+        if (!wanted || appliedPreselectRef.current === wanted) return;
+        const match = items.find((item) => item.id === wanted);
         if (!match) return;
-        appliedPreselectRef.current = preselect;
-        setSelected(preselect);
+        appliedPreselectRef.current = wanted;
+        setSelected(wanted);
         setSelectedName(match.display_name || match.name);
         return;
       }
@@ -81,10 +88,11 @@ export default function useViewSummaryPage() {
         description: project.description || "",
       }));
       setAvailable(items);
-      if (!preselect || appliedPreselectRef.current === preselect) return;
-      appliedPreselectRef.current = preselect;
-      setSelected(preselect);
-      const match = items.find((item) => item.id === preselect);
+      const wanted = preselectRef.current;
+      if (!wanted || appliedPreselectRef.current === wanted) return;
+      appliedPreselectRef.current = wanted;
+      setSelected(wanted);
+      const match = items.find((item) => item.id === wanted);
       if (match) setSelectedName(match.display_name || match.name);
     } catch (fetchError) {
       console.error("Error fetching summaries:", fetchError);
@@ -92,7 +100,18 @@ export default function useViewSummaryPage() {
     } finally {
       setListLoading(false);
     }
-  }, [preselect, projectsList, selectedProject]);
+  }, [projectsList, selectedProject]);
+
+  // A preselection arriving after the list loaded (Back/Forward, a link)
+  // is still applied, once.
+  useEffect(() => {
+    if (!preselect || appliedPreselectRef.current === preselect) return;
+    const match = available.find((item) => item.id === preselect);
+    if (!match) return;
+    appliedPreselectRef.current = preselect;
+    setSelected(preselect);
+    setSelectedName(match.display_name || match.name);
+  }, [available, preselect]);
 
   useEffect(() => {
     fetchProjects();

@@ -51,6 +51,11 @@ export default function useViewCodebookPage() {
     availableCodebooks.find((codebook) => String(codebook.id) === String(selectedCodebook))?.metadata
       ?.schema || null;
   const urlRef = useRefParam(selectedSchema);
+  // Applied by its own effect below rather than inside the list fetch:
+  // picking a codebook writes `?ref=`, which changes `preselected`, and
+  // having it as a fetch dependency refetched the whole list (with a
+  // "Loading…" flash) on every pick -- and a fetch started for pick A
+  // could resolve after pick B and snap the selection back to A.
   const preselected = location?.state?.selected || urlRef;
 
   // Edit mode holds an unsaved draft of the whole codebook.
@@ -85,13 +90,6 @@ export default function useViewCodebookPage() {
             metadata: { schema: file.schema_name, file },
           }));
         setAvailableCodebooks(codebookFiles);
-
-        if (!preselected || appliedPreselectRef.current === preselected) return;
-        const match = codebookFiles.find((item) => matchesPreselection(item, preselected));
-        if (!match) return;
-        appliedPreselectRef.current = preselected;
-        setSelectedCodebook(match.id);
-        setSelectedCodebookName(match.display_name || match.name || match.id || "");
         return;
       }
 
@@ -101,25 +99,25 @@ export default function useViewCodebookPage() {
       const data = await response.json();
       const codebooks = Array.isArray(data.codebooks) ? data.codebooks : [];
       setAvailableCodebooks(codebooks);
-      if (codebooks.length === 0) return;
-
-      if (preselected && appliedPreselectRef.current !== preselected) {
-        const selected = codebooks.find((cb) => matchesPreselection(cb, preselected));
-        if (selected) {
-          appliedPreselectRef.current = preselected;
-          setSelectedCodebook(String(selected.id));
-          setSelectedCodebookName(
-            selected?.display_name || selected?.name || selected?.id || "",
-          );
-        }
-      }
     } catch (fetchError) {
       console.error("Error fetching codebooks list:", fetchError);
       setListError("Couldn't load your codebooks. Check your connection and refresh to try again.");
     } finally {
       setListLoading(false);
     }
-  }, [preselected, projectsList, selectedProject]);
+  }, [projectsList, selectedProject]);
+
+  // Apply a preselection once per distinct value, against whatever list is
+  // current -- whether it arrived before or after the list loaded.
+  useEffect(() => {
+    if (!preselected || appliedPreselectRef.current === preselected) return;
+    const match = availableCodebooks.find((item) => matchesPreselection(item, preselected));
+    if (!match) return;
+    appliedPreselectRef.current = preselected;
+    selectedCodebookRef.current = String(match.id);
+    setSelectedCodebook(String(match.id));
+    setSelectedCodebookName(match.display_name || match.name || match.id || "");
+  }, [availableCodebooks, preselected]);
 
   // Switching codebooks quickly can leave an older request in flight; only
   // the newest may fill the tree, or editing and saving the codebook on
@@ -199,9 +197,12 @@ export default function useViewCodebookPage() {
       setSaveState({ status: "success", message: "Saved." });
       setRefreshKey((key) => key + 1);
       await fetchCodebook(selectedCodebook);
-      await fetchAvailableCodebooks();
+      // The project-scoped list is derived from the projects payload, so a
+      // renamed codebook only shows its new name once that is refetched;
+      // the global list refetches on its own.
+      await Promise.all([fetchProjects(), fetchAvailableCodebooks()]);
     },
-    [selectedCodebook, codebookDraft, fetchCodebook, fetchAvailableCodebooks],
+    [selectedCodebook, codebookDraft, fetchCodebook, fetchAvailableCodebooks, fetchProjects],
   );
 
   useEffect(() => {
@@ -230,6 +231,9 @@ export default function useViewCodebookPage() {
   return {
     availableCodebooks,
     selectedCodebook,
+    // The `proj_…` schema the Compare/Integrate pages key their pickers
+    // on; `selectedCodebook` is the numeric file id.
+    selectedSchema,
     setSelectedCodebook: changeSelectedCodebook,
     projectsList,
     selectedProject,

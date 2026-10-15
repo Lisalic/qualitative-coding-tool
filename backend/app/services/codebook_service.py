@@ -262,8 +262,8 @@ async def save_project_codebook(
         codes=rows,
     )
 
-    if display_name:
-        file_rec.filename = display_name
+    if display_name and display_name.strip():
+        file_rec.filename = display_name.strip()
 
     if assist_runs:
         edges = await version_repo.list_parent_edges_for_files(session, [file_rec.id])

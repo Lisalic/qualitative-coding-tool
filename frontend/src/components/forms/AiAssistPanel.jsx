@@ -64,14 +64,16 @@ export default function AiAssistPanel({
   const running = runningKey !== null;
   const disabled = running || parentDisabled;
 
-  // Upfront pre-run batch estimate (QC-005)
+  // Upfront pre-run batch estimate (QC-005). Keyed on the batch count the
+  // request actually sends, not the raw slider value: dragging the slider
+  // used to fire a request per percent for the same answer.
+  const estBatches = Math.max(1, Math.round(samplePercentage / 20));
   useEffect(() => {
     if (!model) {
       setEstimate(null);
       return;
     }
     let cancelled = false;
-    const estBatches = Math.max(1, Math.round(samplePercentage / 20));
     fetchJobEstimate(model, estBatches)
       .then((data) => {
         if (!cancelled) setEstimate(data);
@@ -82,7 +84,7 @@ export default function AiAssistPanel({
     return () => {
       cancelled = true;
     };
-  }, [model, samplePercentage]);
+  }, [model, estBatches]);
 
   const runWithGuard = async (key, runFn, extraValues) => {
     setRunningKey(key);

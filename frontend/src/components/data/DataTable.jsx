@@ -41,7 +41,13 @@ export default function DataTable({
   const latestRequest = useRef(0);
 
   useEffect(() => {
-    const timer = setTimeout(() => setAppliedSearch(searchTerm.trim()), 300);
+    // The page resets together with the applied term, not on the keystroke:
+    // resetting it immediately fired a wasted fetch of page 0 with the OLD
+    // search term before the debounced one went out.
+    const timer = setTimeout(() => {
+      setPage(0);
+      setAppliedSearch(searchTerm.trim());
+    }, 300);
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
@@ -78,7 +84,17 @@ export default function DataTable({
       }
 
       const data = await response.json();
-      if (requestId === latestRequest.current) setDbEntries(data);
+      if (requestId !== latestRequest.current) return;
+      // Deleting every row on the last page leaves this offset past the
+      // end: step back to the last page that still has rows instead of
+      // reporting "This database has no rows." for a database that has them.
+      const totalRows = Math.max(data?.total_submissions || 0, data?.total_comments || 0);
+      const lastPage = Math.max(0, Math.ceil(totalRows / limit) - 1);
+      if (page > lastPage && totalRows > 0) {
+        setPage(lastPage);
+        return;
+      }
+      setDbEntries(data);
     } catch (err) {
       if (requestId === latestRequest.current) setError(`Error: ${err.message}`);
     } finally {
@@ -265,10 +281,7 @@ export default function DataTable({
                 placeholder="Search posts and comments…"
                 aria-label="Search posts and comments"
                 value={searchTerm}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value);
-                  setPage(0);
-                }}
+                onChange={(e) => setSearchTerm(e.target.value)}
                 className={`${inputClasses} text-left`}
               />
             </div>

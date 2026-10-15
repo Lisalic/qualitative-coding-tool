@@ -71,6 +71,7 @@ from backend.app.versioning_models import (
     ORIGIN_FORKED,
     RELATION_DERIVED_FROM,
     ROLE_SOURCE_DATA,
+    ArtifactVersion,
 )
 
 # ---------------------------------------------------------------------------
@@ -144,8 +145,6 @@ def _liveness_predicate(model, version_no: int | None):
     ``raw_data_repo._as_of``/``_liveness_condition`` for the canonical
     version this mirrors.
     """
-    from sqlalchemy import and_, or_
-
     if version_no is None:
         return model.valid_to.is_(None)
     return and_(model.valid_from <= version_no, or_(model.valid_to.is_(None), model.valid_to >= version_no))
@@ -725,7 +724,7 @@ async def _materialize_filtered_schema(
     post_ids: list[str],
     comment_ids: list[str],
     message: str | None = None,
-) -> tuple[File, dict[str, int]]:
+) -> tuple[File, dict[str, int], ArtifactVersion]:
     """Create the new ``filtered_data`` ``File`` row, its dependency on the
     source file, and copy the matched rows into the fixed
     ``submissions``/``comments`` tables via

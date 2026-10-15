@@ -120,6 +120,7 @@ async def get_code_frequencies_by_uid(
     *,
     codes: list[CodebookCode],
     version_no: int | None = None,
+    entries: list[Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Frequency and document counts grouped strictly by ``code_uid``, not
     by code name -- stable against renames across versions (a renamed
@@ -132,8 +133,13 @@ async def get_code_frequencies_by_uid(
     repository must not import the service layer -- see
     ``export_service.py``'s ``_get_sorted_codebook_codes``, the one place
     that calls it.
+
+    ``entries`` lets a caller that has already read this version's coding
+    entries (``export_service.export_coding`` does, for the quote rows)
+    hand them over instead of this function reading the same rows again.
     """
-    entries = await get_coding_entries(session, file_id, version_no=version_no)
+    if entries is None:
+        entries = await get_coding_entries(session, file_id, version_no=version_no)
 
     code_meta_by_uid: dict[str, dict[str, Any]] = {
         c.code_uid: {
@@ -202,13 +208,28 @@ async def get_project_files(session: AsyncSession, project_id: int) -> list[File
 async def get_project_lineage_graph(session: AsyncSession, project_files: list[File]) -> dict[str, Any]:
     """One-hop-per-file lineage graph (versions + parent/child edges) for
     every artifact in a project bundle.
+
+    Three bulk reads for the whole project rather than three per file --
+    a 40-file project used to cost 120 round trips here before a single
+    export had been rendered.
     """
+    file_ids = [f.id for f in project_files]
+    versions_by_file: dict[int, list[Any]] = {}
+    for v in await version_repo.list_versions_for_files(session, file_ids):
+        versions_by_file.setdefault(v.file_id, []).append(v)
+    parent_edges_by_file: dict[int, list[Any]] = {}
+    for pe in await version_repo.list_parent_edges_for_files(session, file_ids):
+        parent_edges_by_file.setdefault(pe.child_file_id, []).append(pe)
+    child_edges_by_file: dict[int, list[Any]] = {}
+    for ce in await version_repo.list_child_edges_for_files(session, file_ids):
+        child_edges_by_file.setdefault(ce.parent_file_id, []).append(ce)
+
     files_data = []
 
     for f in project_files:
-        versions = await version_repo.list_versions(session, f.id)
-        parent_edges = await version_repo.list_parent_edges(session, f.id)
-        child_edges = await version_repo.list_child_edges(session, f.id)
+        versions = versions_by_file.get(f.id, [])
+        parent_edges = parent_edges_by_file.get(f.id, [])
+        child_edges = child_edges_by_file.get(f.id, [])
 
         files_data.append(
             {

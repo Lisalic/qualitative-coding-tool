@@ -3,6 +3,13 @@ import { useEffect, useRef } from "react";
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+// Open modals, outermost first. Every modal listens for keydown on
+// `window`, and `stopPropagation` can't stop other listeners on the same
+// target -- so with a confirm dialog open over another modal, Escape used
+// to close both, and Tab pulled focus out of the confirm. Only the
+// topmost modal reacts.
+const openModals = [];
+
 /**
  * Keyboard behaviour every modal in the app shares: Escape closes it,
  * focus moves into it on open (to `initialFocusRef` when given, else the
@@ -19,12 +26,15 @@ export function useModalBehavior(onClose, { initialFocusRef, enabled = true } = 
 
   useEffect(() => {
     if (!enabled) return undefined;
+    const token = Symbol("modal");
+    openModals.push(token);
     const previouslyFocused = document.activeElement;
     const dialog = dialogRef.current;
     const first = initialFocusRef?.current || dialog?.querySelector(FOCUSABLE);
     first?.focus();
 
     const onKeyDown = (event) => {
+      if (openModals[openModals.length - 1] !== token) return;
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
@@ -50,6 +60,8 @@ export function useModalBehavior(onClose, { initialFocusRef, enabled = true } = 
     window.addEventListener("keydown", onKeyDown, true);
     return () => {
       window.removeEventListener("keydown", onKeyDown, true);
+      const index = openModals.indexOf(token);
+      if (index !== -1) openModals.splice(index, 1);
       if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus();
     };
   }, [enabled, initialFocusRef]);

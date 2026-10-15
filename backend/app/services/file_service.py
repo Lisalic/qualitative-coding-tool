@@ -20,7 +20,9 @@ import itertools
 from collections import Counter
 import os
 import secrets
+import shutil
 import tempfile
+from typing import BinaryIO
 
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -106,7 +108,7 @@ async def upload_zst(
     session: AsyncSession,
     user_id: int,
     *,
-    file_content: bytes,
+    file_content: bytes | BinaryIO,
     filename: str,
     data_type: str,
     name: str | None,
@@ -121,11 +123,17 @@ async def upload_zst(
     submissions/comments mapping and the ``.zst``/JSON/data_type format
     checks stay in the route (pure request validation, no DB/IO).
 
-    Parsing (decompression + JSON) is blocking, so each batch of
-    ``_UPLOAD_BATCH_SIZE`` rows is pulled off ``iter_zst_records`` on a
-    worker thread; the insert itself runs on this async session.
+    ``file_content`` is either the whole dump as ``bytes`` or an open
+    binary file object (the route passes the upload's spooled file), which
+    is copied to disk in chunks on a worker thread so a large dump never
+    has to fit in memory. Parsing (decompression + JSON) is blocking too,
+    so each batch of ``_UPLOAD_BATCH_SIZE`` rows is pulled off
+    ``iter_zst_records`` on a worker thread; the insert itself runs on
+    this async session.
     """
-    base_name = name if name is not None else filename.replace(".zst", "")
+    # A blank name (an empty form field) falls back the same way a missing
+    # one does; it used to create a file whose display name was "".
+    base_name = (name or "").strip() or filename.replace(".zst", "")
     schema_name = f"proj_{secrets.token_hex(6)}"
 
     file_rec = File(
@@ -158,8 +166,11 @@ async def upload_zst(
     inserted_counts = {"submissions": 0, "comments": 0}
     try:
         with tempfile.NamedTemporaryFile(suffix=".zst", delete=False) as tmp:
-            tmp.write(file_content)
             tmp_path = tmp.name
+            if isinstance(file_content, (bytes, bytearray)):
+                tmp.write(file_content)
+            else:
+                await asyncio.to_thread(shutil.copyfileobj, file_content, tmp, 1024 * 1024)
 
         skipped: Counter = Counter()
         records = iter_zst_records(tmp_path, data_type, skipped)

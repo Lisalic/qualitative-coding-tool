@@ -1,4 +1,4 @@
-import { useCallback, useState, useEffect } from "react";
+import { useCallback, useState, useEffect, useRef } from "react";
 import { apiFetch } from "../../api";
 import MemoEditor from "./MemoEditor";
 import { formatDate } from "../../lib/formatDate";
@@ -32,21 +32,28 @@ export default function EntryModal({
 }) {
   const [comments, setComments] = useState([]);
   const [loadingComments, setLoadingComments] = useState(false);
+  // Stepping quickly through posts with ←/→ fires one request per post;
+  // only the newest may fill the list, or a slower earlier one lands last
+  // and shows the previous post's comments under this one.
+  const latestRequest = useRef(0);
 
   const fetchComments = useCallback(async (submissionId) => {
+    const requestId = ++latestRequest.current;
     try {
       setLoadingComments(true);
       const response = await apiFetch(
-        `/api/comments/${submissionId}?database=${database}`
+        `/api/comments/${encodeURIComponent(submissionId)}?database=${encodeURIComponent(database)}`
       );
       if (!response.ok) throw new Error("Failed to fetch comments");
       const data = await response.json();
+      if (requestId !== latestRequest.current) return;
       setComments(data.comments || []);
     } catch (err) {
+      if (requestId !== latestRequest.current) return;
       console.error("Error fetching comments:", err);
       setComments([]);
     } finally {
-      setLoadingComments(false);
+      if (requestId === latestRequest.current) setLoadingComments(false);
     }
   }, [database]);
 
@@ -54,6 +61,7 @@ export default function EntryModal({
     if (isOpen && entry && entry.type === "submission") {
       fetchComments(entry.id);
     } else {
+      latestRequest.current += 1;
       setComments([]);
     }
   }, [isOpen, entry, fetchComments]);

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { apiFetch } from "../../api";
+import { apiFetch, describeApiError } from "../../api";
 import ArtifactCreatedMessage from "../feedback/ArtifactCreatedMessage";
 import Panel from "../shell/Panel";
 import Dropdown from "../primitives/Dropdown";
@@ -8,22 +8,7 @@ import { btn, btnPrimary, input, pillRadioInput, pillRadioLabel, select } from "
 import { toProjectOptions } from "../../lib/projectOptions";
 import { describeSkippedRecords } from "../../lib/importSummary";
 
-function formatApiErrorPayload(parsed, fallback) {
-  if (!parsed || typeof parsed !== "object") return fallback;
-  if (typeof parsed.error === "string") return parsed.error;
-  if (typeof parsed.detail === "string") return parsed.detail;
-  if (Array.isArray(parsed.detail)) {
-    const msg = parsed.detail
-      .map((d) => {
-        const loc = Array.isArray(d.loc) ? d.loc.slice(-1).join(".") : "";
-        return loc ? `${loc}: ${d.msg}` : d.msg;
-      })
-      .filter(Boolean)
-      .join("; ");
-    return msg || fallback;
-  }
-  return fallback;
-}
+const formatApiErrorPayload = describeApiError;
 
 const inputClasses = input;
 const selectClasses = select;

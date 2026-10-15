@@ -12,6 +12,7 @@ per-account cooldown claimed with one conditional ``UPDATE`` so concurrent
 requests across instances can't each send an email.
 """
 
+import asyncio
 import hmac
 from datetime import datetime, timedelta, timezone
 from html import escape
@@ -133,5 +134,7 @@ async def reset_password(db: AsyncSession, token: str, new_password: str) -> Non
     ):
         raise ValidationAppError(INVALID_TOKEN_MESSAGE)
 
-    user.password = _hash_password(new_password)
+    # Same reasoning as the login/register routes: keep the PBKDF2 work off
+    # the event loop.
+    user.password = await asyncio.to_thread(_hash_password, new_password)
     await db.commit()

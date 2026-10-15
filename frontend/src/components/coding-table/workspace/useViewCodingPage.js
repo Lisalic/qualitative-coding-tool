@@ -69,6 +69,11 @@ export default function useViewCodingPage({
   // it; a pinned workspace (Apply Codebook) has no picker and no URL ref.
   const urlRef = useRefParam(pickedCodedData, { enabled: !isPinned });
   const preselectedRef = location?.state?.selectedCodedData || (isPinned ? null : urlRef);
+  // Read through a ref inside the list fetch: picking a file writes
+  // `?ref=`, which changes `preselectedRef`, and having it as a dependency
+  // refetched the whole list (with a "Loading…" flash) on every pick.
+  const preselectedRefValue = useRef(preselectedRef);
+  preselectedRefValue.current = preselectedRef;
   const [refreshKey, setRefreshKey] = useState(0);
   const [projectsList, setProjectsList] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
@@ -152,7 +157,7 @@ export default function useViewCodingPage({
           }));
         setAvailableCodedData(codingFiles);
 
-        const preselected = preselectedRef;
+        const preselected = preselectedRefValue.current;
         if (preselected && appliedPreselectRef.current !== preselected) {
           const match = codingFiles.find(
             (item) =>
@@ -188,7 +193,7 @@ export default function useViewCodingPage({
       }));
       setAvailableCodedData(items);
 
-      const preselected = preselectedRef;
+      const preselected = preselectedRefValue.current;
       if (!preselected || appliedPreselectRef.current === preselected) return;
       const match = items.find((item) => item.id === preselected);
       if (!match) return;
@@ -201,7 +206,22 @@ export default function useViewCodingPage({
     } finally {
       setListLoading(false);
     }
-  }, [preselectedRef, projectsList, selectedProject]);
+  }, [projectsList, selectedProject]);
+
+  // A navigation that arrives with a new preselection after the list is
+  // already loaded (a Lineage link, Back/Forward) still applies it.
+  useEffect(() => {
+    if (isPinned || !preselectedRef || appliedPreselectRef.current === preselectedRef) return;
+    const match = availableCodedData.find(
+      (item) =>
+        String(item.id) === String(preselectedRef) ||
+        String(item?.metadata?.file?.id) === String(preselectedRef),
+    );
+    if (!match) return;
+    appliedPreselectRef.current = preselectedRef;
+    setSelectedCodedData(match.id);
+    setSelectedCodedDataName(match?.display_name || match?.name || match?.id || "");
+  }, [availableCodedData, isPinned, preselectedRef]);
 
   const getSelectedCodingSchema = useCallback(
     (codedId = selectedCodedData) => {
@@ -980,6 +1000,7 @@ export default function useViewCodingPage({
     sessionSaveState,
     saveSession,
     discardSession,
+    refreshCurrent,
     selectedItemIds,
     toggleItemSelected,
     clearSelection,

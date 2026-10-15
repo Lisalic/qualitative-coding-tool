@@ -54,21 +54,12 @@ export default function useProjectScopedFiles(fileType) {
       setListError("");
       setListLoading(true);
       try {
-        const meResp = await apiFetch("/api/me/", { signal: controller.signal });
-        if (meResp.ok) {
-          const projResp = await apiFetch(`/api/my-files/?file_type=${fileType}`, { signal: controller.signal });
-          if (!projResp.ok) throw new Error("Failed to fetch user projects");
-          const projData = await projResp.json();
-          const projects = projData.projects || [];
-          setUserProjects(projects);
-          setDatabases(normalizeDatabaseProjects(projects));
-          return;
-        }
-
-        const fallbackResp = await apiFetch(`/api/my-files/?file_type=${fileType}`, { signal: controller.signal });
-        if (!fallbackResp.ok) throw new Error("Failed to fetch user projects");
-        const fallbackData = await fallbackResp.json();
-        const projects = fallbackData.projects || [];
+        // One request: the page is already behind the route guard, and
+        // both branches of the old `/api/me/` check fetched this same list.
+        const projResp = await apiFetch(`/api/my-files/?file_type=${fileType}`, { signal: controller.signal });
+        if (!projResp.ok) throw new Error("Failed to fetch user projects");
+        const projData = await projResp.json();
+        const projects = projData.projects || [];
         setUserProjects(projects);
         setDatabases(normalizeDatabaseProjects(projects));
       } catch (error) {

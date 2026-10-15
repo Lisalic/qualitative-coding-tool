@@ -271,7 +271,11 @@ export default function CodebookEditor() {
         // Deliberately NOT cleared: the draft now equals what the server
         // just committed, and refine is continuous editing of ONE
         // artifact -- unlike "new" mode below, there is no next artifact
-        // for a blank draft to prepare for.
+        // for a blank draft to prepare for. The assist runs it carried
+        // ARE done with, though: the server has recorded them against
+        // this version, and re-sending them with the next save inserted
+        // duplicate provenance rows.
+        editor.markAssistRunsRecorded();
         return;
       }
 

@@ -33,7 +33,13 @@ def encode_delta(from_codes: Sequence[Any], to_codes: Sequence[Any]) -> dict:
     ``to_codes`` are ``CodebookCode`` ORM rows or plain ``CodeRow``
     dicts, same as ``diff_codes``.
     """
-    diff = diff_codes(from_codes, to_codes)
+    # Never the display-time name matching: with ``match_unrelated`` on,
+    # two snapshots sharing no uid but repeating a name (a codebook
+    # re-imported without its identities) would have those codes pulled
+    # out of ``added``/``removed``, and the stored delta would silently
+    # keep the anchor's old uids for them while omitting the new ones --
+    # ``coding_entries.code_uid`` then stops resolving.
+    diff = diff_codes(from_codes, to_codes, match_unrelated=False)
 
     from_by_uid = {c["code_uid"]: c for c in (_as_dict(c) for c in from_codes)}
     to_by_uid = {c["code_uid"]: c for c in (_as_dict(c) for c in to_codes)}

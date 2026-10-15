@@ -34,6 +34,11 @@ const inputClasses = input;
 export default function CodebookWorkspaceSection({
   picker = null,
   selectedCodebook,
+  // The `proj_…` schema name. Compare and Integrate key their codebook
+  // pickers (and their request builders) on it; passing the numeric
+  // `selectedCodebook` id used to leave Compare's A slot blank and make
+  // Integrate's preview fail its `proj_<id>` check.
+  selectedSchema = null,
   selectedCodebookName,
   systemPrompt,
   instructions,
@@ -84,7 +89,7 @@ export default function CodebookWorkspaceSection({
               className={toolsMenuItem}
               onClick={() => {
                 close();
-                leaveTo("/compare-codebook", { state: { codebookA: selectedCodebook } });
+                leaveTo("/compare-codebook", { state: { codebookA: selectedSchema || selectedCodebook } });
               }}
             >
               Compare
@@ -94,7 +99,7 @@ export default function CodebookWorkspaceSection({
               className={toolsMenuItem}
               onClick={() => {
                 close();
-                leaveTo("/integrate-codebook", { state: { codebookA: selectedCodebook } });
+                leaveTo("/integrate-codebook", { state: { codebookA: selectedSchema || selectedCodebook } });
               }}
             >
               Integrate

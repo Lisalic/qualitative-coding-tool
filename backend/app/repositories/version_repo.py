@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Sequence
 
-from sqlalchemy import select, delete
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.versioning_models import ArtifactVersion, ArtifactEdge, CodebookCode
@@ -108,6 +108,27 @@ async def latest_materialized_version(
     return result.scalars().first()
 
 
+async def latest_code_bearing_version(
+    session: AsyncSession, file_id: int, *, at_or_before: int
+) -> ArtifactVersion | None:
+    """The highest-``version_no`` version at or before ``at_or_before``
+    that *owns* a codebook state: either still materialized or compacted
+    to a stored ``codes_delta``. A row-only coding edit (neither) inherits
+    its codes from this version -- see ``version_service.read_codes``.
+    """
+    result = await session.execute(
+        select(ArtifactVersion)
+        .where(
+            ArtifactVersion.file_id == file_id,
+            ArtifactVersion.version_no <= at_or_before,
+            or_(ArtifactVersion.codes_materialized.is_(True), ArtifactVersion.codes_delta.is_not(None)),
+        )
+        .order_by(ArtifactVersion.version_no.desc())
+        .limit(1)
+    )
+    return result.scalars().first()
+
+
 async def list_versions(session: AsyncSession, file_id: int, *, limit: int = 100, offset: int = 0) -> list[ArtifactVersion]:
     result = await session.execute(
         select(ArtifactVersion)
@@ -115,6 +136,21 @@ async def list_versions(session: AsyncSession, file_id: int, *, limit: int = 100
         .order_by(ArtifactVersion.version_no.desc())
         .limit(limit)
         .offset(offset)
+    )
+    return list(result.scalars().all())
+
+
+async def list_versions_for_files(session: AsyncSession, file_ids: Sequence[int]) -> list[ArtifactVersion]:
+    """Every version of every file in ``file_ids`` in one read, ordered
+    ``(file_id, version_no)`` -- the bulk counterpart of ``list_versions``
+    for callers walking a whole project (``export_repo.get_project_lineage_graph``).
+    """
+    if not file_ids:
+        return []
+    result = await session.execute(
+        select(ArtifactVersion)
+        .where(ArtifactVersion.file_id.in_(file_ids))
+        .order_by(ArtifactVersion.file_id, ArtifactVersion.version_no)
     )
     return list(result.scalars().all())
 
@@ -228,6 +264,20 @@ async def list_parent_edges_for_files(session: AsyncSession, child_file_ids: Seq
 
 async def list_child_edges(session: AsyncSession, parent_file_id: int) -> list[ArtifactEdge]:
     result = await session.execute(select(ArtifactEdge).where(ArtifactEdge.parent_file_id == parent_file_id))
+    return list(result.scalars().all())
+
+
+async def list_child_edges_for_files(session: AsyncSession, parent_file_ids: Sequence[int]) -> list[ArtifactEdge]:
+    """Every child edge of every file in ``parent_file_ids``, any
+    relation -- the bulk counterpart of ``list_child_edges``.
+    """
+    if not parent_file_ids:
+        return []
+    result = await session.execute(
+        select(ArtifactEdge)
+        .where(ArtifactEdge.parent_file_id.in_(parent_file_ids))
+        .order_by(ArtifactEdge.position, ArtifactEdge.id)
+    )
     return list(result.scalars().all())
 
 

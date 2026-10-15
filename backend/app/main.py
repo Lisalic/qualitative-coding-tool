@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -54,6 +55,10 @@ async def lifespan(app: FastAPI):
     refresh_task = asyncio.create_task(_refresh_model_catalog_loop())
     yield
     refresh_task.cancel()
+    # Let the cancellation land before the engine goes away: a refresh
+    # mid-flight otherwise logs "Task was destroyed but it is pending".
+    with contextlib.suppress(asyncio.CancelledError):
+        await refresh_task
     await async_engine.dispose()
 
 

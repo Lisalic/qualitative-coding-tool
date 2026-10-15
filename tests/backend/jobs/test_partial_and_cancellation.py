@@ -212,3 +212,28 @@ async def test_job_error_redacts_api_key_from_exception_text(session, user_id):
     assert refreshed.status == "failed"
     assert "sk-or-v1-supersecret" not in refreshed.error
     assert "[REDACTED]" in refreshed.error
+
+
+class _StringCodedError(Exception):
+    """Shaped like a SQLAlchemy error: ``.code`` is a short string, not an HTTP status."""
+
+    code = "gkpj"
+
+
+@register_handler("test_string_error_code")
+async def _string_code_handler(job_id: int, payload: dict) -> dict:
+    raise _StringCodedError("database said no")
+
+
+async def test_a_non_integer_error_code_still_marks_the_job_failed(session, user_id):
+    """``jobs.error_code`` is an integer column; writing a string ``.code``
+    into it used to fail the failure-update itself, leaving the job
+    "running" forever (and the client polling forever).
+    """
+    job = await service.enqueue_job(
+        session, user_id=user_id, job_type="test_string_error_code", payload={}
+    )
+    refreshed = await _wait_terminal(session, job.id, user_id)
+    assert refreshed.status == "failed"
+    assert refreshed.error_code is None
+    assert "database said no" in refreshed.error

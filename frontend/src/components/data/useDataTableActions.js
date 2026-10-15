@@ -18,25 +18,35 @@ export function useDataTableActions({
     setSelectedRows(new Set());
   }, [currentDatabase]);
 
+  // The move-target list is the same on every database, so it's loaded once
+  // per mount (not once per database switch), and never written after
+  // unmount.
   useEffect(() => {
+    let mounted = true;
     (async () => {
-      if (!currentDatabase) return;
       try {
         const response = await apiFetch("/api/my-files/?file_type=raw_data");
-        if (!response.ok) return;
+        if (!response.ok || !mounted) return;
         const data = await response.json();
-        const projectList = data.projects || [];
-        setProjects(projectList);
-        setTargetDb((prev) => {
-          if (prev) return prev;
-          const other = projectList.find((p) => p.schema_name !== currentDatabase);
-          return other ? other.schema_name : "";
-        });
+        if (!mounted) return;
+        setProjects(data.projects || []);
       } catch {
         // ignore
       }
     })();
-  }, [currentDatabase]);
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!currentDatabase) return;
+    setTargetDb((prev) => {
+      if (prev && prev !== currentDatabase) return prev;
+      const other = projects.find((p) => p.schema_name !== currentDatabase);
+      return other ? other.schema_name : "";
+    });
+  }, [currentDatabase, projects]);
 
   const keyFor = useCallback((type, id) => `${type}:${id}`, []);
 
@@ -95,6 +105,11 @@ export function useDataTableActions({
       else groups.comment.push(rowId);
     }
 
+    // One request per table: if the second fails, the first group is
+    // already gone server-side, so the table is refetched and those rows
+    // dropped from the selection either way -- a retry must not resend ids
+    // that were already closed.
+    const done = new Set();
     try {
       setLoading(true);
       setError("");
@@ -120,16 +135,16 @@ export function useDataTableActions({
 
         const data = await response.json();
         if (data.error) throw new Error(data.error);
+        rowIds.forEach((rowId) => done.add(keyFor(typeKey, rowId)));
       }
-
-      setSelectedRows(new Set());
-      await fetchEntries();
     } catch (error) {
       setError(`Error deleting selected: ${error.message}`);
     } finally {
+      setSelectedRows((prev) => new Set(Array.from(prev).filter((key) => !done.has(key))));
+      await fetchEntries();
       setLoading(false);
     }
-  }, [currentDatabase, fetchEntries, selectedRows, setError, setLoading]);
+  }, [currentDatabase, fetchEntries, keyFor, selectedRows, setError, setLoading]);
 
   const moveSelected = useCallback(async () => {
     if (!currentDatabase || !targetDb || selectedRows.size === 0) return;
@@ -152,6 +167,8 @@ export function useDataTableActions({
       else groups.comment.push(rowId);
     }
 
+    // Same partial-failure handling as deleteSelected above.
+    const done = new Set();
     try {
       setLoading(true);
       setError("");
@@ -173,18 +190,19 @@ export function useDataTableActions({
           const text = await response.text();
           throw new Error(`Move failed: ${response.status} ${text}`);
         }
+        rowIds.forEach((rowId) => done.add(keyFor(typeKey, rowId)));
       }
-
-      setSelectedRows(new Set());
-      await fetchEntries();
     } catch (error) {
       setError(`Error moving selected: ${error.message}`);
     } finally {
+      setSelectedRows((prev) => new Set(Array.from(prev).filter((key) => !done.has(key))));
+      await fetchEntries();
       setLoading(false);
     }
   }, [
     currentDatabase,
     fetchEntries,
+    keyFor,
     selectedRows,
     setError,
     setLoading,

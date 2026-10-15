@@ -14,7 +14,7 @@ class TestListAiModels:
             ai_models,
             "AI_MODELS",
             [
-                {"value": "free/a", "label": "Free A", "paid": False},
+                {"value": "free/a", "label": "Free A", "paid": False, "context_length": 131072},
                 {
                     "value": "paid/b",
                     "label": "Paid B",
@@ -28,12 +28,15 @@ class TestListAiModels:
 
         assert resp.status_code == 200
         body = resp.json()
+        # context_length must survive the response model: the model picker
+        # shows it, and it used to be silently filtered out.
         assert body == [
-            {"value": "free/a", "label": "Free A", "paid": False, "pricing": None},
+            {"value": "free/a", "label": "Free A", "paid": False, "pricing": None, "context_length": 131072},
             {
                 "value": "paid/b",
                 "label": "Paid B",
                 "paid": True,
                 "pricing": {"inputUsdPerMillion": 1.5, "outputUsdPerMillion": 3.0},
+                "context_length": None,
             },
         ]

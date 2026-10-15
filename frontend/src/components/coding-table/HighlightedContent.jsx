@@ -186,7 +186,10 @@ const HighlightedContent = ({
   const [tooltip, setTooltip] = useState(null); // { codeUids: [...], notesByCode: { [uid]: string[] }, x, y }
   const [popoverFilter, setPopoverFilter] = useState("");
 
-  const nameByUid = buildNameByUidLookup(codeEvidence, availableCodes);
+  const nameByUid = useMemo(
+    () => buildNameByUidLookup(codeEvidence, availableCodes),
+    [codeEvidence, availableCodes],
+  );
 
   const calculateLines = useCallback(() => {
     if (!containerRef.current) return;
@@ -264,9 +267,19 @@ const HighlightedContent = ({
     calculateLines();
   }, [content, codeEvidence, calculateLines]);
 
+  // The pane re-wraps when a rail collapses or the grid changes width,
+  // not only on a window resize -- the stripes must follow the spans.
   useEffect(() => {
     window.addEventListener("resize", calculateLines);
-    return () => window.removeEventListener("resize", calculateLines);
+    const observer =
+      typeof ResizeObserver !== "undefined" && containerRef.current
+        ? new ResizeObserver(() => calculateLines())
+        : null;
+    observer?.observe(containerRef.current);
+    return () => {
+      window.removeEventListener("resize", calculateLines);
+      observer?.disconnect();
+    };
   }, [calculateLines]);
 
   // Hide the hover tooltip (coded-span mouseover) on any scroll (window
@@ -306,15 +319,22 @@ const HighlightedContent = ({
     const root = textAreaRef.current;
     if (!root.contains(range.commonAncestorContainer)) return;
 
-    const selectedText = sel.toString();
-    if (!selectedText.trim()) return;
+    if (!sel.toString().trim()) return;
 
-    // Compute the selection's offsets into `content` directly from the
+    // Compute BOTH ends of the selection into `content` directly from the
     // real DOM range -- see getTextOffsetInRoot's comment for why this is
-    // exact by construction rather than a search.
+    // exact by construction rather than a search. The end is not
+    // `start + sel.toString().length`: `Selection.toString()` applies CSS
+    // whitespace collapsing, so a selection spanning a blank line or a run
+    // of spaces came out shorter than the real span, and the stored quote
+    // no longer equalled `content[start:end]`.
     const startUnits = getTextOffsetInRoot(root, range.startContainer, range.startOffset);
+    const endUnits = getTextOffsetInRoot(root, range.endContainer, range.endOffset);
+    if (endUnits <= startUnits) return;
+    const selectedText = content.slice(startUnits, endUnits);
+    if (!selectedText.trim()) return;
     const startOffset = utf16ToCodePointIndex(content, startUnits);
-    const endOffset = utf16ToCodePointIndex(content, startUnits + selectedText.length);
+    const endOffset = utf16ToCodePointIndex(content, endUnits);
 
     lastRangeRef.current = range.cloneRange();
     setTooltip(null);
@@ -433,70 +453,70 @@ const HighlightedContent = ({
 
   const hideTooltip = () => setTooltip(null);
 
-  const notesByCodeLookup = buildNotesByCodeLookup(codeEvidence);
+  const notesByCodeLookup = useMemo(() => buildNotesByCodeLookup(codeEvidence), [codeEvidence]);
+
+  // The interval/segment pass walks the whole document (code-point
+  // conversion per entry, then a merge); it only depends on the text and
+  // its evidence, so it is not redone on every tooltip mouse move.
+  const segmentPieces = useMemo(() => {
+    if (!content || !codeEvidence?.length) return null;
+    const intervals = buildEvidenceIntervals(content, codeEvidence);
+    if (intervals.length === 0) return null;
+    const segments = mergeIntervalsToSegments(intervals);
+    const pieces = [];
+    let lastEnd = 0;
+    segments.forEach((segment, idx) => {
+      if (segment.start > lastEnd) {
+        pieces.push({ key: `text-${idx}`, text: content.slice(lastEnd, segment.start) });
+      }
+      const codeUids = Array.from(segment.codes);
+      const notesByCode = codeUids.reduce((acc, codeUid) => {
+        const notesFromSegment = segment.notesByCode.get(codeUid);
+        if (notesFromSegment && notesFromSegment.size > 0) {
+          acc[codeUid] = Array.from(notesFromSegment);
+          return acc;
+        }
+        if (notesByCodeLookup[codeUid] && notesByCodeLookup[codeUid].size > 0) {
+          acc[codeUid] = Array.from(notesByCodeLookup[codeUid]);
+        }
+        return acc;
+      }, {});
+      pieces.push({
+        key: `segment-${idx}`,
+        text: content.slice(segment.start, segment.end),
+        codeUids,
+        notesByCode,
+      });
+      lastEnd = segment.end;
+    });
+    if (lastEnd < content.length) {
+      pieces.push({ key: "remaining", text: content.slice(lastEnd) });
+    }
+    return pieces;
+  }, [content, codeEvidence, notesByCodeLookup]);
 
   let textAreaChildren;
   if (!content) {
     textAreaChildren = null;
-  } else if (!codeEvidence?.length) {
+  } else if (!segmentPieces) {
     textAreaChildren = <span>{content}</span>;
   } else {
-    const intervals = buildEvidenceIntervals(content, codeEvidence);
-
-    if (intervals.length === 0) {
-      textAreaChildren = <span>{content}</span>;
-    } else {
-      const segments = mergeIntervalsToSegments(intervals);
-      const elements = [];
-      let lastEnd = 0;
-
-      segments.forEach((segment, idx) => {
-        if (segment.start > lastEnd) {
-          elements.push(
-            <span key={`text-${idx}`}>
-              {content.slice(lastEnd, segment.start)}
-            </span>,
-          );
-        }
-
-        const segmentText = content.slice(segment.start, segment.end);
-        const codeUids = Array.from(segment.codes);
-        const notesByCode = codeUids.reduce((acc, codeUid) => {
-          const notesFromSegment = segment.notesByCode.get(codeUid);
-          if (notesFromSegment && notesFromSegment.size > 0) {
-            acc[codeUid] = Array.from(notesFromSegment);
-            return acc;
-          }
-
-          if (notesByCodeLookup[codeUid] && notesByCodeLookup[codeUid].size > 0) {
-            acc[codeUid] = Array.from(notesByCodeLookup[codeUid]);
-          }
-
-          return acc;
-        }, {});
-
-        elements.push(
-          <span
-            key={`segment-${idx}`}
-            className="coded-span relative cursor-pointer bg-paper px-0.5 py-px text-ink"
-            data-code-uids={codeUids.join(",")}
-            onMouseEnter={(e) => showCodeTooltip(e, codeUids, notesByCode)}
-            onMouseMove={moveTooltip}
-            onMouseLeave={hideTooltip}
-          >
-            {segmentText}
-          </span>,
-        );
-
-        lastEnd = segment.end;
-      });
-
-      if (lastEnd < content.length) {
-        elements.push(<span key="remaining">{content.slice(lastEnd)}</span>);
-      }
-
-      textAreaChildren = elements;
-    }
+    textAreaChildren = segmentPieces.map((piece) =>
+      piece.codeUids ? (
+        <span
+          key={piece.key}
+          className="coded-span relative cursor-pointer bg-paper px-0.5 py-px text-ink"
+          data-code-uids={piece.codeUids.join(",")}
+          onMouseEnter={(e) => showCodeTooltip(e, piece.codeUids, piece.notesByCode)}
+          onMouseMove={moveTooltip}
+          onMouseLeave={hideTooltip}
+        >
+          {piece.text}
+        </span>
+      ) : (
+        <span key={piece.key}>{piece.text}</span>
+      ),
+    );
   }
 
   const handleApplyCodeClick = (codeUid) => (e) => {
@@ -509,9 +529,10 @@ const HighlightedContent = ({
     onSelectionChange?.(null);
   };
 
-  const filteredPopoverCodes = (availableCodes || []).filter((code) =>
-    (code.name || "").toLowerCase().includes(popoverFilter.trim().toLowerCase()),
-  );
+  const filteredPopoverCodes = useMemo(() => {
+    const needle = popoverFilter.trim().toLowerCase();
+    return (availableCodes || []).filter((code) => (code.name || "").toLowerCase().includes(needle));
+  }, [availableCodes, popoverFilter]);
 
   // 1-9 applies the Nth VISIBLE code (i.e. after the search box's own
   // filter) to the pending selection -- indexing `availableCodes`

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { apiFetch } from "../../api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { apiFetch, describeApiError } from "../../api";
 
 export default function useHomePage() {
   const [projects, setProjects] = useState([]);
@@ -11,19 +11,26 @@ export default function useHomePage() {
   const [message, setMessage] = useState("");
   const [messageIsError, setMessageIsError] = useState(false);
   const [creating, setCreating] = useState(false);
+  // Only the newest load may write: the refresh after creating a project
+  // can overlap the initial load, and the older response must not win.
+  const latestRequest = useRef(0);
 
   const fetchProjects = useCallback(async () => {
+    const requestId = ++latestRequest.current;
     setLoading(true);
     setError(null);
     try {
       const resp = await apiFetch("/api/projects/");
+      if (requestId !== latestRequest.current) return;
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({}));
-        setError(data.detail || `HTTP ${resp.status}`);
+        if (requestId !== latestRequest.current) return;
+        setError(describeApiError(data, `HTTP ${resp.status}`));
         setLoading(false);
         return;
       }
       const data = await resp.json();
+      if (requestId !== latestRequest.current) return;
       const list = Array.isArray(data.projects) ? data.projects : [];
       list.sort((a, b) => {
         const ta = a && a.created_at ? Date.parse(a.created_at) : 0;
@@ -33,6 +40,7 @@ export default function useHomePage() {
       setProjects(list);
       setLoading(false);
     } catch (err) {
+      if (requestId !== latestRequest.current) return;
       setError(String(err));
       setLoading(false);
     }
@@ -76,7 +84,7 @@ export default function useHomePage() {
         });
         if (!resp.ok) {
           const data = await resp.json().catch(() => ({}));
-          throw new Error(data.detail || `HTTP ${resp.status}`);
+          throw new Error(describeApiError(data, `HTTP ${resp.status}`));
         }
 
         const data = await resp.json();

@@ -29,18 +29,23 @@ from backend.app.database import File, Project
 from backend.app.repositories import file_repo, project_repo, version_repo
 
 
-async def _build_parent_files_map(session: AsyncSession, files: list[File], user_id: int) -> dict[int, list[dict]]:
+async def _build_parent_files_map(
+    session: AsyncSession, files: list[File], user_id: int, *, children: list[File] | None = None
+) -> dict[int, list[dict]]:
     """``child_file_id -> [{id, name, schema_name, type}, ...]`` for every
-    parent edge among ``files``, scoped to parents ``user_id`` actually
-    owns -- at most two extra queries (edges, then any parent ``File``
-    rows not already in ``files``) regardless of file/edge count.
+    parent edge among ``children`` (default: all of ``files``), scoped to
+    parents ``user_id`` actually owns -- at most two extra queries (edges,
+    then any parent ``File`` rows not already in ``files``) regardless of
+    file/edge count. ``files`` is the pool already-loaded parents are
+    resolved from, so a caller listing one file type passes just those
+    files as ``children`` without losing parents of other types.
 
     Ownership-scoping this lookup (via ``file_repo.filter_owned_ids``)
     closes a pre-existing gap: the old ``_resolve_parent_files`` did an
     unscoped ``File.id.in_(missing_ids)`` lookup, so a parent belonging
     to another user could be resolved and serialized here.
     """
-    file_ids = [f.id for f in files]
+    file_ids = [f.id for f in (children if children is not None else files)]
     edges = await version_repo.list_parent_edges_for_files(session, file_ids)
     if not edges:
         return {}
@@ -93,7 +98,9 @@ async def list_files_for_user(
     types = _file_type_filter(file_type)
     all_files = await file_repo.list_files_with_tables(session, user_id)
     matched = [f for f in all_files if f.file_type in types]
-    parents_by_child = await _build_parent_files_map(session, all_files, user_id)
+    # Only the listed files' edges are needed; the full pool still serves
+    # as the lookup for their (possibly other-typed) parents.
+    parents_by_child = await _build_parent_files_map(session, all_files, user_id, children=matched)
 
     result = []
     for p in matched:
@@ -217,7 +224,9 @@ async def rename_file(
 
     file_rec.filename = display_name
     if description is not None:
-        file_rec.description = description
+        # A cleared description field arrives as "" -- store it as the same
+        # "no description" every other write path uses, not an empty string.
+        file_rec.description = description.strip() or None
     await session.commit()
     await session.refresh(file_rec)
     return file_rec

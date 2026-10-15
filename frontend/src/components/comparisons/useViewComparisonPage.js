@@ -25,6 +25,10 @@ export default function useViewComparisonPage({
   // keep it); a link's `location.state` still wins.
   const urlRef = useRefParam(selected);
   const preselect = location?.state?.[preselectStateKey] || urlRef || null;
+  // Read through a ref inside the list fetch -- same reasoning as
+  // useViewSummaryPage: a pick must not refetch the list or snap back.
+  const preselectRef = useRef(preselect);
+  preselectRef.current = preselect;
   const [listError, setListError] = useState("");
   const [listLoading, setListLoading] = useState(false);
   const [selectedName, setSelectedName] = useState("");
@@ -71,11 +75,12 @@ export default function useViewComparisonPage({
           }));
         setAvailable(items);
 
-        if (!preselect || appliedPreselectRef.current === preselect) return;
-        const match = items.find((item) => item.id === preselect);
+        const wanted = preselectRef.current;
+        if (!wanted || appliedPreselectRef.current === wanted) return;
+        const match = items.find((item) => item.id === wanted);
         if (!match) return;
-        appliedPreselectRef.current = preselect;
-        setSelectedRaw(preselect);
+        appliedPreselectRef.current = wanted;
+        setSelectedRaw(wanted);
         setSelectedName(match.display_name || match.name);
         setSelectedDescription(match.description || "");
         return;
@@ -94,11 +99,12 @@ export default function useViewComparisonPage({
         description: project.description || "",
       }));
       setAvailable(items);
-      if (!preselect || appliedPreselectRef.current === preselect) return;
-      const match = items.find((item) => item.id === preselect);
+      const wanted = preselectRef.current;
+      if (!wanted || appliedPreselectRef.current === wanted) return;
+      const match = items.find((item) => item.id === wanted);
       if (match) {
-        appliedPreselectRef.current = preselect;
-        setSelectedRaw(preselect);
+        appliedPreselectRef.current = wanted;
+        setSelectedRaw(wanted);
         setSelectedName(match.display_name || match.name);
         setSelectedDescription(match.description || "");
       }
@@ -108,7 +114,19 @@ export default function useViewComparisonPage({
     } finally {
       setListLoading(false);
     }
-  }, [fileType, preselect, projectsList, selectedProject]);
+  }, [fileType, projectsList, selectedProject]);
+
+  // A preselection arriving after the list loaded (Back/Forward, a link)
+  // is still applied, once.
+  useEffect(() => {
+    if (!preselect || appliedPreselectRef.current === preselect) return;
+    const match = available.find((item) => item.id === preselect);
+    if (!match) return;
+    appliedPreselectRef.current = preselect;
+    setSelectedRaw(preselect);
+    setSelectedName(match.display_name || match.name);
+    setSelectedDescription(match.description || "");
+  }, [available, preselect]);
 
   const setSelected = useCallback(
     (id) => {

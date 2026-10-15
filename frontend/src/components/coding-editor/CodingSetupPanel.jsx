@@ -139,8 +139,11 @@ export default function CodingSetupPanel({ onCreated }) {
     ) {
       setContentScope("posts");
     }
+    // `database` too: switching between two posts-only databases leaves
+    // the availability flags unchanged, so without it the reset to "both"
+    // in handleDatabaseChange stuck on a database with no comments.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [postsAvailable, commentsAvailable]);
+  }, [database, postsAvailable, commentsAvailable]);
 
   const displayError = error || panelDataError;
   const canSubmit =

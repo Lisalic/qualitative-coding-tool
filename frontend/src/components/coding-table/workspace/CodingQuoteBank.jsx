@@ -19,11 +19,20 @@ import { useModalBehavior } from "../../feedback/useModalBehavior";
 
 const PAGE_SIZE = 25;
 
-export default function CodingQuoteBank({ schema, availableCodes = [], refreshKey = 0 }) {
+/**
+ * `onServerChange` is called after a star-independent write that commits a
+ * new coding version server-side (a note edit): the workspace's own row
+ * cache then refetches, so the Reader pane doesn't keep -- and later
+ * re-save -- the note as it was before.
+ */
+export default function CodingQuoteBank({ schema, availableCodes = [], refreshKey = 0, onServerChange = null }) {
   const [quotes, setQuotes] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  // Only the newest list request may write: typing in search or paging
+  // quickly used to let an older, slower response overwrite a newer one.
+  const latestRequest = useRef(0);
 
   // Filters
   const [codeFilter, setCodeFilter] = useState("");
@@ -58,6 +67,28 @@ export default function CodingQuoteBank({ schema, availableCodes = [], refreshKe
     return () => clearTimeout(timer);
   }, [searchInput]);
 
+  // A different coding file is a different quote bank: drop the previous
+  // file's quotes (and its filters, which name ITS codes) rather than
+  // showing them -- and starring/annotating their ids -- under the new
+  // schema until the first load lands.
+  useEffect(() => {
+    latestRequest.current += 1;
+    setQuotes([]);
+    setTotal(0);
+    setError(null);
+    setActionError(null);
+    setCodeFilter("");
+    setCoderFilter("all");
+    setSearchInput("");
+    setSearchQuery("");
+    setStarredOnly(false);
+    setPage(0);
+    setSelectedIndex(0);
+    setInspectQuote(null);
+    setCitationModalQuote(null);
+    setEditingNoteId(null);
+  }, [schema]);
+
   // Reset page when filters change
   const handleCodeFilterChange = (e) => {
     setCodeFilter(e.target.value);
@@ -77,6 +108,7 @@ export default function CodingQuoteBank({ schema, availableCodes = [], refreshKe
   // Fetch quotes
   const fetchQuotes = useCallback(async () => {
     if (!schema) return;
+    const requestId = ++latestRequest.current;
     setLoading(true);
     setError(null);
 
@@ -92,13 +124,15 @@ export default function CodingQuoteBank({ schema, availableCodes = [], refreshKe
       const res = await apiFetch(`/api/coding/${encodeURIComponent(schema)}/quotes?${params.toString()}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
+      if (requestId !== latestRequest.current) return;
       setQuotes(data.quotes || []);
       setTotal(data.total || 0);
       setSelectedIndex(0);
     } catch (err) {
+      if (requestId !== latestRequest.current) return;
       setError(err?.message || "Failed to load quotes");
     } finally {
-      setLoading(false);
+      if (requestId === latestRequest.current) setLoading(false);
     }
   }, [schema, codeFilter, coderFilter, searchQuery, starredOnly, page]);
 
@@ -164,6 +198,9 @@ export default function CodingQuoteBank({ schema, availableCodes = [], refreshKe
         notes: res.data?.notes ?? updatedNotes,
       });
       setEditingNoteId(null);
+      // The server just minted a version with this note; the Reader pane's
+      // cached rows must not carry the old one into the next save.
+      onServerChange?.();
     } catch (err) {
       setActionError(err?.message || "Failed to save note");
     } finally {

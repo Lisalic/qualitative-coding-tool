@@ -63,16 +63,17 @@ export function useApiKey() {
   };
 
   const toggleSidebar = () => {
-    setSidebarCollapsed((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem("sidebarCollapsed", String(next));
-      } catch {
-        // ignore storage errors
-      }
-      window.dispatchEvent(new Event("sidebar-toggle"));
-      return next;
-    });
+    // Side effects stay outside the state updater: an updater runs during
+    // render (and twice under StrictMode), and dispatching `sidebar-toggle`
+    // from it made the Sidebar set state while the Navbar was rendering.
+    const next = !sidebarCollapsed;
+    try {
+      localStorage.setItem("sidebarCollapsed", String(next));
+    } catch {
+      // ignore storage errors
+    }
+    setSidebarCollapsed(next);
+    window.dispatchEvent(new Event("sidebar-toggle"));
   };
 
   return {

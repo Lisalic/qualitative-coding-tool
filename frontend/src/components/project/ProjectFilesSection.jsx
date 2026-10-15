@@ -68,6 +68,17 @@ export default function ProjectFilesSection({ project, onRefreshProject }) {
     () => (project?.files || []).filter((f) => f.file_type === "raw_data"),
     [project],
   );
+
+  // A database deleted (or otherwise gone from the project) must leave the
+  // merge selection too: it used to stay counted, and the merge then
+  // posted a schema that no longer existed and failed with no visible cause.
+  useEffect(() => {
+    const present = new Set(dbFiles.map((f) => f.schema_name));
+    setSelectedDatabases((prev) => {
+      const kept = prev.filter((schema) => present.has(schema));
+      return kept.length === prev.length ? prev : kept;
+    });
+  }, [dbFiles]);
   const filteredFiles = useMemo(
     () => (project?.files || []).filter((f) => f.file_type === "filtered_data"),
     [project],

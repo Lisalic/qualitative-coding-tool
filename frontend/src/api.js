@@ -75,6 +75,32 @@ export async function apiFetch(path, options = {}) {
 const initialToken = readStoredToken();
 if (initialToken) api.defaults.headers.common["Authorization"] = `Bearer ${initialToken}`;
 
+/**
+ * A human-readable message from a parsed error body, or `fallback`.
+ * `{error: "..."}` wins, then a string `detail`, then FastAPI's 422
+ * `detail` array flattened to "field: message; ...". Never returns an
+ * object -- rendering a raw `detail` array as a React child used to crash
+ * the register page on a validation error.
+ */
+export function describeApiError(parsed, fallback) {
+  if (!parsed || typeof parsed !== "object") return fallback;
+  if (typeof parsed.error === "string") return parsed.error;
+  if (typeof parsed.detail === "string") return parsed.detail;
+  if (Array.isArray(parsed.detail)) {
+    return (
+      parsed.detail
+        .map((d) => {
+          const loc = Array.isArray(d?.loc) ? d.loc.slice(-1).join(".") : "";
+          const msg = typeof d?.msg === "string" ? d.msg : "";
+          return loc && msg ? `${loc}: ${msg}` : msg;
+        })
+        .filter(Boolean)
+        .join("; ") || fallback
+    );
+  }
+  return fallback;
+}
+
 // Normalizes a fetch Response into `{ ok, status, data, error }`, shared by
 // `postForm` and `requestJson`. `error` is a human-readable string when
 // `ok` is false: FastAPI 422 responses flatten the validation `detail`
@@ -94,19 +120,7 @@ async function _normalizeJsonResponse(response) {
 
   let error = genericHttpError(response.status);
   if (parsed) {
-    if (typeof parsed.error === "string") {
-      error = parsed.error;
-    } else if (typeof parsed.detail === "string") {
-      error = parsed.detail;
-    } else if (Array.isArray(parsed.detail)) {
-      error = parsed.detail
-        .map((d) => {
-          const loc = Array.isArray(d.loc) ? d.loc.slice(-1).join(".") : "";
-          return loc ? `${loc}: ${d.msg}` : d.msg;
-        })
-        .filter(Boolean)
-        .join("; ") || error;
-    }
+    error = describeApiError(parsed, error);
   } else if (rawText && !rawText.trimStart().startsWith("<")) {
     // A plain-text body is the server's own message; an HTML body (a
     // proxy or gateway error page) is not something to show a user.

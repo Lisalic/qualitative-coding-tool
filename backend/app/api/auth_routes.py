@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
@@ -43,7 +45,9 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_async_db))
     if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    if not _verify_password(user.password, payload.password):
+    # PBKDF2 at 100k iterations is tens of milliseconds of pure CPU; run
+    # it off the event loop so one login doesn't stall every other request.
+    if not await asyncio.to_thread(_verify_password, user.password, payload.password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     return _session_response(user)
@@ -54,7 +58,7 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_asyn
     if await auth_service.find_user_by_email(db, payload.email):
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    hashed = _hash_password(payload.password)
+    hashed = await asyncio.to_thread(_hash_password, payload.password)
 
     user = User(email=payload.email, password=hashed)
     db.add(user)

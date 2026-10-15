@@ -155,3 +155,20 @@ class TestApplyDeltaEdgeCases:
         a = [_code("u1", position=5), _code("u2", position=1)]
         result = apply_delta(a, None)
         assert [c["code_uid"] for c in result] == ["u2", "u1"]
+
+
+class TestDisjointIdentities:
+    def test_same_named_codes_with_new_uids_round_trip_by_uid(self):
+        """Two snapshots that share no code_uid but repeat a name (a codebook
+        re-imported without its identities) must encode as "remove the old
+        uid, add the new one" -- the display-time name matching in
+        ``diff_codes`` must never leak into a stored delta, or applying it
+        reconstructs the anchor's old uids and ``coding_entries.code_uid``
+        stops resolving.
+        """
+        a = [_code("old-uid", name="Avoidance", position=0)]
+        b = [_code("new-uid", name="Avoidance", position=0, definition="redefined")]
+        delta = _roundtrip_ok(a, b)
+        assert delta["removed"] == ["old-uid"]
+        assert [c["code_uid"] for c in delta["added"]] == ["new-uid"]
+        assert [c["code_uid"] for c in apply_delta(a, delta)] == ["new-uid"]

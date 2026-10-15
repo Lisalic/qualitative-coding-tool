@@ -219,3 +219,66 @@ class TestChurnCompactsAwayEmptyDeltas:
         assert {c.code_uid for c in codes_v2} == {"u1", "u2"}
         codes_v3 = await version_service.read_codes(session, f.id, version_no=3)
         assert {c.code_uid for c in codes_v3} == {"u1"}
+
+
+class TestRowOnlyEditsSurviveCompactionOfTheirAncestor:
+    """A row-only coding version owns no codes of its own and inherits
+    them from the nearest version that does. Once that version is itself
+    compacted (rows deleted, changes kept as a delta), the inheritance
+    must resolve through the delta -- it used to jump straight to the
+    materialized anchor beneath it and silently drop every edit the
+    delta recorded, so the head of a coding artifact read an OLDER
+    codebook than the one it had been saved against.
+    """
+
+    async def _coding_file_with_edit_then_row_saves(self, session, user_id, *, row_saves: int) -> File:
+        f = await _make_file(session, user_id, file_type="coding", schemaname="proj_row_only_compaction")
+        await version_service.commit_codebook_version(
+            session, file_id=f.id, author_user_id=user_id, origin="generated", codes=_codes_at(1),
+        )
+        await session.commit()
+        await version_service.commit_codebook_version(  # v2: a real codebook edit
+            session, file_id=f.id, author_user_id=user_id, origin="edited", codes=_codes_at(2),
+        )
+        await session.commit()
+        for _ in range(row_saves):  # v3.. : row-only saves
+            await version_service.commit_coding_version(session, file_id=f.id, author_user_id=user_id, origin="edited")
+            await session.commit()
+        return f
+
+    async def test_head_still_reads_the_edit_after_its_version_is_compacted(self, session, user_id) -> None:
+        f = await self._coding_file_with_edit_then_row_saves(session, user_id, row_saves=3)  # head = v5
+
+        v2 = await version_repo.get_version_by_no(session, f.id, 2)
+        assert v2.codes_materialized is False and v2.codes_delta is not None, "setup: v2 must be compacted by v5"
+
+        for n in (2, 3, 4, 5):
+            codes = await version_service.read_codes(session, f.id, version_no=n)
+            assert [c.definition for c in codes] == ["step 2"], f"v{n} lost v2's edit"
+        head_codes = await version_service.read_codes(session, f.id)
+        assert [c.definition for c in head_codes] == ["step 2"]
+
+    async def test_a_keyframe_landing_on_a_row_only_edit_copies_the_right_codes(self, session, user_id) -> None:
+        f = await self._coding_file_with_edit_then_row_saves(session, user_id, row_saves=8)  # head = v10 keyframe
+
+        v10 = await version_repo.get_version_by_no(session, f.id, 10)
+        assert v10.codes_materialized is True
+        assert [r.definition for r in await version_repo.list_codes(session, v10.id)] == ["step 2"]
+
+
+class TestRowOnlyHeadKeepsNoOpSuppression:
+    async def test_resaving_identical_codes_over_a_row_only_head_mints_no_version(self, session, user_id) -> None:
+        f = await _make_file(session, user_id, file_type="coding", schemaname="proj_row_only_noop")
+        await version_service.commit_codebook_version(
+            session, file_id=f.id, author_user_id=user_id, origin="generated", codes=_codes_at(1),
+        )
+        await session.commit()
+        row_only = await version_service.commit_coding_version(session, file_id=f.id, author_user_id=user_id, origin="edited")
+        await session.commit()
+
+        same = await version_service.commit_codebook_version(
+            session, file_id=f.id, author_user_id=user_id, origin="edited", codes=_codes_at(1),
+        )
+        await session.commit()
+
+        assert same.id == row_only.id, "identical codes must not mint a new version just because the head was row-only"

@@ -12,14 +12,8 @@ export async function savePromptToLibrary(promptType, promptText) {
     throw new Error("EMPTY_PROMPT");
   }
 
-  let fetchedUserId = null;
-  try {
-    const me = await api.get("/api/me/");
-    fetchedUserId = me?.data?.id || me?.data?.sub || null;
-  } catch (e) {
-    console.warn("Could not fetch /api/me", e);
-  }
-
+  // No `/api/me/` round trip: the server takes the owner from the session
+  // (`prompt_routes.create_prompt`) and ignores any `user_id` field.
   let promptName = `Prompt ${Date.now()}`;
   try {
     const listRes = await api.get(
@@ -35,7 +29,6 @@ export async function savePromptToLibrary(promptType, promptText) {
   form.append("promptname", promptName);
   form.append("prompt", trimmed);
   form.append("type", promptType);
-  if (fetchedUserId) form.append("user_id", fetchedUserId);
 
   const res = await api.post("/api/prompts/", form);
   const saved = res && res.data ? res.data : null;

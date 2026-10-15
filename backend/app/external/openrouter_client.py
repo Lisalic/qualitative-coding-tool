@@ -31,9 +31,21 @@ T = TypeVar("T")
 
 
 def get_openrouter_client(api_key: str) -> AsyncOpenAI:
+    """A fresh client for one ``chat_completion`` call; the caller closes
+    it (``async with``) so its httpx connection pool doesn't leak -- a
+    client per batch that was never closed used to pile up open sockets
+    for the life of a long job.
+
+    ``max_retries=0``: the SDK's own default (2 retries with backoff on
+    408/429/5xx) sat *underneath* ``retry_async``, so a 429 was retried
+    twice by the SDK and then again by us -- up to 9 attempts for one
+    JSON-ladder tier, and a non-retryable 402 still cost the SDK's full
+    backoff before our policy could reject it. This module's retry policy
+    is the only one.
+    """
     if not api_key:
         raise ValueError("OpenRouter API key is required")
-    return AsyncOpenAI(api_key=api_key, base_url=OPENROUTER_URL)
+    return AsyncOpenAI(api_key=api_key, base_url=OPENROUTER_URL, max_retries=0)
 
 
 async def retry_async(
@@ -134,9 +146,10 @@ async def chat_completion(
         return content
 
     try:
-        return await retry_async(
-            _call, max_retries=max_retries, is_retryable=is_retryable_error, on_retry=on_retry
-        )
+        async with client:
+            return await retry_async(
+                _call, max_retries=max_retries, is_retryable=is_retryable_error, on_retry=on_retry
+            )
     except ExternalServiceError:
         raise
     except Exception as e:

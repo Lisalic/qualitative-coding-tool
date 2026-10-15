@@ -4,6 +4,7 @@ import {
   acceptProposal,
   addProposals,
   buildAssistRunsForSubmit,
+  clearAssistRuns,
   copySourceCode,
   counts,
   deserializeDraft,
@@ -36,6 +37,12 @@ function writeDraft(storageKey, state) {
   }
 }
 
+// Every keystroke in a code's name or definition commits a new state;
+// serializing and writing the whole draft synchronously on each one made
+// large codebooks lag. Writes are coalesced and flushed shortly after the
+// last change (and on unmount/key change/page hide, so nothing is lost).
+const WRITE_DEBOUNCE_MS = 250;
+
 /**
  * Stateful wrapper over `lib/codebookEditorState.js`, persisting the draft
  * to `localStorage` under one caller-supplied `storageKey`.
@@ -65,11 +72,49 @@ export function useCodebookEditorState(storageKey) {
   // still needs an explicit re-hydration.
   const hydratedFor = useRef(storageKey);
 
+  // Pending (debounced) write: which key it belongs to and the timer.
+  const pendingWrite = useRef({ key: null, timer: null });
+
+  const flushWrite = useCallback(() => {
+    const pending = pendingWrite.current;
+    if (pending.timer == null) return;
+    clearTimeout(pending.timer);
+    pending.timer = null;
+    const key = pending.key;
+    pending.key = null;
+    if (key) writeDraft(key, stateRef.current);
+  }, []);
+
+  const scheduleWrite = useCallback(
+    (key) => {
+      if (!key) return;
+      const pending = pendingWrite.current;
+      // A different key's write is still pending: land it first so its
+      // draft isn't lost to the new key's timer.
+      if (pending.key && pending.key !== key) flushWrite();
+      if (pending.timer != null) clearTimeout(pending.timer);
+      pending.key = key;
+      pending.timer = setTimeout(flushWrite, WRITE_DEBOUNCE_MS);
+    },
+    [flushWrite],
+  );
+
+  useEffect(() => {
+    const onPageHide = () => flushWrite();
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      flushWrite();
+    };
+  }, [flushWrite]);
+
   useEffect(() => {
     if (hydratedFor.current === storageKey) return;
+    // Land the previous key's pending draft before reading the new one.
+    flushWrite();
     hydratedFor.current = storageKey;
     setState(readDraft(storageKey));
-  }, [storageKey]);
+  }, [flushWrite, storageKey]);
 
   /** Apply a pure transform, then persist the result. */
   const commit = useCallback(
@@ -77,16 +122,21 @@ export function useCodebookEditorState(storageKey) {
       const next = transform(stateRef.current);
       stateRef.current = next;
       setState(next);
-      writeDraft(storageKey, next);
+      scheduleWrite(storageKey);
       return next;
     },
-    [storageKey],
+    [scheduleWrite, storageKey],
   );
 
   const clearDraft = useCallback(() => {
     const next = emptyState();
     stateRef.current = next;
     setState(next);
+    // A write still queued for this draft must not resurrect it.
+    const pending = pendingWrite.current;
+    if (pending.timer != null) clearTimeout(pending.timer);
+    pending.timer = null;
+    pending.key = null;
     if (!storageKey) return;
     try {
       window.localStorage.removeItem(storageKey);
@@ -147,6 +197,9 @@ export function useCodebookEditorState(storageKey) {
    * tray never proposed a merge for straight into the draft. See
    * `lib/codebookEditorState.js::copySourceCode`. */
   const copyCode = useCallback((sourceCode) => commit((prev) => copySourceCode(prev, sourceCode)), [commit]);
+  /** After a save has recorded this session's assist runs -- see
+   * `lib/codebookEditorState.js::clearAssistRuns`. */
+  const markAssistRunsRecorded = useCallback(() => commit((prev) => clearAssistRuns(prev)), [commit]);
 
   return {
     draft: state.draft,
@@ -163,6 +216,7 @@ export function useCodebookEditorState(storageKey) {
     dismiss,
     dismissEvery,
     copyCode,
+    markAssistRunsRecorded,
     clearDraft,
     snapshot,
     clearDraftIfUnchanged,

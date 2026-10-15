@@ -323,15 +323,38 @@ async def code_summary_with_samples(
     current name; see ``code_frequency`` for why entries' own names can't.
     """
     freq = await code_frequency(session, file_id)
+    if not freq:
+        return []
+
+    # One query for every code's sample rather than one per code: a
+    # ROW_NUMBER() window partitioned by code_uid keeps the first
+    # ``max_evidence_per_code`` live quotes of each (in id order, so the
+    # sample is stable across calls). Was an N+1 -- a codebook with 60
+    # codes cost 61 round trips every time summarize/compare ran.
+    row_number = (
+        func.row_number()
+        .over(partition_by=CodingEntry.code_uid, order_by=CodingEntry.id)
+        .label("rn")
+    )
+    ranked = _live(
+        select(CodingEntry.code_uid, CodingEntry.quote, row_number).where(CodingEntry.file_id == file_id)
+    ).subquery("ranked_quotes")
+    result = await session.execute(
+        select(ranked.c.code_uid, ranked.c.quote)
+        .where(ranked.c.rn <= max_evidence_per_code)
+        .order_by(ranked.c.code_uid, ranked.c.rn)
+    )
+    samples_by_uid: dict[str, list[str]] = {}
+    for code_uid, quote in result.all():
+        if quote:
+            samples_by_uid.setdefault(code_uid, []).append(quote)
+
     summaries = []
     for code_uid, stored_name, count in freq:
-        result = await session.execute(
-            _live(select(CodingEntry.quote).where(CodingEntry.file_id == file_id, CodingEntry.code_uid == code_uid))
-            .limit(max_evidence_per_code)
-        )
-        sample_evidence = [row[0] for row in result.all() if row[0]]
         code = (name_by_uid or {}).get(code_uid) or stored_name
-        summaries.append({"code": code, "count": count, "sample_evidence": sample_evidence})
+        summaries.append(
+            {"code": code, "count": count, "sample_evidence": samples_by_uid.get(code_uid, [])}
+        )
     return summaries
 
 

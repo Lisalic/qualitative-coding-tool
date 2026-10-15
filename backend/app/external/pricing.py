@@ -10,7 +10,14 @@ known free one.
 from __future__ import annotations
 
 from typing import Any
-from backend.app.ai_models import _MODEL_META_BY_SLUG, is_paid_model
+
+# The module, not its ``_MODEL_META_BY_SLUG`` name: ``ai_models.set_catalog``
+# rebinds that global on every daily refresh, so a name imported here at
+# import time would keep pointing at the stale start-up snapshot -- a model
+# added to OpenRouter after boot would price as "unknown" and a price
+# change would never be seen until the process restarted.
+from backend.app import ai_models
+from backend.app.ai_models import is_paid_model
 
 
 def get_model_pricing(model_slug: str) -> dict[str, Any]:
@@ -30,7 +37,8 @@ def get_model_pricing(model_slug: str) -> dict[str, Any]:
             "output_usd_per_million": 0.0,
         }
 
-    if clean_slug not in _MODEL_META_BY_SLUG:
+    meta = ai_models._MODEL_META_BY_SLUG.get(clean_slug)
+    if meta is None:
         return {
             "model": clean_slug,
             "known": False,
@@ -39,7 +47,6 @@ def get_model_pricing(model_slug: str) -> dict[str, Any]:
             "output_usd_per_million": None,
         }
 
-    meta = _MODEL_META_BY_SLUG[clean_slug]
     is_paid = is_paid_model(clean_slug)
     pricing = meta.get("pricing") or {}
 

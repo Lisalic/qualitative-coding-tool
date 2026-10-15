@@ -318,6 +318,21 @@ export function copySourceCode(state, sourceCode) {
   });
 }
 
+/**
+ * Forget the assist runs a save has just recorded, keeping the draft.
+ *
+ * Refine mode keeps editing the same artifact after a save, and the runs
+ * it had already sent as `assist_runs` were re-sent on every later save --
+ * the server does not dedupe, so each save inserted the same provenance
+ * rows again against the new version.
+ */
+export function clearAssistRuns(state) {
+  return withState(state, (next) => {
+    next.assistRuns = [];
+    next.acceptedKeyToUid = {};
+  });
+}
+
 export function counts(state) {
   const uids = draftCodeUids(state.draft);
   let aiAccepted = 0;

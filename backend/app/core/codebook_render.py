@@ -201,6 +201,10 @@ def _split_labeled_fields(content: str) -> dict[str, str | None]:
     fields: dict[str, str | None] = dict(empty)
     current: str | None = None
     found_any = False
+    # Prose before the first label used to be dropped on the floor
+    # ("Intro sentence\nDefinition: x" imported as just "x"); it is kept
+    # and folded into the definition instead.
+    preamble: list[str] = []
     for raw_line in content.split("\n"):
         stripped = raw_line.strip()
         if not stripped:
@@ -215,9 +219,14 @@ def _split_labeled_fields(content: str) -> dict[str, str | None]:
         if current is not None:
             prev = fields[current] or ""
             fields[current] = f"{prev}\n{stripped}".strip() if prev else stripped
+        else:
+            preamble.append(stripped)
 
     if not found_any:
         return empty
+    if preamble:
+        lead = "\n".join(preamble)
+        fields["definition"] = f"{lead}\n{fields['definition']}".strip() if fields["definition"] else lead
     cleaned: dict[str, str | None] = {}
     for key, value in fields.items():
         text = _optional_text(value)

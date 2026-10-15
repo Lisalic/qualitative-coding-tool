@@ -436,6 +436,12 @@ async def commit_coding_version(
         user_instructions=user_instructions, prompt_meta=prompt_meta, now=now,
     )
     is_keyframe = version.version_no % KEYFRAME_INTERVAL == 0
+    # The codes are inherited unchanged, so the hash describing them is
+    # too. Without this a row-only head had content_hash=NULL, and
+    # commit_codebook_version's no-op suppression could never match it:
+    # re-saving a byte-identical codebook minted a spurious new version.
+    if previous_head is not None:
+        version.content_hash = previous_head.content_hash
     if previous_head is None:
         version.codes_materialized = True
     elif is_keyframe:
@@ -544,12 +550,26 @@ async def read_codes(session: AsyncSession, file_id: int, *, version_no: int | N
     if version.codes_materialized:
         return await version_repo.list_codes(session, version.id)
 
+    if not version.codes_delta:
+        # A row-only coding edit: its codes are whatever the nearest
+        # version that actually OWNS a codebook state had -- materialized
+        # or compacted. It must not be "nearest materialized" directly:
+        # once the owning version is compacted (its rows deleted, its
+        # changes kept only as a delta), skipping straight to the
+        # materialized anchor beneath it silently dropped every edit that
+        # delta records, so the head of a coding artifact read an older
+        # codebook than the one it was saved against.
+        owner = await version_repo.latest_code_bearing_version(
+            session, file_id, at_or_before=version.version_no - 1
+        )
+        if owner is None:
+            return []
+        return await read_codes(session, file_id, version_no=owner.version_no)
+
     anchor = await version_repo.latest_materialized_version(session, file_id, at_or_before=version.version_no)
     if anchor is None:
         return []
     anchor_codes = await version_repo.list_codes(session, anchor.id)
-    if not version.codes_delta:
-        return anchor_codes
 
     reconstructed = apply_delta(anchor_codes, version.codes_delta)
     # Detached, unflushed CodebookCode instances -- never session.add()ed

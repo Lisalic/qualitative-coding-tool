@@ -264,3 +264,15 @@ class TestRenderCodesToMarkdown:
         round_tripped = parse_markdown_to_codes(md)
         for key in ("name", "family_name", "definition", "inclusion", "exclusion", "keywords", "example"):
             assert round_tripped[0][key] == original[0][key]
+
+
+class TestPreambleBeforeFirstLabel:
+    def test_prose_before_the_first_label_is_kept_in_the_definition(self):
+        fields = materialize_fields_from_body("Intro prose\nDefinition: the def\nKeywords: k")
+        assert fields["definition"] == "Intro prose\nthe def"
+        assert fields["keywords"] == "k"
+
+    def test_prose_before_a_non_definition_label_becomes_the_definition(self):
+        fields = materialize_fields_from_body("Only an intro\nKeywords: k")
+        assert fields["definition"] == "Only an intro"
+        assert fields["keywords"] == "k"

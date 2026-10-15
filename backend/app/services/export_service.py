@@ -556,7 +556,7 @@ async def export_coding(
 
     if export_format in ("xlsx", "docx"):
         summary_data = await export_repo.get_code_frequencies_by_uid(
-            session, file_id, codes=codes, version_no=version_no
+            session, file_id, codes=codes, version_no=version_no, entries=entries
         )
         if export_format == "xlsx":
             content = _coding_xlsx(

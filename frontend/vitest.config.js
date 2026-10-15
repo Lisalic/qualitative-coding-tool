@@ -13,6 +13,9 @@ export default defineConfig({
     // `// @vitest-environment jsdom` docblock (see src/api.test.js).
     environment: "node",
     globals: false,
+    // Reconciles Node's own experimental `localStorage` global with jsdom's
+    // for the files that opt into jsdom -- see vitest.setup.js.
+    setupFiles: ["./vitest.setup.js"],
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],

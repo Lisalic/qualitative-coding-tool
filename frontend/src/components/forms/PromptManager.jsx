@@ -48,14 +48,15 @@ export default function PromptManager({
       });
   }, [promptType]);
 
+  // Gated on `isOpen`: this stays mounted (closed) under every prompt
+  // textarea, so each copy used to fetch the library on mount and again on
+  // every "Save prompt" anywhere on the page. Load it when it's opened.
   useEffect(() => {
+    if (!isOpen) return undefined;
     loadSavedPrompts();
-  }, [loadSavedPrompts]);
-
-  useEffect(() => {
     window.addEventListener("promptSaved", loadSavedPrompts);
     return () => window.removeEventListener("promptSaved", loadSavedPrompts);
-  }, [loadSavedPrompts]);
+  }, [isOpen, loadSavedPrompts]);
 
   const showMessage = (text, type = "success") => {
     setMessage(text);

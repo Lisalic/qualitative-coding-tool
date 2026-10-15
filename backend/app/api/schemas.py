@@ -807,6 +807,10 @@ class AiModelOut(BaseModel):
     label: str
     paid: bool
     pricing: Optional[AiModelPricing] = None
+    # The catalog carries this (``openrouter_catalog._map_model``) and the
+    # model picker renders it (``aiModelCatalog.js::formatAiModelOptionMeta``);
+    # without it here ``response_model`` filtered it out of every response.
+    context_length: Optional[int] = None
 
 
 class StarQuoteRequest(BaseModel):

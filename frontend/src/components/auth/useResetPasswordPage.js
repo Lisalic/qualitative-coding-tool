@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { requestJson } from "../../api";
 import { MIN_PASSWORD_LENGTH } from "../../lib/apiContracts";
@@ -14,6 +14,10 @@ export default function useResetPasswordPage() {
   const [messageType, setMessageType] = useState(token ? "" : "error");
   const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
+  // The post-success redirect is cancelled on unmount, so leaving the page
+  // within the delay doesn't yank the user to /login from wherever they went.
+  const redirectTimer = useRef(null);
+  useEffect(() => () => clearTimeout(redirectTimer.current), []);
 
   const handleSubmit = useCallback(
     async (event) => {
@@ -42,7 +46,7 @@ export default function useResetPasswordPage() {
       if (res.ok) {
         setMessage(res.data.message);
         setMessageType("success");
-        setTimeout(() => navigate("/login"), 1500);
+        redirectTimer.current = setTimeout(() => navigate("/login"), 1500);
       } else {
         setMessage(res.error || "Could not reset password");
         setMessageType("error");

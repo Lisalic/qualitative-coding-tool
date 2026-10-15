@@ -100,7 +100,9 @@ def to_bytes(doc: DocumentType) -> bytes:
 
 # --- markdown -------------------------------------------------------------
 
-_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
+# A closing hash run only counts when whitespace precedes it (CommonMark):
+# "## Using C#" is a heading whose text ends in "#", not "Using C".
+_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*?)(?:\s+#+)?\s*$")
 _FENCE_RE = re.compile(r"^\s*(```|~~~)")
 _RULE_RE = re.compile(r"^\s*([-*_])(\s*\1){2,}\s*$")
 _BULLET_RE = re.compile(r"^(\s*)[-*+]\s+(.*)$")

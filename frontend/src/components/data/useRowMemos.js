@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, requestJson } from "../../api";
 import { keyFor } from "../../lib/filterEditorState";
 import { isProjectSchema } from "../../lib/schemaGuards";
@@ -19,8 +19,15 @@ import { isProjectSchema } from "../../lib/schemaGuards";
 export function useRowMemos(database) {
   const [memos, setMemos] = useState(() => new Map());
   const [error, setError] = useState("");
+  // Only the newest load may fill the index: switching database while the
+  // previous one's memos are still loading used to show them under the new
+  // database (and star/memo writes then targeted the wrong rows).
+  const latestLoad = useRef(0);
+  const databaseRef = useRef(database);
+  databaseRef.current = database;
 
   const load = useCallback(async () => {
+    const requestId = ++latestLoad.current;
     if (!database || !isProjectSchema(database)) {
       setMemos(new Map());
       return;
@@ -31,6 +38,7 @@ export function useRowMemos(database) {
       );
       if (!response.ok) throw new Error("Failed to load memos");
       const data = await response.json();
+      if (requestId !== latestLoad.current) return;
       const next = new Map();
       for (const memo of data.memos || []) {
         next.set(keyFor(memo.row_type, memo.row_id), memo);
@@ -38,6 +46,7 @@ export function useRowMemos(database) {
       setMemos(next);
       setError("");
     } catch (err) {
+      if (requestId !== latestLoad.current) return;
       // A memo is an annotation on top of the data -- failing to load one
       // must never blank out the rows themselves.
       setError(err?.message || "Failed to load memos");
@@ -69,6 +78,9 @@ export function useRowMemos(database) {
         body: { schema: String(database), row_type: rowType, row_id: rowId, body },
       });
       if (!ok) return { ok: false, error: err || "Failed to save memo" };
+      // The database changed while the save was in flight: the memo was
+      // saved, but it belongs to the previous index, not the current one.
+      if (database !== databaseRef.current) return { ok: true };
 
       setMemos((prev) => {
         const next = new Map(prev);
