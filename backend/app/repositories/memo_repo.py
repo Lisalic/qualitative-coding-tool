@@ -24,7 +24,7 @@ from sqlalchemy import and_, delete, func, insert, literal, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.sql_filters import in_values
-from backend.app.storage_models import RowMemo
+from backend.app.models.storage import RowMemo
 
 # Never copied verbatim between files: ``id`` is a surrogate identity and
 # ``file_id`` is supplied by the caller. Everything else (row identity,

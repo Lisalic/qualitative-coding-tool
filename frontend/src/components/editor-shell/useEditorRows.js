@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { apiFetch } from "../../api";
+import { apiFetch } from "../../api/client";
 import { PROJ_SCHEMA_RE } from "../../lib/schemaGuards";
 
 /** Stable identity for a submission/comment row across the whole app. */

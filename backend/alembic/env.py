@@ -5,20 +5,17 @@ from sqlalchemy import pool
 
 from alembic import context
 
-# Import the app's Base *and* every module that defines a table on it, so
-# `target_metadata` reflects the full schema for autogenerate. Mirrors the
-# same reasoning as the storage_models import in backend/app/main.py.
-from backend.app.database import Base  # noqa: E402
+# Import the app's Base *and* the models package, which registers every
+# table on it, so `target_metadata` reflects the full schema for autogenerate.
+from backend.app import models  # noqa: E402,F401
+from backend.app.core.database import Base  # noqa: E402
 from backend.app.core.migrations import lock_for_migrations, sync_database_url  # noqa: E402
-from backend.app import storage_models  # noqa: E402,F401
-from backend.app import versioning_models  # noqa: E402,F401
-from backend.app.jobs import models as jobs_models  # noqa: E402,F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
 
-# Single source of truth for the DB URL is backend/app/database.py (env
+# Single source of truth for the DB URL is backend/app/core/database.py (env
 # vars / backend/.env), not a separate value duplicated in alembic.ini,
 # with the sync driver pinned (see sync_database_url).
 SYNC_DATABASE_URL = sync_database_url()

@@ -1,7 +1,7 @@
 """Tests for backend/app/services/version_service.py's codebook-snapshot
 compaction scheme: which versions stay materialized (v1 / latest-3 /
 every-Kth keyframe), how a compacted version's codes are reconstructed
-via core/codebook_delta.py, and that reconstruction is byte-exact
+via domain/codebook_delta.py, and that reconstruction is byte-exact
 regardless of how many compacted versions sit in between. See
 ArtifactVersion.codes_materialized's docstring for the full policy.
 """
@@ -9,7 +9,7 @@ ArtifactVersion.codes_materialized's docstring for the full policy.
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from backend.app.database import File, User
+from backend.app.models.workspace import File, User
 from backend.app.repositories import version_repo
 from backend.app.services import version_service
 from backend.app.services.version_service import KEYFRAME_INTERVAL, LATEST_MATERIALIZED_WINDOW

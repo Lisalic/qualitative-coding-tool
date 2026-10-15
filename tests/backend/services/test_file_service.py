@@ -5,7 +5,7 @@ in-memory async SQLite session (`async_sqlite_engine` from
 `tests/conftest.py`) -- pure ORM operations on the fixed tables, no
 Postgres-only SQL involved.
 
-`upload_zst` parses the upload with `import_db.iter_zst_records` and
+`upload_zst` parses the upload with `reddit_import.iter_zst_records` and
 bulk-inserts straight into the fixed tables, so it also runs against the
 SQLite fixture -- fed plain NDJSON bytes (the parser reads uncompressed
 text before falling back to zstd).
@@ -24,11 +24,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from backend.app.core.exceptions import ForbiddenError, NotFoundError, ValidationAppError
-from backend.app.database import File, FileTable, User
+from backend.app.models.workspace import File, FileTable, User
 from backend.app.repositories import version_repo
 from backend.app.services import file_service, version_service
-from backend.app.storage_models import Comment, CodingEntry, Submission
-from backend.app.versioning_models import ArtifactEdge, ArtifactVersion, CodebookCode
+from backend.app.models.storage import Comment, CodingEntry, Submission
+from backend.app.models.versioning import ArtifactEdge, ArtifactVersion, CodebookCode
 
 
 @pytest.fixture()

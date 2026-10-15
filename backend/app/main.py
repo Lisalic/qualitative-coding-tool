@@ -7,17 +7,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 
-from backend.app import ai_models
-from backend.app.api import routes
+from backend.app.api.router import router as api_router
+from backend.app.external import ai_models
 from backend.app.core.exceptions import AppError
 from backend.app.core.logging import configure_logging, get_logger
 from backend.app.core.migrations import upgrade_to_head
-from backend.app.database import async_engine
+from backend.app.core.database import async_engine
 from backend.app.jobs.service import reconcile_orphaned_jobs_on_startup
 # Imported so every model is registered before the first query configures mappers.
-from backend.app import storage_models  # noqa: F401
-from backend.app import versioning_models  # noqa: F401
-from backend.app.jobs import models as job_models  # noqa: F401
+from backend.app import models  # noqa: F401
 
 logger = get_logger(__name__)
 
@@ -98,7 +96,7 @@ app.add_middleware(
     expose_headers=["Content-Disposition"],
 )
 
-app.include_router(routes.router, prefix="/api")
+app.include_router(api_router, prefix="/api")
 
 
 @app.get("/")

@@ -49,7 +49,7 @@ Two components implement it, and between them they replaced a five-file shell
 that stacked a centered max-width container inside global padding inside a
 `border-2` panel:
 
-- **`components/shell/PageShell.jsx`** — the one page frame. A toolbar row that
+- **`components/layout/PageShell.jsx`** — the one page frame. A toolbar row that
   never scrolls, above a body that does.
   - The toolbar holds the page's **only** title (left-aligned, `text-base
     font-semibold`), an optional subtitle, and every page-level action pushed
@@ -59,7 +59,7 @@ that stacked a centered max-width container inside global padding inside a
   - `scroll`: `"page"` (the body scrolls as one column) or `"fill"` (the body is
     a fixed-height box and the **child** owns scrolling — for viewport-height
     workspaces).
-- **`components/shell/Panel.jsx`** — the one bordered region: a single 1px
+- **`components/layout/Panel.jsx`** — the one bordered region: a single 1px
   `border-line` edge, a `border-b` header strip, one internal scroll container.
   `padded={false}` for content that draws its own borders (tables, `CodeLegend`);
   `scroll={false}` when a child owns scrolling.
@@ -163,7 +163,7 @@ Focus states use a visible white outline (`outline: 2px solid white; outline-off
   history). Never "project file" or "coded data", and never "artifact" in UI
   copy — `artifact` is the backend's word for the version spine and stays in
   code and docs, but the user picks a **file**.
-- **Modals:** centered panel, 2px white border, dark translucent black backdrop (`black/80`). One modal pattern reused everywhere — the app previously had a second, near-duplicate modal implementation for the data table's entry viewer; that's being collapsed into the single shared pattern. Yes/no confirmations never use the browser's native `window.confirm`: call `DialogService.confirm` (`components/feedback/DialogService.js`), which `components/feedback/DialogHost.jsx` (mounted once in `App.jsx`) renders in this same pattern — pass `danger: true` for destructive confirms. Non-blocking notices never use `window.alert` either: call `ToastService.show(message, type)` (`components/feedback/ToastService.js`), rendered by `ToastHost.jsx` as a small bottom-right toast (1px border tinted by type, seconds-left counter and shrinking bar) that fades out (errors after 15s, success/info notices after 6s; at most 3 on screen), pauses while hovered, and can be dismissed with ×. The one exception is the `beforeunload` tab-close warning, which browsers only allow as their own native prompt. Every modal gets the same keyboard behavior from `components/feedback/useModalBehavior.js` (Escape closes, focus moves in and is kept inside, and returns on close); a destructive `DialogService.confirm` opens with Cancel focused. A page holding unsaved work calls `useLeaveGuard(dirty)` (`components/feedback/LeaveGuard.js`), and app-level navigation (sidebar, navbar, workspace Tools links) awaits `confirmLeave()` before leaving.
+- **Modals:** centered panel, 2px white border, dark translucent black backdrop (`black/80`). One modal pattern reused everywhere — the app previously had a second, near-duplicate modal implementation for the data table's entry viewer; that's being collapsed into the single shared pattern. Yes/no confirmations never use the browser's native `window.confirm`: call `DialogService.confirm` (`components/feedback/DialogService.js`), which `components/feedback/DialogHost.jsx` (mounted once in `App.jsx`) renders in this same pattern — pass `danger: true` for destructive confirms. Non-blocking notices never use `window.alert` either: call `ToastService.show(message, type)` (`components/feedback/ToastService.js`), rendered by `ToastHost.jsx` as a small bottom-right toast (1px border tinted by type, seconds-left counter and shrinking bar) that fades out (errors after 15s, success/info notices after 6s; at most 3 on screen), pauses while hovered, and can be dismissed with ×. The one exception is the `beforeunload` tab-close warning, which browsers only allow as their own native prompt. Every modal gets the same keyboard behavior from `hooks/useModalBehavior.js` (Escape closes, focus moves in and is kept inside, and returns on close); a destructive `DialogService.confirm` opens with Cancel focused. A page holding unsaved work calls `useLeaveGuard(dirty)` (`components/feedback/LeaveGuard.js`), and app-level navigation (sidebar, navbar, workspace Tools links) awaits `confirmLeave()` before leaving.
 - **Tree/accordion views** (codebook tree, code legend): hierarchy is communicated through indentation, connector lines, borders, and font-weight — not background color steps. This is the area most affected by the black/white cleanup, since the old implementation leaned on a multi-step gray ramp instead.
 - **Tooltip:** small bordered black box, appears on hover/focus, used for the "AI-use involved" label icon and code-badge notes.
 

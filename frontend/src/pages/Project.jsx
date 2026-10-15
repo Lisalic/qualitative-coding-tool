@@ -1,9 +1,9 @@
 import { useParams } from "react-router-dom";
-import ProjectHeaderSection from "../components/project/ProjectHeaderSection";
-import ProjectFilesSection from "../components/project/ProjectFilesSection";
+import ProjectHeaderSection from "../features/projects/ProjectHeaderSection";
+import ProjectFilesSection from "../features/projects/ProjectFilesSection";
 import PageEmptyState from "../components/primitives/PageEmptyState";
-import useProjectPage from "../components/project/useProjectPage";
-import PageShell from "../components/shell/PageShell";
+import useProjectPage from "../features/projects/useProjectPage";
+import PageShell from "../components/layout/PageShell";
 import ErrorDisplay from "../components/feedback/ErrorDisplay";
 
 export default function Project() {

@@ -8,7 +8,7 @@ a fresh codebook, or another data-anchored pass over an existing one.
 ## Where to find it
 
 Sidebar → Create Codebook, the project page's **Add Codebook** button, or
-`/codebook` → `pages/Codebook.jsx` → `components/codebook-editor/CodebookEditor.jsx`.
+`/codebook` → `pages/Codebook.jsx` → `features/codebook/editor/CodebookEditor.jsx`.
 
 ## Layout
 
@@ -57,7 +57,7 @@ explicit accept. The current draft is sent as `existing_codes` with every
 run, so repeated runs propose only what's still missing, and dismissals
 are remembered so a later run can't re-offer the same code. The draft
 persists to `localStorage` per (source, target) pair
-(`useCodebookEditorState`/`lib/codebookEditorState.js`).
+(`useCodebookEditorState`/`features/codebook/editor/codebookEditorState.js`).
 
 ## What happens on submit
 
@@ -86,22 +86,22 @@ version" message instead.
 |---|---|
 | "API key not set. Please set your API key in the navbar." (AI assist only) | No `localStorage.apiKey` |
 | Create/Save button stays disabled | No codes in the draft yet, the name field is blank (New), or no codebook is selected (Refine) |
-| AI assist proposes a code already in the draft | Shouldn't happen — proposals already covered by `existing_codes` are dropped server-side (`codebook_service._code_dedupe_key`); if it does, the dedupe key and `lib/codebookEditorState.js::codeKey` have drifted out of step |
+| AI assist proposes a code already in the draft | Shouldn't happen — proposals already covered by `existing_codes` are dropped server-side (`codebook_service._code_dedupe_key`); if it does, the dedupe key and `features/codebook/editor/codebookEditorState.js::codeKey` have drifted out of step |
 
 ## Developer reference
 
-- Frontend: `pages/Codebook.jsx`, `components/codebook-editor/`
+- Frontend: `pages/Codebook.jsx`, `features/codebook/editor/`
   (`CodebookEditor.jsx`, `CodebookSourceReader.jsx`, `CodebookReaderPane.jsx`,
   `CodebookCodesRail.jsx`, `CodebookProposalTray.jsx`, `CodebookAiPanel.jsx`
   on the shared `components/forms/AiAssistPanel.jsx`),
-  `lib/codebookEditorState.js`,
-  `lib/apiContracts.js::buildCodebookPreviewPayload`/`buildManualCodebookPayload`.
-- Backend: `backend/app/api/codebook_routes.py` (`POST /codebook-preview/`,
+  `features/codebook/editor/codebookEditorState.js`,
+  `api/contracts.js::buildCodebookPreviewPayload`/`buildManualCodebookPayload`.
+- Backend: `backend/app/api/routes/codebook.py` (`POST /codebook-preview/`,
   `POST /codebook/manual`, `PUT /codebook/{ref}`) →
   `backend/app/services/codebook_service.py`
   (`start_codebook_preview_job`/`_run_codebook_preview_job`,
   `create_manual_codebook`, `save_project_codebook`) →
-  `backend/scripts/codebook_generator.py` (map-reduce generation) →
+  `backend/app/pipelines/codebook_generator.py` (map-reduce generation) →
   `backend/app/services/version_service.py::commit_codebook_version`.
 - Storage written (create only): new `files` row (`codebook`), an
   `artifact_edges` row back to the source, `codebook_codes` rows on v1.

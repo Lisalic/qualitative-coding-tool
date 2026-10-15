@@ -8,7 +8,7 @@ factored out to avoid repeating it in every test file.
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from backend.app.database import User
+from backend.app.models.workspace import User
 
 
 @pytest.fixture()

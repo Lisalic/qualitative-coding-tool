@@ -15,7 +15,7 @@ a destructive overwrite) with a git-shaped model: ``artifact_versions``
 and ``codebook_codes`` (one row per code, materialized per codebook
 version, keyed by a stable ``code_uid`` so a rename is recorded rather
 than inferred from a name-similarity heuristic). See
-``backend/app/versioning_models.py`` for the full model docstrings.
+``backend/app/models/versioning.py`` for the full model docstrings.
 
 **Why this is split into two revisions with a script in between, rather
 than the single revision most of this project's other migrations use.**
@@ -24,7 +24,7 @@ parsing their ``artifact_content`` blobs and minting fresh ``code_uid``
 values; turning existing ``coding_entries.code`` name strings into stable
 ``code_uid`` references means matching them against those freshly-minted
 codes. That parsing/matching is real, non-trivial application logic
-(``display_codebook.py::parse_codebook_to_json`` plus name-matching), and
+(``formats/codebook_parser.py::parse_codebook_to_json`` plus name-matching), and
 running it as one-off Python is a far better fit for a standalone,
 re-runnable, ``--dry-run``-capable script than for DDL frozen into a
 migration file forever (the classic "don't pin a revision to today's

@@ -43,12 +43,12 @@ KEPT_TABLES = ("users", "projects", "prompts")
 
 
 def sync_database_url() -> str:
-    """``backend.app.database.DATABASE_URL`` with the sync driver pinned:
+    """``backend.app.core.database.DATABASE_URL`` with the sync driver pinned:
     a bare ``postgresql://`` resolves to psycopg (v3) on SQLAlchemy >= 2.1,
     which isn't installed -- psycopg2-binary is the sync driver in
     backend/requirements.txt. Read at call time so tests can repoint it.
     """
-    from backend.app import database
+    from backend.app.core import database
 
     return re.sub(
         r"^postgres(?:ql)?(?:\+[^:/]+)?://", "postgresql+psycopg2://", database.DATABASE_URL.strip(), count=1
@@ -119,9 +119,8 @@ def _rebuild_untracked_schema(connection: Connection, cfg: Config) -> None:
     code depends on, so the features writing them could not have worked;
     the project carries no production data worth migrating (CLAUDE.md).
     """
-    from backend.app.database import Base
-    from backend.app import storage_models, versioning_models  # noqa: F401
-    from backend.app.jobs import models as jobs_models  # noqa: F401
+    from backend.app.core.database import Base
+    from backend.app import models  # noqa: F401
 
     _log_schema_drift(connection, Base.metadata)
 

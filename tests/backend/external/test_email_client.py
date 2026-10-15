@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from backend.app.config import settings
+from backend.app.core.config import settings
 from backend.app.external import email_client
 from backend.app.external.errors import ExternalServiceError
 

@@ -1,7 +1,7 @@
 """Tests for backend/app/external/context_window.py.
 
 The shared batching/context-limit primitive that generalizes what used to
-be private helpers in ``backend/scripts/filter_db.py``
+be private helpers in ``backend/app/pipelines/filter_db.py``
 (``MODEL_CONTEXT_LIMITS``/``_estimate_context_limit``/``_batch_content``).
 """
 
@@ -15,7 +15,7 @@ from backend.app.external import context_window
 
 class TestGetContextLength:
     def test_known_slug_from_real_catalog(self) -> None:
-        from backend.app import ai_models
+        from backend.app.external import ai_models
 
         slug = next(m["value"] for m in ai_models.AI_MODELS if m.get("context_length"))
         expected = ai_models._MODEL_META_BY_SLUG[slug]["context_length"]

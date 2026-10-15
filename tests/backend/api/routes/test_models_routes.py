@@ -1,0 +1,42 @@
+"""Tests for GET /api/models -- exposes the in-memory OpenRouter catalog."""
+
+
+from backend.app.external import ai_models
+
+
+class TestListAiModels:
+    def test_requires_auth(self, client) -> None:
+        resp = client.get("/api/models")
+        assert resp.status_code == 401
+
+    def test_returns_current_catalog(self, client, auth_cookies, monkeypatch) -> None:
+        monkeypatch.setattr(
+            ai_models,
+            "AI_MODELS",
+            [
+                {"value": "free/a", "label": "Free A", "paid": False, "context_length": 131072},
+                {
+                    "value": "paid/b",
+                    "label": "Paid B",
+                    "paid": True,
+                    "pricing": {"inputUsdPerMillion": 1.5, "outputUsdPerMillion": 3.0},
+                },
+            ],
+        )
+
+        resp = client.get("/api/models", cookies=auth_cookies)
+
+        assert resp.status_code == 200
+        body = resp.json()
+        # context_length must survive the response model: the model picker
+        # shows it, and it used to be silently filtered out.
+        assert body == [
+            {"value": "free/a", "label": "Free A", "paid": False, "pricing": None, "context_length": 131072},
+            {
+                "value": "paid/b",
+                "label": "Paid B",
+                "paid": True,
+                "pricing": {"inputUsdPerMillion": 1.5, "outputUsdPerMillion": 3.0},
+                "context_length": None,
+            },
+        ]

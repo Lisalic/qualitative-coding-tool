@@ -8,7 +8,7 @@ Replaces the free-text ``evidence`` column (an AI's raw, unverified
 ``"quote a"§"quote b"`` string for one (item, code) pair) with one row per
 individual quote, each carrying the exact ``start_offset``/``end_offset``
 into the item's own body text (``Submission.selftext``/``Comment.body``)
-that the quote was resolved to (see ``backend/app/core/evidence_match.py``).
+that the quote was resolved to (see ``backend/app/domain/evidence_match.py``).
 
 This is what makes View Coding's highlighting exact by construction: the
 frontend used to re-search for each evidence snippet in the rendered text

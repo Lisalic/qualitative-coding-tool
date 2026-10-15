@@ -11,7 +11,7 @@
 // `groupCodesByFamily`/`flattenTreeToCodes` are the adapter pair between
 // that flat wire shape and the nested family->codes tree the editor UI
 // renders -- grouping is a pure display-time transform, matching how
-// `backend/app/core/codebook_render.py` groups server-side: by
+// `backend/app/formats/codebook_render.py` groups server-side: by
 // `family_uid` (never by name), in `position` order.
 
 /** Group a flat `codes` list (as returned by the backend) into a nested
@@ -179,7 +179,7 @@ export const getCodeColor = (codeUid) => {
 
 /**
  * Reduce a row's coded entries to one AI/Human/Both label -- the client
- * mirror of `backend/app/core/coder_rollup.py::roll_up`. Computed
+ * mirror of `backend/app/domain/coder_rollup.py::roll_up`. Computed
  * client-side (never trusted from a server-fetched `row.coder` field)
  * so the badge stays correct for a row with LOCALLY staged, unsaved
  * edits too (see `useViewCodingPage.js`'s `pendingRowEdits`) -- a row

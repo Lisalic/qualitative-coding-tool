@@ -33,7 +33,7 @@ class TestEnvPyDatabaseUrl:
         # the bare `%` as interpolation and env.py raised before connecting.
         # Offline (`sql=True`) runs env.py end to end without a database.
         url = "postgresql://app:p%40ss%25w0rd@db.example.com:5432/prod"
-        monkeypatch.setattr("backend.app.database.DATABASE_URL", url)
+        monkeypatch.setattr("backend.app.core.database.DATABASE_URL", url)
         cfg = migrations.alembic_config()
 
         command.upgrade(cfg, "a1e6f2c9b3d7", sql=True)

@@ -1,10 +1,10 @@
 import React from "react";
 import ErrorDisplay from "../components/feedback/ErrorDisplay";
 import ProgressBar from "../components/feedback/ProgressBar";
-import SummarizeRequestSection from "../components/summarize/SummarizeRequestSection";
-import SummaryOutputSection from "../components/summarize/SummaryOutputSection";
-import PageShell from "../components/shell/PageShell";
-import useSummarizeCodingPage from "../components/summarize/useSummarizeCodingPage";
+import SummarizeRequestSection from "../features/summarize/SummarizeRequestSection";
+import SummaryOutputSection from "../features/summarize/SummaryOutputSection";
+import PageShell from "../components/layout/PageShell";
+import useSummarizeCodingPage from "../features/summarize/useSummarizeCodingPage";
 
 export default function SummarizeCoding() {
   const {

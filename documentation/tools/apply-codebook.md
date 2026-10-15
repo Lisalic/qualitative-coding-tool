@@ -10,11 +10,11 @@ opens on an existing artifact.
 
 Sidebar → Apply Codebook, the project page's **Add Coding** button, or
 `/codebook-apply` → `pages/ApplyCodebook.jsx` →
-`components/coding-editor/CodingEditor.jsx`.
+`features/coding/editor/CodingEditor.jsx`.
 
 ## Two steps on one route
 
-**Setup** (`components/coding-editor/CodingSetupPanel.jsx`) chooses the
+**Setup** (`features/coding/editor/CodingSetupPanel.jsx`) chooses the
 source database, the codebook, the content scope, and how much to sample,
 then creates the artifact — always **uncoded**: rows copied in, codebook
 snapshotted, zero `coding_entries`. There is no "code everything now"
@@ -78,11 +78,11 @@ point, not a result.
 
 ## Developer reference
 
-- Frontend: `pages/ApplyCodebook.jsx`, `components/coding-editor/`
+- Frontend: `pages/ApplyCodebook.jsx`, `features/coding/editor/`
   (`CodingEditor.jsx`, `CodingSetupPanel.jsx`),
-  `lib/apiContracts.js::buildManualCodingPayload`. Workspace files are the
+  `api/contracts.js::buildManualCodingPayload`. Workspace files are the
   same ones [View Coding](view-coding.md) documents.
-- Backend: `backend/app/api/coding_routes.py::POST /coding/manual` →
+- Backend: `backend/app/api/routes/coding.py::POST /coding/manual` →
   `backend/app/services/coding_service.py::create_manual_coding` →
   `_read_codebook_as_parent`, `_sample_rows_for_coding`,
   `_materialize_coding_artifact` → `backend/app/repositories/raw_data_repo.py`,

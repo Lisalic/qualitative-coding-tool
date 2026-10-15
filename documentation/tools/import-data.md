@@ -29,7 +29,7 @@ Direct (non-job) call — the file is small enough that ingestion runs synchrono
 
 `POST /api/upload-zst/` (multipart: `file`, `data_type`, `name`, `description`, `project_id`).
 
-Server-side (`backend/app/services/file_service.py::upload_zst`): creates the `File` row (`file_type="raw_data"`, new `proj_<hex>` schemaname) and links it to the project; writes the upload to a temp `.zst` file; pulls 1000-row batches off `backend/scripts/import_db.py::iter_zst_records` on a worker thread (decompresses, parses each JSON line, skips malformed lines, empty/`[deleted]` bodies and repeated ids) and bulk-inserts each batch into the fixed `submissions`/`comments` tables keyed by the new `file_id`; records the row count in `FileTable`; deletes the temp file.
+Server-side (`backend/app/services/file_service.py::upload_zst`): creates the `File` row (`file_type="raw_data"`, new `proj_<hex>` schemaname) and links it to the project; writes the upload to a temp `.zst` file; pulls 1000-row batches off `backend/app/formats/reddit_import.py::iter_zst_records` on a worker thread (decompresses, parses each JSON line, skips malformed lines, empty/`[deleted]` bodies and repeated ids) and bulk-inserts each batch into the fixed `submissions`/`comments` tables keyed by the new `file_id`; records the row count in `FileTable`; deletes the temp file.
 
 ## Output
 
@@ -45,7 +45,7 @@ A `raw_data` File artifact with `submissions`/`comments` rows populated. On succ
 
 ## Developer reference
 
-- Frontend: `pages/Import.jsx`, `components/data/FileUpload.jsx`.
-- Backend: `backend/app/api/file_routes.py::POST /upload-zst/` → `backend/app/services/file_service.py::upload_zst` → `backend/scripts/import_db.py::iter_zst_records` (parsing/decompression) → `backend/app/repositories/raw_data_repo.py::bulk_insert_submissions`/`bulk_insert_comments`.
+- Frontend: `pages/Import.jsx`, `features/data/FileUpload.jsx`.
+- Backend: `backend/app/api/routes/files.py::POST /upload-zst/` → `backend/app/services/file_service.py::upload_zst` → `backend/app/formats/reddit_import.py::iter_zst_records` (parsing/decompression) → `backend/app/repositories/raw_data_repo.py::bulk_insert_submissions`/`bulk_insert_comments`.
 - Storage written: `files`, `file_tables`, `project_files`, `submissions`/`comments` (fixed tables, keyed by the new `file_id`).
 - Endpoint: `POST /api/upload-zst/` — see [api-reference.md](../api-reference.md#files--backendappapifile_routespy).

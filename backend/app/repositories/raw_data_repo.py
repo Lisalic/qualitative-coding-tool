@@ -1,13 +1,13 @@
 """Repository for bulk operations on ``submissions``/``comments``.
 
 Replaces the per-row insert loops that used to run against a brand-new
-Postgres schema per upload/filter/move (``file_routes.py`` upload path,
-``data_routes.py::filter_data`` lines ~623-677, ``file_routes.py::move_rows``)
+Postgres schema per upload/filter/move (``routes/files.py`` upload path,
+``routes/data.py::filter_data`` lines ~623-677, ``routes/files.py::move_rows``)
 with set-based bulk-insert and insert-from-select operations against the
 fixed ``submissions``/``comments`` tables, keyed by ``file_id``.
 
 Every read in this module applies the SCD-2 liveness predicate (see
-``storage_models.py``'s ``Submission``/``Comment`` docstrings): a row is
+``models/storage.py``'s ``Submission``/``Comment`` docstrings): a row is
 live iff ``valid_to IS NULL``, live *as of* version ``v`` iff
 ``valid_from <= v AND (valid_to IS NULL OR valid_to >= v)``. This mirrors
 ``coding_repo.py``'s ``_live``/``entries_as_of`` split for
@@ -22,7 +22,7 @@ from sqlalchemy import and_, func, insert, literal, null, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.sql_filters import in_values
-from backend.app.storage_models import Comment, Submission
+from backend.app.models.storage import Comment, Submission
 
 # Columns never copied verbatim between files: `pk` is a per-row
 # surrogate identity, `file_id` is supplied by the caller, and
@@ -129,8 +129,8 @@ async def sample_submissions(
 ) -> list[Submission]:
     """``ceil(total * sample_percentage / 100)`` random LIVE rows for
     ``file_id``, matching the sampling logic in
-    ``codebook_routes.py::generate_codebook`` /
-    ``coding_routes.py::_assemble_posts_content``.
+    ``routes/codebook.py::generate_codebook`` /
+    ``routes/coding.py::_assemble_posts_content``.
     """
     total_result = await session.execute(
         _live(Submission, select(func.count()).select_from(Submission).where(Submission.file_id == file_id))
@@ -175,7 +175,7 @@ async def parent_post_context_for_comments(
     comment.
 
     ``link_id`` already has its ``t3_`` prefix stripped at import
-    (``backend/scripts/import_db.py``), so it matches ``Submission.id``
+    (``backend/app/formats/reddit_import.py``), so it matches ``Submission.id``
     directly. Shared by ``codebook_service`` and ``coding_service`` so a
     comment sent to either the codebook generator or the classifier can
     carry its parent post as context.
@@ -197,7 +197,7 @@ async def parent_post_context_for_comments(
 
 async def row_ids_as_of(session: AsyncSession, file_id: int, *, version_no: int, table: str) -> set[str]:
     """Every ``id`` live as of ``version_no`` for ``file_id``'s
-    ``submissions``/``comments`` -- backs ``core/data_diff.py``'s
+    ``submissions``/``comments`` -- backs ``domain/data_diff.py``'s
     added/removed set comparison, mirroring
     ``coding_repo.entries_as_of``'s as-of read for ``coding_entries``.
     """
@@ -220,7 +220,7 @@ async def copy_rows_by_id(
 ) -> dict[str, int]:
     """Set-based copy of specific rows from ``source_file_id`` to
     ``target_file_id``, replacing the per-id ``SELECT``+``INSERT`` loops in
-    ``data_routes.py::filter_data`` and ``file_routes.py::move_rows``.
+    ``routes/data.py::filter_data`` and ``routes/files.py::move_rows``.
 
     Each id list is skipped entirely (no query run) when ``None``/empty.
     Copied rows are re-stamped ``valid_from=target_version_no,

@@ -1,5 +1,5 @@
 """Service layer for saved summaries -- backs
-backend/app/api/content_routes.py.
+backend/app/api/routes/content.py.
 
 Content lives in a version's ``artifact_versions.content`` blob now
 (``version_service.commit_blob_version``), not in the old one-row-per-file
@@ -20,10 +20,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.exceptions import NotFoundError
-from backend.app.database import File, async_link_file_to_project
+from backend.app.models.workspace import File
+from backend.app.repositories.project_repo import async_link_file_to_project
 from backend.app.repositories import project_repo
 from backend.app.services import version_service
-from backend.app.versioning_models import ORIGIN_EDITED
+from backend.app.models.versioning import ORIGIN_EDITED
 
 
 async def save_summary(

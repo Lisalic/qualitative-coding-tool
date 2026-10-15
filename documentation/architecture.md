@@ -8,38 +8,73 @@ A `/**...*/` block above an exported component/hook/function states its purpose 
 
 ## Frontend layering
 
+`frontend/src/` is organized by feature, with a shared layer underneath that no feature owns:
+
+```
+src/
+  main.jsx, App.jsx, index.css   entry point, routing, global styles
+  pages/                         one thin route component per URL, composing features
+  features/                      everything specific to one product area
+    auth/  projects/  data/  memos/  filter/  export/  compare/  summarize/  versioning/
+    codebook/{editor,integrate,view}/
+    coding/{editor,workspace}/   (+ CodeLegend.jsx, shared by the codebook views)
+  components/                    shared UI with no feature knowledge
+    editor-shell/  feedback/  forms/  layout/  primitives/
+  hooks/                         shared hooks (useToolPanelData, useUnmountSignal, ...)
+  lib/                           shared pure helpers (uiClasses, formatDate, codingUtils, ...)
+  api/                           HTTP client (client.js) and request builders (contracts.js)
+```
+
+A feature's pure logic sits next to its components (e.g. `features/filter/filterEditorState.js`), and tests live in a `__tests__/` folder beside the code they cover. Features may import each other where one domain genuinely builds on another (the codebook views render `features/coding/CodeLegend.jsx`); anything used across many features belongs in the shared layer instead.
+
 - Routing is centralized in `frontend/src/App.jsx`; most feature pages are lazy-loaded (`React.lazy`) and wrapped in `ProtectedRoute` so anonymous sessions can't reach tool pages.
-- `frontend/src/components/shell/` (`ToolPage`, `ToolPageShell`, `ToolPageBody`, `ToolPanelHost`, `ViewPageShell`) keeps the Import/Filter/Generate/Apply screens and the View screens visually and structurally consistent. Compare and Summarize Coding hand-roll their own container instead of using the shell.
-- `frontend/src/components/tool-panels/useToolPanelData.js` is the shared data-loading hook for the three form-driven tool panels (Filter, Generate Codebook, Apply Codebook) — it fetches raw DBs, filtered DBs, projects, and (optionally) codebooks in parallel on mount, so every tool panel gets a consistent source-selection UX for free.
-- `frontend/src/lib/apiContracts.js` mirrors the field expectations of `backend/app/api/schemas.py` and validates required fields client-side (`assertRequired`, `assertProjSchema`) before the network call, so invalid submissions fail fast instead of round-tripping to get a 422. Only three of the six AI tools (Filter Data, Generate Codebook, Apply Codebook) go through this builder layer — Compare Codebooks/Codings and Summarize Coding assemble their `FormData` inline in their own components.
-- `frontend/src/api.js` exports the shared `axios` instance (`api`, cookie + Bearer-token auth via `localStorage.getItem("access_token")`) and:
+- `frontend/src/components/layout/` holds the app chrome (`Navbar`, `Sidebar`) and the page frame every screen shares (`PageShell`, `Panel`); `frontend/src/components/editor-shell/` is the setup-step/workspace/rail scaffold the Filter, Codebook, Apply Codebook and Integrate editors are all built on.
+- `frontend/src/hooks/useToolPanelData.js` is the shared data-loading hook for the form-driven tool editors (Filter, Generate Codebook, Apply Codebook, Integrate Codebook) — it fetches raw DBs, filtered DBs, projects, and (optionally) codebooks in parallel on mount, so every tool gets a consistent source-selection UX for free.
+- `frontend/src/api/contracts.js` mirrors the field expectations of `backend/app/api/schemas.py` and validates required fields client-side (`assertRequired`, `assertProjSchema`) before the network call, so invalid submissions fail fast instead of round-tripping to get a 422. Only three of the six AI tools (Filter Data, Generate Codebook, Apply Codebook) go through this builder layer — Compare Codebooks/Codings and Summarize Coding assemble their `FormData` inline in their own components.
+- `frontend/src/api/client.js` exports the shared `axios` instance (`api`, cookie + Bearer-token auth via `localStorage.getItem("access_token")`) and:
   - `postForm(path, formData)` — normalizes a response to `{ok, status, data, error}`, flattening FastAPI 422 `detail[]` arrays into a readable string.
   - `postFormAndPoll(path, formData, {intervalMs=2000, timeoutMs=600000, ...})` — the shared kickoff-then-poll helper for every job-backed endpoint: POSTs expecting `202 {job_id, status}`, then polls `GET /api/jobs/{job_id}` until the job reaches `succeeded`/`failed`/timeout.
 - Styling is Tailwind CSS v4, utility classes directly in JSX — see [style-guide.md](style-guide.md).
 
 ## Backend layering
 
-- Entry point `backend/app/main.py` mounts every router under `/api` (see `backend/app/api/routes.py`) and on startup upgrades the database to Alembic head (`backend/app/core/migrations.py`, see [Migrations](#migrations)).
-- Domain routers live in `backend/app/api/*_routes.py`, one per feature area (auth, files, prompts, codebooks, coding, data, projects, content, models) plus `backend/app/jobs/routes.py`. Every route is uniformly async: `Depends(get_async_db)` for DB access, `Depends(require_user_id)` for auth.
-- Routes stay thin and delegate to `backend/app/services/<domain>_service.py`, which in turn uses `backend/app/repositories/` for DB access and `backend/scripts/*.py` for pipeline/LLM logic.
-- New layers introduced by the recent storage refactor, all under `backend/app/`:
-  - `core/` — `exceptions.py` (the `AppError` hierarchy, translated to JSON by one global FastAPI exception handler in `main.py`), `auth_dependency.py::require_user_id`/`optional_user_id`, `schema_guard.py` (schema-name validation), `logging.py`.
-  - `external/` — the single OpenRouter call seam (`openrouter_client.py::chat_completion`, built on `AsyncOpenAI` plus a shared `retry_async` backoff helper), plus `errors.py` and `response_parsers.py`.
-  - `repositories/` — all DB access to the fixed storage tables.
-  - `services/` — per-domain business logic and job handlers.
-  - `jobs/` — the background job queue.
+Everything lives in the `backend.app` package, split by layer:
+
+```
+backend/app/
+  main.py         FastAPI app, lifespan, global error handlers (Azure runs backend.app.main:app)
+  api/            HTTP layer: router.py mounts routes/<domain>.py; schemas.py holds request models
+  services/       per-domain business logic and job handlers
+  repositories/   all DB access to the fixed storage tables
+  models/         SQLAlchemy ORM models: workspace (users/projects/files/prompts), storage, versioning, job
+  domain/         pure, IO-free logic: diffs, codebook deltas, coder rollup, coverage, evidence matching
+  formats/        (de)serialization: codebook markdown, DOCX/XLSX/QDC export, Reddit dump import
+  pipelines/      LLM-backed generation steps (filter, codebook generate/apply, summarize, tag expansion)
+  external/       OpenRouter client, model catalog, pricing, context window; email client
+  jobs/           the in-process background job queue
+  auth/           JWT tokens, password hashing, request session resolution, FastAPI auth dependencies
+  core/           infrastructure: config, database engine/session, exceptions, logging, migrations
+backend/alembic/  migration environment and revisions
+```
+
+- Entry point `backend/app/main.py` mounts every router under `/api` (see `backend/app/api/router.py`) and on startup upgrades the database to Alembic head (`backend/app/core/migrations.py`, see [Migrations](#migrations)).
+- Domain routers live in `backend/app/api/routes/<domain>.py`, one per feature area (auth, files, prompts, codebook, coding, data, memos, projects, content, versions, export, coverage, ai_models, jobs). Every route is uniformly async: `Depends(get_async_db)` for DB access, `Depends(require_user_id)` for auth.
+- Routes stay thin and delegate to `backend/app/services/<domain>_service.py`, which in turn uses `backend/app/repositories/` for DB access and `backend/app/pipelines/*.py` for pipeline/LLM logic.
+- Importing `backend.app.models` (or any module in it) registers every table on `Base.metadata`, so Alembic, the startup schema check and the tests' `create_all` always see the full schema.
+- `core/exceptions.py` holds the `AppError` hierarchy, translated to JSON by one global FastAPI exception handler in `main.py`; `auth/dependencies.py` provides `require_user_id`/`optional_user_id`.
+- `external/openrouter_client.py::chat_completion` is the single OpenRouter call seam (built on `AsyncOpenAI` plus a shared `retry_async` backoff helper), with `errors.py` and `response_parsers.py` beside it.
 
 ## Auth
 
-Hand-rolled HMAC-SHA256 JWT (`backend/app/auth.py`), not a third-party JWT library: `create_access_token`/`decode_access_token` sign/verify with `settings.jwt_secret_key`. Token resolution order (`backend/app/api/utils.py::get_user_id_from_request`): the `access_token` cookie first, then an `Authorization: Bearer <token>` header. Passwords are hashed with PBKDF2-HMAC-SHA256 (100,000 iterations), stored as `salt$iterations$hashhex`.
+Hand-rolled HMAC-SHA256 JWT (`backend/app/auth/tokens.py`), not a third-party JWT library: `create_access_token`/`decode_access_token` sign/verify with `settings.jwt_secret_key`. Token resolution order (`backend/app/auth/session.py::get_token_payload_from_request`): the `access_token` cookie first, then an `Authorization: Bearer <token>` header. Passwords are hashed with PBKDF2-HMAC-SHA256 (100,000 iterations) in `backend/app/auth/passwords.py`, stored as `salt$iterations$hashhex`.
 
 Two FastAPI dependencies wrap this: `require_user_id` (raises `UnauthorizedError` → 401 if absent) and `optional_user_id` (returns `None` instead of raising — used by a couple of file routes that need to run format validation before the auth check). Every route other than `/api/login/`, `/api/register/`, and `/api/logout/` requires a user.
 
-`Settings` (`backend/app/config.py`) reads `jwt_secret_key`, `jwt_algorithm` (`HS256`), `jwt_access_token_expire_minutes` (default 480), `jwt_refresh_token_expire_minutes` (default 10080) from `backend/.env`. **Set `JWT_SECRET_KEY` explicitly** — the fallback default in code is the literal string `"your-secret-key-here"`.
+`Settings` (`backend/app/core/config.py`) reads `jwt_secret_key`, `jwt_algorithm` (`HS256`), `jwt_access_token_expire_minutes` (default 480), `jwt_refresh_token_expire_minutes` (default 10080) from `backend/.env`. **Set `JWT_SECRET_KEY` explicitly** — the fallback default in code is the literal string `"your-secret-key-here"`.
 
 ## Errors
 
-`backend/app/core/exceptions.py` defines `AppError` (base, 500) and four subclasses: `NotFoundError` (404), `ForbiddenError` (403), `UnauthorizedError` (401), `ValidationAppError` (400), `UpstreamServiceError` (502). A single `@app.exception_handler(AppError)` in `main.py` renders any of these as `{"error": message}` with the matching status code. Separately, FastAPI's own request-validation errors (missing/malformed form fields on the Pydantic-backed endpoints) render as the standard `{"detail": [...]}` 422 shape, which `frontend/src/api.js::postForm` flattens into a readable string.
+`backend/app/core/exceptions.py` defines `AppError` (base, 500) and four subclasses: `NotFoundError` (404), `ForbiddenError` (403), `UnauthorizedError` (401), `ValidationAppError` (400), `UpstreamServiceError` (502). A single `@app.exception_handler(AppError)` in `main.py` renders any of these as `{"error": message}` with the matching status code. Separately, FastAPI's own request-validation errors (missing/malformed form fields on the Pydantic-backed endpoints) render as the standard `{"detail": [...]}` 422 shape, which `frontend/src/api/client.js::postForm` flattens into a readable string.
 
 ## Background jobs
 
@@ -50,7 +85,7 @@ Slow, LLM-backed endpoints don't block the request. Instead they return `202 {"j
 1. A route calls `backend/app/services/<domain>_service.py::start_<x>_job`, which validates input, resolves any `schemaname` references to `file_id`s, then calls `backend/app/jobs/service.py::enqueue_job(session, user_id=..., job_type=..., payload=..., runtime_extra=...)`.
 2. `enqueue_job` inserts a `pending` `Job` row (only `payload` is persisted — **never** `runtime_extra`, which is how the OpenRouter API key stays out of the database) and hands `_execute_job(...)` to the singleton `AsyncioJobRunner` (`backend/app/jobs/runner.py`), which keeps a reference in `self._tasks` (with a done-callback cleanup) specifically to dodge the classic "GC'd asyncio task" footgun.
 3. `_execute_job` opens its own DB session (the original request's session is long closed by the time this runs), sets `status="running"`, looks up the handler registered for `job_type` via `backend/app/jobs/registry.py::get_handler`, awaits it, and persists the result. It **never raises** — any exception (handler bug, DB error mid-update) is caught and the job is marked `failed` with `error`/`error_code` set, so a job can't get stuck at `running` forever.
-4. The frontend polls `GET /api/jobs/{job_id}` (`backend/app/jobs/routes.py`) via `postFormAndPoll` until the job reaches `succeeded` or `failed`.
+4. The frontend polls `GET /api/jobs/{job_id}` (`backend/app/api/routes/jobs.py`) via `postFormAndPoll` until the job reaches `succeeded` or `failed`.
 
 **Registered handlers** (`@register_handler("<job_type>")`):
 
@@ -64,11 +99,11 @@ Slow, LLM-backed endpoints don't block the request. Instead they return `202 {"j
 | `compare_codings` | `_run_compare_codings_job` | `services/coding_service.py` | `POST /api/compare-codings/` |
 | `summarize_coding` | `_run_summarize_coding_job` | `services/coding_service.py` | `POST /api/summarize-coding/` |
 
-Structural (no-LLM) codebook/coding diffing is a separate, non-job concern: `GET /api/artifacts/{ref}/diff` (`version_routes.py`) computes it synchronously between two versions of the same artifact's own history — see "Fixed content tables" below for the versioning model it reads.
+Structural (no-LLM) codebook/coding diffing is a separate, non-job concern: `GET /api/artifacts/{ref}/diff` (`routes/versions.py`) computes it synchronously between two versions of the same artifact's own history — see "Fixed content tables" below for the versioning model it reads.
 
 **Durability trade-off, accepted deliberately:** since a job's API key only ever lives in the runner's in-memory closure, a job in flight is lost if the process restarts. `backend/app/jobs/service.py::reconcile_orphaned_jobs_on_startup` (called from `main.py`'s lifespan, after tables are created) marks any leftover `pending`/`running` row as `failed` with `"Worker restarted before this job finished. Please retry."`, so the frontend fails loudly instead of polling forever. This also means the job runner does not horizontally scale: a second worker process would fail the first worker's in-flight jobs on its own startup.
 
-`Job` model (`backend/app/jobs/models.py`): `id`, `job_type`, `user_id` (FK, cascade delete), `status` (`pending`/`running`/`succeeded`/`partial`/`retryable_failure`/`failed`/`cancelled` — `succeeded` is the one and only success status; nothing produces `"completed"`), `payload` (JSON, never the caller's API key — that only ever lives in `runtime_extra`), `result`/`accounting`/`salvaged_output` (JSON, nullable), `error`/`error_code` (nullable; `error` is redacted against the job's own API key before being persisted or returned), `created_at`/`started_at`/`finished_at`.
+`Job` model (`backend/app/models/job.py`): `id`, `job_type`, `user_id` (FK, cascade delete), `status` (`pending`/`running`/`succeeded`/`partial`/`retryable_failure`/`failed`/`cancelled` — `succeeded` is the one and only success status; nothing produces `"completed"`), `payload` (JSON, never the caller's API key — that only ever lives in `runtime_extra`), `result`/`accounting`/`salvaged_output` (JSON, nullable), `error`/`error_code` (nullable; `error` is redacted against the job's own API key before being persisted or returned), `created_at`/`started_at`/`finished_at`.
 
 Token/cost accounting (`JobAccountingTracker`, `backend/app/jobs/progress.py`) preserves unknown provider usage or pricing as `None`, never coercing it to `0` — a call whose usage OpenRouter didn't report reads as "unknown" everywhere it's surfaced (`GET /api/jobs/{id}`'s `accounting`, the AI-assist panel), not as a misleadingly precise free run.
 
@@ -79,24 +114,24 @@ Every OpenRouter call funnels through `backend/app/external/openrouter_client.py
 - `chat_completion(*, system_prompt, user_prompt, api_key, model, temperature=0.05, timeout=300.0, response_format=None, use_middle_out=True, max_retries=3, on_retry=None) -> str` — the single entry point. Sends `extra_body={"transforms": ["middle-out"]}` when `use_middle_out` (OpenRouter's context-compaction feature), raises `ExternalServiceError("OpenRouter returned an empty completion")` on an empty response, and wraps any other exception as `ExternalServiceError` with an HTTP status code extracted from the error message.
 - `retry_async(fn, *, max_retries=3, initial_delay_s=2.0, is_retryable=None, on_retry=None)` — shared exponential-backoff helper (`2.0 * 2^(attempt-1)`), reused by the OpenRouter client and by `tag_expansion.py`.
 
-Per-script response *parsing* is intentionally **not** deduplicated into this seam, because the six pipeline scripts genuinely have different output contracts — free-form markdown (codebook generation), the `POST_ID`/`CODE`/`EVIDENCE` DSL (codebook application), a bare Python-literal array (AI filtering), and real JSON (tag expansion). Only the actually-shared primitives — markdown-fence stripping, OpenRouter error-code extraction and friendly messaging — are deduped into `backend/app/external/response_parsers.py` and `backend/app/external/errors.py` / `backend/scripts/openrouter_http.py`.
+Per-script response *parsing* is intentionally **not** deduplicated into this seam, because the six pipeline scripts genuinely have different output contracts — free-form markdown (codebook generation), the `POST_ID`/`CODE`/`EVIDENCE` DSL (codebook application), a bare Python-literal array (AI filtering), and real JSON (tag expansion). Only the actually-shared primitives — markdown-fence stripping, OpenRouter error-code extraction and friendly messaging — are deduped into `backend/app/external/response_parsers.py` and `backend/app/external/errors.py` / `backend/app/external/openrouter_http.py`.
 
 The OpenRouter API key is always supplied per-request by the caller (see [concepts.md#api-key-handling](concepts.md#api-key-handling)) — never stored server-side.
 
 ## Model catalog
 
-`backend/app/ai_models.py` loads `backend/constants/openrouter_models.json` at import time into `AI_MODELS` (28 entries: 22 free, 6 paid) and exposes:
+`backend/app/external/ai_models.py` loads `backend/app/external/openrouter_models.json` at import time into `AI_MODELS` (28 entries: 22 free, 6 paid) and exposes:
 
 - `model_slug_at(index)` — clamped lookup, used by pipeline scripts to pick their module-level defaults.
 - `is_paid_model(slug)` — live lookup against the current in-memory catalog.
 - `set_catalog(models)` / `refresh_from_openrouter()` — replace the catalog; called once at startup and then every 24 hours by a background task spawned in `main.py`'s lifespan (`fetch_openrouter_catalog`, an unauthenticated `GET https://openrouter.ai/api/v1/models`, keeps only text-in/text-out models, and computes USD-per-million pricing).
-- `GET /api/models` (`backend/app/api/models_routes.py`) — serves the live catalog to the frontend's `AiModelFormGroup`.
+- `GET /api/models` (`backend/app/api/routes/ai_models.py`) — serves the live catalog to the frontend's `AiModelFormGroup`.
 
-**Caveat:** `backend/scripts/codebook_generator.py::MODEL_1..MODEL_7` and `backend/scripts/codebook_apply.py::FREE_MODEL` are bound via `model_slug_at(...)` **at import time**, so they keep pointing at whichever free models were current at process start and do **not** track the daily refresh. `is_paid_model` and a fresh `GET /api/models` call both see the live catalog immediately, since they look it up at call time. `backend/scripts/filter_db.py::FREE_MODEL` and `backend/scripts/tag_expansion.py::DEFAULT_MODEL` don't consult the catalog at all — they hardcode `"meta-llama/llama-3.3-70b-instruct:free"`.
+**Caveat:** `backend/app/pipelines/codebook_generator.py::MODEL_1..MODEL_7` and `backend/app/pipelines/codebook_apply.py::FREE_MODEL` are bound via `model_slug_at(...)` **at import time**, so they keep pointing at whichever free models were current at process start and do **not** track the daily refresh. `is_paid_model` and a fresh `GET /api/models` call both see the live catalog immediately, since they look it up at call time. `backend/app/pipelines/filter_db.py::FREE_MODEL` and `backend/app/pipelines/tag_expansion.py::DEFAULT_MODEL` don't consult the catalog at all — they hardcode `"meta-llama/llama-3.3-70b-instruct:free"`.
 
 ## Storage
 
-### Relational metadata (`backend/app/database.py`)
+### Relational metadata (`backend/app/models/workspace.py`)
 
 | Table | Purpose |
 |---|---|
@@ -107,7 +142,7 @@ The OpenRouter API key is always supplied per-request by the caller (see [concep
 | `file_tables` | per-`file_id` row counts, keyed by table name (`submissions`/`comments`) |
 | `prompts` | the user's saved prompt library (see [Prompt Manager](tools/prompt-manager.md)) |
 
-### Fixed content tables (`backend/app/storage_models.py`, `backend/app/versioning_models.py`)
+### Fixed content tables (`backend/app/models/storage.py`, `backend/app/models/versioning.py`)
 
 Replaces the old per-artifact dynamic-schema model (see [concepts.md#schemaname](concepts.md#schemaname-an-opaque-identifier-not-a-postgres-schema)) with a handful of normal tables, all keyed by `file_id`:
 
@@ -118,14 +153,14 @@ Replaces the old per-artifact dynamic-schema model (see [concepts.md#schemaname]
 | `artifact_versions` | one **commit** per save, sealed the instant it's created — `version_no`, `origin` (generated/edited/imported/forked), `sealed_at`, `job_id`/`model`/`system_prompt` provenance, plus `user_instructions` (the human-authored fragment only) and `prompt_meta` (a length/hash of the LLM-rendered prompt — the rendered prompt itself is not stored, since it duplicates data already in `submissions`/`comments`), and `content` (used only by blob-storage artifact types: `codebook_comparison` / `coding_comparison` / `summary`) | `UNIQUE(file_id, version_no)`; self-FK `parent_version_id` (cross-file for a fork's v1) |
 | `artifact_edges` | typed, ordered, version-pinned derivation between artifacts — replaces the old untyped `file_dependencies` | `(child_file_id, parent_file_id, parent_version_id, relation, role, position)` |
 | `codebook_codes` | one row per code, keyed by a stable `code_uid`/`family_uid` so renames are recorded rather than inferred — the content of a `codebook` artifact and of a `coding` artifact's own codebook snapshot | `UNIQUE(version_id, code_uid)` |
-| `coding_entries` | structured, SCD-2 range-versioned `(file_id, row_type, post_id, code_uid, evidence, notes, coder, coder_model, valid_from, valid_to)` rows — a row is **live** iff `valid_to IS NULL`; superseding at version `N` closes the old row with `valid_to = N - 1` rather than deleting it. `coder` (`"human"`/`"ai"`) and `coder_model` are B1's per-quote attribution — a row's AI/Human/Both label is rolled up from its live entries, never stored (`backend/app/core/coder_rollup.py`) | `(file_id, code_uid)`, `(file_id, coder)`, and liveness-filtered indexes |
-| `artifact_assists` | C2's AI-assist provenance channel — one row per assistant run (`filter_preview`/`codebook_preview`/`recode_items`) that contributed to a version: `stage`, `job_id`, `model`/`system_prompt`/`user_instructions`/`prompt_meta` (read from the job, never trusted from the client), `proposed_count`/`accepted_count`/`dismissed_count`, `accepted_refs`. Deliberately sibling to `artifact_versions`, not a change to it — see `versioning_models.ArtifactAssist`'s docstring | `(file_id)`, `(version_id)` indexes; FKs to `files`/`artifact_versions`/`jobs` |
+| `coding_entries` | structured, SCD-2 range-versioned `(file_id, row_type, post_id, code_uid, evidence, notes, coder, coder_model, valid_from, valid_to)` rows — a row is **live** iff `valid_to IS NULL`; superseding at version `N` closes the old row with `valid_to = N - 1` rather than deleting it. `coder` (`"human"`/`"ai"`) and `coder_model` are B1's per-quote attribution — a row's AI/Human/Both label is rolled up from its live entries, never stored (`backend/app/domain/coder_rollup.py`) | `(file_id, code_uid)`, `(file_id, coder)`, and liveness-filtered indexes |
+| `artifact_assists` | C2's AI-assist provenance channel — one row per assistant run (`filter_preview`/`codebook_preview`/`recode_items`) that contributed to a version: `stage`, `job_id`, `model`/`system_prompt`/`user_instructions`/`prompt_meta` (read from the job, never trusted from the client), `proposed_count`/`accepted_count`/`dismissed_count`, `accepted_refs`. Deliberately sibling to `artifact_versions`, not a change to it — see `models.versioning.ArtifactAssist`'s docstring | `(file_id)`, `(version_id)` indexes; FKs to `files`/`artifact_versions`/`jobs` |
 
 `coding_entries` exists so code-frequency queries (`GROUP BY code_uid`) can run directly in SQL instead of re-parsing a blob client-side — see `backend/app/repositories/coding_repo.py::code_frequency`. Every read goes through that module's `_live()` helper so a superseded (closed) range never reappears as current coding.
 
 All access to these tables goes through `backend/app/repositories/`: `file_repo.py` (schemaname → `file_id` resolution, ownership checks), `raw_data_repo.py` (bulk insert, sampling, row copy for filter/merge), `version_repo.py` (dumb CRUD on `artifact_versions`/`artifact_edges`/`codebook_codes` — no policy), `coding_repo.py` (SCD-2 read/write + frequency queries), `project_repo.py`. Policy — no-op suppression, the three `commit_*` write paths, forking — lives one layer up in `backend/app/services/version_service.py`; see that module's docstring. Every commit is sealed the instant it's created (no unsealed "draft" state to open, mutate, or auto-seal) — the `POST /api/artifacts/{ref}/checkpoint` route that once let a user trigger sealing manually has been removed, since there was never anything left for it to do. History is strictly append-only — there is no revert route. Recovering an old state is "duplicate from that version" instead (`POST /api/coding/{ref}/duplicate` / `POST /api/codebook/{ref}/duplicate`, both taking an optional `from_version_no`) — non-destructive, so it needs no guard against another artifact's `parent_version_id` pin.
 
-Not every version owns a `codebook_codes` row set of its own. v1, the 3 most recent versions of any file, and every 10th version ("keyframe") stay fully materialized; everything else is compacted to a field-level delta (`codes_delta`, `backend/app/core/codebook_delta.py::encode_delta`) computed directly against its nearest still-materialized ancestor, checked once per commit (O(1), never a sweep — `version_service._demote_if_eligible`). A coding version born from a row-only edit (`save_coding_revision`, an AI recode) skips materialization from birth rather than storing an empty delta, since its codes are identical to its predecessor's by construction; `version_service.read_codes` resolves either case (a plain inherit or a real compacted delta) by looking up the nearest earlier materialized version and applying `codes_delta` if there is one. Every version that existed before this scheme was added defaults to materialized, so no backfill was needed. See `ArtifactVersion.codes_materialized`'s docstring for the full policy and reasoning (including why each compacted version stores one delta computed directly against its anchor, not a step in a consecutive chain).
+Not every version owns a `codebook_codes` row set of its own. v1, the 3 most recent versions of any file, and every 10th version ("keyframe") stay fully materialized; everything else is compacted to a field-level delta (`codes_delta`, `backend/app/domain/codebook_delta.py::encode_delta`) computed directly against its nearest still-materialized ancestor, checked once per commit (O(1), never a sweep — `version_service._demote_if_eligible`). A coding version born from a row-only edit (`save_coding_revision`, an AI recode) skips materialization from birth rather than storing an empty delta, since its codes are identical to its predecessor's by construction; `version_service.read_codes` resolves either case (a plain inherit or a real compacted delta) by looking up the nearest earlier materialized version and applying `codes_delta` if there is one. Every version that existed before this scheme was added defaults to materialized, so no backfill was needed. See `ArtifactVersion.codes_materialized`'s docstring for the full policy and reasoning (including why each compacted version stores one delta computed directly against its anchor, not a step in a consecutive chain).
 
 ## Migrations
 
@@ -149,4 +184,4 @@ Old dynamic per-artifact schemas (`proj_*`/`cmp_*`/`sum_*`) from before the fixe
 
 Deployed to Azure Web App via `.github/workflows/main_qualitative-coding-tool.yml` on push to `main`. The workflow uploads the repo as-is (dependency install happens server-side via Azure Oryx); the Azure startup command runs `python -m uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT`. CORS in `main.py` is locked to `http://localhost:5173` plus the deployed Vercel frontend origins — update that list when adding a new frontend origin.
 
-Several backend modules (e.g. `auth.py`) use a `try: from backend.app.X import ... except Exception: from app.X import ...` fallback pattern, because the Azure deployment and local `uvicorn backend.app.main:app` runs can end up with different values on `sys.path`/cwd.
+Every backend import is absolute (`from backend.app.X import ...`), so the app must be started from the repository root, as both the Azure startup command and local `uvicorn backend.app.main:app` runs do.

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { useAuth } from "../auth/useAuth";
+import { useAuth } from "../../features/auth/useAuth";
 import { confirmLeave } from "../feedback/LeaveGuard";
 
 const navBtn = "block w-full px-3 py-1.5 text-left text-sm transition-colors";

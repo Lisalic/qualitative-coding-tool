@@ -1,12 +1,12 @@
 import React from "react";
 import ErrorDisplay from "../components/feedback/ErrorDisplay";
-import ExportDropdown from "../components/export/ExportDropdown";
+import ExportDropdown from "../features/export/ExportDropdown";
 import ArtifactPicker from "../components/primitives/ArtifactPicker";
 import MarkdownDisplay from "../components/primitives/MarkdownDisplay";
-import PageShell from "../components/shell/PageShell";
-import Panel from "../components/shell/Panel";
+import PageShell from "../components/layout/PageShell";
+import Panel from "../components/layout/Panel";
 import PageEmptyState from "../components/primitives/PageEmptyState";
-import useViewSummaryPage from "../components/summarize/useViewSummaryPage";
+import useViewSummaryPage from "../features/summarize/useViewSummaryPage";
 
 export default function ViewSummary() {
   const {

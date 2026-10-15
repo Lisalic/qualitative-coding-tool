@@ -2,7 +2,7 @@
 the real throwaway Postgres database rather than the SQLite fixtures
 used everywhere else -- this is the end-to-end proof that the
 `TestClient` + dependency-override wiring used throughout
-tests/backend/routes/ generalizes to a real database, not just SQLite's
+tests/backend/api/routes/ generalizes to a real database, not just SQLite's
 more forgiving semantics.
 
 Deliberately a SYNCHRONOUS test (`def`, not `async def`): Starlette's
@@ -22,7 +22,7 @@ from urllib.parse import urlsplit, urlunsplit
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from backend.app.database import get_async_db
+from backend.app.core.database import get_async_db
 from backend.app.main import app as fastapi_app
 
 
@@ -74,7 +74,7 @@ def test_password_reset_revocation_flow(integration_sync_engine, integration_db_
     immediately revokes existing session credentials across all authenticated routes.
     """
     from urllib.parse import parse_qs, urlparse
-    from backend.app.config import settings
+    from backend.app.core.config import settings
     from backend.app.services import auth_service
 
     monkeypatch.setattr(settings, "brevo_api_key", "test-key")

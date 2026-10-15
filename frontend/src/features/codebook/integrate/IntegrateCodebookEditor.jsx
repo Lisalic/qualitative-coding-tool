@@ -1,0 +1,369 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
+import { requestJson } from "../../../api/client";
+import ArtifactCreatedMessage from "../../../components/feedback/ArtifactCreatedMessage";
+import ErrorDisplay from "../../../components/feedback/ErrorDisplay";
+import DialogService from "../../../components/feedback/DialogService";
+import ToastService from "../../../components/feedback/ToastService";
+import PageShell from "../../../components/layout/PageShell";
+import { useInitialProjectId } from "../../../hooks/useInitialProjectId";
+import { useToolPanelData } from "../../../hooks/useToolPanelData";
+import {
+  MissingFieldsError,
+  buildIntegrateCodebookPayload,
+} from "../../../api/contracts";
+import { integrateDraftStorageKey } from "../editor/codebookEditorState";
+import { flattenTreeToCodes } from "../../../lib/codingUtils";
+import { btn } from "../../../lib/uiClasses";
+import { useCodebookEditorState } from "../editor/useCodebookEditorState";
+import EditorSetupStep from "../../../components/editor-shell/EditorSetupStep";
+import { missingHint } from "../../../lib/formHints";
+import EditorOutputFields from "../../../components/editor-shell/EditorOutputFields";
+import EditorWorkspace from "../../../components/editor-shell/EditorWorkspace";
+import EditorActionBar from "../../../components/editor-shell/EditorActionBar";
+import IntegrateBuilderPane from "./IntegrateBuilderPane";
+import IntegrateChangeSourcesModal from "./IntegrateChangeSourcesModal";
+import IntegrateRail from "./IntegrateRail";
+import IntegrateSourcePane from "./IntegrateSourcePane";
+import IntegrateSourcePicker from "./IntegrateSourcePicker";
+import { useSourceCodebooks } from "./useSourceCodebooks";
+import { useSourceComparisons } from "./useSourceComparisons";
+
+/**
+ * Merge two or more existing codebooks into one, with the source codes
+ * in front of you.
+ *
+ * Same two-step shape as Create Codebook: a setup step picks the source
+ * codebooks (two or more) and names the output, then a 3-pane workspace
+ * opens -- the source codebooks' codes on the left (read-only, grouped
+ * by codebook, each with an "Add" rescue action), the merged draft in
+ * the center (`IntegrateBuilderPane`, built on the same `CodeLegend`
+ * every other codebook editor uses), and the active source code's full
+ * text plus the AI merge assistant in a reference rail on the right.
+ * The rail's Comparison tab shows any Compare Codebook report made from
+ * these sources -- compare-then-integrate is the intended workflow --
+ * and can hand that report to the assistant as merge guidance.
+ *
+ * The draft starts empty: nothing is in the merged codebook until the
+ * researcher accepts an AI-proposed merge or copies a source code by
+ * hand, and nothing is created at all until an explicit submit --
+ * mirrors Create Codebook's "review tray, never auto-write" contract,
+ * see `features/codebook/editor/codebookEditorState.js`'s module docstring for why this
+ * editor reuses that state machine rather than a second one.
+ *
+ * Unlike Create Codebook there is no Refine mode and no source-database
+ * row list -- a merge output is always a fresh codebook, and its
+ * "source data" is the codebooks themselves, not raw rows.
+ */
+/** Carry a saved draft over to a new storage key (the draft hook re-reads
+ * on a key change). Best-effort: without localStorage there's no draft. */
+function moveDraft(fromKey, toKey) {
+  try {
+    const saved = window.localStorage.getItem(fromKey);
+    if (saved !== null) window.localStorage.setItem(toKey, saved);
+    window.localStorage.removeItem(fromKey);
+  } catch {
+    // localStorage unavailable -- nothing was persisted to move.
+  }
+}
+
+export default function IntegrateCodebookEditor() {
+  const location = useLocation();
+  const initialProjectId = useInitialProjectId();
+  const { codebooks, projects, loading: panelDataLoading, error: panelDataError } =
+    useToolPanelData({ includeCodebooks: true });
+
+  const [started, setStarted] = useState(false);
+  // Arriving from View Codebook's "Integrate" button pre-selects that
+  // codebook as the first of the set; the researcher still has to pick
+  // at least one more before Continue is enabled.
+  const [selectedRefs, setSelectedRefs] = useState(() =>
+    location.state?.codebookA ? [location.state.codebookA] : [],
+  );
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [selectedProject, setSelectedProject] = useState(initialProjectId);
+
+  const [activeCode, setActiveCode] = useState(null);
+  const [railTab, setRailTab] = useState("code");
+  const [selectedComparison, setSelectedComparison] = useState(null);
+  const [useComparisonInAi, setUseComparisonInAi] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const [createdFile, setCreatedFile] = useState(null);
+  const [changingSources, setChangingSources] = useState(false);
+
+  const codebookOptions = useMemo(
+    () => (codebooks || []).filter((entry) => entry?.metadata?.file_type !== "codebook_comparison"),
+    [codebooks],
+  );
+  const codebookNames = useMemo(() => {
+    const names = {};
+    for (const option of codebookOptions) {
+      names[option.metadata?.schema || option.id] = option.name;
+    }
+    return names;
+  }, [codebookOptions]);
+
+  // Set at "Continue" from the selection at that point. Change Sources
+  // (below) moves the draft to the new selection's key rather than
+  // abandoning it, so reopening this page with the same codebooks
+  // selected restores the draft either way.
+  const [sessionStorageKey, setSessionStorageKey] = useState("");
+  const editor = useCodebookEditorState(sessionStorageKey);
+
+  const { sources, loading: sourcesLoading, error: sourcesError } = useSourceCodebooks(
+    started ? selectedRefs : [],
+  );
+  const { comparisons, loading: comparisonsLoading } = useSourceComparisons(started ? selectedRefs : []);
+
+  // Open on the newest comparison when there is one -- reading it is the
+  // natural first step of a merge. Re-evaluated whenever the comparison
+  // list changes, but without undoing the researcher's own choices: a
+  // still-listed comparison stays selected, the "use in AI" opt-out is
+  // left alone, and the rail tab only moves until they've picked one.
+  const railTouchedRef = useRef(false);
+  useEffect(() => {
+    const best = comparisons[0] || null;
+    setSelectedComparison((prev) =>
+      prev && comparisons.some((c) => c.ref === prev) ? prev : best?.ref || null,
+    );
+    if (!railTouchedRef.current) setRailTab(best ? "comparison" : "code");
+  }, [comparisons]);
+
+  const changeRailTab = (tab) => {
+    railTouchedRef.current = true;
+    setRailTab(tab);
+  };
+
+  const selectCode = (code) => {
+    setActiveCode(code);
+    changeRailTab("code");
+  };
+
+  const copyCode = (code) => {
+    const before = editor.snapshot();
+    if (editor.copyCode(code) === before) {
+      ToastService.show(`"${code.name}" is already in your draft.`, "info");
+    }
+  };
+
+  const handleClear = async () => {
+    const confirmed = await DialogService.confirm(
+      "Clear every code and proposal in this merged draft? This cannot be undone.",
+      { title: "Clear draft", confirmLabel: "Clear", danger: true },
+    );
+    if (confirmed) editor.clearDraft();
+  };
+
+  const toggleRef = (ref) => {
+    setSelectedRefs((prev) => (prev.includes(ref) ? prev.filter((r) => r !== ref) : [...prev, ref]));
+  };
+
+  const handleSubmit = async () => {
+    if (submitting) return;
+    const submittedState = editor.snapshot();
+    setSubmitting(true);
+    setSubmitError("");
+    setCreatedFile(null);
+    const codes = flattenTreeToCodes(editor.draft);
+    try {
+      let payload;
+      try {
+        payload = buildIntegrateCodebookPayload({
+          codebooks: selectedRefs,
+          name,
+          description,
+          projectId: selectedProject,
+          codes,
+          assistRuns: editor.assistRuns,
+        });
+      } catch (err) {
+        if (err instanceof MissingFieldsError) {
+          setSubmitError(err.userMessage);
+          return;
+        }
+        throw err;
+      }
+
+      const { ok, data, error: postError } = await requestJson("/api/codebook/integrate", {
+        method: "POST",
+        body: payload,
+      });
+      if (!ok) {
+        setSubmitError(postError || "Failed to create the codebook");
+        return;
+      }
+
+      setCreatedFile(data?.file || null);
+      // The draft has become an artifact -- starting the next merge from
+      // the same selection would otherwise inherit every code just saved.
+      editor.clearDraftIfUnchanged(submittedState);
+    } catch (err) {
+      setSubmitError(err?.message || "Failed to save the codebook");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const { draft: draftCount, proposed, aiAccepted } = editor.counts;
+  const outputReady = Boolean(name.trim()) && Boolean(selectedProject);
+  const canContinue = selectedRefs.length >= 2 && outputReady;
+  const canSubmit = !submitting && draftCount > 0;
+
+  const totalSourceCodes = sources.reduce((sum, s) => sum + s.codes.length, 0);
+
+  if (!started) {
+    return (
+      <PageShell title="Integrate Codebook" width="wide">
+        <EditorSetupStep
+          sourceTitle="Source codebooks"
+          sourceFields={
+            <>
+              <IntegrateSourcePicker
+                codebooks={codebookOptions}
+                selected={selectedRefs}
+                onToggle={toggleRef}
+                loading={panelDataLoading}
+                disabled={false}
+              />
+              {selectedRefs.length < 2 && (
+                <p className="text-sm text-paper/50">Select 2 or more codebooks.</p>
+              )}
+            </>
+          }
+          outputTitle="Output"
+          outputFields={
+            <EditorOutputFields
+              idPrefix="integrateCodebook"
+              name={name}
+              onNameChange={setName}
+              namePlaceholder="integrated-codebook"
+              nameLabel="Codebook name"
+              description={description}
+              onDescriptionChange={setDescription}
+              selectedProject={selectedProject}
+              onProjectChange={setSelectedProject}
+              projectOptions={projects}
+            />
+          }
+          onSubmit={() => {
+            setSessionStorageKey(integrateDraftStorageKey(selectedRefs));
+            setStarted(true);
+          }}
+          submitLabel="Continue"
+          submitLoadingLabel="Continue"
+          submitDisabled={!canContinue}
+          submitHint={missingHint([
+            ["2 or more codebooks", selectedRefs.length < 2],
+            ["a name", !name.trim()],
+            ["a project", !selectedProject],
+          ])}
+          error={panelDataError}
+        />
+      </PageShell>
+    );
+  }
+
+  return (
+    <>
+      <EditorWorkspace
+        title="Integrate Codebook"
+        emphasis="builder"
+        subtitle={`${selectedRefs.length} codebooks · ${totalSourceCodes} codes`}
+        actions={
+          <button type="button" className={btn} onClick={() => setChangingSources(true)}>
+            Change sources
+          </button>
+        }
+        banners={
+          <>
+            {sourcesError && (
+              <div className="shrink-0">
+                <ErrorDisplay message={sourcesError} variant="alert" />
+              </div>
+            )}
+            {createdFile && (
+              <div className="shrink-0">
+                <ArtifactCreatedMessage
+                  name={createdFile.filename}
+                  viewPath="/codebook-view"
+                  viewState={{ selected: createdFile.schema_name }}
+                />
+              </div>
+            )}
+          </>
+        }
+        list={
+          <IntegrateSourcePane
+            sources={sources}
+            codebookNames={codebookNames}
+            loading={sourcesLoading}
+            activeKey={activeCode?.key}
+            onSelectCode={selectCode}
+            draftCount={draftCount}
+            onCopyCode={copyCode}
+            disabled={submitting}
+          />
+        }
+        reader={<IntegrateBuilderPane editor={editor} codebookNames={codebookNames} disabled={submitting} />}
+        rail={
+          <IntegrateRail
+            tab={railTab}
+            onTabChange={changeRailTab}
+            comparisons={comparisons}
+            comparisonsLoading={comparisonsLoading}
+            selectedComparison={selectedComparison}
+            onSelectComparison={setSelectedComparison}
+            useComparisonInAi={useComparisonInAi}
+            onUseComparisonInAiChange={setUseComparisonInAi}
+            active={activeCode}
+            codebookName={activeCode ? codebookNames[activeCode.source.ref] : ""}
+            codebooks={selectedRefs}
+            existingCodes={editor.existingCodes}
+            onProposals={editor.receiveProposals}
+            disabled={submitting}
+          />
+        }
+        actionBar={
+          <EditorActionBar
+            summary={
+              <>
+                {draftCount} code{draftCount === 1 ? "" : "s"}
+                {proposed > 0 ? ` · ${proposed} awaiting review` : ""}
+                {aiAccepted > 0 ? ` · ${aiAccepted} from AI` : ""}
+              </>
+            }
+            secondaryLabel="Clear"
+            onSecondary={handleClear}
+            secondaryDisabled={submitting || (draftCount === 0 && proposed === 0)}
+            primaryLabel="Create codebook"
+            primaryLoadingLabel="Creating…"
+            primaryLoading={submitting}
+            onPrimary={handleSubmit}
+            primaryDisabled={!canSubmit}
+            primaryHint={draftCount === 0 ? "Add at least one code to create the codebook." : ""}
+            errorMessage={submitError}
+          />
+        }
+      />
+      {changingSources && (
+        <IntegrateChangeSourcesModal
+          codebooks={codebookOptions}
+          selected={selectedRefs}
+          onClose={() => setChangingSources(false)}
+          onChange={(nextRefs) => {
+            const nextKey = integrateDraftStorageKey(nextRefs);
+            if (nextKey !== sessionStorageKey) {
+              moveDraft(sessionStorageKey, nextKey);
+              setSessionStorageKey(nextKey);
+            }
+            setSelectedRefs(nextRefs);
+            setActiveCode(null);
+            setChangingSources(false);
+          }}
+        />
+      )}
+    </>
+  );
+}

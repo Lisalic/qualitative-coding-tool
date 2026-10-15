@@ -8,7 +8,7 @@ Register an account, log in, and log out. Gates access to every other tool.
 
 - `/login` → `frontend/src/pages/Login.jsx`
 - `/register` → `frontend/src/pages/Register.jsx`
-- `/` and any unknown path render `frontend/src/components/auth/AuthGate.jsx`, which shows the authenticated Home page or an anonymous Landing page depending on session state.
+- `/` and any unknown path render `frontend/src/features/auth/AuthGate.jsx`, which shows the authenticated Home page or an anonymous Landing page depending on session state.
 
 Anonymous users see only Login/Register in the sidebar (`frontend/src/components/layout/Sidebar.jsx`); every other route is wrapped in `ProtectedRoute` and redirects to `/login` (carrying `state.from`) if unauthenticated.
 
@@ -50,6 +50,6 @@ No artifact. A valid session (cookie + `localStorage.access_token`) that every s
 
 ## Developer reference
 
-- Frontend: `pages/Login.jsx`, `pages/Register.jsx`, `components/auth/AuthFormSection.jsx` (shared `mode="login"|"register"` form), `components/auth/AuthLinksSection.jsx`, `components/auth/AuthGate.jsx`, `components/auth/ProtectedRoute.jsx`, `components/auth/useAuth.js`.
-- Backend: `backend/app/api/auth_routes.py` → password hashing/verification and JWT issuance in `backend/app/auth.py` and `backend/app/api/utils.py`. See [architecture.md#auth](../architecture.md#auth) for the token format and resolution order.
+- Frontend: `pages/Login.jsx`, `pages/Register.jsx`, `features/auth/AuthFormSection.jsx` (shared `mode="login"|"register"` form), `features/auth/AuthLinksSection.jsx`, `features/auth/AuthGate.jsx`, `features/auth/ProtectedRoute.jsx`, `features/auth/useAuth.js`.
+- Backend: `backend/app/api/routes/auth.py` → password hashing/verification in `backend/app/auth/passwords.py` and JWT issuance in `backend/app/auth/tokens.py`. See [architecture.md#auth](../architecture.md#auth) for the token format and resolution order.
 - Endpoints: `POST /api/login/`, `POST /api/register/`, `GET /api/me/`, `POST /api/logout/` — see [api-reference.md](../api-reference.md#authentication--backendappapiauth_routespy).

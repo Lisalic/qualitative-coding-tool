@@ -46,6 +46,6 @@ No new artifact — edits mutate the underlying `submissions`/`comments` rows fo
 
 ## Developer reference
 
-- Frontend: `pages/Data.jsx` / `pages/FilteredData.jsx`, `components/data/useDataBrowserPage.js`, `useProjectScopedFiles.js`, `useDataTableActions.js`, `components/data/DatabaseSelectionSection.jsx`, `SelectedDatabaseTableSection.jsx`, `DataTable.jsx`, `EntryModal.jsx`.
-- Backend: `backend/app/api/data_routes.py` (reads) + `backend/app/api/file_routes.py` (delete/move) → `backend/app/services/data_service.py` / `file_service.py` → `backend/app/repositories/raw_data_repo.py`.
+- Frontend: `pages/Data.jsx` / `pages/FilteredData.jsx`, `features/data/useDataBrowserPage.js`, `useProjectScopedFiles.js`, `useDataTableActions.js`, `features/data/DatabaseSelectionSection.jsx`, `SelectedDatabaseTableSection.jsx`, `DataTable.jsx`, `EntryModal.jsx`.
+- Backend: `backend/app/api/routes/data.py` (reads) + `backend/app/api/routes/files.py` (delete/move) → `backend/app/services/data_service.py` / `file_service.py` → `backend/app/repositories/raw_data_repo.py`.
 - Endpoints: `GET /api/file-entries/`, `GET /api/comments/{id}`, `POST /api/post-contents/`, `POST /api/delete-row/`, `POST /api/move-rows/` — see [api-reference.md](../api-reference.md#data--backendappapidata_routespy).

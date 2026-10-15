@@ -1,9 +1,9 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import React, { Suspense } from "react";
-import ProtectedRoute from "./components/auth/ProtectedRoute";
+import ProtectedRoute from "./features/auth/ProtectedRoute";
 import Sidebar from "./components/layout/Sidebar";
 import Navbar from "./components/layout/Navbar";
-import AuthGate from "./components/auth/AuthGate";
+import AuthGate from "./features/auth/AuthGate";
 import DialogHost from "./components/feedback/DialogHost";
 import ToastHost from "./components/feedback/ToastHost";
 

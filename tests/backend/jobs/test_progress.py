@@ -9,8 +9,8 @@ at the in-memory SQLite engine the rest of the jobs test suite uses.
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from backend.app.database import User
-from backend.app.jobs.models import Job
+from backend.app.models.workspace import User
+from backend.app.models.job import Job
 from backend.app.jobs.progress import ProgressTracker, update_job_progress
 
 

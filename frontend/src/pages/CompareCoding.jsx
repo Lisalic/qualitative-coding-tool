@@ -1,5 +1,5 @@
 import { useLocation } from "react-router-dom";
-import ComparePageContainer from "../components/compare/ComparePageContainer";
+import ComparePageContainer from "../features/compare/ComparePageContainer";
 
 export default function CompareCoding() {
   const location = useLocation();

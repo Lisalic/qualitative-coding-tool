@@ -1,5 +1,5 @@
-import DataBrowserPage from "../components/data/DataBrowserPage";
-import useDataBrowserPage from "../components/data/useDataBrowserPage";
+import DataBrowserPage from "../features/data/DataBrowserPage";
+import useDataBrowserPage from "../features/data/useDataBrowserPage";
 
 export default function Data() {
   const page = useDataBrowserPage({ mode: "raw" });

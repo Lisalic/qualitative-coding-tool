@@ -1,10 +1,10 @@
-"""Tests for ``GET /api/jobs/{id}`` (backend/app/jobs/routes.py)."""
+"""Tests for ``GET /api/jobs/{id}`` (backend/app/api/routes/jobs.py)."""
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from backend.app.database import User
-from backend.app.jobs.models import Job
+from backend.app.models.workspace import User
+from backend.app.models.job import Job
 
 
 def _auth_headers(make_token, sub="1"):

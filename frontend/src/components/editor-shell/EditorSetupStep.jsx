@@ -1,5 +1,5 @@
 import FormShell from "../forms/FormShell";
-import Panel from "../shell/Panel";
+import Panel from "../layout/Panel";
 
 /**
  * Step 1 of every editor: pick a source, name the output. Generalized

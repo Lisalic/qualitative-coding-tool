@@ -1,10 +1,10 @@
 import { useState } from "react";
 import ArtifactPicker from "../components/primitives/ArtifactPicker";
-import PageShell from "../components/shell/PageShell";
-import Panel from "../components/shell/Panel";
+import PageShell from "../components/layout/PageShell";
+import Panel from "../components/layout/Panel";
 import PageEmptyState from "../components/primitives/PageEmptyState";
 import PromptPanel from "../components/primitives/PromptPanel";
-import useLineagePage, { typeLabel } from "../components/versioning/useLineagePage";
+import useLineagePage, { typeLabel } from "../features/versioning/useLineagePage";
 import { hasPromptInfo } from "../lib/promptInfo";
 import { badge, btnSm } from "../lib/uiClasses";
 
@@ -78,7 +78,7 @@ function NeighborCard({ neighbor, onNavigate, direction }) {
 /**
  * A one-hop lineage explorer: the current artifact in the middle, its
  * typed parents above and typed children below (see
- * `backend/app/api/version_routes.py::lineage`, GAP C6). Clicking a
+ * `backend/app/api/routes/versions.py::lineage`, GAP C6). Clicking a
  * neighbor re-centers the graph on it, so the whole DAG is reachable by
  * walking edge by edge without a heavyweight graph-layout library.
  */

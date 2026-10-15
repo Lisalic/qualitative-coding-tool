@@ -8,7 +8,7 @@ forward with exactly the rows they were asked about -- never more.
 
 from sqlalchemy import select
 
-from backend.app.database import File
+from backend.app.models.workspace import File
 from backend.app.repositories.memo_repo import (
     copy_all_memos,
     copy_memos_by_id,
@@ -17,7 +17,7 @@ from backend.app.repositories.memo_repo import (
     list_memos,
     upsert_memo,
 )
-from backend.app.storage_models import RowMemo
+from backend.app.models.storage import RowMemo
 
 from .conftest import make_user
 

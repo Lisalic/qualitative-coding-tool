@@ -17,7 +17,7 @@ stamped ``False`` instead of copying anything, and
 ``version_service.read_codes`` resolves it by looking up the nearest
 earlier version with ``codes_materialized = True`` -- one indexed query,
 not a replay, since there's no delta representation to replay here (see
-``versioning_models.ArtifactVersion``'s docstring for the full reasoning
+``models.versioning.ArtifactVersion``'s docstring for the full reasoning
 and the O(1)-regardless-of-run-length argument).
 
 **No backfill needed.** Every version that exists today is fully

@@ -1,5 +1,5 @@
 """Integration coverage for the raw-SQL, per-artifact-schema pattern used
-throughout codebook_routes.py / coding_routes.py / content_routes.py:
+throughout routes/codebook.py / routes/coding.py / routes/content.py:
 `CREATE SCHEMA IF NOT EXISTS "<schema>"` + a `content_store` table +
 insert/read. This is exactly what the SQLite-backed unit tests can't
 exercise, since `CREATE SCHEMA` and Postgres's catalog functions

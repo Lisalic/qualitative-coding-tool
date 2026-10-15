@@ -1,14 +1,14 @@
 """Service layer for raw-data file lifecycle (upload / merge / delete /
-row edit / row move) -- backs backend/app/api/file_routes.py.
+row edit / row move) -- backs backend/app/api/routes/files.py.
 
 Moves the five handlers off per-upload dynamic Postgres schemas
 (``CREATE SCHEMA "proj_<hex>"`` holding ``submissions``/``comments``) onto
 the fixed, indexed ``submissions``/``comments`` tables in
-``backend/app/storage_models.py``, keyed by ``file_id``, via
+``backend/app/models/storage.py``, keyed by ``file_id``, via
 ``repositories/raw_data_repo.py``.
 
 Uploads stream straight into the fixed tables: ``upload_zst`` pulls row
-batches off ``backend.scripts.import_db.iter_zst_records`` on a worker
+batches off ``backend.app.formats.reddit_import.iter_zst_records`` on a worker
 thread and bulk-inserts them on the request's async session -- no
 per-upload landing schema.
 """
@@ -29,12 +29,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.exceptions import ForbiddenError, ValidationAppError
 from backend.app.core.sql_filters import in_values
-from backend.app.database import File, FileTable, async_link_file_to_project
+from backend.app.models.workspace import File, FileTable
+from backend.app.repositories.project_repo import async_link_file_to_project
 from backend.app.repositories import file_repo, memo_repo, project_repo, raw_data_repo, version_repo
 from backend.app.services import version_service
 from backend.app.services.version_service import EdgeSpec
-from backend.app.storage_models import Comment, CodingEntry, Submission
-from backend.app.versioning_models import (
+from backend.app.models.storage import Comment, CodingEntry, Submission
+from backend.app.models.versioning import (
     ArtifactVersion,
     CodebookCode,
     ORIGIN_EDITED,
@@ -42,7 +43,7 @@ from backend.app.versioning_models import (
     RELATION_MERGED_FROM,
     ROLE_MERGE_INPUT,
 )
-from backend.scripts.import_db import ImportFormatError, iter_zst_records
+from backend.app.formats.reddit_import import ImportFormatError, iter_zst_records
 
 _UPLOAD_BATCH_SIZE = 1000
 
@@ -204,7 +205,7 @@ async def upload_zst(
         "schema_name": schema_name,
         "inserted_counts": inserted_counts,
         # Records the dump contained but the import left out, by reason
-        # (see import_db.iter_zst_records).
+        # (see reddit_import.iter_zst_records).
         "skipped_counts": dict(skipped),
     }
     return file_rec, response
@@ -455,7 +456,7 @@ async def delete_database(session: AsyncSession, user_id: int, file_ref: str) ->
 
     Ordering matters: a FORK's v1 ``ArtifactVersion`` can
     point cross-file at this file's head (``parent_version_id`` -- see
-    ``versioning_models.ArtifactVersion``'s docstring for why), so any
+    ``models.versioning.ArtifactVersion``'s docstring for why), so any
     such pointer must be nulled out before this file's own versions are
     deleted, or the FK raises. Edges must go before versions (edges FK
     into versions), and codes must go before versions too (codes FK into

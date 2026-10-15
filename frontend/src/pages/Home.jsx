@@ -1,7 +1,7 @@
-import ProjectsListSection from "../components/project/ProjectsListSection";
-import CreateProjectSection from "../components/project/CreateProjectSection";
-import useHomePage from "../components/project/useHomePage";
-import PageShell from "../components/shell/PageShell";
+import ProjectsListSection from "../features/projects/ProjectsListSection";
+import CreateProjectSection from "../features/projects/CreateProjectSection";
+import useHomePage from "../features/projects/useHomePage";
+import PageShell from "../components/layout/PageShell";
 
 export default function Home() {
   const page = useHomePage();

@@ -25,9 +25,9 @@ The app supports a qualitative analysis pipeline over social/text data:
 ### Frontend architecture (React)
 
 - Routing is centralized in `frontend/src/App.jsx`, with protected routes for tool workflows.
-- Shared layout (`frontend/src/components/shell/PageShell.jsx` + `Panel.jsx`) keeps every screen consistent. Simple form pages (Import, Compare, Summarize) get one or two side-by-side panels over a centered primary button. The three editors (Filter, Codebook, Apply Codebook) are two steps built on one shared layer, `frontend/src/components/editor-shell/`: a setup step (source on the left, output naming on the right, nothing created yet) then a workspace — a 3-pane grid, a compact row/document list on the left, one item's full content in the center, and a non-scrolling right rail (decisions, or the draft/applied codebook) with that stage's AI-assist tool pinned at its foot — filling the remaining viewport height (`scroll="fill"`). View Coding shares the same workspace component.
-- Reusable panel data loading (`frontend/src/components/tool-panels/useToolPanelData.js`) fetches raw DBs, filtered DBs, projects, and optional codebooks in parallel.
-- Frontend request builders in `frontend/src/lib/apiContracts.js` mirror backend schema requirements and validate required fields before network calls.
+- Shared layout (`frontend/src/components/layout/PageShell.jsx` + `Panel.jsx`) keeps every screen consistent. Simple form pages (Import, Compare, Summarize) get one or two side-by-side panels over a centered primary button. The three editors (Filter, Codebook, Apply Codebook) are two steps built on one shared layer, `frontend/src/components/editor-shell/`: a setup step (source on the left, output naming on the right, nothing created yet) then a workspace — a 3-pane grid, a compact row/document list on the left, one item's full content in the center, and a non-scrolling right rail (decisions, or the draft/applied codebook) with that stage's AI-assist tool pinned at its foot — filling the remaining viewport height (`scroll="fill"`). View Coding shares the same workspace component.
+- Reusable panel data loading (`frontend/src/hooks/useToolPanelData.js`) fetches raw DBs, filtered DBs, projects, and optional codebooks in parallel.
+- Frontend request builders in `frontend/src/api/contracts.js` mirror backend schema requirements and validate required fields before network calls.
 
 Why this structure:
 
@@ -39,9 +39,9 @@ Why this structure:
 
 - API entrypoint in `backend/app/main.py` mounts all routes under `/api`.
 - Domain routers in `backend/app/api/*_routes.py` split features by responsibility (files, data, codebook, coding, content, projects, prompts).
-- Metadata is tracked in relational tables (`users`, `projects`, `files`, `project_files`) in `backend/app/database.py` — a `files` row is a git-style ref (identity only, no content).
-- Heavy artifact content lives in a small set of fixed, indexed tables keyed by `file_id`: `submissions`/`comments` (`backend/app/storage_models.py`) plus the artifact-version spine in `backend/app/versioning_models.py` — `artifact_versions` (one commit per save), `artifact_edges` (typed, ordered, version-pinned derivation between artifacts), and `codebook_codes` (per-version, per-code rows keyed by a stable `code_uid`). `coding_entries` (`backend/app/storage_models.py`) is SCD-2 range-versioned by `code_uid`/`valid_from`/`valid_to`. `files.schemaname` is retained as an opaque identifier string (`proj_<hex>` / `cmp_<hex>` / `sum_<hex>`) that the frontend still passes around, but it is no longer a real Postgres schema — every repository resolves it to `files.id` via `backend/app/repositories/file_repo.py::resolve_file_id` and queries the fixed tables by `file_id`. The old per-artifact dynamic schemas (`proj_*`/`cmp_*`/`sum_*`, each created via `CREATE SCHEMA IF NOT EXISTS`) still physically exist as a read-only rollback fallback and have not been dropped yet — see `documentation/architecture.md` for the full storage model.
-- AI pipelines live in reusable scripts under `backend/scripts/` (`filter_db.py`, `codebook_generator.py`, `codebook_apply.py`, `summarize_coding.py`).
+- Metadata is tracked in relational tables (`users`, `projects`, `files`, `project_files`) in `backend/app/models/workspace.py` — a `files` row is a git-style ref (identity only, no content).
+- Heavy artifact content lives in a small set of fixed, indexed tables keyed by `file_id`: `submissions`/`comments` (`backend/app/models/storage.py`) plus the artifact-version spine in `backend/app/models/versioning.py` — `artifact_versions` (one commit per save), `artifact_edges` (typed, ordered, version-pinned derivation between artifacts), and `codebook_codes` (per-version, per-code rows keyed by a stable `code_uid`). `coding_entries` (`backend/app/models/storage.py`) is SCD-2 range-versioned by `code_uid`/`valid_from`/`valid_to`. `files.schemaname` is retained as an opaque identifier string (`proj_<hex>` / `cmp_<hex>` / `sum_<hex>`) that the frontend still passes around, but it is no longer a real Postgres schema — every repository resolves it to `files.id` via `backend/app/repositories/file_repo.py::resolve_file_id` and queries the fixed tables by `file_id`. The old per-artifact dynamic schemas (`proj_*`/`cmp_*`/`sum_*`, each created via `CREATE SCHEMA IF NOT EXISTS`) still physically exist as a read-only rollback fallback and have not been dropped yet — see `documentation/architecture.md` for the full storage model.
+- AI pipelines live in reusable modules under `backend/app/pipelines/` (`filter_db.py`, `codebook_generator.py`, `codebook_apply.py`, `summarize_coding.py`).
 
 Why this structure:
 
@@ -98,9 +98,9 @@ User-facing behavior:
 
 Frontend implementation:
 
-- Home page and hook: `frontend/src/pages/Home.jsx`, `frontend/src/components/project/useHomePage.js`
+- Home page and hook: `frontend/src/pages/Home.jsx`, `frontend/src/features/projects/useHomePage.js`
 - Project page and composition: `frontend/src/pages/Project.jsx`
-- Project file UI/actions: `frontend/src/components/project/ProjectFilesSection.jsx`, `frontend/src/components/project/FileRowActions.jsx`, `frontend/src/components/project/useProjectPage.js`
+- Project file UI/actions: `frontend/src/features/projects/ProjectFilesSection.jsx`, `frontend/src/features/projects/FileRowActions.jsx`, `frontend/src/features/projects/useProjectPage.js`
 
 Backend implementation:
 
@@ -124,7 +124,7 @@ User-facing behavior:
 Frontend implementation:
 
 - Page: `frontend/src/pages/Import.jsx`
-- Upload component: `frontend/src/components/data/FileUpload.jsx`
+- Upload component: `frontend/src/features/data/FileUpload.jsx`
 
 Backend implementation:
 
@@ -145,8 +145,8 @@ User-facing behavior:
 Frontend implementation:
 
 - Pages: `frontend/src/pages/Data.jsx`, `frontend/src/pages/FilteredData.jsx`
-- Shared data-browser logic: `frontend/src/components/data/useDataBrowserPage.js`
-- Table and detail UI: `frontend/src/components/data/DataTable.jsx`, `frontend/src/components/data/EntryModal.jsx`
+- Shared data-browser logic: `frontend/src/features/data/useDataBrowserPage.js`
+- Table and detail UI: `frontend/src/features/data/DataTable.jsx`, `frontend/src/features/data/EntryModal.jsx`
 
 Backend implementation:
 
@@ -195,7 +195,7 @@ User-facing behavior:
 Frontend implementation:
 
 - Page: `frontend/src/pages/Filter.jsx`
-- Components: `frontend/src/components/filter-editor/` (`FilterEditor.jsx`
+- Components: `frontend/src/features/filter/` (`FilterEditor.jsx`
   renders `EditorSetupStep`/`EditorOutputFields` for the setup step, then
   `EditorWorkspace` composing `FilterRowList.jsx` (built on the shared
   `EditorListPane`), `FilterReaderPane.jsx`, and `FilterDecisionsRail.jsx`
@@ -204,7 +204,7 @@ Frontend implementation:
   `frontend/src/components/forms/AiAssistPanel.jsx`) --
   `frontend/src/components/editor-shell/` is shared with the codebook and
   coding editors, along with `useEditorRows`/`useEditorShortcuts`.
-- Selection logic (pure, unit-tested): `frontend/src/lib/filterEditorState.js`,
+- Selection logic (pure, unit-tested): `frontend/src/features/filter/filterEditorState.js`,
   persisted to `localStorage` per source database so a refresh or a multi-minute
   AI run doesn't lose the work.
 - Request builders: `buildFilterPreviewPayload` / `buildManualFilterPayload`.
@@ -248,15 +248,15 @@ User-facing behavior:
 
 Frontend implementation:
 
-- `frontend/src/components/data/MemoEditor.jsx` (used by `EntryModal.jsx`
+- `frontend/src/features/memos/MemoEditor.jsx` (used by `EntryModal.jsx`
   and by `FilterReaderPane.jsx`/`CodebookReaderPane.jsx`),
   `MemoIndicator.jsx`, and the shared `useRowMemos.js` hook (one fetch per database).
 
 Backend implementation:
 
-- `GET /api/memos/?schema=...` and `PUT /api/memos/` (`backend/app/api/memo_routes.py`)
+- `GET /api/memos/?schema=...` and `PUT /api/memos/` (`backend/app/api/routes/memos.py`)
 - `backend/app/services/memo_service.py`, `backend/app/repositories/memo_repo.py`,
-  `storage_models.py::RowMemo`, Alembic revision `c8f1b04e7a29`.
+  `models/storage.py::RowMemo`, Alembic revision `c8f1b04e7a29`.
 
 Why implemented this way:
 
@@ -308,7 +308,7 @@ User-facing behavior:
 Frontend implementation:
 
 - Page: `frontend/src/pages/Codebook.jsx`
-- Components: `frontend/src/components/codebook-editor/` (`CodebookEditor.jsx`
+- Components: `frontend/src/features/codebook/editor/` (`CodebookEditor.jsx`
   renders `EditorSetupStep`/`EditorOutputFields` for the setup step, then
   `EditorWorkspace` composing `CodebookSourceReader.jsx` (built on the shared
   `EditorListPane`), `CodebookReaderPane.jsx`, and `CodebookCodesRail.jsx`
@@ -316,7 +316,7 @@ Frontend implementation:
   `CodebookProposalTray.jsx`, and the AI panel `CodebookAiPanel.jsx` -- built,
   like the filter editor's, on the shared
   `frontend/src/components/forms/AiAssistPanel.jsx`)
-- Draft/proposal logic (pure, unit-tested): `frontend/src/lib/codebookEditorState.js`,
+- Draft/proposal logic (pure, unit-tested): `frontend/src/features/codebook/editor/codebookEditorState.js`,
   persisted to `localStorage` per (source data, target codebook) pair so a refresh or
   a multi-minute AI run doesn't lose the work.
 - Request builders: `buildCodebookPreviewPayload` / `buildManualCodebookPayload`.
@@ -338,7 +338,7 @@ Backend implementation:
 
 ### 5c) View Codebook
 
-- Page/hook/workspace: `frontend/src/pages/ViewCodebook.jsx`, `frontend/src/components/codebook/useViewCodebookPage.js`, `frontend/src/components/codebook/CodebookWorkspaceSection.jsx`
+- Page/hook/workspace: `frontend/src/pages/ViewCodebook.jsx`, `frontend/src/features/codebook/view/useViewCodebookPage.js`, `frontend/src/features/codebook/view/CodebookWorkspaceSection.jsx`
 - `GET /api/codebook`, `GET /api/list-codebooks`, `PUT /api/codebook/{ref}`,
   `POST /api/codebook/{ref}/import`, `POST /api/codebook/{ref}/duplicate`
 
@@ -386,16 +386,16 @@ User-facing behavior:
 Frontend implementation:
 
 - Apply page/setup: `frontend/src/pages/ApplyCodebook.jsx` ->
-  `frontend/src/components/coding-editor/CodingEditor.jsx`, which renders
+  `frontend/src/features/coding/editor/CodingEditor.jsx`, which renders
   the setup step (`CodingSetupPanel.jsx`, built on the shared
   `frontend/src/components/editor-shell/`) and then this same workspace on
   the artifact it just created
-- Coding workspace: `frontend/src/pages/ViewCoding.jsx`, `frontend/src/components/coding-table/workspace/useViewCodingPage.js`, `frontend/src/components/coding-table/workspace/CodingWorkspaceSection.jsx` (shares `EDITOR_GRID_CLASSES`/`EditorRail`/`EditorActionBar` with the filter and codebook editors' workspaces)
-- Document list, reader pane, and the tabbed right rail (Codebook / AI Coding / Coverage; tabs via `frontend/src/components/primitives/RailTabs.jsx`): `frontend/src/components/coding-table/workspace/CodingDocumentList.jsx`, `CodingReaderPane.jsx`, `CodingCodebookSidebar.jsx`, `CodingAiPanel.jsx`
-- The `1`-`9` code shortcut lives in `frontend/src/components/coding-table/HighlightedContent.jsx` (built on the shared `useEditorShortcuts`), since it needs the same filtered/visible code list the selection popup renders
-- Read-only rendered text tab: `frontend/src/components/coding-table/workspace/CodingTextView.jsx`
-- Fork-the-whole-artifact control: `frontend/src/components/coding-table/workspace/CodingDuplicateControl.jsx`
-- Request builders: `buildManualCodingPayload`/`buildRecodeItemsPayload` in `frontend/src/lib/apiContracts.js`
+- Coding workspace: `frontend/src/pages/ViewCoding.jsx`, `frontend/src/features/coding/workspace/useViewCodingPage.js`, `frontend/src/features/coding/workspace/CodingWorkspaceSection.jsx` (shares `EDITOR_GRID_CLASSES`/`EditorRail`/`EditorActionBar` with the filter and codebook editors' workspaces)
+- Document list, reader pane, and the tabbed right rail (Codebook / AI Coding / Coverage; tabs via `frontend/src/components/primitives/RailTabs.jsx`): `frontend/src/features/coding/workspace/CodingDocumentList.jsx`, `CodingReaderPane.jsx`, `CodingCodebookSidebar.jsx`, `CodingAiPanel.jsx`
+- The `1`-`9` code shortcut lives in `frontend/src/features/coding/workspace/HighlightedContent.jsx` (built on the shared `useEditorShortcuts`), since it needs the same filtered/visible code list the selection popup renders
+- Read-only rendered text tab: `frontend/src/features/coding/workspace/CodingTextView.jsx`
+- Fork-the-whole-artifact control: `frontend/src/features/coding/workspace/CodingDuplicateControl.jsx`
+- Request builders: `buildManualCodingPayload`/`buildRecodeItemsPayload` in `frontend/src/api/contracts.js`
 
 Backend implementation:
 
@@ -421,12 +421,12 @@ Why implemented this way:
 User-facing behavior:
 
 - Ask an LLM to compare two codebooks or two coding outputs — similarities/differences, conflicting or inconsistent codes, merge/reconciliation suggestions, an overall recommendation — and save the narrative result as a `codebook_comparison`/`coding_comparison` artifact.
-- For a deterministic, no-LLM structural/classification diff between two *versions of the same artifact's own history* instead (not the LLM narrative comparison of two arbitrary artifacts here), open that artifact's Version History page (`GET /api/artifacts/{ref}/diff`, `frontend/src/components/versioning/VersionHistoryPanel.jsx`) — see "Lineage and traceability" below.
+- For a deterministic, no-LLM structural/classification diff between two *versions of the same artifact's own history* instead (not the LLM narrative comparison of two arbitrary artifacts here), open that artifact's Version History page (`GET /api/artifacts/{ref}/diff`, `frontend/src/features/versioning/VersionHistoryPanel.jsx`) — see "Lineage and traceability" below.
 
 Frontend implementation:
 
 - Pages: `frontend/src/pages/CompareCodebook.jsx`, `frontend/src/pages/CompareCoding.jsx`
-- Shared compare container and data hook: `frontend/src/components/compare/ComparePageContainer.jsx`, `frontend/src/components/compare/useComparePageData.js`, `CompareDualSelectPanel.jsx`, `CompareModelPromptPanel.jsx`, `CompareResultPanel.jsx`
+- Shared compare container and data hook: `frontend/src/features/compare/ComparePageContainer.jsx`, `frontend/src/features/compare/useComparePageData.js`, `CompareDualSelectPanel.jsx`, `CompareModelPromptPanel.jsx`, `CompareResultPanel.jsx`
 
 Backend implementation:
 
@@ -447,8 +447,8 @@ User-facing behavior:
 Frontend implementation:
 
 - Page: `frontend/src/pages/IntegrateCodebook.jsx`
-- Editor: `frontend/src/components/integrate-codebook/IntegrateCodebookEditor.jsx`, built on the same `EditorSetupStep`/`EditorWorkspace` shell as Filter/Codebook/Apply Codebook, with `IntegrateSourcePicker.jsx` (a searchable card grid plus a removable chip strip, not a bare checkbox list) picking sources in the setup step; the workspace has `IntegrateSourcePane.jsx` (read-only source codes, grouped by codebook, with a per-code "Add" that live-guards against duplicates rather than tracking a persistent "merged" flag — see "Why implemented this way" below) on the left, `IntegrateBuilderPane.jsx` (the merged draft, edited via the same `CodeLegend` every codebook tool uses) in the center, and `IntegrateRail.jsx`/`IntegrateAiPanel.jsx` on the right.
-- State: extends `frontend/src/lib/codebookEditorState.js` (the same tray→draft state machine Create Codebook uses) rather than a second module — `copySourceCode`/`integrateDraftStorageKey` are the additions specific to a merge.
+- Editor: `frontend/src/features/codebook/integrate/IntegrateCodebookEditor.jsx`, built on the same `EditorSetupStep`/`EditorWorkspace` shell as Filter/Codebook/Apply Codebook, with `IntegrateSourcePicker.jsx` (a searchable card grid plus a removable chip strip, not a bare checkbox list) picking sources in the setup step; the workspace has `IntegrateSourcePane.jsx` (read-only source codes, grouped by codebook, with a per-code "Add" that live-guards against duplicates rather than tracking a persistent "merged" flag — see "Why implemented this way" below) on the left, `IntegrateBuilderPane.jsx` (the merged draft, edited via the same `CodeLegend` every codebook tool uses) in the center, and `IntegrateRail.jsx`/`IntegrateAiPanel.jsx` on the right.
+- State: extends `frontend/src/features/codebook/editor/codebookEditorState.js` (the same tray→draft state machine Create Codebook uses) rather than a second module — `copySourceCode`/`integrateDraftStorageKey` are the additions specific to a merge.
 
 Backend implementation:
 
@@ -470,8 +470,8 @@ User-facing behavior:
 
 Frontend implementation:
 
-- Summarize page/hook: `frontend/src/pages/SummarizeCoding.jsx`, `frontend/src/components/summarize/useSummarizeCodingPage.js`
-- View summary page/hook: `frontend/src/pages/ViewSummary.jsx`, `frontend/src/components/summarize/useViewSummaryPage.js`
+- Summarize page/hook: `frontend/src/pages/SummarizeCoding.jsx`, `frontend/src/features/summarize/useSummarizeCodingPage.js`
+- View summary page/hook: `frontend/src/pages/ViewSummary.jsx`, `frontend/src/features/summarize/useViewSummaryPage.js`
 
 Backend implementation:
 
@@ -498,15 +498,15 @@ Why implemented this way:
 
 ### Contract symmetry between frontend and backend
 
-- `frontend/src/lib/apiContracts.js` mirrors backend `backend/app/api/schemas.py` field expectations.
+- `frontend/src/api/contracts.js` mirrors backend `backend/app/api/schemas.py` field expectations.
 - Required-field checks are done early in the client for clearer user feedback.
 
 ### Lineage and traceability
 
-- `artifact_edges` (in `backend/app/versioning_models.py`) captures typed, ordered, version-pinned parent-child artifact relationships, replacing the old untyped `file_dependencies` table.
+- `artifact_edges` (in `backend/app/models/versioning.py`) captures typed, ordered, version-pinned parent-child artifact relationships, replacing the old untyped `file_dependencies` table.
 - `artifact_versions` gives every artifact a full revision history (see "Artifact versioning" above / `documentation/architecture.md`), so lineage and revision are tracked as two separate, explicit concerns rather than one table conflating them.
 - This supports reproducible analysis chains across import -> filter -> codebook -> coding -> summary, and lets the UI walk the DAG via `GET /api/artifacts/{ref}/lineage` (`frontend/src/pages/Lineage.jsx`).
-- Every artifact also has a Version History page (`/versions?ref=...`, `frontend/src/components/versioning/VersionHistoryPanel.jsx`) that lists its own `artifact_versions` and diffs any two of them via `GET /api/artifacts/{ref}/diff` (`backend/app/api/version_routes.py`): a structural codebook diff (added/removed/renamed/redefined/moved/reordered codes, always computed) plus a type-specific content diff — a coding artifact's own `coding_entries` (rows recoded, per-code count deltas, applied/removed evidence), or a raw/filtered data artifact's own submissions/comments (rows added/removed). This is the deterministic, no-LLM counterpart to [Compare Codebook and Compare Coding](#7-compare-codebook-and-compare-coding) above — scoped to one artifact's own history rather than two arbitrary artifacts.
+- Every artifact also has a Version History page (`/versions?ref=...`, `frontend/src/features/versioning/VersionHistoryPanel.jsx`) that lists its own `artifact_versions` and diffs any two of them via `GET /api/artifacts/{ref}/diff` (`backend/app/api/routes/versions.py`): a structural codebook diff (added/removed/renamed/redefined/moved/reordered codes, always computed) plus a type-specific content diff — a coding artifact's own `coding_entries` (rows recoded, per-code count deltas, applied/removed evidence), or a raw/filtered data artifact's own submissions/comments (rows added/removed). This is the deterministic, no-LLM counterpart to [Compare Codebook and Compare Coding](#7-compare-codebook-and-compare-coding) above — scoped to one artifact's own history rather than two arbitrary artifacts.
 
 ### AI-assist provenance
 
@@ -516,14 +516,14 @@ assist meaningfully shaped it, which erased the record of where the AI helped.
 Two sibling channels, deliberately separate from `ArtifactVersion`'s own
 fields, close that gap:
 
-- **Per-quote coder attribution (B1).** `coding_entries` (`storage_models.py`)
+- **Per-quote coder attribution (B1).** `coding_entries` (`models/storage.py`)
   carries `coder` (`"human"`/`"ai"`) and `coder_model` per coded quote. A row's
   AI/Human/Both label is never stored -- it's rolled up from its live entries
-  (`backend/app/core/coder_rollup.py` server-side, `frontend/src/lib/codingUtils.js::rollUpCoder`
+  (`backend/app/domain/coder_rollup.py` server-side, `frontend/src/lib/codingUtils.js::rollUpCoder`
   client-side, so a locally staged edit reads correctly before the next fetch).
   Surfaced as a small badge in `CodingDocumentList.jsx`/`CodingReaderPane.jsx`,
   and as a `CODER:` line in the rendered Text View.
-- **Per-version assist runs (C2).** `artifact_assists` (`versioning_models.py`)
+- **Per-version assist runs (C2).** `artifact_assists` (`models/versioning.py`)
   records one row per assistant run that contributed to a version: which
   `filter_preview`/`codebook_preview`/`recode_items` job, how many proposals it
   made, how many the researcher accepted versus dismissed, and which refs were

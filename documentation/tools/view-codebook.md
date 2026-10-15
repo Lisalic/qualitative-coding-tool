@@ -41,6 +41,6 @@ Overwrites the existing codebook's content/name — does not create a new artifa
 
 ## Developer reference
 
-- Frontend: `pages/ViewCodebook.jsx`, `components/codebook/useViewCodebookPage.js`, `components/codebook/CodebookWorkspaceSection.jsx`, `components/coding-table/CodeLegend.jsx`, `components/primitives/PromptPanel.jsx`, `components/primitives/ArtifactPicker.jsx`.
-- Backend: `backend/app/api/codebook_routes.py` (`GET /codebook`, `GET /parse-codebook`, `GET /list-codebooks`, `POST /save-file-codebook/`) → `backend/app/services/codebook_service.py` → `backend/app/repositories/artifact_content_repo.py`. Tree parsing: `backend/scripts/display_codebook.py::parse_codebook_to_json`.
+- Frontend: `pages/ViewCodebook.jsx`, `features/codebook/view/useViewCodebookPage.js`, `features/codebook/view/CodebookWorkspaceSection.jsx`, `features/coding/CodeLegend.jsx`, `components/primitives/PromptPanel.jsx`, `components/primitives/ArtifactPicker.jsx`.
+- Backend: `backend/app/api/routes/codebook.py` (`GET /codebook`, `GET /parse-codebook`, `GET /list-codebooks`, `POST /save-file-codebook/`) → `backend/app/services/codebook_service.py` → `backend/app/repositories/artifact_content_repo.py`. Tree parsing: `backend/app/formats/codebook_parser.py::parse_codebook_to_json`.
 - Endpoints — see [api-reference.md](../api-reference.md#codebooks--backendappapicodebook_routespy).

@@ -1,4 +1,4 @@
-from backend.app.database import File
+from backend.app.models.workspace import File
 from backend.app.repositories.coding_repo import (
     bulk_insert_coding_entries,
     code_frequency,
@@ -10,7 +10,7 @@ from backend.app.repositories.coding_repo import (
     render_coding_text,
     replace_entries_for_items,
 )
-from backend.app.storage_models import Comment, Submission
+from backend.app.models.storage import Comment, Submission
 
 from .conftest import make_user
 
@@ -429,7 +429,7 @@ class TestCopyEntries:
 
             # Source is untouched: A is still closed at 1, B is still live.
             from sqlalchemy import select as _select
-            from backend.app.storage_models import CodingEntry as _CodingEntry
+            from backend.app.models.storage import CodingEntry as _CodingEntry
 
             source_rows = (
                 await session.execute(_select(_CodingEntry).where(_CodingEntry.file_id == source.id))
@@ -513,7 +513,7 @@ class TestCopyEntries:
 
 class TestSCD2Ranges:
     """``replace_entries_for_items``'s three-step algorithm --
-    storage_models.py::CodingEntry's range invariant, exercised directly
+    models/storage.py::CodingEntry's range invariant, exercised directly
     against real version-number arguments rather than through the
     service layer.
     """
@@ -551,7 +551,7 @@ class TestSCD2Ranges:
             await session.commit()
 
             from sqlalchemy import select as _select
-            from backend.app.storage_models import CodingEntry as _CodingEntry
+            from backend.app.models.storage import CodingEntry as _CodingEntry
 
             all_rows = (
                 await session.execute(_select(_CodingEntry).where(_CodingEntry.file_id == f.id))
@@ -604,7 +604,7 @@ class TestSCD2Ranges:
             await session.commit()
 
             from sqlalchemy import select as _select
-            from backend.app.storage_models import CodingEntry as _CodingEntry
+            from backend.app.models.storage import CodingEntry as _CodingEntry
 
             p2_row = (
                 await session.execute(

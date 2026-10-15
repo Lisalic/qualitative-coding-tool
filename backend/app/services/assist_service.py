@@ -31,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.core.exceptions import ValidationAppError
 from backend.app.jobs import service as jobs_service
 from backend.app.repositories import assist_repo
-from backend.app.versioning_models import (
+from backend.app.models.versioning import (
     ASSIST_STAGE_CODEBOOK,
     ASSIST_STAGE_CODING,
     ASSIST_STAGE_FILTER,

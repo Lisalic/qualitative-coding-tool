@@ -10,10 +10,10 @@ see the difference.
 
 from sqlalchemy import func, select
 
-from backend.app.database import File, Project, User
+from backend.app.models.workspace import File, Project, User
 from backend.app.repositories import raw_data_repo
 from backend.app.services import data_service, file_service
-from backend.app.storage_models import Submission
+from backend.app.models.storage import Submission
 
 _ROWS = 40_000
 

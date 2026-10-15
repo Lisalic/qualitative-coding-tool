@@ -1,4 +1,4 @@
-import PageShell from "../shell/PageShell";
+import PageShell from "../layout/PageShell";
 
 /**
  * Step 2 of every editor: the 3-pane workspace frame. Lifted from

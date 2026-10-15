@@ -12,10 +12,10 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from backend.app.core.exceptions import ForbiddenError, NotFoundError, ValidationAppError
-from backend.app.database import File, User
-from backend.app.jobs.models import Job
+from backend.app.models.workspace import File, User
+from backend.app.models.job import Job
 from backend.app.services import assist_service, version_service
-from backend.app.versioning_models import (
+from backend.app.models.versioning import (
     ASSIST_STAGE_CODING,
     ASSIST_STAGE_FILTER,
     ASSIST_STAGE_INTEGRATE,

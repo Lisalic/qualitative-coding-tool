@@ -1,7 +1,7 @@
 import pytest
 
 from backend.app.core.exceptions import ForbiddenError, NotFoundError
-from backend.app.database import Project
+from backend.app.models.workspace import Project
 from backend.app.repositories.project_repo import get_owned_project
 
 from .conftest import make_user

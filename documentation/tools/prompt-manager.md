@@ -44,6 +44,6 @@ Rows in the `prompts` table, scoped to the user.
 
 ## Developer reference
 
-- Frontend: `components/forms/PromptManager.jsx`, `components/forms/PromptTextareaWithActions.jsx`, `frontend/src/lib/savePromptToLibrary.js`, `frontend/src/lib/apiContracts.js::EXAMPLE_PROMPTS`.
-- Backend: `backend/app/api/prompt_routes.py` → `backend/app/services/prompt_service.py` (ORM-only, no repository layer).
+- Frontend: `components/forms/PromptManager.jsx`, `components/forms/PromptTextareaWithActions.jsx`, `frontend/src/lib/savePromptToLibrary.js`, `frontend/src/api/contracts.js::EXAMPLE_PROMPTS`.
+- Backend: `backend/app/api/routes/prompts.py` → `backend/app/services/prompt_service.py` (ORM-only, no repository layer).
 - Endpoints: `GET /api/prompts/`, `POST /api/prompts/`, `POST /api/prompts/{id}/update`, `DELETE /api/prompts/{id}` — see [api-reference.md](../api-reference.md#prompts--backendappapiprompt_routespy).

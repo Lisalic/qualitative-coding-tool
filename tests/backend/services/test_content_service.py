@@ -2,7 +2,7 @@
 
 Runs directly against an in-memory async SQLite session (the
 ``async_sqlite_engine`` fixture from ``tests/conftest.py``), bypassing the
-HTTP layer entirely -- ``tests/backend/routes/test_ai_and_raw_sql_routes.py``
+HTTP layer entirely -- ``tests/backend/api/routes/test_ai_and_raw_sql_routes.py``
 covers the route/auth/response-shape behavior on top of this.
 """
 
@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from backend.app.core.exceptions import ForbiddenError, NotFoundError
-from backend.app.database import File, User
+from backend.app.models.workspace import File, User
 from backend.app.services import content_service, version_service
 
 
@@ -61,7 +61,7 @@ class TestSaveSummary:
             assert file_rec.description is None
 
     async def test_links_owned_project(self, session_factory) -> None:
-        from backend.app.database import Project
+        from backend.app.models.workspace import Project
 
         async with session_factory() as session:
             user = await _make_user(session)
@@ -95,7 +95,7 @@ class TestSaveSummary:
                 )
 
     async def test_project_wrong_owner_raises_forbidden(self, session_factory) -> None:
-        from backend.app.database import Project
+        from backend.app.models.workspace import Project
 
         async with session_factory() as session:
             owner = await _make_user(session, "owner@x.com")

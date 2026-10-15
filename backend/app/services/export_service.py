@@ -11,7 +11,7 @@ or another QDA package:
   headings, each code with its definition and rules -- see
   ``_codebook_docx``), ``xlsx`` (one row per code), ``qdc`` (REFI-QDA
   Codebook, the interchange standard NVivo/ATLAS.ti/MAXQDA implement --
-  see ``core/qdc.py``) and ``csv``.
+  see ``formats/qdc.py``) and ``csv``.
 * coding -- ``xlsx`` (default: one workbook holding the coded quotes, the
   item-by-code matrix, the codebook and code counts as sheets, so nobody
   has to pick a layout), ``docx`` (a code report: every quote grouped
@@ -26,11 +26,11 @@ or another QDA package:
   content *is* a markdown blob (a saved ``summary``, a
   ``codebook_comparison``/``coding_comparison``): the ``md`` export is the
   stored blob as-is, the ``docx`` one renders it
-  (``core/docx_render.py::markdown_to_docx``). Distinct from ``summary``
+  (``formats/docx_render.py::markdown_to_docx``). Distinct from ``summary``
   above, which computes a frequency table *from a coding*.
 
 Every format writes user text through the sanitizer matching its sink
-(``core/export_text.py``): spreadsheet cells can't become formulas, XML
+(``formats/export_text.py``): spreadsheet cells can't become formulas, XML
 formats drop the control characters XML forbids, and generated markdown
 headings/cells can't inject structure or HTML. Word/Excel headers are
 plain language ("Code", "Coded by"); CSV/JSON keep their machine
@@ -64,14 +64,14 @@ from datetime import datetime
 from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.core import docx_render
+from backend.app.formats import docx_render
 from backend.app.core.exceptions import NotFoundError, ValidationAppError
-from backend.app.core.export_text import md_inline, neutralize_formula
-from backend.app.core.qdc import serialize_codes_to_qdc
-from backend.app.core.xlsx_render import SheetSpec, build_workbook
+from backend.app.formats.export_text import md_inline, neutralize_formula
+from backend.app.formats.qdc import serialize_codes_to_qdc
+from backend.app.formats.xlsx_render import SheetSpec, build_workbook
 from backend.app.repositories import export_repo, file_repo, project_repo, version_repo
 from backend.app.services import version_service
-from backend.app.versioning_models import CodebookCode
+from backend.app.models.versioning import CodebookCode
 
 
 async def _get_sorted_codebook_codes(

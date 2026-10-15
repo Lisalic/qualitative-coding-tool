@@ -7,7 +7,7 @@
  * embedded the whole batch of sampled post/comment text the artifact
  * already owns, which cost 119 MB across 61 version rows and was being
  * shipped in the JSON body of every page load (see
- * `backend/app/versioning_models.py::ArtifactVersion`). What's left is
+ * `backend/app/models/versioning.py::ArtifactVersion`). What's left is
  * the part anyone would actually read, plus a length + hash so the claim
  * "this version came from that input" stays checkable.
  */

@@ -4,11 +4,11 @@
 
 Ask an LLM to compare two codebooks — similarities/differences, conflicting or duplicate codes, merge suggestions, an overall recommendation — and save the result as a `codebook_comparison` artifact.
 
-For a deterministic, no-LLM structural diff (added/removed/renamed/redefined/moved/reordered codes) between two versions of the *same* codebook's own history, open that codebook's Version History page (`/versions?ref=...`, `components/versioning/VersionHistoryPanel.jsx`) instead — see [architecture.md](../architecture.md) for the artifact-versioning model. That diff is free, needs no API key, and is what this page used to also offer inline before the two were split apart. This page is for the LLM narrative comparison of two (possibly unrelated) codebooks, which Version History does not do.
+For a deterministic, no-LLM structural diff (added/removed/renamed/redefined/moved/reordered codes) between two versions of the *same* codebook's own history, open that codebook's Version History page (`/versions?ref=...`, `features/versioning/VersionHistoryPanel.jsx`) instead — see [architecture.md](../architecture.md) for the artifact-versioning model. That diff is free, needs no API key, and is what this page used to also offer inline before the two were split apart. This page is for the LLM narrative comparison of two (possibly unrelated) codebooks, which Version History does not do.
 
 ## Where to find it
 
-Sidebar → Compare Codebook (pipeline group), or `/compare-codebook` → `pages/CompareCodebook.jsx` → `components/compare/ComparePageContainer.jsx` with `mode="codebook"`.
+Sidebar → Compare Codebook (pipeline group), or `/compare-codebook` → `pages/CompareCodebook.jsx` → `features/compare/ComparePageContainer.jsx` with `mode="codebook"`.
 
 This shares one implementation with [Compare Codings](compare-codings.md) — `ComparePageContainer`'s `CONFIG_BY_MODE` is the only difference between the two pages. See [architecture.md](../architecture.md) for the shared plumbing.
 
@@ -47,8 +47,8 @@ Job result: `{comparison: <text>, file: {id, schema_name, filename}}`. The compa
 
 ## Developer reference
 
-- Frontend: `pages/CompareCodebook.jsx`, `components/compare/ComparePageContainer.jsx`, `CompareDualSelectPanel.jsx`, `CompareModelPromptPanel.jsx`, `CompareResultPanel.jsx`, `useComparePageData.js`.
-- Backend: `backend/app/api/codebook_routes.py::POST /compare-codebooks/` → `backend/app/services/codebook_service.py::start_compare_codebooks_job` / `_run_compare_codebooks_job` (`job_type="compare_codebooks"`) → `backend/scripts/codebook_generator.py::get_client`.
+- Frontend: `pages/CompareCodebook.jsx`, `features/compare/ComparePageContainer.jsx`, `CompareDualSelectPanel.jsx`, `CompareModelPromptPanel.jsx`, `CompareResultPanel.jsx`, `useComparePageData.js`.
+- Backend: `backend/app/api/routes/codebook.py::POST /compare-codebooks/` → `backend/app/services/codebook_service.py::start_compare_codebooks_job` / `_run_compare_codebooks_job` (`job_type="compare_codebooks"`) → `backend/app/pipelines/codebook_generator.py::get_client`.
 - Storage written: new `files` row (`codebook_comparison`), two `artifact_edges` rows, `artifact_versions` content blob.
 - Endpoint: `POST /api/compare-codebooks/` — see [api-reference.md](../api-reference.md#codebooks--backendappapicodebook_routespy).
-- Structural (no-LLM) codebook diffing lives at `GET /api/artifacts/{ref}/diff`, rendered by `components/versioning/VersionHistoryPanel.jsx`.
+- Structural (no-LLM) codebook diffing lives at `GET /api/artifacts/{ref}/diff`, rendered by `features/versioning/VersionHistoryPanel.jsx`.

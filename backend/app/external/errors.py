@@ -1,7 +1,7 @@
 """Shared error-classification helpers for external (LLM/HTTP) API calls.
 
 ``extract_http_error_code`` was duplicated near-identically in
-``backend/scripts/filter_db.py`` and ``backend/scripts/tag_expansion.py``;
+``backend/app/pipelines/filter_db.py`` and ``backend/app/pipelines/tag_expansion.py``;
 this is the one copy going forward.
 """
 
@@ -41,7 +41,7 @@ def extract_http_error_code(error: Exception) -> int:
 # credits, flagged content, an invalid model slug, a malformed request) --
 # retrying sends the exact same doomed request again, so these should fail
 # immediately instead of burning through backoff and more attempts.
-# Matches ``backend/scripts/openrouter_http.py``'s own permanent-vs-transient
+# Matches ``backend/app/external/openrouter_http.py``'s own permanent-vs-transient
 # split of ``OPENROUTER_CLIENT_ERROR_CODES``: 408/429/502/503 (plus network
 # errors and empty completions, which carry no code at all) are transient
 # and stay retryable by default.

@@ -1,8 +1,8 @@
 import ArtifactPicker from "../components/primitives/ArtifactPicker";
-import PageShell from "../components/shell/PageShell";
+import PageShell from "../components/layout/PageShell";
 import PageEmptyState from "../components/primitives/PageEmptyState";
-import VersionHistoryPanel from "../components/versioning/VersionHistoryPanel";
-import useVersionHistoryPage from "../components/versioning/useVersionHistoryPage";
+import VersionHistoryPanel from "../features/versioning/VersionHistoryPanel";
+import useVersionHistoryPage from "../features/versioning/useVersionHistoryPage";
 
 /**
  * The standalone Version History page (`/versions?ref=...`) -- every

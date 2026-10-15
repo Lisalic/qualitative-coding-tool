@@ -29,14 +29,14 @@ to create. It also means `compare_metadata` against `Base.metadata` can
 be asserted empty in a test for the first time (see
 `tests/backend/integration/test_alembic_migration.py`).
 
-This also makes good on a claim `backend/app/storage_models.py` has been
+This also makes good on a claim `backend/app/models/storage.py` has been
 making since it was written: its module docstring says `word_count` on
 `Submission`/`Comment` is "a plain `Integer` for ORM/test purposes... the
 real `GENERATED ALWAYS AS (...) STORED` DDL is added by the Alembic
 migration that creates these tables against Postgres" -- no such
 migration has ever existed; the only place that DDL is written anywhere
 in this repository is the legacy per-schema path in
-`backend/scripts/import_db.py:71-91`. This revision reproduces that exact
+`backend/app/formats/reddit_import.py:71-91`. This revision reproduces that exact
 expression as a Postgres-only `sa.Computed(..., persisted=True)` column
 (SQLite's `Base.metadata.create_all`, which the default unit test suite
 still uses, has never modeled generated-column behavior and continues

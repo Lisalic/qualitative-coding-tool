@@ -2,11 +2,11 @@ import { useEffect, useState } from "react";
 import PromptTextareaWithActions from "./PromptTextareaWithActions";
 import SliderField from "./SliderField";
 import HelpTip from "./HelpTip";
-import AiModelFormGroup from "../models/AiModelFormGroup";
-import ContentScopeFormGroup from "../tool-panels/ContentScopeFormGroup";
+import AiModelFormGroup from "./AiModelFormGroup";
+import ContentScopeFormGroup from "./ContentScopeFormGroup";
 import ProgressBar from "../feedback/ProgressBar";
 import ErrorDisplay from "../feedback/ErrorDisplay";
-import { fetchJobEstimate, MISSING_API_KEY_MESSAGE } from "../../api";
+import { fetchJobEstimate, MISSING_API_KEY_MESSAGE } from "../../api/client";
 import { btn, btnPrimary, meta } from "../../lib/uiClasses";
 
 /** "850 ms" stays as is; anything a second or longer reads in seconds. */

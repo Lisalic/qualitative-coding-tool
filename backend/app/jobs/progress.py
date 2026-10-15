@@ -18,9 +18,9 @@ from typing import Any
 from sqlalchemy import update
 
 from backend.app.core.logging import get_logger
-from backend.app.database import AsyncSessionLocal
+from backend.app.core.database import AsyncSessionLocal
 from backend.app.external.pricing import calculate_cost
-from backend.app.jobs.models import Job
+from backend.app.models.job import Job
 
 logger = get_logger(__name__)
 

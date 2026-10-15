@@ -27,15 +27,15 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from backend.app.core.codebook_render import parse_markdown_to_codes
+from backend.app.formats.codebook_render import parse_markdown_to_codes
 from backend.app.core.exceptions import ForbiddenError, NotFoundError, ValidationAppError
-from backend.app.database import File, Project, User
+from backend.app.models.workspace import File, Project, User
 from backend.app.repositories import version_repo
 from backend.app.jobs import service as jobs_service
-from backend.app.jobs.models import TERMINAL_STATUSES
+from backend.app.models.job import TERMINAL_STATUSES
 from backend.app.services import coding_service, file_service, version_service
-from backend.app.storage_models import CodingEntry, Submission
-from backend.app.versioning_models import ArtifactVersion, CodebookCode
+from backend.app.models.storage import CodingEntry, Submission
+from backend.app.models.versioning import ArtifactVersion, CodebookCode
 
 
 async def _seed_codebook_markdown(session, file_id: int, user_id: int, markdown: str) -> None:
@@ -238,7 +238,7 @@ class TestStartSummarizeCodingJobEnqueue:
     ) -> None:
         source_file = await _make_file(session, user_id, schemaname="proj_a")
         monkeypatch.setattr(
-            "backend.scripts.summarize_coding.summarize_coding",
+            "backend.app.pipelines.summarize_coding.summarize_coding",
             AsyncMock(return_value=("a summary", {"batches_processed": 1, "batches_total": 1, "error": None})),
         )
 
@@ -289,7 +289,7 @@ class TestSummarizeCodingJobHandlerEndToEnd:
         await session.commit()
 
         summarize_mock = AsyncMock(return_value=("the final summary", {"batches_processed": 1, "batches_total": 1, "error": None}))
-        monkeypatch.setattr("backend.scripts.summarize_coding.summarize_coding", summarize_mock)
+        monkeypatch.setattr("backend.app.pipelines.summarize_coding.summarize_coding", summarize_mock)
 
         job = await coding_service.start_summarize_coding_job(
             session,
@@ -344,7 +344,7 @@ class TestSummarizeCodingJobHandlerEndToEnd:
         await session.commit()
 
         summarize_mock = AsyncMock(return_value=("the final summary", {"batches_processed": 1, "batches_total": 1, "error": None}))
-        monkeypatch.setattr("backend.scripts.summarize_coding.summarize_coding", summarize_mock)
+        monkeypatch.setattr("backend.app.pipelines.summarize_coding.summarize_coding", summarize_mock)
 
         job = await coding_service.start_summarize_coding_job(
             session,
@@ -367,7 +367,7 @@ class TestSummarizeCodingJobHandlerEndToEnd:
         # No coding_entries rows at all for this file.
         await _make_file(session, user_id, schemaname="proj_a")
         summarize_mock = AsyncMock(return_value=("should not be called", {"batches_processed": 1, "batches_total": 1, "error": None}))
-        monkeypatch.setattr("backend.scripts.summarize_coding.summarize_coding", summarize_mock)
+        monkeypatch.setattr("backend.app.pipelines.summarize_coding.summarize_coding", summarize_mock)
 
         job = await coding_service.start_summarize_coding_job(
             session,
@@ -706,7 +706,7 @@ class TestSaveCodingRevisionRowsOnly:
 
 class TestSaveCodingRevisionCoderAttribution:
     """B1: per-entry coder attribution threaded through
-    ``save_coding_revision``. See ``versioning_models.ArtifactAssist``
+    ``save_coding_revision``. See ``models.versioning.ArtifactAssist``
     for why this is a channel separate from the version's own
     ``origin``/``model`` -- these tests also guard that separation.
     """
@@ -730,7 +730,7 @@ class TestSaveCodingRevisionCoderAttribution:
         assert entry.coder_model is None
 
     async def test_accepted_ai_entry_resolves_coder_model_from_the_job(self, session, user_id) -> None:
-        from backend.app.jobs.models import Job
+        from backend.app.models.job import Job
 
         coding_file = await _make_file(session, user_id, schemaname="proj_coder_ai", content="body")
         codes = await version_service.read_codes(session, coding_file.id)
@@ -782,7 +782,7 @@ class TestSaveCodingRevisionCoderAttribution:
             )
 
     async def test_ai_entry_with_a_job_for_a_different_coding_file_is_rejected(self, session, user_id) -> None:
-        from backend.app.jobs.models import Job
+        from backend.app.models.job import Job
 
         coding_file = await _make_file(session, user_id, schemaname="proj_coder_wrong_file", content="body")
         codes = await version_service.read_codes(session, coding_file.id)
@@ -811,9 +811,9 @@ class TestSaveCodingRevisionCoderAttribution:
     async def test_mixed_row_keeps_each_entrys_own_coder(self, session, user_id) -> None:
         """One row, two quotes: a hand-added one and an accepted AI one
         -- the concrete case a "Both" row badge derives from (see
-        core/coder_rollup.py).
+        domain/coder_rollup.py).
         """
-        from backend.app.jobs.models import Job
+        from backend.app.models.job import Job
 
         coding_file = await _make_file(session, user_id, schemaname="proj_coder_mixed", content="body")
         codes = await version_service.read_codes(session, coding_file.id)
@@ -1382,7 +1382,7 @@ class TestCompareCodingsJobHandlerEndToEnd:
         # compare_codings' handler imports get_client via a LOCAL import
         # inside the handler body, so it must be patched at its source
         # module, not on coding_service.
-        monkeypatch.setattr("backend.scripts.codebook_generator.get_client", llm_mock)
+        monkeypatch.setattr("backend.app.pipelines.codebook_generator.get_client", llm_mock)
 
         job = await coding_service.start_compare_codings_job(
             session,
@@ -1423,7 +1423,7 @@ class TestCompareCodingsJobHandlerEndToEnd:
         await _make_file(session, user_id, schemaname="proj_cmp_empty_a")
         await _make_file(session, user_id, schemaname="proj_cmp_empty_b")
         llm_mock = AsyncMock(return_value="should not run")
-        monkeypatch.setattr("backend.scripts.codebook_generator.get_client", llm_mock)
+        monkeypatch.setattr("backend.app.pipelines.codebook_generator.get_client", llm_mock)
 
         job = await coding_service.start_compare_codings_job(
             session,
@@ -1454,7 +1454,7 @@ class TestCompareCodingsJobHandlerEndToEnd:
             lambda model, **kwargs: True,
         )
         llm_mock = AsyncMock(return_value="cmp")
-        monkeypatch.setattr("backend.scripts.codebook_generator.get_client", llm_mock)
+        monkeypatch.setattr("backend.app.pipelines.codebook_generator.get_client", llm_mock)
 
         job = await coding_service.start_compare_codings_job(
             session,
@@ -1496,7 +1496,7 @@ class TestCompareCodingsJobHandlerEndToEnd:
 
         monkeypatch.setattr("backend.app.services.coding_service.context_window.prompt_fits", _prompt_fits)
         llm_mock = AsyncMock(return_value="the comparison")
-        monkeypatch.setattr("backend.scripts.codebook_generator.get_client", llm_mock)
+        monkeypatch.setattr("backend.app.pipelines.codebook_generator.get_client", llm_mock)
 
         job = await coding_service.start_compare_codings_job(
             session,
@@ -1530,7 +1530,7 @@ class TestCompareCodingsJobHandlerEndToEnd:
             lambda model, **kwargs: False,
         )
         llm_mock = AsyncMock(return_value="should not run")
-        monkeypatch.setattr("backend.scripts.codebook_generator.get_client", llm_mock)
+        monkeypatch.setattr("backend.app.pipelines.codebook_generator.get_client", llm_mock)
 
         job = await coding_service.start_compare_codings_job(
             session,

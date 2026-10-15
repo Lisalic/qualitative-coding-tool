@@ -1,9 +1,9 @@
 """Service layer for codebook artifacts -- backs
-backend/app/api/codebook_routes.py.
+backend/app/api/routes/codebook.py.
 
 Reads/writes a codebook's content as structured ``codebook_codes`` rows
 via ``services/version_service.py`` rather than a markdown blob -- see
-that module and ``core/codebook_render.py`` for the row<->markdown
+that module and ``formats/codebook_render.py`` for the row<->markdown
 boundary. Adds the auth/ownership scoping ``get_codebook`` never had, and
 supersedes the Stage-0 guard-clause patch on ``list_codebooks`` with a
 real service-layer implementation.
@@ -36,28 +36,26 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from backend.app.core.codebook_render import (
+from backend.app.formats.codebook_render import (
     parse_json_to_codes,
     parse_json_to_merge_proposals,
     parse_markdown_to_codes,
 )
-from backend.app.core.evidence_match import normalize_label
+from backend.app.domain.evidence_match import normalize_label
 from backend.app.core.exceptions import ContextBudgetError, NotFoundError, ValidationAppError
 from backend.app.core.schema_guard import require_valid_schema
-from backend.app.database import (
-    AsyncSessionLocal,
-    File,
-    async_link_file_to_project,
-)
+from backend.app.core.database import AsyncSessionLocal
+from backend.app.models.workspace import File
+from backend.app.repositories.project_repo import async_link_file_to_project
 from backend.app.external import context_window
-from backend.app.jobs.models import Job
+from backend.app.models.job import Job
 from backend.app.jobs.progress import ProgressTracker
 from backend.app.jobs.registry import register_handler
 from backend.app.jobs.service import enqueue_job
 from backend.app.repositories import file_repo, project_repo, raw_data_repo, version_repo
 from backend.app.services import assist_service, version_service
 from backend.app.services.version_service import EdgeSpec
-from backend.app.versioning_models import (
+from backend.app.models.versioning import (
     ASSIST_STAGE_CODEBOOK,
     ASSIST_STAGE_INTEGRATE,
     ORIGIN_EDITED,
@@ -73,7 +71,7 @@ from backend.app.versioning_models import (
     ROLE_SOURCE_DATA,
     ArtifactVersion,
 )
-from backend.scripts import codebook_generator as codebook_generator_module
+from backend.app.pipelines import codebook_generator as codebook_generator_module
 
 _CODEBOOK_LIST_TYPES = ("codebook", "codebook_comparison")
 
@@ -132,7 +130,7 @@ async def get_codebook(session: AsyncSession, user_id: int, codebook_id: str | N
     falsy) the most recently created one. Raises ``NotFoundError`` (404) if
     nothing matches. The route reads the actual content separately via
     ``version_service.read_codes``/``read_blob``, matching
-    ``content_routes.py::get_summary_file``'s split between "resolve the
+    ``routes/content.py::get_summary_file``'s split between "resolve the
     file" (service) and "read its content" (route + ``version_service``).
     """
     file_rec = await _lookup_codebook_file(session, user_id, codebook_id, file_types=_CODEBOOK_LIST_TYPES)
@@ -511,7 +509,7 @@ async def _materialize_codebook(
 def _code_dedupe_key(family_name: str | None, name: str | None) -> str:
     """Normalized ``(family, name)`` identity used to tell a proposed code
     apart from one the researcher already has. Mirrors
-    ``lib/codebookEditorState.js::codeKey`` exactly -- the two must agree
+    ``features/codebook/editor/codebookEditorState.js::codeKey`` exactly -- the two must agree
     or the server and the client would disagree about what counts as a
     duplicate.
     """
@@ -1190,7 +1188,7 @@ async def create_integrated_codebook(
     integrate preview assistant).
 
     Every accepted/copied code in ``codes`` mints a FRESH ``code_uid``/
-    ``family_uid`` on the client (see ``lib/codebookEditorState.js``'s
+    ``family_uid`` on the client (see ``features/codebook/editor/codebookEditorState.js``'s
     ``acceptProposal``/``copySourceCode``) -- never a source codebook's
     own uid. This is enforced upstream, not re-checked here, but is worth
     restating: ``_resolve_code_rows`` *accepts* a bare carried-over

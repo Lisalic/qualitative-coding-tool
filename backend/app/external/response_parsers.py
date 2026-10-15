@@ -1,8 +1,8 @@
 """Shared response-parsing primitives.
 
 Only the primitive that was genuinely duplicated (markdown-fence
-stripping, in ``backend/scripts/filter_db.py`` and
-``backend/scripts/tag_expansion.py``) lives here. The 4 scripts' actual
+stripping, in ``backend/app/pipelines/filter_db.py`` and
+``backend/app/pipelines/tag_expansion.py``) lives here. The 4 scripts' actual
 response *parsing* (free-form text, the POST_ID/CODE/EVIDENCE DSL,
 ``ast.literal_eval`` array, JSON) stays script-specific -- they're
 genuinely different output contracts.

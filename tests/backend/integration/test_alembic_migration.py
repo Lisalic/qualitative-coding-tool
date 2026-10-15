@@ -93,18 +93,18 @@ def alembic_config(alembic_db_url, monkeypatch):
     """An Alembic `Config` pointed at this repo's `alembic.ini`, wired to
     `alembic_db_url` instead of the real app database.
 
-    `backend/alembic/env.py` does `from backend.app.database import ...
+    `backend/alembic/env.py` does `from backend.app.core.database import ...
     DATABASE_URL` and then `config.set_main_option("sqlalchemy.url",
     DATABASE_URL)` on every invocation -- so passing a URL via
     `Config.set_main_option` alone is not enough, env.py would overwrite
-    it right back with whatever `backend.app.database.DATABASE_URL`
+    it right back with whatever `backend.app.core.database.DATABASE_URL`
     currently holds (the fake sentinel `tests/conftest.py` sets at import
     time). `env.py` is re-executed fresh on every `command.upgrade`/
     `downgrade` call (`alembic.script.Script.run_env` ->
     `util.load_python_file`), so monkeypatching the module attribute here
     is picked up on each call.
     """
-    from backend.app import database as db_module
+    from backend.app.core import database as db_module
 
     monkeypatch.setattr(db_module, "DATABASE_URL", alembic_db_url)
 
@@ -220,8 +220,8 @@ class TestSchemaMatchesOrmMetadata:
         which is exactly how this project's migration chain fell out of
         sync with its schema in the first place.
 
-        Regression: this used to import `storage_models`/`jobs.models`
-        but not `versioning_models` -- so unless some OTHER test module
+        Regression: this used to import the storage and job models
+        but not the versioning ones -- so unless some OTHER test module
         happened to have imported it first during the same pytest
         collection (an accident of import order, not a guarantee),
         `ArtifactVersion`/`ArtifactEdge`/`CodebookCode`/`ArtifactAssist`
@@ -233,10 +233,8 @@ class TestSchemaMatchesOrmMetadata:
         reproduced it: `Base.metadata.tables` came back without any of
         those four tables.
         """
-        from backend.app.database import Base
-        from backend.app import storage_models  # noqa: F401
-        from backend.app import versioning_models  # noqa: F401
-        from backend.app.jobs import models as jobs_models  # noqa: F401
+        from backend.app.core.database import Base
+        from backend.app import models  # noqa: F401
 
         assert "artifact_versions" in Base.metadata.tables
         assert "artifact_assists" in Base.metadata.tables
@@ -320,7 +318,7 @@ class TestWordCountColumn:
         from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
         from backend.app.repositories import raw_data_repo
-        from backend.app.storage_models import Comment, Submission
+        from backend.app.models.storage import Comment, Submission
 
         command.upgrade(alembic_config, "head")
 
@@ -368,9 +366,8 @@ class TestExistingDatabaseNoOp:
         """Simulates every real deployment's database: schema built and stamped
         at head. Upgrading to head against it should apply zero revisions.
         """
-        from backend.app.database import Base
-        from backend.app import storage_models  # noqa: F401
-        from backend.app.jobs import models as jobs_models  # noqa: F401
+        from backend.app.core.database import Base
+        from backend.app import models  # noqa: F401
 
         engine = create_engine(alembic_db_url)
         try:
@@ -414,9 +411,8 @@ def _production_state(alembic_config, db_url: str) -> None:
     already created by the startup `create_all` that deploy still ran, and
     `users` still missing `password_reset_requested_at`.
     """
-    from backend.app.database import Base
-    from backend.app import storage_models, versioning_models  # noqa: F401
-    from backend.app.jobs import models as jobs_models  # noqa: F401
+    from backend.app.core.database import Base
+    from backend.app import models  # noqa: F401
 
     command.upgrade(alembic_config, "e8a2b3c4d5f6")
     engine = create_engine(db_url)
@@ -451,7 +447,7 @@ class TestStartupUpgrade:
         from sqlalchemy.orm import Session
 
         from backend.app.core.migrations import upgrade_to_head
-        from backend.app.database import User
+        from backend.app.models.workspace import User
 
         _production_state(alembic_config, alembic_db_url)
 
@@ -520,7 +516,7 @@ class TestStartupUpgrade:
         import uuid
         from urllib.parse import quote, urlsplit, urlunsplit
 
-        from backend.app import database as db_module
+        from backend.app.core import database as db_module
         from backend.app.core.migrations import upgrade_to_head
 
         role = f"qc_pct_{uuid.uuid4().hex[:8]}"
@@ -611,10 +607,9 @@ def _prod_replica(alembic_config, db_url: str, *, empty_version_table: bool = Fa
     shape, and Alembic's own bookkeeping is gone. Seeded with accounts and
     with rows in the tables that get dropped.
     """
-    from backend.app.api.utils import _hash_password
-    from backend.app.database import Base
-    from backend.app import storage_models, versioning_models  # noqa: F401
-    from backend.app.jobs import models as jobs_models  # noqa: F401
+    from backend.app.auth.passwords import _hash_password
+    from backend.app.core.database import Base
+    from backend.app import models  # noqa: F401
 
     command.upgrade(alembic_config, "8b0a568ce28c")
     engine = create_engine(db_url)
@@ -644,7 +639,7 @@ def _prod_replica(alembic_config, db_url: str, *, empty_version_table: bool = Fa
 
 def _drift(db_url: str) -> list[str]:
     from backend.app.core.migrations import _describe
-    from backend.app.database import Base
+    from backend.app.core.database import Base
 
     engine = create_engine(db_url)
     try:

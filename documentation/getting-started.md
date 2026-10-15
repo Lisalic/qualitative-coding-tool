@@ -31,7 +31,7 @@ Create `frontend/.env` (optional) with:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `VITE_API_URL` | `http://localhost:8000` | Base URL the frontend's `axios`/`fetch` clients call — see `frontend/src/api.js` |
+| `VITE_API_URL` | `http://localhost:8000` | Base URL the frontend's `axios`/`fetch` clients call — see `frontend/src/api/client.js` |
 
 ## Run
 
@@ -62,7 +62,7 @@ The full pipeline and how each stage depends on the previous one is diagrammed i
 
 ## Tests
 
-Frontend (Vitest — covers `frontend/src/lib/**` and `frontend/src/api.js`, pure logic, no component/DOM tests):
+Frontend (Vitest — tests live in `__tests__/` folders beside the code they cover):
 
 ```bash
 cd frontend && npm run test:run

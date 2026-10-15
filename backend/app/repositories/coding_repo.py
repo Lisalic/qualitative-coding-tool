@@ -4,8 +4,8 @@ reading the rows (``submissions``/``comments``) a coding artifact owns.
 One ``coding_entries`` row per *quote* -- a single code applied to an item
 on the strength of several distinct quotes gets several rows, each
 carrying its own ``start_offset``/``end_offset`` into that item's own body
-text (see ``storage_models.CodingEntry`` and
-``backend/app/core/evidence_match.py``). Enables a real
+text (see ``models.storage.CodingEntry`` and
+``backend/app/domain/evidence_match.py``). Enables a real
 ``SELECT code, COUNT(*) ... GROUP BY code``, impossible without pulling
 and re-parsing a blob client-side.
 
@@ -30,12 +30,12 @@ from sqlalchemy import and_, delete, exists, func, insert, literal, null, or_, s
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.core.coder_rollup import roll_up
+from backend.app.domain.coder_rollup import roll_up
 from backend.app.core.exceptions import NotFoundError
-from backend.app.core.item_types import COMMENT, SUBMISSION, qualify_item_id
+from backend.app.domain.item_types import COMMENT, SUBMISSION, qualify_item_id
 from backend.app.core.sql_filters import LIKE_ESCAPE, contains_pattern
 from backend.app.repositories.raw_data_repo import _liveness_condition
-from backend.app.storage_models import CODER_AI, CODER_HUMAN, Comment, CodingEntry, StarredQuote, Submission
+from backend.app.models.storage import CODER_AI, CODER_HUMAN, Comment, CodingEntry, StarredQuote, Submission
 
 RowFilter = Literal["all", "coded", "uncoded", "ai", "human"]
 
@@ -46,7 +46,7 @@ def _live(query):
     this module routes through this rather than repeating the predicate,
     so a version boundary correctly hides closed (superseded) rows
     without a query missing it and showing stale/duplicate history as if
-    it were still current (see ``storage_models.py::CodingEntry``'s range
+    it were still current (see ``models/storage.py::CodingEntry``'s range
     invariant).
     """
     return query.where(CodingEntry.valid_to.is_(None))
@@ -62,7 +62,7 @@ async def bulk_insert_coding_entries(
 
     ``version_no`` stamps every inserted row's ``valid_from`` -- the
     version of this coding artifact these entries were written under
-    (see ``storage_models.py::CodingEntry``'s SCD-2 docstring). A brand
+    (see ``models/storage.py::CodingEntry``'s SCD-2 docstring). A brand
     new coding artifact (apply-codebook, duplicate) always passes ``1``;
     a later edit passes whatever version ``version_service.commit_coding_version``
     opened for it.
@@ -114,7 +114,7 @@ async def replace_entries_for_items(
     (e.g. the AI decided no code applies, or a user cleared every code
     from a row) -- it is not left untouched.
 
-    SCD-2, in three steps, per ``storage_models.py::CodingEntry``'s range
+    SCD-2, in three steps, per ``models/storage.py::CodingEntry``'s range
     invariant:
 
     1. DELETE rows already born in ``version_no`` itself -- these never
@@ -288,7 +288,7 @@ async def code_frequency(session: AsyncSession, file_id: int) -> list[tuple[str,
 
     ``count`` is the number of ``coding_entries`` rows for that code --
     since a row is now one quote (not one item, see
-    ``storage_models.CodingEntry``), this counts *references* (how many
+    ``models.storage.CodingEntry``), this counts *references* (how many
     quoted excerpts carry the code), the standard meaning of "code
     frequency" in qualitative coding tools -- not distinct items. An item
     with the same code applied via two separate quotes counts twice.
@@ -366,7 +366,7 @@ async def code_summary_with_samples(
 
 def _rows_union_subquery(file_id: int):
     """One row per LIVE submission/comment owned by ``file_id`` (see
-    ``storage_models.py``'s ``Submission``/``Comment`` SCD-2 docstrings),
+    ``models/storage.py``'s ``Submission``/``Comment`` SCD-2 docstrings),
     in a common ``(row_type, item_id, title, body)`` shape -- ``title``
     is ``NULL`` for a comment. Kept as a reusable subquery so listing and
     counting apply the exact same filters. A coding artifact's own rows
@@ -497,7 +497,7 @@ async def list_rows_with_codes(
     row it owns, coded or not -- each with its list of ``{code, quote,
     start_offset, end_offset, notes, coder, coder_model}`` entries (empty
     for an uncoded row, one entry per quote for a code supported by more
-    than one), plus a row-level ``coder`` rollup (``core/coder_rollup.py``
+    than one), plus a row-level ``coder`` rollup (``domain/coder_rollup.py``
     -- ``"ai"``/``"human"``/``"both"``/``None`` for uncoded) so the
     document list can badge a row without re-deriving it client-side.
 
@@ -572,7 +572,7 @@ async def render_coding_text(session: AsyncSession, file_id: int, *, version_no:
     artifact's classification, so there is no separate stored blob to
     drift from this rendering. Safe to extend with ``CODER:`` because
     this text is read-only and never parsed back into rows (unlike the
-    codebook markdown DSL) -- see ``frontend/src/lib/codingViewHelpers.js``.
+    codebook markdown DSL) -- see ``frontend/src/features/coding/workspace/codingViewHelpers.js``.
 
     One ``coding_entries`` row is one quote, so a code supported by
     several quotes for the same item renders as several

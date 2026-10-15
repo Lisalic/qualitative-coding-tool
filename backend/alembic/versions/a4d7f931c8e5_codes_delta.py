@@ -18,10 +18,10 @@ Combined with the already-added ``codes_materialized``,
 ``version_service`` now keeps only v1, the 3 most recent versions of any
 file, and every 10th version ("keyframe") fully materialized; every
 other version is compacted to a field-level delta
-(``core/codebook_delta.py::encode_delta``) computed directly against its
+(``domain/codebook_delta.py::encode_delta``) computed directly against its
 nearest still-materialized ancestor, and reconstructed on read by
 ``version_service.read_codes`` via ``apply_delta``. See
-``versioning_models.ArtifactVersion.codes_materialized``'s docstring for
+``models.versioning.ArtifactVersion.codes_materialized``'s docstring for
 the full policy and the reasoning for a single direct delta per
 compacted version rather than a chain of consecutive ones.
 

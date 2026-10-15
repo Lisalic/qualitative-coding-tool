@@ -10,7 +10,7 @@ Closes GAP-4 in
 every artifact (``origin=edited``, no model, no prompt) and, as a side
 effect, erased the record of where the AI actually helped. That decision
 about ``origin``/``model``/``system_prompt`` is correct and untouched by
-this revision -- see ``versioning_models.ArtifactAssist``'s docstring for
+this revision -- see ``models.versioning.ArtifactAssist``'s docstring for
 why a SIBLING channel is the fix rather than overloading those columns.
 
 Two independent additions:

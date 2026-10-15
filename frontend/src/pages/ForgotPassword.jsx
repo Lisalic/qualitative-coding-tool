@@ -1,7 +1,7 @@
-import AuthLinksSection from "../components/auth/AuthLinksSection";
-import AuthFormSection from "../components/auth/AuthFormSection";
+import AuthLinksSection from "../features/auth/AuthLinksSection";
+import AuthFormSection from "../features/auth/AuthFormSection";
 import PageHeading from "../components/primitives/PageHeading";
-import useForgotPasswordPage from "../components/auth/useForgotPasswordPage";
+import useForgotPasswordPage from "../features/auth/useForgotPasswordPage";
 
 const ForgotPassword = () => {
   const page = useForgotPasswordPage();

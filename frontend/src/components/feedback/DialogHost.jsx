@@ -1,7 +1,7 @@
 import { useRef, useSyncExternalStore } from "react";
 import { btn, btnDanger, btnPrimary } from "../../lib/uiClasses";
 import DialogService from "./DialogService";
-import { useModalBehavior } from "./useModalBehavior";
+import { useModalBehavior } from "../../hooks/useModalBehavior";
 
 /**
  * Renders whichever DialogService confirm is at the head of the queue, using

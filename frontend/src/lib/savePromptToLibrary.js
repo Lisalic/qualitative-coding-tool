@@ -1,4 +1,4 @@
-import { api } from "../api";
+import { api } from "../api/client";
 
 /**
  * Saves the current prompt text to the user's prompt library.

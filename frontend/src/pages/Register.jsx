@@ -1,7 +1,7 @@
-import AuthLinksSection from "../components/auth/AuthLinksSection";
-import AuthFormSection from "../components/auth/AuthFormSection";
+import AuthLinksSection from "../features/auth/AuthLinksSection";
+import AuthFormSection from "../features/auth/AuthFormSection";
 import PageHeading from "../components/primitives/PageHeading";
-import useRegisterPage from "../components/auth/useRegisterPage";
+import useRegisterPage from "../features/auth/useRegisterPage";
 
 const Register = () => {
   const page = useRegisterPage();

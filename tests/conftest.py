@@ -6,7 +6,7 @@ This file sets ``DATABASE_URL`` to a sentinel value *before* any
 ``backend.*`` module is imported, so the real dev database can never be
 touched by the default test run.
 
-Why this is safe: ``backend/app/database.py`` calls
+Why this is safe: ``backend/app/core/database.py`` calls
 ``load_dotenv(backend/.env)`` (default ``override=False``) and only then
 reads ``os.environ.get("DATABASE_URL")``. A value already present in the
 environment therefore always wins over ``backend/.env`` -- verified
@@ -38,8 +38,9 @@ from sqlalchemy import event  # noqa: E402
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
-from backend.app.auth import create_access_token, password_fingerprint  # noqa: E402
-from backend.app.database import Base, Project, User, get_async_db  # noqa: E402
+from backend.app.auth.tokens import create_access_token, password_fingerprint  # noqa: E402
+from backend.app.core.database import Base, get_async_db  # noqa: E402
+from backend.app.models.workspace import Project, User
 from backend.app.main import app as fastapi_app  # noqa: E402
 
 
@@ -160,11 +161,11 @@ async def override_async_db(async_sqlite_engine) -> AsyncIterator[None]:
 
 @pytest.fixture()
 def frozen_time(monkeypatch) -> float:
-    """Freeze ``time.time()`` as seen by ``backend.app.auth`` so JWT
+    """Freeze ``time.time()`` as seen by ``backend.app.auth.tokens`` so JWT
     ``iat``/``exp`` boundaries are deterministic. Returns the frozen epoch.
     """
     fixed = 1_700_000_000.0
-    monkeypatch.setattr("backend.app.auth.time.time", lambda: fixed)
+    monkeypatch.setattr("backend.app.auth.tokens.time.time", lambda: fixed)
     return fixed
 
 

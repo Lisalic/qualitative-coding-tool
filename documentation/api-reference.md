@@ -1,12 +1,12 @@
 # API Reference
 
-Every endpoint is mounted under `/api` (`backend/app/main.py` → `backend/app/api/routes.py`). Unless noted, all routes require auth via `Depends(require_user_id)` (401 `{"error": "Not authenticated"}` if missing — see [architecture.md#auth](architecture.md#auth)).
+Every endpoint is mounted under `/api` (`backend/app/main.py` → `backend/app/api/router.py`). Unless noted, all routes require auth via `Depends(require_user_id)` (401 `{"error": "Not authenticated"}` if missing — see [architecture.md#auth](architecture.md#auth)).
 
 "Job" endpoints return `202 {"job_id": <int>, "status": "pending"}` immediately; poll `GET /api/jobs/{job_id}` for the result. See [architecture.md#background-jobs](architecture.md#background-jobs).
 
 One route exists outside `/api`: `GET /` → `{"message": "Qualitative Coding API"}`, no auth, defined directly on the FastAPI app.
 
-## Authentication — `backend/app/api/auth_routes.py`
+## Authentication — `backend/app/api/routes/auth.py`
 
 | Method | Path | Auth | Body | Response |
 |---|---|---|---|---|
@@ -17,7 +17,7 @@ One route exists outside `/api`: `GET /` → `{"message": "Qualitative Coding AP
 
 See [tools/authentication.md](tools/authentication.md).
 
-## Files — `backend/app/api/file_routes.py`
+## Files — `backend/app/api/routes/files.py`
 
 | Method | Path | Body | Response |
 |---|---|---|---|
@@ -29,7 +29,7 @@ See [tools/authentication.md](tools/authentication.md).
 
 See [tools/import-data.md](tools/import-data.md), [tools/projects.md](tools/projects.md), [tools/data-browser.md](tools/data-browser.md).
 
-## Prompts — `backend/app/api/prompt_routes.py`
+## Prompts — `backend/app/api/routes/prompts.py`
 
 | Method | Path | Body | Response |
 |---|---|---|---|
@@ -40,7 +40,7 @@ See [tools/import-data.md](tools/import-data.md), [tools/projects.md](tools/proj
 
 See [tools/prompt-manager.md](tools/prompt-manager.md).
 
-## Codebooks — `backend/app/api/codebook_routes.py`
+## Codebooks — `backend/app/api/routes/codebook.py`
 
 | Method | Path | Body | Response | Kind |
 |---|---|---|---|---|
@@ -56,7 +56,7 @@ See [tools/prompt-manager.md](tools/prompt-manager.md).
 
 See [tools/codebook.md](tools/codebook.md), [tools/view-codebook.md](tools/view-codebook.md), [tools/compare-codebooks.md](tools/compare-codebooks.md), [tools/integrate-codebook.md](tools/integrate-codebook.md).
 
-## Coding — `backend/app/api/coding_routes.py`
+## Coding — `backend/app/api/routes/coding.py`
 
 | Method | Path | Body | Response | Kind |
 |---|---|---|---|---|
@@ -76,9 +76,9 @@ See [tools/codebook.md](tools/codebook.md), [tools/view-codebook.md](tools/view-
 
 See [tools/apply-codebook.md](tools/apply-codebook.md), [tools/view-coding.md](tools/view-coding.md), [tools/compare-codings.md](tools/compare-codings.md), [tools/summarize-coding.md](tools/summarize-coding.md).
 
-Structural (no-LLM) diffing between two versions of the *same* codebook/coding artifact — as opposed to the LLM narrative comparison of two arbitrary artifacts above — lives at `GET /api/artifacts/{ref}/diff` (`backend/app/api/version_routes.py`), not as a standalone comparison endpoint.
+Structural (no-LLM) diffing between two versions of the *same* codebook/coding artifact — as opposed to the LLM narrative comparison of two arbitrary artifacts above — lives at `GET /api/artifacts/{ref}/diff` (`backend/app/api/routes/versions.py`), not as a standalone comparison endpoint.
 
-## Export — `backend/app/api/export_routes.py`
+## Export — `backend/app/api/routes/export.py`
 
 Owner-scoped, byte-deterministic for unchanged data. An explicit `version_no` that doesn't resolve to a real version 404s rather than silently returning an empty export.
 
@@ -86,18 +86,18 @@ Owner-scoped, byte-deterministic for unchanged data. An explicit `version_no` th
 
 | Method | Path | Query | Response | Kind |
 |---|---|---|---|---|
-| GET | `/api/export/{ref}/codebook` | `format` (docx\|xlsx\|qdc\|csv, default docx), `version_no?` | docx: a readable codebook (families as headings, each code's definition/include/exclude/example/keywords); xlsx: one row per code; qdc: [REFI-QDA Codebook](https://www.qdasoftware.org/refi-qda-codebook) XML, importable by NVivo/ATLAS.ti/MAXQDA (`backend/app/core/qdc.py`); csv: one row per code for R | direct |
+| GET | `/api/export/{ref}/codebook` | `format` (docx\|xlsx\|qdc\|csv, default docx), `version_no?` | docx: a readable codebook (families as headings, each code's definition/include/exclude/example/keywords); xlsx: one row per code; qdc: [REFI-QDA Codebook](https://www.qdasoftware.org/refi-qda-codebook) XML, importable by NVivo/ATLAS.ti/MAXQDA (`backend/app/formats/qdc.py`); csv: one row per code for R | direct |
 | GET | `/api/export/{ref}/coding` | `format` (xlsx\|docx\|csv\|json, default xlsx), `layout` (long\|wide, csv/json only, default long -- passing it with xlsx/docx is a 400), `version_no?`, `include_source_text` (default false), `include_author` (default false) | xlsx: one workbook with *Coded quotes*, *Matrix* (every item incl. uncoded, one column per code), *Codebook*, *Code counts* and *About this export* sheets; docx: a code report, every quote under its code; csv/json long: one row per coded segment; wide: one row per dataset item, one column per code | direct |
 | GET | `/api/export/{ref}/summary` | `format` (docx\|xlsx\|md, default docx), `version_no?` | code-frequency table, grouped by `code_uid` (stable across renames) | direct |
 | GET | `/api/export/{ref}/memos` | `format` (docx\|xlsx\|md\|csv, default docx) | row memos; docx/md keep a memo body's paragraph breaks, which a single CSV cell flattens | direct |
 | GET | `/api/export/{ref}/document` | `format` (docx\|md, default docx), `version_no?` | a saved `summary` or `codebook_comparison`/`coding_comparison`: docx renders its stored markdown (headings, lists, tables, emphasis; raw HTML stays literal text and links become `text (url)`), md returns it as stored | direct |
 | GET | `/api/export/projects/{project_id}/bundle` | `include_source_text` (default false), `include_author` (default false), `codebook_formats` (`docx`\|`xlsx`\|`qdc`\|`csv`, default `docx`), `coding_formats` (`xlsx`\|`docx`\|`csv_long`\|`csv_wide`\|`json`, default `xlsx`), `comparison_formats` / `summary_formats` (`docx`\|`md`, default `docx`), `memo_formats` (`docx`\|`xlsx`\|`md`\|`csv`, default `docx`) -- each format param repeatable | deterministic ZIP: one export per project file per requested format (by default just Word/Excel), a SHA-256 `manifest.json` (schema 3.0, recording the formats used), and `lineage/project_lineage.json` | direct |
 
-Word and Excel lead every export because most users aren't technical: a `.docx`/`.xlsx` opens with a double-click and holds multi-line text and several related tables properly. The interchange formats stay available after them. `.qdc` is still the way to move a codebook into another QDA package, since REFI-QDA is the one codebook interchange standard they implement. The serializer maps this app's `code_uid` (a bare `uuid4().hex`) onto the schema's hyphenated `GUIDType`, re-hyphenating rather than replacing it where the uid is already a UUID, so identity survives the round trip; a code family becomes a non-codable parent `Code` holding its codes. Conformance rules are pinned in `tests/backend/core/test_qdc.py`.
+Word and Excel lead every export because most users aren't technical: a `.docx`/`.xlsx` opens with a double-click and holds multi-line text and several related tables properly. The interchange formats stay available after them. `.qdc` is still the way to move a codebook into another QDA package, since REFI-QDA is the one codebook interchange standard they implement. The serializer maps this app's `code_uid` (a bare `uuid4().hex`) onto the schema's hyphenated `GUIDType`, re-hyphenating rather than replacing it where the uid is already a UUID, so identity survives the round trip; a code family becomes a non-codable parent `Code` holding its codes. Conformance rules are pinned in `tests/backend/formats/test_qdc.py`.
 
-By default the project bundle writes **one file per project file**, in its Word/Excel format; repeating a `*_formats` param writes the same artifact once per requested format (the Project page's **Download** dialog exposes these as checkboxes). A file's row memos ride along as a sidecar (`.docx` by default), which for a `raw_data`/`filtered_data` file is its only export. Word/Excel files are frozen to fixed timestamps (`backend/app/core/xlsx_render.py::freeze_ooxml`), so a bundle stays byte-identical for unchanged data.
+By default the project bundle writes **one file per project file**, in its Word/Excel format; repeating a `*_formats` param writes the same artifact once per requested format (the Project page's **Download** dialog exposes these as checkboxes). A file's row memos ride along as a sidecar (`.docx` by default), which for a `raw_data`/`filtered_data` file is its only export. Word/Excel files are frozen to fixed timestamps (`backend/app/formats/xlsx_render.py::freeze_ooxml`), so a bundle stays byte-identical for unchanged data.
 
-**Injection safety.** Every export query is ORM-built with bound parameters, and `ref` is only ever a bound value matched inside the owner-scoped query (`file_repo._lookup_file`). User text passes through the sanitizer for its destination (`backend/app/core/export_text.py`):
+**Injection safety.** Every export query is ORM-built with bound parameters, and `ref` is only ever a bound value matched inside the owner-scoped query (`file_repo._lookup_file`). User text passes through the sanitizer for its destination (`backend/app/formats/export_text.py`):
 - spreadsheet cells can't become formulas. CSV gets a `'` prefix, including payloads behind leading whitespace. XLSX stores every string as a string cell, never a formula, and flags formula-like ones with Excel's `quotePrefix`.
 - XML formats (qdc/docx/xlsx) drop the control characters XML forbids.
 - generated markdown headings and table cells escape newlines, pipes, block markers and raw HTML.
@@ -106,7 +106,7 @@ An over-long XLSX cell (Excel caps cells at 32,767 characters) is cut with a vis
 
 `include_source_text`/`include_author` default to `False` everywhere — an export is opt-in to carrying a quote's full source text or its author, not opt-out. Backed by `backend/app/services/export_service.py` and `backend/app/repositories/export_repo.py`.
 
-## Data — `backend/app/api/data_routes.py`
+## Data — `backend/app/api/routes/data.py`
 
 | Method | Path | Body | Response | Kind |
 |---|---|---|---|---|
@@ -119,7 +119,7 @@ An over-long XLSX cell (Excel caps cells at 32,767 characters) is cut with a vis
 
 See [tools/data-browser.md](tools/data-browser.md), [tools/filter.md](tools/filter.md).
 
-## Projects — `backend/app/api/project_routes.py`
+## Projects — `backend/app/api/routes/projects.py`
 
 | Method | Path | Body | Response |
 |---|---|---|---|
@@ -133,20 +133,20 @@ See [tools/data-browser.md](tools/data-browser.md), [tools/filter.md](tools/filt
 
 See [tools/projects.md](tools/projects.md).
 
-## Content — `backend/app/api/content_routes.py`
+## Content — `backend/app/api/routes/content.py`
 
 | Method | Path | Body | Response |
 |---|---|---|---|
 | POST | `/api/save-summary/` | `content`, `name` (required), `description`, `project_id` | `{message, file: {id, schema_name, filename}}` |
 | GET | `/api/summary/{summary_id}` | — | `{"summary": {content, display_name, description}}` |
 
-## Models — `backend/app/api/models_routes.py`
+## Models — `backend/app/api/routes/ai_models.py`
 
 | Method | Path | Response |
 |---|---|---|
 | GET | `/api/models` | `[{value, label, paid, pricing: {inputUsdPerMillion, outputUsdPerMillion} \| null}]` — live in-memory catalog, see [architecture.md#model-catalog](architecture.md#model-catalog) |
 
-## Jobs — `backend/app/jobs/routes.py`
+## Jobs — `backend/app/api/routes/jobs.py`
 
 | Method | Path | Response |
 |---|---|---|

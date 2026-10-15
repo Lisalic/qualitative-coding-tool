@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { savePromptToLibrary } from "../savePromptToLibrary";
-import { api } from "../../api";
+import { api } from "../../api/client";
 
-vi.mock("../../api", () => ({
+vi.mock("../../api/client", () => ({
   api: { get: vi.fn(), post: vi.fn() },
 }));
 

@@ -2,7 +2,7 @@
 
 Runs directly against an in-memory async SQLite session (the
 ``async_sqlite_engine`` fixture from ``tests/conftest.py``), bypassing the
-HTTP layer entirely -- ``tests/backend/routes/test_prompt_routes.py``
+HTTP layer entirely -- ``tests/backend/api/routes/test_prompt_routes.py``
 covers the route/auth/response-shape behavior on top of this.
 """
 
@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from backend.app.core.exceptions import ForbiddenError, NotFoundError, ValidationAppError
-from backend.app.database import User
+from backend.app.models.workspace import User
 from backend.app.services import prompt_service
 
 

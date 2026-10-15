@@ -10,7 +10,7 @@ export default defineConfig({
     // Most of the test suite is pure logic (no DOM) and runs fine -- and
     // faster -- under plain node. Only files that touch `window`/
     // `localStorage`/`fetch` opt in to jsdom via a per-file
-    // `// @vitest-environment jsdom` docblock (see src/api.test.js).
+    // `// @vitest-environment jsdom` docblock (see src/api/__tests__/client.test.js).
     environment: "node",
     globals: false,
     // Reconciles Node's own experimental `localStorage` global with jsdom's
@@ -19,7 +19,7 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],
-      include: ["src/lib/**", "src/api.js"],
+      include: ["src/api/**", "src/lib/**", "src/features/**/*.js"],
     },
   },
 });

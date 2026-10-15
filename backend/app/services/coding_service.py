@@ -1,5 +1,5 @@
 """Service layer for coding-artifact operations -- backs
-backend/app/api/coding_routes.py.
+backend/app/api/routes/coding.py.
 
 A ``coding`` ``File`` is now a self-contained artifact made of three
 parts, all keyed by its own ``file_id``:
@@ -47,24 +47,22 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from backend.app.core.evidence_match import find_quote, normalize_label
+from backend.app.domain.evidence_match import find_quote, normalize_label
 from backend.app.core.exceptions import ContextBudgetError, NotFoundError, ValidationAppError
-from backend.app.core.item_types import COMMENT, SUBMISSION, qualify_item_id, split_item_id
-from backend.app.database import (
-    AsyncSessionLocal,
-    File,
-    async_link_file_to_project,
-)
+from backend.app.domain.item_types import COMMENT, SUBMISSION, qualify_item_id, split_item_id
+from backend.app.core.database import AsyncSessionLocal
+from backend.app.models.workspace import File
+from backend.app.repositories.project_repo import async_link_file_to_project
 from backend.app.external import context_window
-from backend.app.jobs.models import Job
+from backend.app.models.job import Job
 from backend.app.jobs.progress import ProgressTracker
 from backend.app.jobs.registry import register_handler
 from backend.app.jobs.service import enqueue_job
 from backend.app.repositories import coding_repo, file_repo, memo_repo, project_repo, raw_data_repo, version_repo
 from backend.app.services import assist_service, codebook_service, version_service
 from backend.app.services.version_service import EdgeSpec
-from backend.app.storage_models import CODER_AI, CODER_HUMAN, Comment, Submission
-from backend.app.versioning_models import (
+from backend.app.models.storage import CODER_AI, CODER_HUMAN, Comment, Submission
+from backend.app.models.versioning import (
     ASSIST_STAGE_CODING,
     ORIGIN_EDITED,
     ORIGIN_FORKED,
@@ -76,7 +74,7 @@ from backend.app.versioning_models import (
     ROLE_SIDE_B,
     ROLE_SOURCE_DATA,
 )
-from backend.scripts.codebook_apply import classify_posts
+from backend.app.pipelines.codebook_apply import classify_posts
 
 _PARENT_TEXT_TRUNCATE_CHARS = 280
 
@@ -370,7 +368,7 @@ async def save_coding_revision(
 
     No ``model``/``job_id`` params any more -- that used to be the one
     place an AI assist leaked onto this ``origin=ORIGIN_EDITED`` version's
-    ``model`` field (see ``versioning_models.ArtifactAssist`` for why that
+    ``model`` field (see ``models.versioning.ArtifactAssist`` for why that
     is exactly what the C2 design forbids). ``assist_runs`` is the
     replacement channel (recorded once the version is settled, below);
     each row entry's own ``coder``/``assist_job_id`` (validated via
@@ -773,7 +771,7 @@ def _assemble_posts_content(
     multi-paragraph item across a batch boundary).
 
     Each id is qualified with its Reddit-fullname-style type prefix
-    (``core/item_types.py::qualify_item_id``) so ``codebook_apply``'s
+    (``domain/item_types.py::qualify_item_id``) so ``codebook_apply``'s
     classifier -- and, downstream, ``coding_entries.row_type`` -- can tell
     a coded comment apart from a coded post; a comment's record also
     carries an ``IN_REPLY_TO:`` line (its parent post's title/text, from
@@ -1301,8 +1299,8 @@ async def _run_compare_codings_job(job_id: int, payload: dict) -> dict:
     ``artifact_edges`` rows link the new file to BOTH source codings,
     ordered ``side_a``/``side_b``.
     """
-    from backend.scripts import summarize_coding as summarize_coding_module
-    from backend.scripts.codebook_generator import get_client as codebook_get_client
+    from backend.app.pipelines import summarize_coding as summarize_coding_module
+    from backend.app.pipelines.codebook_generator import get_client as codebook_get_client
 
     user_id = payload["user_id"]
     file_id_a = payload["file_id_a"]
@@ -1498,8 +1496,8 @@ async def _run_summarize_coding_job(job_id: int, payload: dict) -> dict:
     fall back to; a coding artifact with literally zero coded rows fails
     with a clear error instead.
     """
-    from backend.scripts.summarize_coding import summarize_coding as summarize_coding_function
-    from backend.scripts import summarize_coding as summarize_coding_module
+    from backend.app.pipelines.summarize_coding import summarize_coding as summarize_coding_function
+    from backend.app.pipelines import summarize_coding as summarize_coding_module
 
     user_id = payload["user_id"]
     prompt = payload.get("prompt", "")

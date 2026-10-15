@@ -1,6 +1,6 @@
 import ArtifactPicker from "../components/primitives/ArtifactPicker";
-import CodebookWorkspaceSection from "../components/codebook/CodebookWorkspaceSection";
-import useViewCodebookPage from "../components/codebook/useViewCodebookPage";
+import CodebookWorkspaceSection from "../features/codebook/view/CodebookWorkspaceSection";
+import useViewCodebookPage from "../features/codebook/view/useViewCodebookPage";
 
 export default function ViewCodebook() {
   const {

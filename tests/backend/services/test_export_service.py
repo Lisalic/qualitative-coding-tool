@@ -16,9 +16,9 @@ from openpyxl import load_workbook
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from backend.app.core.exceptions import NotFoundError, ValidationAppError
-from backend.app.database import File, User
+from backend.app.models.workspace import File, User
 from backend.app.services import export_service, version_service
-from backend.app.storage_models import CodingEntry, RowMemo, Submission
+from backend.app.models.storage import CodingEntry, RowMemo, Submission
 
 
 DOCX_MEDIA = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -625,7 +625,8 @@ async def test_export_coding_wide_layout_includes_uncoded_rows(session, user_id)
 
 @pytest.mark.asyncio
 async def test_export_project_bundle_is_deterministic_and_privacy_scoped(session, user_id):
-    from backend.app.database import Project, async_link_file_to_project
+    from backend.app.models.workspace import Project
+    from backend.app.repositories.project_repo import async_link_file_to_project
 
     project = Project(user_id=user_id, projectname="My Project", description="desc")
     session.add(project)
@@ -691,7 +692,8 @@ async def test_export_project_bundle_writes_one_file_per_project_file(session, u
     """One file in, one file out: no artifact may appear twice in two
     formats, and a file's memos ride along as a single ``.docx`` sidecar.
     """
-    from backend.app.database import Project, async_link_file_to_project
+    from backend.app.models.workspace import Project
+    from backend.app.repositories.project_repo import async_link_file_to_project
 
     project = Project(user_id=user_id, projectname="One Each", description="")
     session.add(project)
@@ -749,7 +751,8 @@ async def test_export_project_bundle_writes_one_file_per_project_file(session, u
 
 @pytest.mark.asyncio
 async def test_export_project_bundle_includes_comparison_markdown(session, user_id):
-    from backend.app.database import Project, async_link_file_to_project
+    from backend.app.models.workspace import Project
+    from backend.app.repositories.project_repo import async_link_file_to_project
 
     project = Project(user_id=user_id, projectname="Cmp Project", description="")
     session.add(project)
@@ -793,7 +796,8 @@ async def test_export_project_bundle_includes_comparison_markdown(session, user_
 
 @pytest.mark.asyncio
 async def test_export_project_bundle_includes_saved_summary_markdown(session, user_id):
-    from backend.app.database import Project, async_link_file_to_project
+    from backend.app.models.workspace import Project
+    from backend.app.repositories.project_repo import async_link_file_to_project
 
     project = Project(user_id=user_id, projectname="Sum Project", description="")
     session.add(project)
@@ -830,7 +834,7 @@ async def test_export_project_bundle_includes_saved_summary_markdown(session, us
 @pytest.mark.asyncio
 async def test_export_project_bundle_unowned_project_raises(session, user_id, other_user_id):
     from backend.app.core.exceptions import ForbiddenError
-    from backend.app.database import Project
+    from backend.app.models.workspace import Project
 
     project = Project(user_id=other_user_id, projectname="Not Mine")
     session.add(project)
@@ -845,7 +849,8 @@ async def test_export_project_bundle_unowned_project_raises(session, user_id, ot
 async def test_export_project_bundle_writes_each_requested_format(session, user_id):
     """Asking for several formats of one type writes the same artifact
     once per format; types left unset keep their single default."""
-    from backend.app.database import Project, async_link_file_to_project
+    from backend.app.models.workspace import Project
+    from backend.app.repositories.project_repo import async_link_file_to_project
 
     project = Project(user_id=user_id, projectname="Many Formats", description="")
     session.add(project)
@@ -900,7 +905,7 @@ async def test_export_project_bundle_writes_each_requested_format(session, user_
 
 @pytest.mark.asyncio
 async def test_export_project_bundle_rejects_an_unknown_format(session, user_id):
-    from backend.app.database import Project
+    from backend.app.models.workspace import Project
 
     project = Project(user_id=user_id, projectname="Bad Format", description="")
     session.add(project)

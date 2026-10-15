@@ -11,7 +11,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.versioning_models import ArtifactAssist, ArtifactVersion
+from backend.app.models.versioning import ArtifactAssist, ArtifactVersion
 
 
 async def insert_assist(

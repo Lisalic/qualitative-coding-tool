@@ -11,7 +11,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.core.coverage_metrics import compute_coverage_metrics
+from backend.app.domain.coverage_metrics import compute_coverage_metrics
 from backend.app.core.exceptions import NotFoundError
 from backend.app.repositories import coding_repo, file_repo, version_repo
 from backend.app.services import version_service

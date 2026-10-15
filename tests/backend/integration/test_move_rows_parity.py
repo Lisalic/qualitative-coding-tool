@@ -25,9 +25,9 @@ session per request).
 
 from sqlalchemy import select
 
-from backend.app.database import File, User
+from backend.app.models.workspace import File, User
 from backend.app.services import file_service
-from backend.app.storage_models import Comment, Submission
+from backend.app.models.storage import Comment, Submission
 
 
 async def _naive_copy(session, *, source_file_id, target_file_id, table, row_ids):

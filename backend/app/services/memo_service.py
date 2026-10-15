@@ -1,8 +1,8 @@
-"""Service layer for row memos -- backs ``backend/app/api/memo_routes.py``.
+"""Service layer for row memos -- backs ``backend/app/api/routes/memos.py``.
 
 Thin on purpose: the interesting decisions (one memo per row, blank body
 means delete, memos follow their rows into derived artifacts) all live in
-``repositories/memo_repo.py`` and ``storage_models.py::RowMemo``. What
+``repositories/memo_repo.py`` and ``models/storage.py::RowMemo``. What
 this layer owns is the same thing every other service in this package
 owns -- turning the opaque ``schemaname`` the frontend passes around into
 an ownership-scoped ``file_id`` before any query runs
@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.schema_guard import require_valid_schema
 from backend.app.repositories import file_repo, memo_repo
-from backend.app.storage_models import RowMemo
+from backend.app.models.storage import RowMemo
 
 
 def _memo_to_dict(memo: RowMemo) -> dict[str, Any]:

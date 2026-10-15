@@ -1,7 +1,7 @@
 """Single seam for all OpenRouter (LLM) calls.
 
 Replaces 4 independent sync ``OpenAI(...)`` + hand-rolled ``time.sleep``
-retry-loop implementations (one per script in ``backend/scripts/``) with
+retry-loop implementations (one per pipeline in ``backend/app/pipelines/``) with
 one async client + one shared retry helper. Response *parsing* stays in
 each script -- a codebook string, a POST_ID/CODE/EVIDENCE DSL, and a JSON
 object are different output contracts and forcing one shape here would be

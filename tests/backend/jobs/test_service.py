@@ -12,9 +12,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from backend.app.core.exceptions import ForbiddenError, NotFoundError
-from backend.app.database import User
+from backend.app.models.workspace import User
 from backend.app.jobs import service
-from backend.app.jobs.models import Job, TERMINAL_STATUSES
+from backend.app.models.job import Job, TERMINAL_STATUSES
 from backend.app.jobs.registry import register_handler
 
 

@@ -71,6 +71,6 @@ Files are organized into tabs: `database` (`raw_data`), `filtered` (`filtered_da
 
 ## Developer reference
 
-- Frontend: `pages/Home.jsx` + `components/project/useHomePage.js`, `components/project/ProjectsListSection.jsx`, `components/project/CreateProjectSection.jsx`, `components/project/ProjectCard.jsx`; `pages/Project.jsx` + `components/project/useProjectPage.js`, `ProjectHeaderSection.jsx`, `ProjectFilesSection.jsx`, `FileRowActions.jsx`.
-- Backend: `backend/app/api/project_routes.py` → `backend/app/services/project_service.py` → `backend/app/repositories/project_repo.py` / `file_repo.py`. Merge/delete/rename of files themselves live in `backend/app/api/file_routes.py` → `backend/app/services/file_service.py`.
+- Frontend: `pages/Home.jsx` + `features/projects/useHomePage.js`, `features/projects/ProjectsListSection.jsx`, `features/projects/CreateProjectSection.jsx`, `features/projects/ProjectCard.jsx`; `pages/Project.jsx` + `features/projects/useProjectPage.js`, `ProjectHeaderSection.jsx`, `ProjectFilesSection.jsx`, `FileRowActions.jsx`.
+- Backend: `backend/app/api/routes/projects.py` → `backend/app/services/project_service.py` → `backend/app/repositories/project_repo.py` / `file_repo.py`. Merge/delete/rename of files themselves live in `backend/app/api/routes/files.py` → `backend/app/services/file_service.py`.
 - Endpoints: `GET /api/projects/`, `POST /api/create-project/`, `POST /api/update-project/`, `GET /api/my-files/`, `POST /api/rename-file/`, `POST /api/merge-databases/`, `DELETE /api/delete-database/{schema}` — see [api-reference.md](../api-reference.md#projects--backendappapiproject_routespy).

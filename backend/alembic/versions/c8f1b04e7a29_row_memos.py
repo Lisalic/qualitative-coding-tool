@@ -12,7 +12,7 @@ annotates a single coded *quote* and therefore only exists once a
 codebook has been generated and applied. A memo attaches to the row
 itself and is available from the moment data is imported.
 
-Scoped by ``file_id`` like every other table in ``storage_models.py``,
+Scoped by ``file_id`` like every other table in ``models/storage.py``,
 so a memo belongs to one artifact's copy of a row. Memos are copied
 forward alongside rows (``repositories/memo_repo.py``), which is what
 makes a memo written while filtering still visible when that row is
@@ -28,7 +28,7 @@ Deliberately no ``valid_from``/``valid_to``: unlike
 ``submissions``/``comments``/``coding_entries``, a memo is commentary
 about an artifact rather than artifact content, so it is not what a
 version diff describes and it is not range-versioned. ``updated_at``
-carries the recency signal instead. See ``storage_models.py::RowMemo``.
+carries the recency signal instead. See ``models/storage.py::RowMemo``.
 
 There is nothing to backfill -- the table starts empty.
 """

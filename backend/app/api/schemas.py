@@ -127,7 +127,7 @@ class _StrippingModel(BaseModel):
 # Filter editor: AI preview + manual submit
 #
 # The two halves of the human-in-the-loop filter screen
-# (`frontend/src/components/filter-editor/`), which composes a
+# (`frontend/src/features/filter/`), which composes a
 # `filtered_data` artifact from rows the user checked by hand, with the
 # AI filter available inside it as an assistive tool rather than as the
 # whole operation.
@@ -161,7 +161,7 @@ class FilterPreviewRequest(_StrippingModel):
     researcher's own judgement rather than following new criteria.
 
     The frontend builder is ``buildFilterPreviewPayload`` in
-    ``frontend/src/lib/apiContracts.js``.
+    ``frontend/src/api/contracts.js``.
     """
 
     api_key: str = Field(min_length=1, description="OpenRouter API key from the client")
@@ -257,7 +257,7 @@ class ManualFilterRequest(_StrippingModel):
     ``AssistRunIn``.
 
     The frontend builder is ``buildManualFilterPayload`` in
-    ``frontend/src/lib/apiContracts.js``.
+    ``frontend/src/api/contracts.js``.
     """
 
     database: str = Field(pattern=_SCHEMA_PATTERN, description="Source schema (proj_<hex>)")
@@ -291,7 +291,7 @@ class ManualFilterRequest(_StrippingModel):
 # ---------------------------------------------------------------------------
 # Row memos
 #
-# One memo per (file, row_type, row_id) -- see `storage_models.py::RowMemo`
+# One memo per (file, row_type, row_id) -- see `models/storage.py::RowMemo`
 # for why memos are neither range-versioned nor threaded.
 # ---------------------------------------------------------------------------
 
@@ -492,7 +492,7 @@ class CompareCodebooksRequest(_StrippingModel):
 
 
 # ---------------------------------------------------------------------------
-# AI coding output (backend/scripts/codebook_apply.py::classify_posts)
+# AI coding output (backend/app/pipelines/codebook_apply.py::classify_posts)
 #
 # The shape the model is asked to return: one object per (item, code)
 # pair, each carrying every quote it found in that item's own content
@@ -518,11 +518,11 @@ class AICodingPayload(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Coding artifact (structured coding_entries; see storage_models.CodingEntry)
+# Coding artifact (structured coding_entries; see models.storage.CodingEntry)
 #
 # A coding artifact now owns its own codebook snapshot, its own copy of
 # every sampled post/comment, and its coding -- these back the editor and
-# recode routes in coding_routes.py. Sent as JSON bodies, not
+# recode routes in routes/coding.py. Sent as JSON bodies, not
 # multipart/form-data, since a per-row list of code/evidence/notes
 # entries doesn't map onto flat form fields the way the editors' scalar
 # fields do -- same reasoning as ``PostContentsRequest`` below.
@@ -531,7 +531,7 @@ class AICodingPayload(BaseModel):
 
 class CodingEntryIn(_StrippingModel):
     """One quote coded to one item -- the unit ``coding_entries`` now
-    stores one row per (see ``storage_models.CodingEntry``). ``start_offset``/
+    stores one row per (see ``models.storage.CodingEntry``). ``start_offset``/
     ``end_offset`` are character offsets into that item's own body text
     (``Submission.selftext``/``Comment.body``) and must satisfy
     ``0 <= start_offset < end_offset``; the frontend computes them directly
@@ -545,7 +545,7 @@ class CodingEntryIn(_StrippingModel):
     a code rename never orphans a manually-entered quote.
 
     ``coder``/``assist_job_id`` are B1's per-quote attribution (see
-    ``storage_models.CodingEntry``): a hand-added or hand-edited quote is
+    ``models.storage.CodingEntry``): a hand-added or hand-edited quote is
     ``coder="human"`` with no job; an accepted-as-is AI recode proposal
     is ``coder="ai"`` with the recode's ``job_id``, which
     ``coding_service.save_coding_revision`` validates the same way
@@ -581,7 +581,7 @@ class CodingEntryIn(_StrippingModel):
 
 class CodingRowUpdate(_StrippingModel):
     """One row's full replacement coding. ``item_id`` is the qualified id
-    (``t3_<id>``/``t1_<id>``, see ``core/item_types.py``) as returned by
+    (``t3_<id>``/``t1_<id>``, see ``domain/item_types.py``) as returned by
     ``GET /api/coding/{ref}/rows``. An empty ``entries`` list clears every
     code from that row -- the row is not left untouched.
     """
@@ -636,7 +636,7 @@ class SaveCodebookRequest(_StrippingModel):
 class ImportCodebookRequest(_StrippingModel):
     """Payload for ``POST /api/codebook/{ref}/import`` -- pasted/uploaded
     markdown, parsed into structured rows (see
-    ``core/codebook_render.py::parse_markdown_to_codes``).
+    ``formats/codebook_render.py::parse_markdown_to_codes``).
     """
 
     markdown: str = Field(min_length=1)
@@ -652,7 +652,7 @@ class SaveCodingRevisionRequest(_StrippingModel):
     No ``model``/``job_id`` here any more -- that used to be the one
     place an AI assist leaked onto an ``origin=edited`` version's
     ``model`` field, which is exactly what the C2 design forbids (see
-    ``versioning_models.ArtifactAssist``). ``assist_runs`` (see
+    ``models.versioning.ArtifactAssist``). ``assist_runs`` (see
     ``AssistRunIn``) is the replacement channel, and each accepted
     entry's own attribution travels on it via
     ``CodingEntryIn.coder``/``assist_job_id``.
@@ -758,7 +758,7 @@ class PostContentsRequest(_StrippingModel):
     Was a bare ``dict`` body -- moved to a real schema so this route
     boundary follows the same "no bare dict at a route boundary" rule as
     the rest of the API. ``post_ids`` may be a mix of qualified ids
-    (``t3_<id>``/``t1_<id>``, see ``backend/app/core/item_types.py``) and
+    (``t3_<id>``/``t1_<id>``, see ``backend/app/domain/item_types.py``) and
     legacy unprefixed ids, since coding artifacts saved before item
     types existed only ever contain the latter.
     """

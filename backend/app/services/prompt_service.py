@@ -1,9 +1,9 @@
-"""Service layer for prompt CRUD -- backs backend/app/api/prompt_routes.py.
+"""Service layer for prompt CRUD -- backs backend/app/api/routes/prompts.py.
 
 Async, ORM-only (no raw SQL), and the sole owner of not-found/ownership
 semantics for prompts so the route handlers stay thin request/response
 shims. Callers are expected to have already resolved the authenticated
-user id (e.g. via ``core/auth_dependency.py::require_user_id``).
+user id (e.g. via ``auth/dependencies.py::require_user_id``).
 """
 
 from typing import Any
@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.exceptions import ForbiddenError, NotFoundError, ValidationAppError
-from backend.app.database import Prompt
+from backend.app.models.workspace import Prompt
 
 _UPDATABLE_FIELDS = ("promptname", "prompt", "type")
 

@@ -1,6 +1,6 @@
 """Shared context-window sizing and batching for LLM prompts.
 
-Generalizes what ``backend/scripts/filter_db.py`` used to keep as private,
+Generalizes what ``backend/app/pipelines/filter_db.py`` used to keep as private,
 hand-maintained helpers (``MODEL_CONTEXT_LIMITS``/``_estimate_context_limit``/
 ``_batch_content``) so every LLM-backed pipeline script can chunk oversized
 input the same way, sized against the model catalog's real ``context_length``
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Awaitable, Callable, TypeVar
 
-from backend.app.ai_models import context_length_for
+from backend.app.external.ai_models import context_length_for
 from backend.app.core.exceptions import ContextBudgetError
 
 if TYPE_CHECKING:

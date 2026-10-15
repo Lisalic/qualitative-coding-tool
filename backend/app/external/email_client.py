@@ -6,7 +6,7 @@ to this one module.
 
 import httpx
 
-from backend.app.config import settings
+from backend.app.core.config import settings
 from backend.app.core.logging import get_logger
 from backend.app.external.errors import ExternalServiceError
 

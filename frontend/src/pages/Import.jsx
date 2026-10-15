@@ -1,5 +1,5 @@
-import FileUpload from "../components/data/FileUpload";
-import PageShell from "../components/shell/PageShell";
+import FileUpload from "../features/data/FileUpload";
+import PageShell from "../components/layout/PageShell";
 
 export default function ImportPage() {
   const handleUploadSuccess = () => {};

@@ -25,7 +25,7 @@ At least one coding artifact. An OpenRouter API key in the navbar.
 
 Job-backed (`job_type="summarize_coding"`): `postFormAndPoll` → `POST /api/summarize-coding/` (raw `Form(...)` params, not a Pydantic schema) → `202 {job_id, status}` → poll.
 
-Server-side (`backend/app/services/coding_service.py::_run_summarize_coding_job`): resolves the coding file to an owned `file_id`, reads its content via `artifact_content_repo.read_content`, calls `backend/scripts/summarize_coding.py::summarize_coding(coding_data, prompt, api_key, model)` (default model index 2 in the catalog), and persists a new `summary` File with a `FileDependency` back to the source coding file.
+Server-side (`backend/app/services/coding_service.py::_run_summarize_coding_job`): resolves the coding file to an owned `file_id`, reads its content via `artifact_content_repo.read_content`, calls `backend/app/pipelines/summarize_coding.py::summarize_coding(coding_data, prompt, api_key, model)` (default model index 2 in the catalog), and persists a new `summary` File with a `FileDependency` back to the source coding file.
 
 ## Output
 
@@ -41,7 +41,7 @@ Job result: `{summary: <text>, file: {id, schema_name, filename}}`. Rendered inl
 
 ## Developer reference
 
-- Frontend: `pages/SummarizeCoding.jsx`, `components/summarize/useSummarizeCodingPage.js`, `SummarizeRequestSection.jsx`, `SummarizeCodingPanel.jsx`, `SummarizeModelPromptPanel.jsx`, `PromptEditorSection.jsx`, `SummaryOutputSection.jsx`.
-- Backend: `backend/app/api/coding_routes.py::POST /summarize-coding/` → `backend/app/services/coding_service.py` (job start + `_run_summarize_coding_job`, `job_type="summarize_coding"`) → `backend/scripts/summarize_coding.py::summarize_coding`.
+- Frontend: `pages/SummarizeCoding.jsx`, `features/summarize/useSummarizeCodingPage.js`, `SummarizeRequestSection.jsx`, `SummarizeCodingPanel.jsx`, `SummarizeModelPromptPanel.jsx`, `PromptEditorSection.jsx`, `SummaryOutputSection.jsx`.
+- Backend: `backend/app/api/routes/coding.py::POST /summarize-coding/` → `backend/app/services/coding_service.py` (job start + `_run_summarize_coding_job`, `job_type="summarize_coding"`) → `backend/app/pipelines/summarize_coding.py::summarize_coding`.
 - Storage written: new `files` row (`summary`), `file_dependencies`, `artifact_content`.
 - Endpoint: `POST /api/summarize-coding/` — see [api-reference.md](../api-reference.md#coding--backendappapicoding_routespy).

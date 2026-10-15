@@ -49,10 +49,10 @@ layer would silently roll back and lose whatever else the caller had
 already staged on the same session.
 
 **Codebook-snapshot compaction.** See
-``versioning_models.ArtifactVersion.codes_materialized``'s docstring for
+``models.versioning.ArtifactVersion.codes_materialized``'s docstring for
 the full policy (v1 / latest-3 / every-Kth-version stay materialized;
 everything else is compacted to a field-level delta via
-``core/codebook_delta.py``). ``_demote_if_eligible`` is the only piece of
+``domain/codebook_delta.py``). ``_demote_if_eligible`` is the only piece of
 that policy that lives here rather than on the model: it runs once per
 commit (O(1), never a sweep) and is called from both
 ``commit_codebook_version`` and ``commit_coding_version``, since a commit
@@ -71,15 +71,15 @@ from typing import Sequence
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.core.codebook_delta import apply_delta, encode_delta
-from backend.app.core.codebook_diff import CodebookDiff, diff_codes
-from backend.app.core.codebook_render import CodeRow, render_codes_to_markdown
-from backend.app.core.coding_diff import CodingDiff, diff_coding_entries
-from backend.app.core.data_diff import DataDiff, diff_row_ids
+from backend.app.domain.codebook_delta import apply_delta, encode_delta
+from backend.app.domain.codebook_diff import CodebookDiff, diff_codes
+from backend.app.formats.codebook_render import CodeRow, render_codes_to_markdown
+from backend.app.domain.coding_diff import CodingDiff, diff_coding_entries
+from backend.app.domain.data_diff import DataDiff, diff_row_ids
 from backend.app.core.exceptions import NotFoundError
-from backend.app.database import File
+from backend.app.models.workspace import File
 from backend.app.repositories import coding_repo, file_repo, raw_data_repo, version_repo
-from backend.app.versioning_models import (
+from backend.app.models.versioning import (
     RELATION_FORKED_FROM,
     ROLE_FORK_ORIGIN,
     ArtifactVersion,
@@ -98,7 +98,7 @@ def _now(now: datetime | None) -> datetime:
 @dataclass(frozen=True)
 class EdgeSpec:
     """One parent link to create alongside a new version. See
-    ``versioning_models.py`` for the ``RELATION_*``/``ROLE_*`` constants.
+    ``models/versioning.py`` for the ``RELATION_*``/``ROLE_*`` constants.
     """
 
     parent_file_id: int
@@ -116,7 +116,7 @@ def prompt_meta(rendered: str | None, *, batches: int | None = None) -> dict | N
 
     The rendered prompt embeds the whole batch of sampled submission/
     comment text, which the artifact already owns in ``submissions``/
-    ``comments`` -- see ``versioning_models.ArtifactVersion`` for what
+    ``comments`` -- see ``models.versioning.ArtifactVersion`` for what
     storing it cost. Keep a length and a hash so "this version came from
     that input" stays falsifiable, and drop the payload.
 
@@ -411,7 +411,7 @@ async def commit_coding_version(
     on. It does NOT do this by copying the rows (that was the earlier
     approach, and it made every single row-only save materialize a
     byte-identical ~44 kB snapshot -- see
-    ``versioning_models.ArtifactVersion``'s ``codes_materialized``
+    ``models.versioning.ArtifactVersion``'s ``codes_materialized``
     docstring for the numbers). Instead the version is born
     unmaterialized when there's a previous head to inherit from, and
     ``read_codes`` resolves it by looking up the nearest materialized

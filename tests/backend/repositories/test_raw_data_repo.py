@@ -1,6 +1,6 @@
 from sqlalchemy import select, update
 
-from backend.app.database import File
+from backend.app.models.workspace import File
 from backend.app.repositories.raw_data_repo import (
     bulk_insert_comments,
     bulk_insert_submissions,
@@ -10,7 +10,7 @@ from backend.app.repositories.raw_data_repo import (
     sample_comments,
     sample_submissions,
 )
-from backend.app.storage_models import Comment, Submission
+from backend.app.models.storage import Comment, Submission
 
 from .conftest import make_user
 
@@ -216,7 +216,7 @@ class TestCopyRowsById:
 class TestLivenessFiltering:
     """``sample_submissions``/``sample_comments`` and ``copy_rows_by_id``/
     ``copy_all_rows``'s source-side counts must only see LIVE rows --
-    see ``storage_models.py``'s SCD-2 docstrings.
+    see ``models/storage.py``'s SCD-2 docstrings.
     """
 
     async def test_sample_submissions_excludes_closed_rows(self, session_factory) -> None:

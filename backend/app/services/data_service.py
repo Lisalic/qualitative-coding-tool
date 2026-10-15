@@ -1,5 +1,5 @@
 """Service layer for raw/filtered data access and the filter-data pipeline
--- backs backend/app/api/data_routes.py.
+-- backs backend/app/api/routes/data.py.
 
 Retires the last raw-SQL-with-spliced-schema-name call sites in the app
 (``get_post_contents`` was the confirmed SQL-injection-adjacent one; the
@@ -15,7 +15,7 @@ only guard, now that ``file_repo`` does the real ownership-scoped
 resolution.
 
 ``word_count_ranges``/``file_entries``/``get_comments_for_submission``
-query the fixed ``submissions``/``comments`` tables (``storage_models.py``)
+query the fixed ``submissions``/``comments`` tables (``models/storage.py``)
 directly -- no more per-schema ``information_schema``/``to_regclass``
 introspection, since the fixed tables (and their ``word_count`` column)
 always exist for every file.
@@ -48,24 +48,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.app.core.exceptions import NotFoundError, ValidationAppError
-from backend.app.core.item_types import COMMENT, SUBMISSION, split_item_id
+from backend.app.domain.item_types import COMMENT, SUBMISSION, split_item_id
 from backend.app.core.schema_guard import require_valid_schema
 from backend.app.core.sql_filters import LIKE_ESCAPE, contains_pattern, in_values
-from backend.app.database import (
-    AsyncSessionLocal,
-    File,
-    FileTable,
-    async_link_file_to_project,
-)
-from backend.app.jobs.models import Job
+from backend.app.core.database import AsyncSessionLocal
+from backend.app.models.workspace import File, FileTable
+from backend.app.repositories.project_repo import async_link_file_to_project
+from backend.app.models.job import Job
 from backend.app.jobs.progress import ProgressTracker
 from backend.app.jobs.registry import register_handler
 from backend.app.jobs.service import enqueue_job
 from backend.app.repositories import file_repo, memo_repo, project_repo, raw_data_repo, version_repo
 from backend.app.services import assist_service, version_service
 from backend.app.services.version_service import EdgeSpec
-from backend.app.storage_models import Comment, Submission
-from backend.app.versioning_models import (
+from backend.app.models.storage import Comment, Submission
+from backend.app.models.versioning import (
     ASSIST_STAGE_FILTER,
     ORIGIN_EDITED,
     ORIGIN_FORKED,
@@ -163,7 +160,7 @@ async def get_file_entries(
     file identified by ``schema``, owned by ``user_id``. ``version_no``
     reads the file AS OF that version (time travel over the SCD-2
     ranges on ``submissions``/``comments`` -- see their docstrings in
-    ``storage_models.py``); the default (``None``) reads the currently
+    ``models/storage.py``); the default (``None``) reads the currently
     LIVE rows. ``q`` narrows both lists (and their totals) to rows whose
     text, subreddit or author contains it, case-insensitively -- searched
     here rather than in the browser so every row is searched, not just
@@ -263,7 +260,7 @@ async def get_post_contents(
     only ever resolves to a file owned by ``user_id`` in the first place.
 
     ``post_ids`` may mix qualified ids (``t3_<id>``/``t1_<id>``, see
-    ``core/item_types.py``) with legacy unprefixed ids -- every coding
+    ``domain/item_types.py``) with legacy unprefixed ids -- every coding
     artifact saved before item types existed only ever contains the
     latter, and an unprefixed id defaults to "submission". Any unprefixed
     id that doesn't resolve against ``submissions`` is retried against
@@ -357,7 +354,7 @@ async def get_post_contents(
 
 def _word_count_expr_ai_ready(rows: list, content_type: str) -> str:
     """Compact string representation of sampled rows for AI filtering,
-    identical formatting to the old inline helper in ``data_routes.py``.
+    identical formatting to the old inline helper in ``routes/data.py``.
     """
     parts = []
     for r in rows:
@@ -551,8 +548,8 @@ async def _apply_tag_or_ai_filter(
     surface a free-model batch cap or mid-run batch failure instead of
     silently returning an incomplete id list.
     """
-    from backend.scripts import filter_db as filter_db_module
-    from backend.scripts.filter_db import AIFilterError
+    from backend.app.pipelines import filter_db as filter_db_module
+    from backend.app.pipelines.filter_db import AIFilterError
 
     include_post_ids: list[str] = []
     exclude_post_ids: list[str] = []
@@ -832,7 +829,7 @@ async def duplicate_data(
     and its lineage (``version_service.fork_lineage``) -- the data-file
     counterpart of ``coding_service.duplicate_coding`` /
     ``codebook_service.duplicate_codebook``. There is deliberately no
-    revert route (see ``version_routes.py``'s module docstring): this is
+    revert route (see ``routes/versions.py``'s module docstring): this is
     how a user "undoes" a delete/move without destroying the original
     artifact's history -- the source is untouched, a new file starts
     from the old state.
@@ -866,7 +863,7 @@ async def duplicate_data(
         session, source_file_id=source_file.id, target_file_id=file_rec.id,
         target_version_no=1, source_version_no=from_version_no,
     )
-    # Memos are not range-versioned (see `storage_models.py::RowMemo`), so
+    # Memos are not range-versioned (see `models/storage.py::RowMemo`), so
     # a fork FROM an older version still carries today's memos -- the fork
     # restores the artifact's *content* as of that version, not the
     # researcher's notes as of that day.
@@ -967,12 +964,12 @@ async def _run_ai_filter(
     examples instead -- the two are mutually exclusive so a normal
     prompt-driven run is never silently biased by prior decisions.
     """
-    from backend.scripts.tag_expansion import (
+    from backend.app.pipelines.tag_expansion import (
         comment_body_tag_predicate_sql,
         parse_filter_tags_input,
         submission_text_tag_predicate_sql,
     )
-    from backend.scripts import tag_expansion as tag_expansion_module
+    from backend.app.pipelines import tag_expansion as tag_expansion_module
 
     api_key = payload["api_key"]
     model = payload.get("model")

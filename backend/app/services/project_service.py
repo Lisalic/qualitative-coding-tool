@@ -1,5 +1,5 @@
 """Service layer for project/file listing and CRUD -- backs
-backend/app/api/project_routes.py.
+backend/app/api/routes/projects.py.
 
 Async, ORM-only. ``list_files_for_user`` and ``list_projects_with_files``
 replace the two N+1-shaped handlers in the old router (``my_projects`` did
@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.app.core.exceptions import ValidationAppError
-from backend.app.database import File, Project
+from backend.app.models.workspace import File, Project
 from backend.app.repositories import file_repo, project_repo, version_repo
 
 

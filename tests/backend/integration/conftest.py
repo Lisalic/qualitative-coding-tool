@@ -113,7 +113,7 @@ def integration_db_url():
 
 @pytest.fixture(scope="session")
 def integration_sync_engine(integration_db_url):
-    from backend.app.database import Base
+    from backend.app.core.database import Base
 
     engine = create_engine(integration_db_url)
     Base.metadata.create_all(engine)

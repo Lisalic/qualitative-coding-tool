@@ -2,7 +2,7 @@
 
 Services raise these instead of building ``JSONResponse``/``HTTPException``
 ad hoc; ``main.py`` registers one handler that maps every ``AppError`` to
-the existing ``{"error": "..."}`` wire format, so ``frontend/src/api.js``
+the existing ``{"error": "..."}`` wire format, so ``frontend/src/api/client.js``
 needs no changes to keep parsing errors correctly.
 """
 

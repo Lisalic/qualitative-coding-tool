@@ -1,6 +1,6 @@
 """Password reset via emailed, stateless signed tokens.
 
-A reset token is a short-lived token from ``backend/app/auth.py`` carrying
+A reset token is a short-lived token from ``backend/app/auth/tokens.py`` carrying
 ``purpose="pwd_reset"`` and ``pwh`` -- a fingerprint of the user's current
 password hash. Changing the password changes the fingerprint, so a token
 stops working as soon as it is used (or the password changes any other
@@ -21,12 +21,12 @@ from typing import Optional
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.api.utils import _hash_password
-from backend.app.auth import create_access_token, decode_access_token, password_fingerprint
-from backend.app.config import settings
+from backend.app.auth.passwords import _hash_password
+from backend.app.auth.tokens import create_access_token, decode_access_token, password_fingerprint
+from backend.app.core.config import settings
 from backend.app.core.exceptions import ValidationAppError
 from backend.app.core.logging import get_logger
-from backend.app.database import User
+from backend.app.models.workspace import User
 from backend.app.external.email_client import email_configured, send_email
 
 logger = get_logger(__name__)

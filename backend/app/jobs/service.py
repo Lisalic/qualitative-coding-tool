@@ -14,9 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.exceptions import ForbiddenError, NotFoundError
 from backend.app.core.logging import get_logger
-from backend.app.database import AsyncSessionLocal
+from backend.app.core.database import AsyncSessionLocal
 from backend.app.external.errors import ExternalServiceError, is_retryable_error, redact_secret
-from backend.app.jobs.models import Job, TERMINAL_STATUSES
+from backend.app.models.job import Job, TERMINAL_STATUSES
 from backend.app.jobs.progress import (
     JobAccountingTracker,
     set_current_accounting_tracker,

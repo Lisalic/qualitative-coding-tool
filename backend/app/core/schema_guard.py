@@ -1,7 +1,5 @@
 """Schema-name normalization/validation.
 
-Relocates the logic that used to live only in ``backend/app/api/utils.py``
-(kept there as a re-export for existing importers -- see that module).
 Every dynamic-SQL call site that touches a schema name should go through
 ``require_valid_schema`` rather than reimplementing its own regex/prefix
 check, which is how the unvalidated ``get_post_contents`` gap happened.

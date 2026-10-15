@@ -1,11 +1,11 @@
 """Tests for backend/app/repositories/version_repo.py -- ``latest_materialized_version``,
 the anchor lookup ``version_service.read_codes`` uses to resolve a
 coding version that inherits its codebook snapshot rather than owning
-one (see ``versioning_models.ArtifactVersion.codes_materialized``'s
+one (see ``models.versioning.ArtifactVersion.codes_materialized``'s
 docstring for why).
 """
 
-from backend.app.database import File
+from backend.app.models.workspace import File
 from backend.app.repositories.version_repo import create_version, latest_materialized_version
 
 from .conftest import make_user

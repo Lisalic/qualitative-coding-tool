@@ -15,7 +15,7 @@ from typing import Sequence
 from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.versioning_models import ArtifactVersion, ArtifactEdge, CodebookCode
+from backend.app.models.versioning import ArtifactVersion, ArtifactEdge, CodebookCode
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +91,7 @@ async def latest_materialized_version(
     """The highest-``version_no`` version for ``file_id`` with
     ``codes_materialized = True`` at or before ``at_or_before`` -- the
     anchor a non-materialized coding version's codes are read from (see
-    ``versioning_models.ArtifactVersion``'s docstring). v1 is always
+    ``models.versioning.ArtifactVersion``'s docstring). v1 is always
     materialized, so this only returns ``None`` if ``file_id`` has no
     versions at all.
     """

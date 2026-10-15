@@ -26,7 +26,8 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from backend.app.core.exceptions import NotFoundError, ValidationAppError
-from backend.app.database import File, Project, User, async_link_file_to_project
+from backend.app.models.workspace import File, Project, User
+from backend.app.repositories.project_repo import async_link_file_to_project
 from backend.app.repositories import coding_repo, file_repo, raw_data_repo
 from backend.app.services import (
     coding_service,
@@ -35,8 +36,8 @@ from backend.app.services import (
     version_service,
 )
 from backend.app.services.version_service import EdgeSpec
-from backend.app.storage_models import CodingEntry, Submission
-from backend.app.versioning_models import (
+from backend.app.models.storage import CodingEntry, Submission
+from backend.app.models.versioning import (
     ORIGIN_GENERATED,
     RELATION_DERIVED_FROM,
     ROLE_CODEBOOK,

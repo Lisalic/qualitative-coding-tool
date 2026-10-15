@@ -5,10 +5,10 @@ import pytest
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from backend.app.database import User
+from backend.app.models.workspace import User
 from backend.app.external.errors import ExternalServiceError
 from backend.app.jobs import service
-from backend.app.jobs.models import Job, TERMINAL_STATUSES
+from backend.app.models.job import Job, TERMINAL_STATUSES
 from backend.app.jobs.registry import register_handler
 
 pytestmark = pytest.mark.usefixtures("override_async_db")

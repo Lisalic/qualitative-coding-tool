@@ -8,7 +8,7 @@ chosen by hand and/or with AI assistance — without mutating the source.
 ## Where to find it
 
 Sidebar → Filter Data, the data viewer's **Filter** button, or `/filter` →
-`pages/Filter.jsx` → `components/filter-editor/FilterEditor.jsx`.
+`pages/Filter.jsx` → `features/filter/FilterEditor.jsx`.
 
 ## Layout
 
@@ -40,7 +40,7 @@ there or from the list. The AI filter (prompt, keywords, model, minimum
 words, sample size) proposes rows from the **undecided pool only** — rows
 already ruled on are never re-litigated — and accepted suggestions are
 badged `(added by AI)`. Selections persist to `localStorage` per source
-database (`useFilterEditorState`/`lib/filterEditorState.js`), so a refresh
+database (`useFilterEditorState`/`features/filter/filterEditorState.js`), so a refresh
 or a multi-minute AI run doesn't lose the work.
 
 ## What happens on submit
@@ -75,15 +75,15 @@ counts}`. Success banner links to [Data Browser](data-browser.md)
 
 ## Developer reference
 
-- Frontend: `pages/Filter.jsx`, `components/filter-editor/` (`FilterEditor.jsx`,
+- Frontend: `pages/Filter.jsx`, `features/filter/` (`FilterEditor.jsx`,
   `FilterRowList.jsx`, `FilterReaderPane.jsx`, `FilterDecisionsRail.jsx`,
   `FilterAiPanel.jsx` on the shared `components/forms/AiAssistPanel.jsx`),
-  `lib/filterEditorState.js`, `lib/apiContracts.js::buildFilterPreviewPayload`/`buildManualFilterPayload`.
-- Backend: `backend/app/api/data_routes.py` (`POST /filter-preview/`, `POST
+  `features/filter/filterEditorState.js`, `api/contracts.js::buildFilterPreviewPayload`/`buildManualFilterPayload`.
+- Backend: `backend/app/api/routes/data.py` (`POST /filter-preview/`, `POST
   /filtered-data/manual`) → `backend/app/services/data_service.py`
   (`start_filter_preview_job`/`_run_filter_preview_job`,
-  `create_manual_filtered_data`) → `backend/scripts/filter_db.py` (AI
-  filtering), `backend/scripts/tag_expansion.py` (keyword expansion) →
+  `create_manual_filtered_data`) → `backend/app/pipelines/filter_db.py` (AI
+  filtering), `backend/app/pipelines/tag_expansion.py` (keyword expansion) →
   `backend/app/repositories/raw_data_repo.py`.
 - Storage written (create only): new `files` row (`filtered_data`), an
   `artifact_edges` row back to the source, `file_tables`,

@@ -2,7 +2,7 @@
 
 Runs directly against an in-memory async SQLite session (the
 ``async_sqlite_engine`` fixture from ``tests/conftest.py``), bypassing the
-HTTP layer entirely -- ``tests/backend/routes/test_project_routes.py``
+HTTP layer entirely -- ``tests/backend/api/routes/test_project_routes.py``
 covers the route/auth/response-shape behavior on top of this.
 """
 
@@ -11,7 +11,7 @@ from sqlalchemy import event
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from backend.app.core.exceptions import ForbiddenError, NotFoundError, ValidationAppError
-from backend.app.database import File, FileTable, User
+from backend.app.models.workspace import File, FileTable, User
 from backend.app.repositories import version_repo
 from backend.app.services import project_service
 
@@ -226,7 +226,7 @@ class TestListProjectsWithFiles:
             user = await _make_user(session)
             proj = await project_service.create_project(session, user.id, "proj", None)
 
-            from backend.app.database import async_link_file_to_project
+            from backend.app.repositories.project_repo import async_link_file_to_project
 
             parent = File(user_id=user.id, filename="raw", schemaname="proj_raw", file_type="raw_data")
             session.add(parent)
@@ -373,7 +373,7 @@ class TestNPlusOneRegression:
             async with session_factory() as session:
                 user = await _make_user(session, email)
                 proj = await project_service.create_project(session, user.id, "p", None)
-                from backend.app.database import async_link_file_to_project
+                from backend.app.repositories.project_repo import async_link_file_to_project
 
                 for i in range(n_files):
                     f = File(

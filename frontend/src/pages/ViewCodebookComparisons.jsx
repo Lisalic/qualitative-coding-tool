@@ -1,4 +1,4 @@
-import ComparisonViewPageContainer from "../components/comparisons/ComparisonViewPageContainer";
+import ComparisonViewPageContainer from "../features/compare/ComparisonViewPageContainer";
 
 export default function ViewCodebookComparisons() {
   return (

@@ -253,7 +253,7 @@ class TestJsonChatCompletion:
     """The 3-tier compliance ladder: strict json_schema (if given) ->
     json_object -> no response_format, tried within one call, mirroring
     the existing 2-tier precedent in
-    ``backend/scripts/tag_expansion.py::_fetch_expansion_json``.
+    ``backend/app/pipelines/tag_expansion.py::_fetch_expansion_json``.
     """
 
     async def test_first_tier_succeeds_uses_strict_json_schema(self, monkeypatch) -> None:

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import Panel from "../shell/Panel";
+import Panel from "../layout/Panel";
 import { meta } from "../../lib/uiClasses";
 
 /**

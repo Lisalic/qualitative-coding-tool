@@ -1,8 +1,8 @@
 import { Link } from "react-router-dom";
-import AuthLinksSection from "../components/auth/AuthLinksSection";
-import AuthFormSection from "../components/auth/AuthFormSection";
+import AuthLinksSection from "../features/auth/AuthLinksSection";
+import AuthFormSection from "../features/auth/AuthFormSection";
 import PageHeading from "../components/primitives/PageHeading";
-import useLoginPage from "../components/auth/useLoginPage";
+import useLoginPage from "../features/auth/useLoginPage";
 
 const Login = () => {
   const page = useLoginPage();

@@ -1,7 +1,7 @@
 import { useCallback, useState, useEffect } from "react";
-import { api } from "../../api";
+import { api } from "../../api/client";
 import DialogService from "../feedback/DialogService";
-import { useModalBehavior } from "../feedback/useModalBehavior";
+import { useModalBehavior } from "../../hooks/useModalBehavior";
 import { btn, btnDanger, input, textarea } from "../../lib/uiClasses";
 
 const inputClasses = input;

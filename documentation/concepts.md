@@ -2,15 +2,15 @@
 
 ## The artifact model
 
-Everything the pipeline produces is a `File` row (`backend/app/database.py`) — a git-style **ref**, identity only — with:
+Everything the pipeline produces is a `File` row (`backend/app/models/workspace.py`) — a git-style **ref**, identity only — with:
 
 - a `file_type`: `raw_data`, `filtered_data`, `codebook`, `coding`, `codebook_comparison`, `coding_comparison`, or `summary`
 - a `schemaname` — see below
 - optional `description`
 
-Content, and the prompts used to produce it, live one level down on the artifact's **version** rows (`artifact_versions` in `backend/app/versioning_models.py`) rather than on the `File` row itself — every save is a new commit, not an overwrite. See [architecture.md#storage](architecture.md#storage) and `backend/app/services/version_service.py`'s docstring for the full versioning model.
+Content, and the prompts used to produce it, live one level down on the artifact's **version** rows (`artifact_versions` in `backend/app/models/versioning.py`) rather than on the `File` row itself — every save is a new commit, not an overwrite. See [architecture.md#storage](architecture.md#storage) and `backend/app/services/version_service.py`'s docstring for the full versioning model.
 
-Each pipeline stage (import → filter → generate codebook → apply codebook → compare → summarize → integrate) reads from one or more parent artifacts and **writes a new artifact** rather than mutating the source. Parent/child relationships are recorded as typed, ordered, version-pinned `artifact_edges` (`backend/app/versioning_models.py`), so the UI can trace an analysis chain back to its raw data — including exactly which revision of a parent was used. See the dependency graph in [workflow.md#end-to-end-workflow](workflow.md#end-to-end-workflow).
+Each pipeline stage (import → filter → generate codebook → apply codebook → compare → summarize → integrate) reads from one or more parent artifacts and **writes a new artifact** rather than mutating the source. Parent/child relationships are recorded as typed, ordered, version-pinned `artifact_edges` (`backend/app/models/versioning.py`), so the UI can trace an analysis chain back to its raw data — including exactly which revision of a parent was used. See the dependency graph in [workflow.md#end-to-end-workflow](workflow.md#end-to-end-workflow).
 
 `RELATION_MERGED_FROM`/`ROLE_MERGE_INPUT` (variadic — one edge per parent, `position` recording selection order) has two producers: merging raw data files (`backend/app/services/file_service.py`) and [Integrate Codebook](tools/integrate-codebook.md), which merges two or more `codebook` artifacts into one new `codebook` rather than a distinct file type.
 
@@ -20,7 +20,7 @@ Historically each artifact got its own dynamic Postgres schema (`proj_<hex>` for
 
 That has changed. Content now lives in a small set of **fixed, indexed tables** (`submissions`, `comments`, `artifact_versions`, `artifact_edges`, `codebook_codes`, `coding_entries` — see [architecture.md#storage](architecture.md#storage)), all keyed by `file_id`. `files.schemaname` is kept as-is purely as an **opaque identifier string** — the frontend still passes it around (e.g. `database=proj_a1b2c3` in a form submission) — but every backend repository resolves it to `files.id` via `backend/app/repositories/file_repo.py::resolve_file_id` before querying, rather than splicing it into a dynamic schema name. Old per-artifact Postgres schemas from before the move may still physically exist in a given database; nothing reads them, and they can be dropped by hand.
 
-Practical consequence for the tool pages in this documentation: whenever a form field is labeled "Database" or a codebook/coding selector shows a `proj_<hex>` value, that value is this opaque identifier, validated client-side against `/^proj_[A-Za-z0-9_]+$/` (`frontend/src/lib/apiContracts.js`) and server-side against the same pattern (`backend/app/api/schemas.py`).
+Practical consequence for the tool pages in this documentation: whenever a form field is labeled "Database" or a codebook/coding selector shows a `proj_<hex>` value, that value is this opaque identifier, validated client-side against `/^proj_[A-Za-z0-9_]+$/` (`frontend/src/api/contracts.js`) and server-side against the same pattern (`backend/app/api/schemas.py`).
 
 ## Projects
 
@@ -41,4 +41,4 @@ Most AI tools operate on a random sample of the source data rather than all of i
 
 ## Model catalog
 
-The list of selectable AI models comes from `GET /api/models`, backed by an in-memory catalog (`backend/app/ai_models.py`) refreshed once a day from OpenRouter's public model list. See [architecture.md#model-catalog](architecture.md#model-catalog) for the free/paid split and a caveat about which module-level model defaults do and don't follow the daily refresh.
+The list of selectable AI models comes from `GET /api/models`, backed by an in-memory catalog (`backend/app/external/ai_models.py`) refreshed once a day from OpenRouter's public model list. See [architecture.md#model-catalog](architecture.md#model-catalog) for the free/paid split and a caveat about which module-level model defaults do and don't follow the daily refresh.

@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
-import { apiFetch, api } from "../../api";
+import { apiFetch, api } from "../../api/client";
 import ToastService from "../feedback/ToastService";
-import { useAuth } from "../auth/useAuth";
+import { useAuth } from "../../features/auth/useAuth";
 import { useApiKey } from "./useApiKey";
 import BackButton from "./BackButton";
 import { confirmLeave } from "../feedback/LeaveGuard";

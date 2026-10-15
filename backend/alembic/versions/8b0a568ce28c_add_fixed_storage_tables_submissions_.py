@@ -7,7 +7,7 @@ Create Date: 2026-08-17 14:25:45.291827
 Note: submissions/comments/artifact_content/coding_entries already exist
 in the target database (created by an earlier, uncommitted session via
 Base.metadata.create_all -- verified their live structure exactly
-matches backend/app/storage_models.py) so autogenerate correctly found
+matches backend/app/models/storage.py) so autogenerate correctly found
 no diff for them; only `jobs` is actually new here. Unrelated
 pre-existing drift the autogenerate diff also surfaced (a stray
 `project_tables` table, several TEXT/String column-type mismatches, a

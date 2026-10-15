@@ -2,8 +2,8 @@
 
 Consolidates the 3-way schemaname/filename/id lookup and the
 user-ownership-check block duplicated across route files (e.g.
-``codebook_routes.py::get_codebook``, the ownership-check blocks in
-``file_routes.py``).
+``routes/codebook.py::get_codebook``, the ownership-check blocks in
+``routes/files.py``).
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.app.core.exceptions import NotFoundError
-from backend.app.database import File
+from backend.app.models.workspace import File
 
 
 async def _lookup_file(
@@ -88,7 +88,7 @@ async def get_owned_file(
     user is indistinguishable, from this function's point of view, from a
     file that doesn't exist at all; both raise ``NotFoundError``. This is
     a deliberate choice matching how the duplicated lookup code it
-    replaces already behaved (e.g. ``codebook_routes.py::get_codebook``
+    replaces already behaved (e.g. ``routes/codebook.py::get_codebook``
     scopes its query the same way), not an oversight -- ``File.id`` isn't
     a stable public identifier the way ``Project.id`` is, so there's no
     "tell the caller which case it was" step worth doing here.

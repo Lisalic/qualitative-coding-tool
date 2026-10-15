@@ -6,7 +6,7 @@ Create Date: 2026-08-28 00:00:00.000000
 
 Adds ``valid_from``/``valid_to`` range columns to ``submissions`` and
 ``comments``, mirroring ``coding_entries``'s existing SCD-2 shape (see
-``storage_models.py::CodingEntry``'s docstring): a row is live iff
+``models/storage.py::CodingEntry``'s docstring): a row is live iff
 ``valid_to IS NULL``, live *as of* version ``v`` iff ``valid_from <= v
 AND (valid_to IS NULL OR valid_to >= v)``. Backs real version history
 for raw/filtered data -- ``file_service.delete_rows``/``move_rows`` now
@@ -58,7 +58,7 @@ def _upgrade_table(table: str) -> None:
     # `autoincrement=True` the way CREATE TABLE can), drop the old
     # composite PK, promote the new column. Plain `Integer`/`SERIAL`
     # (not `BigInteger`/`BIGSERIAL`) to match this column's ORM type in
-    # `storage_models.py` -- also matches every other surrogate PK in
+    # `models/storage.py` -- also matches every other surrogate PK in
     # this project (`File.id`, `ArtifactVersion.id`, `CodingEntry.id`),
     # and SQLite's ROWID-alias autoincrement (used by the test suite)
     # only kicks in for a column declared exactly `INTEGER`, not

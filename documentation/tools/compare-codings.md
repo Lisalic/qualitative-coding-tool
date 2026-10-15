@@ -4,11 +4,11 @@
 
 Ask an LLM to compare two coding outputs — overlaps/divergences in coding decisions, inconsistent or misapplied codes, reconciliation suggestions, an overall recommendation — and save the result as a `coding_comparison` artifact.
 
-For a deterministic, no-LLM diff of two versions of the *same* coding artifact's own classification history (recoded/newly-coded/newly-uncoded rows, per-code counts and deltas, applied/removed evidence), open that artifact's Version History page (`/versions?ref=...`, `components/versioning/VersionHistoryPanel.jsx`'s `CodingDiffSummary`) instead — that diff is free and needs no API key. This page is for the LLM narrative comparison of two (possibly unrelated) coding artifacts, which Version History does not do.
+For a deterministic, no-LLM diff of two versions of the *same* coding artifact's own classification history (recoded/newly-coded/newly-uncoded rows, per-code counts and deltas, applied/removed evidence), open that artifact's Version History page (`/versions?ref=...`, `features/versioning/VersionHistoryPanel.jsx`'s `CodingDiffSummary`) instead — that diff is free and needs no API key. This page is for the LLM narrative comparison of two (possibly unrelated) coding artifacts, which Version History does not do.
 
 ## Where to find it
 
-Sidebar → Compare Coding (pipeline group), or `/compare-coding` → `pages/CompareCoding.jsx` → `components/compare/ComparePageContainer.jsx` with `mode="coding"`.
+Sidebar → Compare Coding (pipeline group), or `/compare-coding` → `pages/CompareCoding.jsx` → `features/compare/ComparePageContainer.jsx` with `mode="coding"`.
 
 Shares one implementation with [Compare Codebooks](compare-codebooks.md) — see that page and [architecture.md](../architecture.md) for the shared plumbing (`ComparePageContainer`'s `CONFIG_BY_MODE`).
 
@@ -49,8 +49,8 @@ Job result: `{comparison: <text>, file: {id, schema_name, filename}}`. Success b
 
 ## Developer reference
 
-- Frontend: `pages/CompareCoding.jsx`, `components/compare/ComparePageContainer.jsx`, `CompareDualSelectPanel.jsx`, `CompareModelPromptPanel.jsx`, `CompareResultPanel.jsx`, `useComparePageData.js`.
-- Backend: `backend/app/api/coding_routes.py::POST /compare-codings/` → `backend/app/services/coding_service.py::start_compare_codings_job` / `_run_compare_codings_job` (`job_type="compare_codings"`) → `backend/scripts/codebook_generator.py::get_client`.
+- Frontend: `pages/CompareCoding.jsx`, `features/compare/ComparePageContainer.jsx`, `CompareDualSelectPanel.jsx`, `CompareModelPromptPanel.jsx`, `CompareResultPanel.jsx`, `useComparePageData.js`.
+- Backend: `backend/app/api/routes/coding.py::POST /compare-codings/` → `backend/app/services/coding_service.py::start_compare_codings_job` / `_run_compare_codings_job` (`job_type="compare_codings"`) → `backend/app/pipelines/codebook_generator.py::get_client`.
 - Storage written: new `files` row (`coding_comparison`), two `artifact_edges` rows, `artifact_versions` content blob.
 - Endpoint: `POST /api/compare-codings/` — see [api-reference.md](../api-reference.md#coding--backendappapicoding_routespy).
-- Structural (no-LLM) coding diffing lives at `GET /api/artifacts/{ref}/diff`, rendered by `components/versioning/VersionHistoryPanel.jsx`.
+- Structural (no-LLM) coding diffing lives at `GET /api/artifacts/{ref}/diff`, rendered by `features/versioning/VersionHistoryPanel.jsx`.

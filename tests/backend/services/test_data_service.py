@@ -2,7 +2,7 @@
 
 Runs directly against an in-memory async SQLite session (the
 ``async_sqlite_engine`` fixture from ``tests/conftest.py``), bypassing the
-HTTP layer entirely -- ``tests/backend/routes/test_ai_and_raw_sql_routes.py``
+HTTP layer entirely -- ``tests/backend/api/routes/test_ai_and_raw_sql_routes.py``
 covers the route/auth/response-shape behavior on top of this.
 
 Note on Postgres-only SQL: the tag-based pre-filter predicate fragments
@@ -25,12 +25,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from backend.app.core.exceptions import NotFoundError, ValidationAppError
-from backend.app.database import File, User
+from backend.app.models.workspace import File, User
 from backend.app.repositories import version_repo
 from backend.app.jobs import service as jobs_service
-from backend.app.jobs.models import TERMINAL_STATUSES
+from backend.app.models.job import TERMINAL_STATUSES
 from backend.app.services import data_service
-from backend.app.storage_models import Comment, Submission
+from backend.app.models.storage import Comment, Submission
 
 
 @pytest.fixture()
@@ -646,11 +646,11 @@ class TestStartFilterPreviewJob:
         # SQLite engine, racing the `async_sqlite_engine` fixture's teardown
         # dispose() once the test function returned.
         monkeypatch.setattr(
-            "backend.scripts.filter_db.triage_posts_with_ai",
+            "backend.app.pipelines.filter_db.triage_posts_with_ai",
             AsyncMock(return_value=([], [], "sys", "user", {"batches_processed": 1, "batches_total": 1})),
         )
         monkeypatch.setattr(
-            "backend.scripts.filter_db.triage_comments_with_ai",
+            "backend.app.pipelines.filter_db.triage_comments_with_ai",
             AsyncMock(return_value=([], [], "", "", {"batches_processed": 1, "batches_total": 1})),
         )
         async with session_factory() as session:
@@ -671,11 +671,11 @@ class TestStartFilterPreviewJob:
 class TestFilterPreviewJobHandler:
     async def test_returns_ids_without_creating_anything(self, session_factory, monkeypatch) -> None:
         monkeypatch.setattr(
-            "backend.scripts.filter_db.triage_posts_with_ai",
+            "backend.app.pipelines.filter_db.triage_posts_with_ai",
             AsyncMock(return_value=(["s2"], ["s1"], "sys", "user", {"batches_processed": 1, "batches_total": 1})),
         )
         monkeypatch.setattr(
-            "backend.scripts.filter_db.triage_comments_with_ai",
+            "backend.app.pipelines.filter_db.triage_comments_with_ai",
             AsyncMock(return_value=([], [], "", "", {"batches_processed": 1, "batches_total": 1})),
         )
 
@@ -707,9 +707,9 @@ class TestFilterPreviewJobHandler:
         posts_mock = AsyncMock(
             return_value=([], [], "sys", "user", {"batches_processed": 1, "batches_total": 1})
         )
-        monkeypatch.setattr("backend.scripts.filter_db.triage_posts_with_ai", posts_mock)
+        monkeypatch.setattr("backend.app.pipelines.filter_db.triage_posts_with_ai", posts_mock)
         monkeypatch.setattr(
-            "backend.scripts.filter_db.triage_comments_with_ai",
+            "backend.app.pipelines.filter_db.triage_comments_with_ai",
             AsyncMock(return_value=([], [], "", "", {"batches_processed": 1, "batches_total": 1})),
         )
 
@@ -737,9 +737,9 @@ class TestFilterPreviewJobHandler:
         posts_mock = AsyncMock(
             return_value=([], [], "sys", "user", {"batches_processed": 1, "batches_total": 1})
         )
-        monkeypatch.setattr("backend.scripts.filter_db.triage_posts_with_ai", posts_mock)
+        monkeypatch.setattr("backend.app.pipelines.filter_db.triage_posts_with_ai", posts_mock)
         monkeypatch.setattr(
-            "backend.scripts.filter_db.triage_comments_with_ai",
+            "backend.app.pipelines.filter_db.triage_comments_with_ai",
             AsyncMock(return_value=([], [], "", "", {"batches_processed": 1, "batches_total": 1})),
         )
 
@@ -769,9 +769,9 @@ class TestFilterPreviewJobHandler:
         posts_mock = AsyncMock(
             return_value=(["s3"], [], "sys", "user", {"batches_processed": 1, "batches_total": 1})
         )
-        monkeypatch.setattr("backend.scripts.filter_db.triage_posts_with_ai", posts_mock)
+        monkeypatch.setattr("backend.app.pipelines.filter_db.triage_posts_with_ai", posts_mock)
         monkeypatch.setattr(
-            "backend.scripts.filter_db.triage_comments_with_ai",
+            "backend.app.pipelines.filter_db.triage_comments_with_ai",
             AsyncMock(return_value=([], [], "", "", {"batches_processed": 1, "batches_total": 1})),
         )
 
@@ -799,13 +799,13 @@ class TestFilterPreviewJobHandler:
         # result must say so instead of silently returning an incomplete
         # post/comment set as if it were complete.
         monkeypatch.setattr(
-            "backend.scripts.filter_db.triage_posts_with_ai",
+            "backend.app.pipelines.filter_db.triage_posts_with_ai",
             AsyncMock(
                 return_value=(["s1"], [], "sys", "user", {"batches_processed": 3, "batches_total": 8})
             ),
         )
         monkeypatch.setattr(
-            "backend.scripts.filter_db.triage_comments_with_ai",
+            "backend.app.pipelines.filter_db.triage_comments_with_ai",
             AsyncMock(return_value=([], [], "", "", {"batches_processed": 1, "batches_total": 1})),
         )
 
@@ -836,8 +836,8 @@ class TestFilterPreviewJobHandler:
             return_value=(["s1"], [], "sys", "user", {"batches_processed": 1, "batches_total": 1})
         )
         comments_mock = AsyncMock(return_value=([], [], "", "", {}))
-        monkeypatch.setattr("backend.scripts.filter_db.triage_posts_with_ai", posts_mock)
-        monkeypatch.setattr("backend.scripts.filter_db.triage_comments_with_ai", comments_mock)
+        monkeypatch.setattr("backend.app.pipelines.filter_db.triage_posts_with_ai", posts_mock)
+        monkeypatch.setattr("backend.app.pipelines.filter_db.triage_comments_with_ai", comments_mock)
 
         async with session_factory() as session:
             user = await _make_user(session)
@@ -863,7 +863,7 @@ class TestFilterPreviewJobHandler:
         cap even when an API error stopped it.
         """
         monkeypatch.setattr(
-            "backend.scripts.filter_db.triage_posts_with_ai",
+            "backend.app.pipelines.filter_db.triage_posts_with_ai",
             AsyncMock(
                 return_value=(
                     ["s1"], [], "sys", "user",
@@ -872,7 +872,7 @@ class TestFilterPreviewJobHandler:
             ),
         )
         monkeypatch.setattr(
-            "backend.scripts.filter_db.triage_comments_with_ai",
+            "backend.app.pipelines.filter_db.triage_comments_with_ai",
             AsyncMock(return_value=([], [], "", "", {"batches_processed": 1, "batches_total": 1})),
         )
 
@@ -1038,7 +1038,7 @@ class TestCreateManualFilteredDataAssistProvenance:
         return user, file_rec
 
     async def _make_succeeded_job(self, session, *, user_id: int, source_file_id: int):
-        from backend.app.jobs.models import Job
+        from backend.app.models.job import Job
 
         job = Job(
             job_type="filter_preview", user_id=user_id, status="succeeded",

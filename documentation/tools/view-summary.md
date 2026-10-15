@@ -32,6 +32,6 @@ No artifact produced — this is a pure viewer. Renders `summary.content` (falli
 
 ## Developer reference
 
-- Frontend: `pages/ViewSummary.jsx`, `components/summarize/useViewSummaryPage.js`, `components/shell/PageShell.jsx`, `components/primitives/ArtifactPicker.jsx`, `components/primitives/MarkdownDisplay.jsx`.
-- Backend: `backend/app/api/content_routes.py::GET /summary/{summary_id}` → `backend/app/services/content_service.py::get_summary` (3-way lookup: schemaname → filename → int id, scoped to the user, falling back to the most recent) → `backend/app/repositories/artifact_content_repo.py::read_content`.
+- Frontend: `pages/ViewSummary.jsx`, `features/summarize/useViewSummaryPage.js`, `components/layout/PageShell.jsx`, `components/primitives/ArtifactPicker.jsx`, `components/primitives/MarkdownDisplay.jsx`.
+- Backend: `backend/app/api/routes/content.py::GET /summary/{summary_id}` → `backend/app/services/content_service.py::get_summary` (3-way lookup: schemaname → filename → int id, scoped to the user, falling back to the most recent) → `backend/app/repositories/artifact_content_repo.py::read_content`.
 - Endpoint: `GET /api/summary/{summary_id}` — see [api-reference.md](../api-reference.md#content--backendappapicontent_routespy).

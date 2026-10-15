@@ -1,22 +1,17 @@
 """Integration coverage for `async_link_file_to_project`
-(backend/app/database.py), which builds its INSERT via
+(backend/app/repositories/project_repo.py), which builds its INSERT via
 `sqlalchemy.dialects.postgresql.insert(...).on_conflict_do_nothing(...)`.
 That construct only compiles against the postgresql dialect -- it's the
 one piece of this codebase's ORM layer that unit tests genuinely cannot
 exercise against SQLite (confirmed while writing
-tests/backend/routes/test_project_routes.py, which had to insert into
+tests/backend/api/routes/test_project_routes.py, which had to insert into
 `project_files_table` directly instead).
 """
 
 from sqlalchemy import select
 
-from backend.app.database import (
-    File,
-    Project,
-    User,
-    async_link_file_to_project,
-    project_files_table,
-)
+from backend.app.models.workspace import File, Project, User, project_files_table
+from backend.app.repositories.project_repo import async_link_file_to_project
 
 
 async def test_link_file_to_project_creates_association_row(integration_async_session):

@@ -1,0 +1,221 @@
+import { useState } from "react";
+import HighlightedContent from "./HighlightedContent";
+import Panel from "../../../components/layout/Panel";
+import MemoEditor from "../../memos/MemoEditor";
+import { badge, btnSm, inputSm } from "../../../lib/uiClasses";
+import { rollUpCoder } from "../../../lib/codingUtils";
+
+function AppliedCodeRow({ entry, getCodeColor, onRemove, onUpdateNotes, readOnly }) {
+  const [notesDraft, setNotesDraft] = useState(entry.notes || "");
+  const [editingNotes, setEditingNotes] = useState(false);
+
+  const commitNotes = () => {
+    setEditingNotes(false);
+    if (notesDraft !== (entry.notes || "")) onUpdateNotes(notesDraft);
+  };
+
+  return (
+    <div className="flex flex-col gap-1 border border-line bg-surface-raised px-2.5 py-2">
+      <div className="flex items-start gap-2">
+        <span
+          className="mt-0.5 h-2.5 w-2.5 shrink-0"
+          style={{ backgroundColor: getCodeColor(entry.code_uid) }}
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm font-semibold">{entry.code}</span>
+            {entry.coder === "ai" && (
+              <span className={badge} title={entry.coder_model ? `Coded by ${entry.coder_model}` : "Coded by AI"}>
+                AI
+              </span>
+            )}
+          </div>
+          <div className="truncate text-xs italic text-paper/60" title={entry.quote}>
+            &ldquo;{entry.quote}&rdquo;
+          </div>
+        </div>
+        {!readOnly && (
+          <button
+            type="button"
+            className="-my-1 -mr-1.5 shrink-0 px-2 py-1 text-paper/50 hover:text-error"
+            onClick={onRemove}
+            aria-label={`Remove ${entry.code}`}
+            title="Remove code"
+          >
+            ×
+          </button>
+        )}
+      </div>
+      {readOnly ? (
+        entry.notes ? <div className="text-xs text-paper/60">{entry.notes}</div> : null
+      ) : editingNotes ? (
+        <input
+          autoFocus
+          type="text"
+          value={notesDraft}
+          onChange={(e) => setNotesDraft(e.target.value)}
+          onBlur={commitNotes}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+            if (e.key === "Escape") {
+              setNotesDraft(entry.notes || "");
+              setEditingNotes(false);
+            }
+          }}
+          placeholder="Add a note…"
+          aria-label={`Note on ${entry.code}`}
+          className={inputSm}
+        />
+      ) : (
+        <button
+          type="button"
+          className="self-start text-xs text-paper/50 underline decoration-dotted hover:text-paper"
+          onClick={() => {
+            // Start from the entry's CURRENT note, not whatever this row's
+            // state held when it mounted -- after a removal or a recode the
+            // same slot can hold a different entry.
+            setNotesDraft(entry.notes || "");
+            setEditingNotes(true);
+          }}
+        >
+          {entry.notes ? entry.notes : "+ note"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Center pane: the active document's full title/content (with inline
+ * evidence highlighting) plus the list of codes applied to it. This is
+ * the one thing on screen that shows full post/comment text -- unlike
+ * the old table, which stacked every visible row's full text at once.
+ *
+ * The 1-9 code shortcut lives in `HighlightedContent` now, not here --
+ * it needs the same filtered, visible code list the selection popup
+ * renders, and this pane doesn't have access to that filter state.
+ */
+export default function CodingReaderPane({
+  activeRow,
+  availableCodes,
+  getCodeColor,
+  pendingSelection,
+  onSelectionChange,
+  onApplyCode,
+  onRemoveEntry,
+  onUpdateNotes,
+  onRecodeThisDocument,
+  memo = null,
+  onSaveMemo = null,
+  readOnly = false,
+}) {
+  if (!activeRow) {
+    return (
+      <Panel className="h-full">
+        <p className="italic text-paper/60">Select a row from the list to read and code it.</p>
+      </Panel>
+    );
+  }
+
+  const codes = Array.isArray(activeRow.codes) ? activeRow.codes : [];
+  // Derived from the row's OWN entries, not a session-long "was ever
+  // proposed" flag -- so a row hand-edited after an AI recode correctly
+  // reads BOTH rather than staying stuck at AI. See lib/codingUtils.js's
+  // rollUpCoder and domain/coder_rollup.py (the server-side mirror, used
+  // for the persisted `coder` this reads).
+  const coderMark = rollUpCoder(codes);
+
+  return (
+    <Panel
+      key={activeRow.item_id}
+      className="h-full"
+      bodyClassName="flex flex-col gap-3"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-xs uppercase tracking-wide text-paper/50">
+            {activeRow.row_type === "comment" ? "Comment" : "Post"} &middot; {activeRow.item_id}
+            {(coderMark === "ai" || coderMark === "both") && (
+              <span className={`ml-2 ${badge}`}>
+                {coderMark === "both" ? "AI + Human" : "AI"}
+              </span>
+            )}
+          </div>
+          {activeRow.title && <h3 className="mt-0.5 text-lg font-semibold">{activeRow.title}</h3>}
+        </div>
+        {!readOnly && (
+          <button type="button" className={`${btnSm} shrink-0`} onClick={onRecodeThisDocument}>
+            Select for AI coding
+          </button>
+        )}
+      </div>
+
+      <HighlightedContent
+        content={activeRow.content || ""}
+        codeEvidence={codes}
+        getCodeColor={getCodeColor}
+        availableCodes={availableCodes}
+        onApplyCode={onApplyCode}
+        pendingSelection={pendingSelection}
+        onSelectionChange={onSelectionChange}
+      />
+
+      <div>
+        <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-paper/50">
+          Applied codes ({codes.length})
+        </div>
+        {codes.length === 0 ? (
+          <div className="text-sm text-paper/50">
+            {readOnly
+              ? "No codes were applied in this version."
+              : "Select text, then pick a code."}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-1.5">
+            {codes.map((entry, index) => (
+              <AppliedCodeRow
+                // Keyed on the quote's identity (code + span), not its list
+                // index: removing entry 0 used to hand entry 1's slot the
+                // removed entry's local note draft, which a blur then saved
+                // over the survivor's own note.
+                key={`${entry.code_uid}-${entry.start_offset}-${entry.end_offset}-${index}`}
+                entry={entry}
+                getCodeColor={getCodeColor}
+                onRemove={() => onRemoveEntry(index)}
+                onUpdateNotes={(notes) => onUpdateNotes(index, notes)}
+                readOnly={readOnly}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Rendered AFTER the content, not above it -- appearing here can't
+          shift the position of the text the popup is already anchored
+          to (see HighlightedContent's module comment for why that used
+          to make the popup jump the instant it opened). */}
+      {!readOnly && pendingSelection && (
+        <div className="shrink-0 border border-line bg-surface-raised px-3 py-2 text-sm">
+          Text selected &mdash; pick a code, or press 1-9.
+          <button
+            type="button"
+            className="ml-2 text-paper/60 underline hover:text-paper"
+            onClick={() => onSelectionChange(null)}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {/* The row's analytic memo -- the same one written on this row in
+          the data viewer or filter editor, copied forward with the row. */}
+      {!readOnly && onSaveMemo && (
+        <MemoEditor
+          key={`${activeRow.row_type}:${activeRow.post_id}`}
+          memo={memo}
+          onSave={(body) => onSaveMemo(activeRow.row_type, activeRow.post_id, body)}
+        />
+      )}
+    </Panel>
+  );
+}

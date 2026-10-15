@@ -1,4 +1,4 @@
-import CodebookEditorSection from "../components/codebook-editor/CodebookEditor";
+import CodebookEditorSection from "../features/codebook/editor/CodebookEditor";
 
 export default function Codebook() {
   return <CodebookEditorSection />;

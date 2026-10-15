@@ -2,8 +2,8 @@
 
 Runs directly against an in-memory async SQLite session (the
 ``async_sqlite_engine`` fixture from ``tests/conftest.py``), bypassing the
-HTTP layer entirely -- ``tests/backend/routes/test_codebook_routes.py`` and
-``tests/backend/routes/test_ai_and_raw_sql_routes.py`` cover the
+HTTP layer entirely -- ``tests/backend/api/routes/test_codebook_routes.py`` and
+``tests/backend/api/routes/test_ai_and_raw_sql_routes.py`` cover the
 route/auth/response-shape behavior on top of this.
 """
 
@@ -17,14 +17,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from backend.app.core.exceptions import NotFoundError, ValidationAppError
-from backend.app.database import File, User
+from backend.app.models.workspace import File, User
 from backend.app.jobs import service as jobs_service
-from backend.app.jobs.models import TERMINAL_STATUSES
+from backend.app.models.job import TERMINAL_STATUSES
 from backend.app.repositories import version_repo
 from backend.app.services import codebook_service, version_service
 from backend.app.services.version_service import EdgeSpec
-from backend.app.storage_models import Comment, Submission
-from backend.app.versioning_models import RELATION_COMPARED, ROLE_SIDE_A, ROLE_SIDE_B
+from backend.app.models.storage import Comment, Submission
+from backend.app.models.versioning import RELATION_COMPARED, ROLE_SIDE_A, ROLE_SIDE_B
 
 
 _ONE_CODE = [
@@ -36,7 +36,7 @@ async def _seed_codes(session, file_id: int, user_id: int, text: str = "codebook
     """Seed a `codebook` file's structured code rows for a test -- `text`
     becomes the sole code's `definition`, so it shows up in the
     rendered markdown a test might assert on (see
-    ``core/codebook_render.py::render_codes_to_markdown``).
+    ``formats/codebook_render.py::render_codes_to_markdown``).
     """
     rows = [{
         "code_uid": "u1", "family_uid": "f1", "family_name": "F", "name": "C",
@@ -964,7 +964,7 @@ class TestCreateManualCodebookAssistProvenance:
     _CODES = TestCreateManualCodebook._CODES
 
     async def _make_succeeded_job(self, session, *, user_id: int, source_file_id: int):
-        from backend.app.jobs.models import Job
+        from backend.app.models.job import Job
 
         job = Job(
             job_type="codebook_preview", user_id=user_id, status="succeeded",
@@ -1430,7 +1430,7 @@ class TestCreateIntegratedCodebook:
                 )
 
     async def test_records_assist_provenance_with_integrate_stage(self, session_factory) -> None:
-        from backend.app.jobs.models import Job
+        from backend.app.models.job import Job
 
         async with session_factory() as session:
             user = await _make_user(session)

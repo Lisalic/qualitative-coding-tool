@@ -10,10 +10,10 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.database import File, project_files_table
+from backend.app.models.workspace import File, project_files_table
 from backend.app.repositories import coding_repo, memo_repo, version_repo
-from backend.app.storage_models import Comment, RowMemo, Submission
-from backend.app.versioning_models import CodebookCode
+from backend.app.models.storage import Comment, RowMemo, Submission
+from backend.app.models.versioning import CodebookCode
 
 
 async def get_all_rows_for_coding(

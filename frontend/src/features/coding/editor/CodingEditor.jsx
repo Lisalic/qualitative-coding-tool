@@ -1,0 +1,73 @@
+import { useState } from "react";
+import { confirmLeave } from "../../../components/feedback/LeaveGuard";
+import ToastService from "../../../components/feedback/ToastService";
+import { btn } from "../../../lib/uiClasses";
+import CodingSetupPanel from "./CodingSetupPanel";
+import CodingWorkspaceSection from "../workspace/CodingWorkspaceSection";
+import useViewCodingPage from "../workspace/useViewCodingPage";
+import PageShell from "../../../components/layout/PageShell";
+
+/**
+ * Apply Codebook, as one iterative screen.
+ *
+ * Two steps on one route. **Setup** chooses the source data and the
+ * codebook, then creates the coding artifact uncoded. **Workspace** is
+ * the View Coding 3-pane editor, rendered right here on the artifact
+ * just created: read a document, tag text by hand, edit the codebook as
+ * you learn what it needs, and send any selection of rows through the
+ * AI. Nothing commits until Save Changes, which writes the whole session
+ * as one version.
+ *
+ * The workspace is not a copy of View Coding's -- it IS View Coding's.
+ * `CodingWorkspaceSection` and `useViewCodingPage` are shared verbatim;
+ * the only difference is that this page pins the artifact it created
+ * instead of offering a picker (see `useViewCodingPage`'s `pinnedRef`).
+ * Applying a codebook and coding are one activity, and a page that ended
+ * at "created" was the seam between them.
+ */
+export default function CodingEditor() {
+  const [artifact, setArtifact] = useState(null);
+
+  const page = useViewCodingPage({
+    pinned: true,
+    pinnedRef: artifact?.schema_name || null,
+    pinnedName: artifact?.filename || "",
+    pinnedDescription: artifact?.description || "",
+  });
+
+  const handleCreated = (file) => {
+    if (!file?.schema_name) return;
+    setArtifact(file);
+    ToastService.show(
+      `Created "${file.filename || "coding"}". It's also listed under View Coding.`,
+      "success",
+    );
+  };
+
+  // Back to setup to start another coding. The created one is already
+  // saved, so only unsaved edits made in this workspace are at stake.
+  const backToSetup = async () => {
+    if (!(await confirmLeave())) return;
+    if (page.isSessionDirty) page.discardSession();
+    setArtifact(null);
+  };
+
+  if (!artifact) {
+    return (
+      <PageShell title="Apply Codebook" width="wide">
+        <CodingSetupPanel onCreated={handleCreated} />
+      </PageShell>
+    );
+  }
+
+  return (
+    <CodingWorkspaceSection
+      page={page}
+      leadingActions={
+        <button type="button" className={btn} onClick={backToSetup}>
+          New coding
+        </button>
+      }
+    />
+  );
+}
