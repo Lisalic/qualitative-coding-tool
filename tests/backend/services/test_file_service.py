@@ -513,7 +513,7 @@ class TestUploadZst:
         """
         content = _ndjson(
             {"id": 101, "title": "t", "selftext": "body", "score": "7", "num_comments": 2.0, "created_utc": "1600000000"},
-            {"id": "101", "title": "t", "selftext": "same id again"},
+            {"id": "2t", "title": "t", "selftext": "same id again, in base 36"},
             {"id": "b", "title": "t", "selftext": "[removed]"},
             {"title": "t", "selftext": "no id"},
         ) + b"\nnot json\n"
@@ -524,7 +524,7 @@ class TestUploadZst:
                 name="n", description=None, project_id=None,
             )
             row = (await session.execute(select(Submission).where(Submission.file_id == file_rec.id))).scalar_one()
-            assert (row.id, row.score, row.num_comments, row.created_utc) == ("101", 7, 2, 1600000000)
+            assert (row.id, row.score, row.num_comments, row.created_utc) == ("2t", 7, 2, 1600000000)
             assert result["skipped_counts"] == {"duplicate": 1, "no_text": 1, "no_id": 1, "unreadable": 1}
 
     async def test_corrupt_zstd_is_rejected_and_leaves_no_file(self, session_factory) -> None:
@@ -598,6 +598,27 @@ class TestUploadZst:
             row = (await session.execute(select(Comment).where(Comment.file_id == file_rec.id))).scalar_one()
             assert row.link_id == "abc"
             assert row.word_count == 1
+
+    async def test_numeric_ids_become_base36_strings(self, session_factory) -> None:
+        """Some dumps store ids as base-10 ints; a numeric parent_id used
+        to fail the String bind on Postgres and the whole upload with it.
+        """
+        content = _ndjson(
+            {"id": "c1", "body": "reply to post", "link_id": 46655, "parent_id": 46655},
+            {"id": "c2", "body": "reply to comment", "link_id": "t3_zzz", "parent_id": 43401048136},
+        )
+        async with session_factory() as session:
+            user = await _make_user(session)
+            file_rec, _ = await file_service.upload_zst(
+                session, user.id, file_content=content, filename="c.zst", data_type="comments",
+                name=None, description=None, project_id=None,
+            )
+            rows = (
+                await session.execute(select(Comment).where(Comment.file_id == file_rec.id).order_by(Comment.id))
+            ).scalars().all()
+            assert [(r.link_id, r.parent_id) for r in rows] == [
+                ("zzz", "t3_zzz"), ("zzz", "t1_jxrv32g")
+            ]
 
     async def test_default_name_strips_zst_suffix(self, session_factory) -> None:
         async with session_factory() as session:

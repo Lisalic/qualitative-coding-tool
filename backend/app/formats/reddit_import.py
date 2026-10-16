@@ -106,7 +106,26 @@ def _int_or_none(value: object, *, bits: int = 32) -> int | None:
     return int(number) if math.isfinite(number) and -limit <= number < limit else None
 
 
+_BASE36_DIGITS = "0123456789abcdefghijklmnopqrstuvwxyz"
+
+
 def _id(value: object) -> str | None:
+    """A Reddit id as the base-36 string the site uses.
+
+    Some dumps store an id (often ``parent_id``) as its base-10 integer
+    instead -- ``43401048136`` for ``jxrv32g``. Passed through as-is it
+    failed the ``String`` column bind and the whole upload; stringified
+    in base 10 it wouldn't match the same id written as text elsewhere.
+    """
+    if isinstance(value, int) and not isinstance(value, bool):
+        if value < 0:
+            return None
+        digits = ""
+        while True:
+            value, rem = divmod(value, 36)
+            digits = _BASE36_DIGITS[rem] + digits
+            if not value:
+                return digits
     text = str(value).strip() if value is not None else ""
     return text or None
 
@@ -136,6 +155,12 @@ def _comment_record(data: dict) -> dict | None:
     body = _clean_text(data.get("body"))
     if not body or not body.strip() or body in _REMOVED_BODIES:
         return None
+    link_id = (_id(data.get("link_id")) or "").removeprefix("t3_")
+    parent_id = _id(data.get("parent_id")) or ""
+    if isinstance(data.get("parent_id"), int) and parent_id:
+        # A numeric parent id carries no kind prefix: it is the post itself
+        # when it matches link_id, otherwise another comment.
+        parent_id = ("t3_" if parent_id == link_id else "t1_") + parent_id
     return {
         "id": _id(data.get("id")),
         "subreddit": data.get("subreddit"),
@@ -143,8 +168,8 @@ def _comment_record(data: dict) -> dict | None:
         "author": data.get("author"),
         "created_utc": _int_or_none(data.get("created_utc"), bits=64),
         "score": _int_or_none(data.get("score")),
-        "link_id": (data.get("link_id") or "").replace("t3_", ""),
-        "parent_id": data.get("parent_id") or "",
+        "link_id": link_id,
+        "parent_id": parent_id,
     }
 
 
