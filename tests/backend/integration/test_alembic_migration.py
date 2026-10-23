@@ -792,7 +792,7 @@ def _free_port() -> int:
 
 
 class _RunningApp:
-    """The real app, booted the way Azure does (`python -m uvicorn
+    """The real app, booted the way the Docker image does (`python -m uvicorn
     backend.app.main:app`) against `db_url`.
     """
 

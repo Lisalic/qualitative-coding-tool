@@ -1,0 +1,6 @@
+# Caddy gets and renews a Let's Encrypt certificate for API_DOMAIN on its
+# own; the Vercel frontend is served over HTTPS, so the API must be too.
+{$API_DOMAIN} {
+	encode gzip
+	reverse_proxy api:8000
+}

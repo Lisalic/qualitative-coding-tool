@@ -13,6 +13,7 @@ ENV/
 *.env
 *.secret
 *.secrets
+!deploy/.env.example
 
 # Data
 *.db
@@ -20,7 +21,6 @@ ENV/
 *.zst
 *.txt
 !backend/requirements*.txt
-!/requirements.txt
 
 # Build
 

@@ -1,0 +1,7 @@
+*
+!alembic.ini
+!backend
+backend/.env
+backend/venv/
+backend/antenv/
+**/__pycache__/

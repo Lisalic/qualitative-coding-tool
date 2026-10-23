@@ -7,6 +7,7 @@ Reference documentation for the Qualitative Coding Tool: what each tool does, ho
 - [getting-started.md](getting-started.md) — prerequisites, environment variables, install, and running the app locally.
 - [concepts.md](concepts.md) — the artifact model, `file_type`/`schemaname`, lineage, and how the OpenRouter API key flows through the app.
 - [architecture.md](architecture.md) — frontend/backend layering, the background jobs system, the LLM call seam, storage tables, auth, and the model catalog.
+- [deployment.md](deployment.md) — the Oracle Cloud VM + Docker Compose production setup, the GitHub deploy job, and day-to-day operations.
 - [api-reference.md](api-reference.md) — every backend endpoint, grouped by router, with request/response shapes.
 - [workflow.md](workflow.md) — narrative feature-by-feature walkthrough of the full pipeline (import → filter → generate codebook → apply codebook → compare → summarize), with a workflow diagram.
 - [style-guide.md](style-guide.md) — the frontend's visual identity (palette, typography, component patterns).

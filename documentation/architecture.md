@@ -42,7 +42,7 @@ Everything lives in the `backend.app` package, split by layer:
 
 ```
 backend/app/
-  main.py         FastAPI app, lifespan, global error handlers (Azure runs backend.app.main:app)
+  main.py         FastAPI app, lifespan, global error handlers (the Docker image runs backend.app.main:app)
   api/            HTTP layer: router.py mounts routes/<domain>.py; schemas.py holds request models
   services/       per-domain business logic and job handlers
   repositories/   all DB access to the fixed storage tables
@@ -182,6 +182,6 @@ Old dynamic per-artifact schemas (`proj_*`/`cmp_*`/`sum_*`) from before the fixe
 
 ## Deployment
 
-Deployed to Azure Web App via `.github/workflows/main_qualitative-coding-tool.yml` on push to `main`. The workflow uploads the repo as-is (dependency install happens server-side via Azure Oryx); the Azure startup command runs `python -m uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT`. CORS in `main.py` is locked to `http://localhost:5173` plus the deployed Vercel frontend origins — update that list when adding a new frontend origin.
+The backend runs as a Docker Compose stack (Postgres, the API, Caddy for HTTPS) on an Oracle Cloud Always Free VM, deployed by `.github/workflows/main.yml` on push to `main` once the test suites pass; see [deployment.md](deployment.md) for the setup and day-to-day commands. CORS in `main.py` is locked to `http://localhost:5173` plus the deployed Vercel frontend origins — update that list when adding a new frontend origin.
 
-Every backend import is absolute (`from backend.app.X import ...`), so the app must be started from the repository root, as both the Azure startup command and local `uvicorn backend.app.main:app` runs do.
+Every backend import is absolute (`from backend.app.X import ...`), so the app must be started from the repository root, as both the Docker image (`WORKDIR /app`) and local `uvicorn backend.app.main:app` runs do.

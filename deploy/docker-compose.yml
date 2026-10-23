@@ -1,0 +1,56 @@
+# Production stack for the backend on a single VM: Postgres, the API, and
+# Caddy terminating HTTPS in front of it. Run from this directory:
+#   docker compose up -d --build
+# Secrets come from deploy/.env on the VM (see .env.example); the GitHub
+# deploy job never overwrites it. See documentation/deployment.md.
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: qct
+      POSTGRES_DB: qct
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qct -d qct"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ..
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      # POSTGRES_PASSWORD must be URL-safe (hex), since it's spliced in here.
+      DATABASE_URL: postgresql://qct:${POSTGRES_PASSWORD}@db:5432/qct
+    # Not published on the host: only Caddy reaches it.
+    expose:
+      - "8000"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN in deploy/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

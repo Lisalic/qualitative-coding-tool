@@ -1,0 +1,130 @@
+name: Test and deploy backend to the Oracle VM
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read #This is required for actions/checkout
+
+    # Real Postgres for the integration suite: the unit suite runs on SQLite,
+    # which can't see Postgres-only behaviour (generated columns, the
+    # migration chain, case-sensitive LIKE).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python version
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install backend test dependencies
+        run: pip install -r backend/requirements-dev.txt
+
+      - name: Lint Python
+        run: python -m ruff check backend tests
+
+      - name: Run backend test suite
+        run: python -m pytest -q
+
+      - name: Run backend integration suite against Postgres
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+          # Fail, don't skip, if the Postgres service is unreachable.
+          REQUIRE_INTEGRATION_DB: "1"
+        run: python -m pytest -q -m integration
+
+  frontend:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run test:run
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [build, frontend]
+    # Skipped until the VM exists: set the DEPLOY_HOST repository variable
+    # (see documentation/deployment.md).
+    if: ${{ vars.DEPLOY_HOST != '' }}
+    permissions:
+      contents: read
+    # Two pushes in a row deploy one after the other, never interleaved.
+    concurrency:
+      group: deploy-vm
+      cancel-in-progress: false
+    env:
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ vars.DEPLOY_USER || 'ubuntu' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          # Pinned host key, not ssh-keyscan at deploy time: a spoofed host
+          # would otherwise receive the code and run the deploy.
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf 'Host vm\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/id_deploy\n  IdentitiesOnly yes\n' \
+            "$DEPLOY_HOST" "$DEPLOY_USER" > ~/.ssh/config
+
+      # Only what the image and the compose stack need. deploy/.env holds the
+      # VM's secrets and is excluded, so --delete never removes it.
+      - name: Sync backend to the VM
+        run: >
+          rsync -az --delete
+          --exclude='deploy/.env'
+          --exclude='__pycache__/'
+          Dockerfile .dockerignore alembic.ini backend deploy
+          vm:qualitative-coding/
+
+      # The app runs Alembic migrations on startup, so this also migrates.
+      - name: Build and restart the stack
+        run: |
+          ssh vm 'cd qualitative-coding/deploy && docker compose up -d --build --remove-orphans && docker image prune -f'
+
+      - name: Wait for the API to answer
+        run: |
+          ssh vm 'cd qualitative-coding/deploy && for i in $(seq 1 30); do
+            docker compose exec -T api python -c "import urllib.request; urllib.request.urlopen(\"http://localhost:8000/\", timeout=5)" && exit 0
+            sleep 5
+          done
+          docker compose logs --tail=100 api
+          exit 1'
