@@ -25,7 +25,9 @@ In the Oracle Cloud console, open **Compute → Instances → Create instance**:
 - Boot volume: choose **Specify a custom boot volume size** and set it to **200 GB**. The default of about 47 GB holds far less data, and 200 GB is the free limit.
 - Add your SSH public key, and keep **Assign a public IPv4 address** on.
 
-If you get "Out of capacity", try a different availability domain or try again later.
+If you get "Out of capacity", try a different availability domain or try again later. If A1 is out of capacity in every domain, the AMD **VM.Standard.E2.1.Micro** shape (1 GB RAM, also Always Free) works for light use; the bootstrap script adds 4 GB of swap so it can build and run the stack.
+
+A VM created with a new VCN from the instance form may come up without a public IP. In that case, open the instance's VNIC, go to **IP administration**, edit the primary private IP, and choose **Ephemeral public IP**.
 
 ### 2. Open ports 80 and 443 in Oracle's network
 
